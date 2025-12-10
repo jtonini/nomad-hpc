@@ -427,6 +427,51 @@ def alerts(ctx: click.Context, db: str, unresolved: bool, severity: str) -> None
 
 
 @cli.command()
+@click.option('--interval', '-i', type=int, default=30, help='Sample interval (seconds)')
+@click.option('--once', is_flag=True, help='Run once and exit')
+@click.option('--nfs-paths', multiple=True, help='Paths to classify as NFS')
+@click.option('--local-paths', multiple=True, help='Paths to classify as local')
+@click.option('--db', type=click.Path(), help='Database path override')
+@click.pass_context
+def monitor(ctx: click.Context, interval: int, once: bool, 
+            nfs_paths: tuple, local_paths: tuple, db: str) -> None:
+    """Monitor running jobs for I/O metrics.
+    
+    Tracks NFS vs local storage writes in real-time.
+    Updates job_summary with actual I/O patterns when jobs complete.
+    """
+    from nomade.monitors.job_monitor import JobMonitor
+    
+    config = ctx.obj['config']
+    
+    # Determine database path
+    if db:
+        db_path = Path(db)
+    else:
+        db_path = get_db_path(config)
+    
+    click.echo(f"Database: {db_path}")
+    
+    # Build monitor config
+    monitor_config = config.get('monitor', {})
+    monitor_config['sample_interval'] = interval
+    
+    if nfs_paths:
+        monitor_config['nfs_paths'] = list(nfs_paths)
+    if local_paths:
+        monitor_config['local_paths'] = list(local_paths)
+    
+    # Create and run monitor
+    job_monitor = JobMonitor(monitor_config, str(db_path))
+    
+    click.echo(f"Starting job monitor (interval: {interval}s)")
+    if not once:
+        click.echo("Press Ctrl+C to stop")
+    
+    job_monitor.run(once=once)
+
+
+@cli.command()
 @click.pass_context
 def syscheck(ctx: click.Context) -> None:
     """Check system requirements and configuration.

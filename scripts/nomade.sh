@@ -124,6 +124,28 @@ nsyscheck() {
     nomade syscheck "$@"
 }
 
+# Job I/O monitor
+nmonitor() {
+    if [[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]]; then
+        echo -e "${_BOLD}nmonitor${_NC} - Monitor running jobs for I/O"
+        echo ""
+        echo "Usage: nmonitor [options]"
+        echo ""
+        echo "Options:"
+        echo "  --once        Run once and exit"
+        echo "  -i, --interval N  Sample interval in seconds (default: 30)"
+        echo "  --nfs-paths   Paths to classify as NFS"
+        echo "  --local-paths Paths to classify as local"
+        echo ""
+        echo "Examples:"
+        echo "  nmonitor --once"
+        echo "  nmonitor -i 60"
+        echo "  nmonitor --nfs-paths /home /scratch"
+        return 0
+    fi
+    nomade monitor "$@"
+}
+
 # Tail collection log
 nlog() {
     if [[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]]; then
@@ -206,6 +228,7 @@ nhelp() {
     echo -e "${_GREEN}Status & Monitoring:${_NC}"
     echo "  nstatus     - Show NØMADE status overview"
     echo "  nwatch [s]  - Watch status (live updates every s seconds)"
+    echo "  nmonitor    - Monitor running jobs for I/O patterns"
     echo "  nlog        - Tail collection log"
     echo ""
     echo -e "${_GREEN}Analysis:${_NC}"
