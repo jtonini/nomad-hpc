@@ -17,6 +17,7 @@ filesystems = [
     "/home",
     "/localscratch",
     "/tmp",
+    "/scratch",
 ]
 quota_enabled = false
 use_shutil = true
