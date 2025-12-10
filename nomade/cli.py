@@ -421,6 +421,177 @@ def alerts(ctx: click.Context, db: str, unresolved: bool, severity: str) -> None
 
 @cli.command()
 @click.pass_context
+def syscheck(ctx: click.Context) -> None:
+    """Check system requirements and configuration.
+    
+    Validates SLURM setup, database, config, and filesystems.
+    """
+    import shutil
+    import subprocess
+    
+    click.echo()
+    click.echo(click.style("NØMADE System Check", bold=True))
+    click.echo("═" * 40)
+    click.echo()
+    
+    errors = 0
+    warnings = 0
+    
+    # Python check
+    click.echo(click.style("Python:", bold=True))
+    import sys
+    py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info >= (3, 9):
+        click.echo(f"  {click.style('✓', fg='green')} Version {py_version} (requires >=3.9)")
+    else:
+        click.echo(f"  {click.style('✗', fg='red')} Version {py_version} (requires >=3.9)")
+        errors += 1
+    
+    # Check required packages
+    required_packages = ['click', 'toml', 'rich', 'numpy', 'pandas', 'scipy']
+    missing = []
+    for pkg in required_packages:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    
+    if not missing:
+        click.echo(f"  {click.style('✓', fg='green')} Required packages installed")
+    else:
+        click.echo(f"  {click.style('✗', fg='red')} Missing packages: {', '.join(missing)}")
+        errors += 1
+    
+    click.echo()
+    
+    # SLURM check
+    click.echo(click.style("SLURM:", bold=True))
+    
+    slurm_commands = ['sinfo', 'squeue', 'sacct', 'sstat']
+    for cmd in slurm_commands:
+        if shutil.which(cmd):
+            click.echo(f"  {click.style('✓', fg='green')} {cmd} available")
+        else:
+            click.echo(f"  {click.style('✗', fg='red')} {cmd} not found")
+            errors += 1
+    
+    # Check slurmdbd
+    try:
+        result = subprocess.run(['sacct', '--version'], capture_output=True, text=True, timeout=5)
+        result2 = subprocess.run(['sacct', '-n', '-X', '-j', '1'], capture_output=True, text=True, timeout=5)
+        if 'Slurm accounting storage is disabled' in result2.stderr:
+            click.echo(f"  {click.style('⚠', fg='yellow')} slurmdbd not enabled (job history limited)")
+            click.echo(f"    → Enable AccountingStorageType in slurm.conf")
+            warnings += 1
+        else:
+            click.echo(f"  {click.style('✓', fg='green')} slurmdbd enabled")
+    except Exception:
+        click.echo(f"  {click.style('⚠', fg='yellow')} Could not check slurmdbd status")
+        warnings += 1
+    
+    # Check JobAcctGather
+    try:
+        result = subprocess.run(['scontrol', 'show', 'config'], capture_output=True, text=True, timeout=10)
+        if 'JobAcctGatherType' in result.stdout:
+            if 'jobacct_gather/linux' in result.stdout or 'jobacct_gather/cgroup' in result.stdout:
+                click.echo(f"  {click.style('✓', fg='green')} JobAcctGather configured")
+            elif 'jobacct_gather/none' in result.stdout:
+                click.echo(f"  {click.style('✗', fg='red')} JobAcctGather disabled (no per-job metrics)")
+                click.echo(f"    → Add: JobAcctGatherType=jobacct_gather/linux")
+                errors += 1
+    except Exception:
+        pass
+    
+    click.echo()
+    
+    # Database check
+    click.echo(click.style("Database:", bold=True))
+    
+    config = ctx.obj.get('config', {})
+    db_path = get_db_path(config)
+    
+    if shutil.which('sqlite3'):
+        click.echo(f"  {click.style('✓', fg='green')} SQLite available")
+    else:
+        click.echo(f"  {click.style('⚠', fg='yellow')} sqlite3 CLI not found (optional)")
+        warnings += 1
+    
+    if db_path.exists():
+        click.echo(f"  {click.style('✓', fg='green')} Database: {db_path}")
+        # Check schema
+        try:
+            conn = sqlite3.connect(db_path)
+            version = conn.execute("SELECT version FROM schema_version ORDER BY version DESC LIMIT 1").fetchone()
+            if version:
+                click.echo(f"  {click.style('✓', fg='green')} Schema version: {version[0]}")
+            conn.close()
+        except Exception as e:
+            click.echo(f"  {click.style('⚠', fg='yellow')} Could not read schema: {e}")
+            warnings += 1
+    else:
+        click.echo(f"  {click.style('⚠', fg='yellow')} Database not found: {db_path}")
+        click.echo(f"    → Run: nomade collect --once")
+        warnings += 1
+    
+    click.echo()
+    
+    # Config check
+    click.echo(click.style("Config:", bold=True))
+    
+    config_path = ctx.obj.get('config_path')
+    if config_path and Path(config_path).exists():
+        click.echo(f"  {click.style('✓', fg='green')} Config: {config_path}")
+        
+        # Check partitions match SLURM
+        config_partitions = config.get('collectors', {}).get('slurm', {}).get('partitions', [])
+        if config_partitions:
+            try:
+                result = subprocess.run(['sinfo', '-h', '-o', '%P'], capture_output=True, text=True, timeout=5)
+                slurm_partitions = [p.strip().rstrip('*') for p in result.stdout.strip().split('\n') if p.strip()]
+                
+                for p in config_partitions:
+                    if p not in slurm_partitions:
+                        click.echo(f"  {click.style('⚠', fg='yellow')} Partition '{p}' in config but not in SLURM")
+                        warnings += 1
+            except Exception:
+                pass
+    else:
+        click.echo(f"  {click.style('✗', fg='red')} Config not found: /etc/nomade/nomade.toml")
+        click.echo(f"    → Create config or use: nomade -c /path/to/config.toml")
+        errors += 1
+    
+    click.echo()
+    
+    # Filesystem check
+    click.echo(click.style("Filesystems:", bold=True))
+    
+    filesystems = config.get('collectors', {}).get('disk', {}).get('filesystems', ['/'])
+    for fs in filesystems:
+        if Path(fs).exists():
+            click.echo(f"  {click.style('✓', fg='green')} {fs} (accessible)")
+        else:
+            click.echo(f"  {click.style('✗', fg='red')} {fs} (not found)")
+            errors += 1
+    
+    click.echo()
+    
+    # Summary
+    click.echo("─" * 40)
+    if errors == 0 and warnings == 0:
+        click.echo(click.style("✓ All checks passed!", fg='green', bold=True))
+    else:
+        parts = []
+        if errors > 0:
+            parts.append(click.style(f"{errors} error(s)", fg='red'))
+        if warnings > 0:
+            parts.append(click.style(f"{warnings} warning(s)", fg='yellow'))
+        click.echo(f"Summary: {', '.join(parts)}")
+    
+    click.echo()
+
+
+@cli.command()
+@click.pass_context
 def version(ctx: click.Context) -> None:
     """Show version information."""
     click.echo("NØMADE v0.1.0")
