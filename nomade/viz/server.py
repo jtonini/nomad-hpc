@@ -1,0 +1,3364 @@
+#!/usr/bin/env python3
+"""
+NOMADE Dashboard Server - Integrated Version
+Connects to TOML config, NOMADE database, and falls back to demo data.
+"""
+
+import json
+import http.server
+import socketserver
+import sqlite3
+import random
+import math
+import os
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs
+from typing import Any, Optional
+from collections import defaultdict
+
+# Try to import toml (fall back to tomllib in Python 3.11+)
+try:
+    import tomllib
+except ImportError:
+    try:
+        import toml as tomllib
+    except ImportError:
+        tomllib = None
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+
+# ============================================================================
+# Configuration Loading
+# ============================================================================
+
+DEFAULT_CONFIG = {
+    "general": {
+        "cluster_name": "demo-cluster",
+        "data_dir": "/var/lib/nomade",
+    },
+    "clusters": {},  # Will be populated from TOML or auto-detected
+    "dashboard": {
+        "host": "localhost",
+        "port": 8050,
+    }
+}
+
+def find_config_file() -> Optional[Path]:
+    """Search for TOML config in standard locations."""
+    search_paths = [
+        Path("/etc/nomade/nomade.toml"),
+        Path.home() / "nomade" / "nomade.toml",
+        Path.home() / ".config" / "nomade" / "nomade.toml",
+        Path("nomade.toml"),
+    ]
+    for path in search_paths:
+        if path.exists():
+            return path
+    return None
+
+
+def load_config(config_path: Optional[Path] = None) -> dict:
+    """Load configuration from TOML file."""
+    config = DEFAULT_CONFIG.copy()
+    
+    if config_path is None:
+        config_path = find_config_file()
+    
+    if config_path and config_path.exists() and tomllib:
+        logger.info(f"Loading config from {config_path}")
+        try:
+            with open(config_path, 'rb') as f:
+                user_config = tomllib.load(f)
+            # Merge with defaults
+            for key, value in user_config.items():
+                if isinstance(value, dict) and key in config:
+                    config[key].update(value)
+                else:
+                    config[key] = value
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
+    else:
+        logger.info("No config file found, using defaults")
+    
+    return config
+
+
+# ============================================================================
+# Database Connection
+# ============================================================================
+
+def find_database() -> Optional[Path]:
+    """Search for NOMADE database."""
+    search_paths = [
+        Path("/var/lib/nomade/nomade.db"),
+        Path.home() / "nomade" / "vm-simulation" / "nomade.db",  # VM simulation data
+        Path.home() / "nomade" / "nomade.db",
+        Path.home() / "nomade.db",
+        Path("nomade.db"),
+        # Also check for cluster_monitor.db as fallback
+        Path.home() / "cluster_monitor.db",
+    ]
+    for path in search_paths:
+        if path.exists():
+            return path
+    return None
+
+
+def get_db_connection(db_path: Path) -> sqlite3.Connection:
+    """Create database connection with row factory."""
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# ============================================================================
+# Data Loaders - Real Data from Database
+# ============================================================================
+
+def load_clusters_from_db(db_path: Path) -> dict:
+    """
+    Auto-detect clusters from node_state or node_status tables.
+    Groups nodes by partition or cluster field.
+    """
+    clusters = {}
+    
+    try:
+        conn = get_db_connection(db_path)
+        
+        # Try NOMADE's node_state table first
+        try:
+            rows = conn.execute("""
+                SELECT DISTINCT node_name, partitions, gres
+                FROM node_state
+                WHERE timestamp = (SELECT MAX(timestamp) FROM node_state)
+            """).fetchall()
+            
+            if rows:
+                # Group by partition
+                partition_nodes = defaultdict(list)
+                gpu_nodes = set()
+                
+                for row in rows:
+                    node = row['node_name']
+                    partitions = row['partitions'] or 'default'
+                    # Use first partition as primary
+                    primary_partition = partitions.split(',')[0]
+                    partition_nodes[primary_partition].append(node)
+                    
+                    if row['gres'] and 'gpu' in row['gres'].lower():
+                        gpu_nodes.add(node)
+                
+                for partition, nodes in partition_nodes.items():
+                    cluster_id = partition.lower().replace(' ', '-')
+                    clusters[cluster_id] = {
+                        "name": partition,
+                        "description": f"{len(nodes)}-node partition",
+                        "nodes": sorted(nodes),
+                        "gpu_nodes": [n for n in nodes if n in gpu_nodes],
+                        "type": "gpu" if any(n in gpu_nodes for n in nodes) else "cpu"
+                    }
+                
+                conn.close()
+                return clusters
+                
+        except sqlite3.OperationalError:
+            pass  # Table doesn't exist
+        
+        # Try cluster_monitor's node_status table
+        try:
+            rows = conn.execute("""
+                SELECT DISTINCT cluster, node_name
+                FROM node_status
+                WHERE timestamp = (SELECT MAX(timestamp) FROM node_status)
+            """).fetchall()
+            
+            if rows:
+                cluster_nodes = defaultdict(list)
+                for row in rows:
+                    cluster_nodes[row['cluster']].append(row['node_name'])
+                
+                for cluster_name, nodes in cluster_nodes.items():
+                    cluster_id = cluster_name.lower().replace(' ', '-')
+                    # Detect GPU nodes by name pattern
+                    gpu_nodes = [n for n in nodes if any(x in n.lower() for x in ['gpu', 'arachne0[456]'])]
+                    clusters[cluster_id] = {
+                        "name": cluster_name,
+                        "description": f"{len(nodes)}-node cluster",
+                        "nodes": sorted(nodes),
+                        "gpu_nodes": gpu_nodes,
+                        "type": "hybrid" if gpu_nodes else "cpu"
+                    }
+                    
+        except sqlite3.OperationalError:
+            pass
+            
+        conn.close()
+        
+    except Exception as e:
+        logger.warning(f"Failed to load clusters from database: {e}")
+    
+    return clusters
+
+
+def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
+    """Load real node statistics from database."""
+    nodes = {}
+    
+    try:
+        conn = get_db_connection(db_path)
+        
+        # Try NOMADE's node_state table
+        try:
+            rows = conn.execute("""
+                SELECT 
+                    node_name, state, cpus_total, cpus_alloc, cpu_load,
+                    memory_total_mb, memory_alloc_mb, memory_free_mb,
+                    cpu_alloc_percent, memory_alloc_percent,
+                    partitions, reason, gres, is_healthy
+                FROM node_state
+                WHERE timestamp = (SELECT MAX(timestamp) FROM node_state)
+            """).fetchall()
+            
+            if rows:
+                # Get job statistics per node from jobs table
+                job_stats = {}
+                try:
+                    job_rows = conn.execute("""
+                        SELECT 
+                            node_list,
+                            state,
+                            COUNT(*) as count
+                        FROM jobs
+                        WHERE start_time > datetime('now', '-1 day')
+                        GROUP BY node_list, state
+                    """).fetchall()
+                    
+                    for row in job_rows:
+                        if row['node_list']:
+                            for node in row['node_list'].split(','):
+                                node = node.strip()
+                                if node not in job_stats:
+                                    job_stats[node] = {'success': 0, 'failed': 0}
+                                if row['state'] == 'COMPLETED':
+                                    job_stats[node]['success'] += row['count']
+                                elif row['state'] in ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY'):
+                                    job_stats[node]['failed'] += row['count']
+                except:
+                    pass
+                
+                for row in rows:
+                    node_name = row['node_name']
+                    
+                    # Find which cluster this node belongs to
+                    cluster_id = None
+                    for cid, cluster in clusters.items():
+                        if node_name in cluster['nodes']:
+                            cluster_id = cid
+                            break
+                    
+                    if not cluster_id:
+                        continue
+                    
+                    is_down = not row['is_healthy'] or 'DOWN' in (row['state'] or '').upper()
+                    
+                    # Calculate job stats
+                    stats = job_stats.get(node_name, {'success': 0, 'failed': 0})
+                    total_jobs = stats['success'] + stats['failed']
+                    success_rate = stats['success'] / total_jobs if total_jobs > 0 else 1.0
+                    
+                    has_gpu = row['gres'] and 'gpu' in row['gres'].lower()
+                    
+                    nodes[node_name] = {
+                        "name": node_name,
+                        "cluster": cluster_id,
+                        "status": "down" if is_down else "online",
+                        "slurm_state": row['state'],
+                        "success_rate": success_rate,
+                        "jobs_today": total_jobs,
+                        "jobs_success": stats['success'],
+                        "jobs_failed": stats['failed'],
+                        "failures": {},  # TODO: aggregate from job data
+                        "top_users": [],  # TODO: aggregate from job data
+                        "has_gpu": has_gpu,
+                        "gpu_util": 0,  # Will be updated from gpu_stats
+                        "gpu_name": row['gres'] if has_gpu else None,
+                        "cpu_util": int(row['cpu_alloc_percent'] or 0),
+                        "mem_util": int(row['memory_alloc_percent'] or 0),
+                        "load_avg": row['cpu_load'] or 0,
+                        "drain_reason": row['reason'],
+                        "last_seen": datetime.now().isoformat()
+                    }
+                
+                # Get GPU stats
+                try:
+                    gpu_rows = conn.execute("""
+                        SELECT gpu_name, gpu_util_percent
+                        FROM gpu_stats
+                        WHERE timestamp = (SELECT MAX(timestamp) FROM gpu_stats)
+                    """).fetchall()
+                    # TODO: map GPU stats to nodes
+                except:
+                    pass
+                    
+                conn.close()
+                return nodes
+                
+        except sqlite3.OperationalError:
+            pass
+        
+        # Try cluster_monitor's node_status table
+        try:
+            rows = conn.execute("""
+                SELECT cluster, node_name, status, slurm_state, is_available
+                FROM node_status
+                WHERE timestamp = (SELECT MAX(timestamp) FROM node_status)
+            """).fetchall()
+            
+            if rows:
+                for row in rows:
+                    node_name = row['node_name']
+                    cluster_id = row['cluster'].lower().replace(' ', '-')
+                    
+                    # Status can be 'ok', 'online', or other values
+                    is_down = not row['is_available'] or row['status'] not in ('ok', 'online', 'up')
+                    
+                    # Detect GPU by node name pattern (node51-53 are GPU nodes on Arachne)
+                    has_gpu = any(x in node_name.lower() for x in ['gpu']) or \
+                              node_name in ('node51', 'node52', 'node53') or \
+                              (node_name.startswith('arachne') and node_name[-2:] in ['04', '05', '06'])
+                    
+                    nodes[node_name] = {
+                        "name": node_name,
+                        "cluster": cluster_id,
+                        "status": "down" if is_down else "online",
+                        "slurm_state": row['slurm_state'],
+                        "success_rate": 0.9 if not is_down else 0,  # Placeholder
+                        "jobs_today": 0,
+                        "jobs_success": 0,
+                        "jobs_failed": 0,
+                        "failures": {},
+                        "top_users": [],
+                        "has_gpu": has_gpu,
+                        "gpu_util": 0,
+                        "gpu_name": "NVIDIA RTX 6000 Ada" if has_gpu else None,
+                        "cpu_util": random.randint(40, 90) if not is_down else 0,
+                        "mem_util": random.randint(30, 80) if not is_down else 0,
+                        "load_avg": round(random.uniform(1, 12), 2) if not is_down else 0,
+                        "last_seen": datetime.now().isoformat()
+                    }
+                    
+        except sqlite3.OperationalError:
+            pass
+            
+        conn.close()
+        
+    except Exception as e:
+        logger.warning(f"Failed to load node data from database: {e}")
+    
+    return nodes
+
+
+def load_jobs_from_db(db_path: Path, limit: int = 500) -> list:
+    """Load job data for network visualization with all available features."""
+    jobs = []
+    
+    try:
+        conn = get_db_connection(db_path)
+        
+        # Get comprehensive job data joining multiple tables
+        try:
+            rows = conn.execute("""
+                SELECT 
+                    j.job_id,
+                    j.state,
+                    j.partition,
+                    j.runtime_seconds,
+                    j.wait_time_seconds,
+                    j.req_cpus,
+                    j.req_mem_mb,
+                    j.req_time_seconds,
+                    js.total_nfs_write_gb,
+                    js.total_local_write_gb,
+                    js.avg_io_wait_percent,
+                    js.peak_cpu_percent,
+                    js.peak_memory_gb,
+                    js.avg_cpu_percent,
+                    js.avg_memory_gb,
+                    js.health_score,
+                    js.nfs_ratio
+                FROM jobs j
+                LEFT JOIN job_summary js ON j.job_id = js.job_id
+                WHERE j.end_time IS NOT NULL
+                ORDER BY j.end_time DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+            
+            if rows:
+                # Also get aggregated io_samples per job
+                io_data = {}
+                try:
+                    io_rows = conn.execute("""
+                        SELECT 
+                            job_id,
+                            MAX(total_write_bytes) as max_write_bytes,
+                            MAX(total_read_bytes) as max_read_bytes,
+                            AVG(nfs_ratio) as avg_nfs_ratio
+                        FROM job_io_samples
+                        GROUP BY job_id
+                    """).fetchall()
+                    for io_row in io_rows:
+                        io_data[io_row['job_id']] = {
+                            'max_write_bytes': io_row['max_write_bytes'] or 0,
+                            'max_read_bytes': io_row['max_read_bytes'] or 0,
+                            'avg_nfs_ratio': io_row['avg_nfs_ratio'] or 0
+                        }
+                except:
+                    pass
+                
+                for row in rows:
+                    job_id = row['job_id']
+                    io_info = io_data.get(job_id, {})
+                    
+                    jobs.append({
+                        "job_id": job_id,
+                        "state": row['state'],
+                        "partition": row['partition'],
+                        "success": row['state'] == 'COMPLETED',
+                        # Time features
+                        "runtime_sec": row['runtime_seconds'] or 0,
+                        "wait_time_sec": row['wait_time_seconds'] or 0,
+                        # Resource requests
+                        "req_cpus": row['req_cpus'] or 1,
+                        "req_mem_mb": row['req_mem_mb'] or 0,
+                        "req_time_sec": row['req_time_seconds'] or 0,
+                        # I/O features
+                        "nfs_write_gb": row['total_nfs_write_gb'] or 0,
+                        "local_write_gb": row['total_local_write_gb'] or 0,
+                        "io_wait_pct": row['avg_io_wait_percent'] or 0,
+                        "total_write_mb": io_info.get('max_write_bytes', 0) / (1024*1024),
+                        "total_read_mb": io_info.get('max_read_bytes', 0) / (1024*1024),
+                        # CPU/Memory features
+                        "peak_cpu_pct": row['peak_cpu_percent'] or 0,
+                        "peak_mem_gb": row['peak_memory_gb'] or 0,
+                        "avg_cpu_pct": row['avg_cpu_percent'] or 0,
+                        "avg_mem_gb": row['avg_memory_gb'] or 0,
+                        # Derived
+                        "health_score": row['health_score'] or 0,
+                        "nfs_ratio": row['nfs_ratio'] or 0,
+                        # Efficiency (runtime / requested)
+                        "time_efficiency": (row['runtime_seconds'] or 0) / max(row['req_time_seconds'] or 1, 1),
+                    })
+                conn.close()
+                return jobs
+                
+        except sqlite3.OperationalError as e:
+            logger.debug(f"Job query failed: {e}")
+        
+        # Fallback: Try jobs table directly
+        try:
+            rows = conn.execute("""
+                SELECT job_id, state, partition, runtime_seconds, wait_time_seconds
+                FROM jobs
+                WHERE end_time IS NOT NULL
+                ORDER BY end_time DESC
+                LIMIT ?
+            """, (limit,)).fetchall()
+            
+            if rows:
+                for row in rows:
+                    jobs.append({
+                        "job_id": row['job_id'],
+                        "state": row['state'],
+                        "partition": row['partition'],
+                        "success": row['state'] == 'COMPLETED',
+                        "runtime_sec": row['runtime_seconds'] or 0,
+                        "wait_time_sec": row['wait_time_seconds'] or 0,
+                        "nfs_write_gb": 0,
+                        "local_write_gb": 0,
+                        "io_wait_pct": 0,
+                        "total_write_mb": 0,
+                        "req_cpus": 1,
+                    })
+                    
+        except sqlite3.OperationalError:
+            pass
+            
+        conn.close()
+        
+    except Exception as e:
+        logger.warning(f"Failed to load jobs from database: {e}")
+    
+    return jobs
+
+
+def compute_feature_stats(jobs: list) -> dict:
+    """Compute statistics for each numeric feature to help users choose axes."""
+    if not jobs:
+        return {}
+    
+    # Identify numeric features
+    numeric_features = []
+    sample_job = jobs[0]
+    for key, value in sample_job.items():
+        if isinstance(value, (int, float)) and key not in ('job_id', 'success'):
+            numeric_features.append(key)
+    
+    stats = {}
+    for feature in numeric_features:
+        values = [j.get(feature, 0) or 0 for j in jobs]
+        if not values:
+            continue
+            
+        mean = sum(values) / len(values)
+        min_val = min(values)
+        max_val = max(values)
+        range_val = max_val - min_val
+        
+        # Variance and standard deviation
+        variance = sum((x - mean) ** 2 for x in values) / len(values)
+        std = variance ** 0.5
+        
+        # Coefficient of variation (normalized measure of spread)
+        cv = (std / mean * 100) if mean != 0 else 0
+        
+        # Count non-zero values
+        non_zero = sum(1 for v in values if v != 0)
+        non_zero_pct = non_zero / len(values) * 100
+        
+        stats[feature] = {
+            "mean": round(mean, 3),
+            "std": round(std, 3),
+            "min": round(min_val, 3),
+            "max": round(max_val, 3),
+            "range": round(range_val, 3),
+            "cv": round(cv, 1),  # Coefficient of variation
+            "non_zero_pct": round(non_zero_pct, 1),
+            "n": len(values)
+        }
+    
+    return stats
+
+
+def suggest_best_axes(feature_stats: dict, n: int = 3) -> list:
+    """Suggest the best features for visualization based on variance and coverage."""
+    if not feature_stats:
+        return ["runtime_sec", "wait_time_sec", "total_write_mb"]
+    
+    # Score features by: high CV + high non-zero percentage
+    scored = []
+    for feature, stats in feature_stats.items():
+        # Skip features with no variation or all zeros
+        if stats['range'] == 0 or stats['non_zero_pct'] < 10:
+            continue
+        
+        # Score = CV * (non_zero_pct / 100)
+        score = stats['cv'] * (stats['non_zero_pct'] / 100)
+        scored.append((feature, score, stats))
+    
+    # Sort by score descending
+    scored.sort(key=lambda x: -x[1])
+    
+    # Return top N feature names
+    return [f[0] for f in scored[:n]]
+
+
+def compute_correlation_matrix(jobs: list, features: list = None) -> dict:
+    """
+    Compute Pearson correlation matrix between numeric features.
+    Returns dict with 'features', 'matrix', and 'high_correlations' for warnings.
+    """
+    if not jobs:
+        return {"features": [], "matrix": [], "high_correlations": []}
+    
+    # Get numeric features if not specified
+    if features is None:
+        sample_job = jobs[0]
+        features = [k for k, v in sample_job.items() 
+                   if isinstance(v, (int, float)) and k not in ('job_id', 'success')]
+    
+    # Extract values for each feature
+    data = {}
+    for f in features:
+        values = [j.get(f, 0) or 0 for j in jobs]
+        # Skip constant features
+        if max(values) == min(values):
+            continue
+        data[f] = values
+    
+    valid_features = list(data.keys())
+    n = len(valid_features)
+    
+    if n == 0:
+        return {"features": [], "matrix": [], "high_correlations": []}
+    
+    # Compute means and standard deviations
+    means = {f: sum(data[f]) / len(data[f]) for f in valid_features}
+    stds = {}
+    for f in valid_features:
+        variance = sum((x - means[f]) ** 2 for x in data[f]) / len(data[f])
+        stds[f] = variance ** 0.5 if variance > 0 else 1
+    
+    # Compute correlation matrix
+    matrix = []
+    high_correlations = []
+    
+    for i, f1 in enumerate(valid_features):
+        row = []
+        for j, f2 in enumerate(valid_features):
+            if i == j:
+                row.append(1.0)
+            elif j < i:
+                # Already computed, mirror it
+                row.append(matrix[j][i])
+            else:
+                # Compute Pearson correlation
+                n_samples = len(data[f1])
+                cov = sum((data[f1][k] - means[f1]) * (data[f2][k] - means[f2]) 
+                         for k in range(n_samples)) / n_samples
+                r = cov / (stds[f1] * stds[f2]) if (stds[f1] * stds[f2]) > 0 else 0
+                r = max(-1, min(1, r))  # Clamp to [-1, 1]
+                row.append(round(r, 3))
+                
+                # Track high correlations for warnings
+                if abs(r) >= 0.7 and i != j:
+                    high_correlations.append({
+                        "feature1": f1,
+                        "feature2": f2,
+                        "correlation": round(r, 3),
+                        "strength": "strong" if abs(r) >= 0.85 else "moderate"
+                    })
+        matrix.append(row)
+    
+    return {
+        "features": valid_features,
+        "matrix": matrix,
+        "high_correlations": high_correlations
+    }
+
+
+def suggest_decorrelated_axes(feature_stats: dict, correlation_data: dict, n: int = 3) -> list:
+    """
+    Suggest N features that are both high-variance AND decorrelated from each other.
+    Uses a greedy selection approach.
+    """
+    if not feature_stats or not correlation_data.get('features'):
+        return suggest_best_axes(feature_stats, n)
+    
+    corr_features = correlation_data['features']
+    corr_matrix = correlation_data['matrix']
+    
+    # Build correlation lookup
+    corr_lookup = {}
+    for i, f1 in enumerate(corr_features):
+        for j, f2 in enumerate(corr_features):
+            corr_lookup[(f1, f2)] = corr_matrix[i][j]
+    
+    # Score features by variance (CV * coverage)
+    scored = []
+    for feature, stats in feature_stats.items():
+        if stats['range'] == 0 or stats['non_zero_pct'] < 10:
+            continue
+        if feature not in corr_features:
+            continue
+        score = stats['cv'] * (stats['non_zero_pct'] / 100)
+        scored.append((feature, score))
+    
+    scored.sort(key=lambda x: -x[1])
+    
+    # Greedy selection: pick highest scored, then next highest that's not correlated
+    selected = []
+    for feature, score in scored:
+        if len(selected) >= n:
+            break
+        
+        # Check correlation with already selected features
+        is_correlated = False
+        for sel in selected:
+            r = corr_lookup.get((feature, sel), corr_lookup.get((sel, feature), 0))
+            if abs(r) > 0.7:  # Threshold for "too correlated"
+                is_correlated = True
+                break
+        
+        if not is_correlated:
+            selected.append(feature)
+    
+    # If we couldn't find enough decorrelated features, fall back
+    if len(selected) < n:
+        for feature, score in scored:
+            if feature not in selected:
+                selected.append(feature)
+            if len(selected) >= n:
+                break
+    
+    return selected[:n]
+
+
+def load_similarity_edges_from_db(db_path: Path, job_ids: list, threshold: float = 0.85) -> list:
+    """Load pre-computed similarity edges from database."""
+    edges = []
+    
+    try:
+        conn = get_db_connection(db_path)
+        
+        # Create job_id to index mapping
+        job_id_to_idx = {jid: idx for idx, jid in enumerate(job_ids)}
+        
+        rows = conn.execute("""
+            SELECT job_id_a, job_id_b, similarity
+            FROM job_similarity
+            WHERE similarity >= ?
+            AND job_id_a IN ({})
+            AND job_id_b IN ({})
+        """.format(
+            ','.join('?' * len(job_ids)),
+            ','.join('?' * len(job_ids))
+        ), [threshold] + job_ids + job_ids).fetchall()
+        
+        for row in rows:
+            if row['job_id_a'] in job_id_to_idx and row['job_id_b'] in job_id_to_idx:
+                edges.append({
+                    "source": job_id_to_idx[row['job_id_a']],
+                    "target": job_id_to_idx[row['job_id_b']],
+                    "similarity": row['similarity']
+                })
+                
+        conn.close()
+        
+    except Exception as e:
+        logger.debug(f"Failed to load similarity edges: {e}")
+    
+    return edges
+
+
+# ============================================================================
+# Demo Data Generation (Fallback)
+# ============================================================================
+
+def generate_demo_clusters():
+    """Generate demo cluster data."""
+    clusters = {
+        "spydur": {
+            "name": "Spydur",
+            "description": "48-node CPU cluster",
+            "nodes": [f"spydur{i:02d}" for i in range(1, 49)],
+            "type": "cpu"
+        },
+        "arachne": {
+            "name": "Arachne", 
+            "description": "6-node hybrid cluster (3 CPU + 3 GPU)",
+            "nodes": ["arachne01", "arachne02", "arachne03", "arachne04", "arachne05", "arachne06"],
+            "gpu_nodes": ["arachne04", "arachne05", "arachne06"],
+            "type": "hybrid"
+        },
+        "chemistry": {
+            "name": "Chemistry",
+            "description": "Chemistry department workstations",
+            "nodes": ["chem-ws01", "chem-ws02", "chem-ws03", "chem-ws04"],
+            "type": "workstation"
+        }
+    }
+    return clusters
+
+
+def generate_demo_node_data(clusters):
+    """Generate realistic node statistics."""
+    nodes = {}
+    failure_types = ["OOM", "Timeout", "Cancelled", "NodeFail", "DiskFull"]
+    users = ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry"]
+    
+    for cluster_id, cluster in clusters.items():
+        for node_name in cluster["nodes"]:
+            random.seed(hash(node_name) % 2**32)
+            is_down = random.random() < 0.08
+            
+            if is_down:
+                nodes[node_name] = {
+                    "name": node_name,
+                    "cluster": cluster_id,
+                    "status": "down",
+                    "success_rate": 0,
+                    "jobs_today": 0,
+                    "jobs_success": 0,
+                    "jobs_failed": 0,
+                    "failures": {},
+                    "top_users": [],
+                    "has_gpu": node_name in cluster.get("gpu_nodes", []),
+                    "gpu_util": 0,
+                    "cpu_util": 0,
+                    "mem_util": 0,
+                    "load_avg": 0,
+                    "last_seen": (datetime.now() - timedelta(hours=random.randint(1, 48))).isoformat()
+                }
+            else:
+                jobs_total = random.randint(5, 80)
+                if random.random() < 0.15:
+                    success_rate = random.uniform(0.35, 0.65)
+                elif random.random() < 0.3:
+                    success_rate = random.uniform(0.65, 0.85)
+                else:
+                    success_rate = random.uniform(0.85, 0.99)
+                
+                jobs_success = int(jobs_total * success_rate)
+                jobs_failed = jobs_total - jobs_success
+                
+                failures = {}
+                remaining = jobs_failed
+                for ft in random.sample(failure_types, min(3, len(failure_types))):
+                    if remaining <= 0:
+                        break
+                    count = random.randint(1, max(1, remaining))
+                    failures[ft] = count
+                    remaining -= count
+                
+                node_users = random.sample(users, random.randint(2, 5))
+                top_users = []
+                jobs_remaining = jobs_total
+                for u in node_users[:-1]:
+                    count = random.randint(1, max(1, jobs_remaining // 2))
+                    top_users.append({"user": u, "jobs": count})
+                    jobs_remaining -= count
+                top_users.append({"user": node_users[-1], "jobs": jobs_remaining})
+                top_users.sort(key=lambda x: -x["jobs"])
+                
+                has_gpu = node_name in cluster.get("gpu_nodes", [])
+                
+                nodes[node_name] = {
+                    "name": node_name,
+                    "cluster": cluster_id,
+                    "status": "online",
+                    "success_rate": success_rate,
+                    "jobs_today": jobs_total,
+                    "jobs_success": jobs_success,
+                    "jobs_failed": jobs_failed,
+                    "failures": failures,
+                    "top_users": top_users[:5],
+                    "has_gpu": has_gpu,
+                    "gpu_util": random.randint(60, 98) if has_gpu else 0,
+                    "gpu_name": "NVIDIA RTX 6000 Ada" if has_gpu else None,
+                    "cpu_util": random.randint(40, 95),
+                    "mem_util": random.randint(30, 85),
+                    "load_avg": round(random.uniform(0.5, 16.0), 2),
+                    "last_seen": datetime.now().isoformat()
+                }
+    
+    random.seed()
+    return nodes
+
+
+def generate_demo_jobs(count=150):
+    """Generate demo job data for network visualization."""
+    jobs = []
+    partitions = ["compute", "gpu", "short", "long"]
+    states = ["COMPLETED", "FAILED", "TIMEOUT", "OUT_OF_MEMORY", "CANCELLED"]
+    
+    for i in range(count):
+        nfs_write = random.uniform(0, 100)
+        local_write = random.uniform(0, 100)
+        io_wait = random.uniform(0, 50)
+        
+        if local_write > 50:
+            state = random.choices(states, weights=[85, 5, 3, 4, 3])[0]
+        elif nfs_write > 70:
+            state = random.choices(states, weights=[40, 25, 15, 15, 5])[0]
+        else:
+            state = random.choices(states, weights=[70, 12, 8, 7, 3])[0]
+        
+        jobs.append({
+            "job_id": 10000 + i,
+            "nfs_write_gb": round(nfs_write, 2),
+            "local_write_gb": round(local_write, 2),
+            "io_wait_pct": round(io_wait, 2),
+            "partition": random.choice(partitions),
+            "state": state,
+            "success": state == "COMPLETED"
+        })
+    
+    return jobs
+
+
+def build_job_network(jobs, threshold=0.95, features=None):
+    """Build similarity network between jobs using cosine similarity.
+    
+    NOTE: This is the legacy method. Use build_bipartite_network() for the
+    Vilhena & Antonelli approach with Simpson's β-diversity.
+    """
+    if features is None:
+        features = ["nfs_write_gb", "local_write_gb", "io_wait_pct"]
+    
+    edges = []
+    
+    for i, job1 in enumerate(jobs):
+        vec1 = [job1.get(f, 0) or 0 for f in features]
+        mag1 = math.sqrt(sum(x*x for x in vec1)) or 1
+        
+        for j, job2 in enumerate(jobs[i+1:], i+1):
+            vec2 = [job2.get(f, 0) or 0 for f in features]
+            mag2 = math.sqrt(sum(x*x for x in vec2)) or 1
+            
+            dot = sum(a*b for a, b in zip(vec1, vec2))
+            similarity = dot / (mag1 * mag2) if (mag1 * mag2) > 0 else 0
+            
+            if similarity >= threshold:
+                edges.append({
+                    "source": i,
+                    "target": j,
+                    "similarity": round(similarity, 4)
+                })
+    
+    return edges
+
+
+def discretize_features(jobs: list, features: list = None, n_bins: int = 3) -> dict:
+    """
+    Discretize continuous features into categorical bins.
+    Uses quantile-based binning to create balanced categories.
+    
+    Returns:
+        dict with:
+        - 'bin_labels': List of bin names (e.g., 'runtime_sec_low', 'runtime_sec_med', 'runtime_sec_high')
+        - 'job_bins': List of sets, where each set contains the bin labels for that job
+        - 'bin_thresholds': Dict mapping feature -> list of threshold values
+    """
+    if not jobs:
+        return {'bin_labels': [], 'job_bins': [], 'bin_thresholds': {}}
+    
+    if features is None:
+        sample = jobs[0]
+        features = [k for k, v in sample.items() 
+                   if isinstance(v, (int, float)) and k not in ('job_id', 'success')]
+    
+    # Compute quantile thresholds for each feature
+    bin_thresholds = {}
+    bin_suffixes = ['low', 'med', 'high'] if n_bins == 3 else [f'q{i+1}' for i in range(n_bins)]
+    
+    for feature in features:
+        values = sorted([j.get(feature, 0) or 0 for j in jobs])
+        n = len(values)
+        
+        # Skip constant features
+        if values[0] == values[-1]:
+            continue
+            
+        # Compute quantile boundaries
+        thresholds = []
+        for q in range(1, n_bins):
+            idx = int(n * q / n_bins)
+            thresholds.append(values[idx])
+        
+        bin_thresholds[feature] = thresholds
+    
+    # Create all possible bin labels
+    all_bin_labels = []
+    for feature in bin_thresholds.keys():
+        for suffix in bin_suffixes:
+            all_bin_labels.append(f"{feature}_{suffix}")
+    
+    # Assign bins to each job
+    job_bins = []
+    for job in jobs:
+        bins = set()
+        for feature, thresholds in bin_thresholds.items():
+            value = job.get(feature, 0) or 0
+            
+            # Find which bin this value falls into
+            bin_idx = 0
+            for thresh in thresholds:
+                if value > thresh:
+                    bin_idx += 1
+            
+            bin_label = f"{feature}_{bin_suffixes[bin_idx]}"
+            bins.add(bin_label)
+        
+        job_bins.append(bins)
+    
+    return {
+        'bin_labels': all_bin_labels,
+        'job_bins': job_bins,
+        'bin_thresholds': bin_thresholds,
+        'n_features': len(bin_thresholds),
+        'n_bins_per_feature': n_bins
+    }
+
+
+def simpson_similarity(set1: set, set2: set) -> float:
+    """
+    Compute Simpson similarity between two sets.
+    
+    Based on Vilhena & Antonelli (2015):
+    βsim = min(b, c) / (a + min(b, c))  [dissimilarity]
+    
+    Simpson similarity = a / (a + min(b, c)) = 1 - βsim
+    
+    Where:
+    - a = |set1 ∩ set2| (shared elements)
+    - b = |set1 - set2| (unique to set1)
+    - c = |set2 - set1| (unique to set2)
+    
+    This measure focuses on the proportion of shared elements relative to
+    the smaller set, avoiding bias toward larger sets.
+    
+    Returns value in [0, 1] where 1 = identical sets, 0 = no overlap
+    """
+    if not set1 or not set2:
+        return 0.0
+    
+    a = len(set1 & set2)  # intersection
+    b = len(set1 - set2)  # unique to set1
+    c = len(set2 - set1)  # unique to set2
+    
+    denominator = a + min(b, c)
+    
+    if denominator == 0:
+        return 1.0 if a > 0 else 0.0
+    
+    return a / denominator
+
+
+def build_bipartite_network(jobs: list, features: list = None, 
+                            threshold: float = 0.5, n_bins: int = 3,
+                            max_edges: int = 10000) -> dict:
+    """
+    Build job similarity network using Vilhena & Antonelli's bipartite approach.
+    
+    Methodology (from Nature Communications, 2015):
+    1. Create bipartite network: Jobs × Resource-bins
+    2. Each job is characterized by which resource bins it occupies
+    3. Similarity computed using Simpson's index (handles set-size bias)
+    4. Edges created between jobs with similarity above threshold
+    
+    This approach:
+    - Treats each resource bin as a "site" (biogeography analogy)
+    - Jobs are "species" that occur in multiple sites
+    - Similar jobs share resource usage patterns
+    - Clusters emerge as "bioregions" of job behavior
+    
+    Args:
+        jobs: List of job dicts with numeric features
+        features: List of feature names to use (None = auto-detect)
+        threshold: Simpson similarity threshold for edge creation (0.5 recommended)
+        n_bins: Number of bins per feature (3 = low/med/high)
+        max_edges: Maximum edges to prevent memory issues
+    
+    Returns:
+        dict with:
+        - 'edges': List of edge dicts with source, target, similarity
+        - 'discretization': Info about how features were binned
+        - 'stats': Network statistics
+    """
+    if not jobs:
+        return {'edges': [], 'discretization': {}, 'stats': {}}
+    
+    # Step 1: Discretize features into bins
+    disc = discretize_features(jobs, features, n_bins)
+    job_bins = disc['job_bins']
+    
+    if not job_bins:
+        return {'edges': [], 'discretization': disc, 'stats': {'error': 'No valid features'}}
+    
+    # Step 2: Compute Simpson similarity for all pairs
+    edges = []
+    n_jobs = len(jobs)
+    n_comparisons = 0
+    similarity_sum = 0
+    n_above_threshold = 0
+    
+    for i in range(n_jobs):
+        for j in range(i + 1, n_jobs):
+            sim = simpson_similarity(job_bins[i], job_bins[j])
+            n_comparisons += 1
+            similarity_sum += sim
+            
+            if sim >= threshold:
+                n_above_threshold += 1
+                if len(edges) < max_edges:
+                    edges.append({
+                        "source": i,
+                        "target": j,
+                        "similarity": round(sim, 4)
+                    })
+    
+    # Compute network statistics
+    avg_similarity = similarity_sum / n_comparisons if n_comparisons > 0 else 0
+    edge_density = len(edges) / n_comparisons if n_comparisons > 0 else 0
+    
+    stats = {
+        'n_jobs': n_jobs,
+        'n_comparisons': n_comparisons,
+        'n_edges': len(edges),
+        'n_above_threshold': n_above_threshold,
+        'avg_similarity': round(avg_similarity, 4),
+        'edge_density': round(edge_density, 4),
+        'threshold': threshold,
+        'truncated': len(edges) >= max_edges
+    }
+    
+    return {
+        'edges': edges,
+        'discretization': disc,
+        'stats': stats
+    }
+
+
+def compute_bipartite_matrix(jobs: list, features: list = None, n_bins: int = 3) -> dict:
+    """
+    Create the bipartite incidence matrix (Jobs × Resource-bins).
+    
+    This is the core data structure for the Vilhena & Antonelli method:
+    - Rows = Jobs
+    - Columns = Resource bins (discretized features)
+    - Cell = 1 if job occupies that bin, 0 otherwise
+    
+    Returns dict with matrix data for visualization and analysis.
+    """
+    disc = discretize_features(jobs, features, n_bins)
+    
+    if not disc['bin_labels']:
+        return {'matrix': [], 'row_labels': [], 'col_labels': []}
+    
+    # Build incidence matrix
+    bin_labels = sorted(disc['bin_labels'])
+    bin_to_idx = {b: i for i, b in enumerate(bin_labels)}
+    
+    matrix = []
+    for i, job in enumerate(jobs):
+        row = [0] * len(bin_labels)
+        for bin_label in disc['job_bins'][i]:
+            if bin_label in bin_to_idx:
+                row[bin_to_idx[bin_label]] = 1
+        matrix.append(row)
+    
+    # Compute column sums (bin occupancy counts)
+    col_sums = [sum(matrix[i][j] for i in range(len(jobs))) for j in range(len(bin_labels))]
+    
+    return {
+        'matrix': matrix,
+        'row_labels': [f"job_{j['job_id']}" for j in jobs],
+        'col_labels': bin_labels,
+        'col_sums': col_sums,
+        'n_jobs': len(jobs),
+        'n_bins': len(bin_labels)
+    }
+
+
+# ============================================================================
+# Data Manager - Unified Interface
+# ============================================================================
+
+class DataManager:
+    """Manages data loading from database or demo fallback."""
+    
+    def __init__(self, config: dict):
+        self.config = config
+        self.db_path = find_database()
+        self.data_source = "demo"
+        
+        self._clusters = None
+        self._nodes = None
+        self._jobs = None
+        self._edges = None
+        self._feature_stats = None
+        self._correlation_data = None
+        self._suggested_axes = None
+        self._network_stats = None
+        self._discretization = None
+        
+        self._load_data()
+    
+    def _load_data(self):
+        """Load all data from best available source."""
+        
+        # Try to load from database
+        if self.db_path:
+            logger.info(f"Found database: {self.db_path}")
+            
+            # Load clusters
+            self._clusters = load_clusters_from_db(self.db_path)
+            
+            if self._clusters:
+                self.data_source = f"database ({self.db_path.name})"
+                logger.info(f"Loaded {len(self._clusters)} clusters from database")
+                
+                # Load nodes
+                self._nodes = load_node_data_from_db(self.db_path, self._clusters)
+                logger.info(f"Loaded {len(self._nodes)} nodes from database")
+                
+                # Load jobs
+                self._jobs = load_jobs_from_db(self.db_path)
+                if self._jobs:
+                    logger.info(f"Loaded {len(self._jobs)} jobs from database")
+                    
+                    # Compute feature statistics
+                    self._feature_stats = compute_feature_stats(self._jobs)
+                    
+                    # Compute correlation matrix
+                    self._correlation_data = compute_correlation_matrix(self._jobs)
+                    n_high_corr = len(self._correlation_data.get('high_correlations', []))
+                    logger.info(f"Computed correlations for {len(self._correlation_data.get('features', []))} features ({n_high_corr} high correlations)")
+                    
+                    # Suggest decorrelated axes
+                    self._suggested_axes = suggest_decorrelated_axes(
+                        self._feature_stats, 
+                        self._correlation_data
+                    )
+                    logger.info(f"Suggested axes: {self._suggested_axes}")
+                    
+                    # Try to load pre-computed edges
+                    job_ids = [j["job_id"] for j in self._jobs]
+                    self._edges = load_similarity_edges_from_db(self.db_path, job_ids)
+                    
+                    if not self._edges:
+                        # Build bipartite network using Vilhena & Antonelli method
+                        network_result = build_bipartite_network(
+                            self._jobs, 
+                            features=self._suggested_axes,
+                            threshold=0.5,  # Simpson similarity threshold
+                            n_bins=3        # low/med/high bins
+                        )
+                        self._edges = network_result['edges']
+                        self._network_stats = network_result['stats']
+                        self._discretization = network_result['discretization']
+                        logger.info(f"Built bipartite network: {len(self._edges)} edges (Simpson β-sim ≥ 0.5)")
+                else:
+                    # Use demo jobs
+                    self._jobs = generate_demo_jobs(150)
+                    self._feature_stats = compute_feature_stats(self._jobs)
+                    self._correlation_data = compute_correlation_matrix(self._jobs)
+                    self._suggested_axes = suggest_decorrelated_axes(
+                        self._feature_stats,
+                        self._correlation_data
+                    )
+                    network_result = build_bipartite_network(self._jobs, threshold=0.5)
+                    self._edges = network_result['edges']
+                    self._network_stats = network_result['stats']
+                    self._discretization = network_result['discretization']
+                    logger.info("Using demo job data for network view")
+                    
+                return
+        
+        # Fall back to demo data
+        logger.info("Using demo data")
+        self.data_source = "demo"
+        self._clusters = generate_demo_clusters()
+        self._nodes = generate_demo_node_data(self._clusters)
+        self._jobs = generate_demo_jobs(150)
+        self._feature_stats = compute_feature_stats(self._jobs)
+        self._correlation_data = compute_correlation_matrix(self._jobs)
+        self._suggested_axes = suggest_decorrelated_axes(
+            self._feature_stats,
+            self._correlation_data
+        )
+        network_result = build_bipartite_network(self._jobs, threshold=0.5)
+        self._edges = network_result['edges']
+        self._network_stats = network_result['stats']
+        self._discretization = network_result['discretization']
+    
+    @property
+    def clusters(self):
+        return self._clusters
+    
+    @property
+    def nodes(self):
+        return self._nodes
+    
+    @property
+    def jobs(self):
+        return self._jobs
+    
+    @property
+    def edges(self):
+        return self._edges
+    
+    @property
+    def feature_stats(self):
+        return self._feature_stats
+    
+    @property
+    def correlation_data(self):
+        return self._correlation_data
+    
+    @property
+    def suggested_axes(self):
+        return self._suggested_axes
+    
+    @property
+    def network_stats(self):
+        return self._network_stats
+    
+    @property
+    def discretization(self):
+        return self._discretization
+    
+    def refresh(self):
+        """Refresh data from source."""
+        self._load_data()
+    
+    def get_stats(self) -> dict:
+        """Get summary statistics."""
+        online_nodes = sum(1 for n in self._nodes.values() if n['status'] == 'online')
+        success_jobs = sum(1 for j in self._jobs if j['success'])
+        
+        return {
+            "data_source": self.data_source,
+            "clusters": len(self._clusters),
+            "nodes_total": len(self._nodes),
+            "nodes_online": online_nodes,
+            "nodes_down": len(self._nodes) - online_nodes,
+            "jobs": len(self._jobs),
+            "jobs_success": success_jobs,
+            "jobs_failed": len(self._jobs) - success_jobs,
+            "edges": len(self._edges)
+        }
+
+
+# ============================================================================
+# HTML Dashboard
+# ============================================================================
+
+DASHBOARD_HTML = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOMADE - HPC Monitor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-deep: #0d1117;
+            --bg-surface: #161b22;
+            --bg-elevated: #21262d;
+            --bg-hover: #30363d;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --green: #3fb950;
+            --green-muted: #238636;
+            --yellow: #d29922;
+            --yellow-muted: #9e6a03;
+            --red: #f85149;
+            --red-muted: #da3633;
+            --cyan: #58a6ff;
+            --purple: #a371f7;
+        }
+        
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+        
+        .mono { font-family: 'IBM Plex Mono', monospace; }
+        
+        .header {
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border);
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            height: 64px;
+            gap: 32px;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 20px;
+            letter-spacing: -0.5px;
+        }
+        
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--cyan), var(--purple));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 4px;
+            flex: 1;
+        }
+        
+        .tab {
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            border: 1px solid transparent;
+        }
+        
+        .tab:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        .tab.active {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border-color: var(--border);
+        }
+        
+        .tab-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            padding: 0 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+            background: var(--bg-hover);
+        }
+        
+        .tab.active .tab-badge { background: var(--border); }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .data-source {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 4px 8px;
+            background: var(--bg-elevated);
+            border-radius: 4px;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .main {
+            display: flex;
+            height: calc(100vh - 64px);
+        }
+        
+        .content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .cluster-header {
+            margin-bottom: 24px;
+        }
+        
+        .cluster-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .cluster-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .stats-bar {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 24px;
+            padding: 16px 20px;
+            background: var(--bg-surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+        }
+        
+        .stat {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-value.green { color: var(--green); }
+        .stat-value.yellow { color: var(--yellow); }
+        .stat-value.red { color: var(--red); }
+        
+        .node-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 12px;
+        }
+        
+        .node-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        
+        .node-card:hover {
+            background: var(--bg-elevated);
+            border-color: var(--cyan);
+            transform: translateY(-2px);
+        }
+        
+        .node-card.selected {
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 1px var(--cyan);
+        }
+        
+        .node-card.down { opacity: 0.5; }
+        
+        .node-name {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .node-indicator {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin: 0 auto 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        
+        .node-indicator.green {
+            background: rgba(63, 185, 80, 0.15);
+            border: 2px solid var(--green);
+            color: var(--green);
+        }
+        
+        .node-indicator.yellow {
+            background: rgba(210, 153, 34, 0.15);
+            border: 2px solid var(--yellow);
+            color: var(--yellow);
+        }
+        
+        .node-indicator.red {
+            background: rgba(248, 81, 73, 0.15);
+            border: 2px solid var(--red);
+            color: var(--red);
+        }
+        
+        .node-indicator.offline {
+            background: var(--bg-hover);
+            border: 2px solid var(--text-muted);
+            color: var(--text-muted);
+        }
+        
+        .node-jobs {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        
+        .node-gpu-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 600;
+            background: rgba(163, 113, 247, 0.2);
+            color: var(--purple);
+            margin-top: 4px;
+        }
+        
+        .sidebar {
+            width: 380px;
+            background: var(--bg-surface);
+            border-left: 1px solid var(--border);
+            padding: 24px;
+            overflow-y: auto;
+        }
+        
+        .sidebar-empty {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            text-align: center;
+            gap: 12px;
+        }
+        
+        .sidebar-empty-icon { font-size: 48px; opacity: 0.3; }
+        
+        .node-detail-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .node-detail-name {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .node-status-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .node-status-badge.online {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--green);
+        }
+        
+        .node-status-badge.down {
+            background: rgba(248, 81, 73, 0.15);
+            color: var(--red);
+        }
+        
+        .detail-section { margin-bottom: 20px; }
+        
+        .detail-section-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+        
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .detail-row:last-child { border-bottom: none; }
+        
+        .detail-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+        
+        .detail-value {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .detail-value.green { color: var(--green); }
+        .detail-value.red { color: var(--red); }
+        
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-hover);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        
+        .progress-fill.green { background: var(--green); }
+        .progress-fill.yellow { background: var(--yellow); }
+        .progress-fill.red { background: var(--red); }
+        .progress-fill.cyan { background: var(--cyan); }
+        .progress-fill.purple { background: var(--purple); }
+        
+        .failure-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        
+        .failure-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+        
+        .failure-count {
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 600;
+            color: var(--red);
+            min-width: 24px;
+        }
+        
+        .failure-type { color: var(--text-secondary); }
+        
+        .user-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .user-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--bg-hover);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+        
+        .user-name { flex: 1; font-size: 13px; }
+        
+        .user-jobs {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        
+        .network-container {
+            width: 100%;
+            height: calc(100vh - 180px);
+            background: var(--bg-surface);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .network-canvas { width: 100%; height: 100%; }
+        
+        .network-controls {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .network-btn {
+            padding: 8px 14px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        
+        .network-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--cyan);
+        }
+        
+        .network-btn.active {
+            background: var(--cyan);
+            color: var(--bg-deep);
+            border-color: var(--cyan);
+        }
+        
+        .network-legend {
+            position: absolute;
+            bottom: 16px;
+            right: 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 12px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        
+        .legend-item:last-child { margin-bottom: 0; }
+        
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        
+        .legend-dot.success { background: var(--green); }
+        .legend-dot.failed { background: var(--red); }
+        
+        .network-stats {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 12px;
+        }
+        
+        .network-stat {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 4px;
+        }
+        
+        .network-stat:last-child { margin-bottom: 0; }
+        
+        .network-stat-value {
+            font-family: 'IBM Plex Mono', monospace;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+        
+        function App() {
+            const [clusters, setClusters] = useState(null);
+            const [nodes, setNodes] = useState(null);
+            const [jobs, setJobs] = useState(null);
+            const [edges, setEdges] = useState(null);
+            const [featureStats, setFeatureStats] = useState(null);
+            const [correlationData, setCorrelationData] = useState(null);
+            const [suggestedAxes, setSuggestedAxes] = useState(null);
+            const [networkStats, setNetworkStats] = useState(null);
+            const [networkMethod, setNetworkMethod] = useState(null);
+            const [dataSource, setDataSource] = useState('loading...');
+            const [activeTab, setActiveTab] = useState(null);
+            const [selectedNode, setSelectedNode] = useState(null);
+            const [currentTime, setCurrentTime] = useState(new Date());
+            
+            useEffect(() => {
+                fetch('/api/data')
+                    .then(r => r.json())
+                    .then(data => {
+                        setClusters(data.clusters);
+                        setNodes(data.nodes);
+                        setJobs(data.jobs);
+                        setEdges(data.edges);
+                        setFeatureStats(data.feature_stats);
+                        setCorrelationData(data.correlation_data);
+                        setSuggestedAxes(data.suggested_axes);
+                        setNetworkStats(data.network_stats);
+                        setNetworkMethod(data.network_method);
+                        setDataSource(data.data_source || 'unknown');
+                        setActiveTab(Object.keys(data.clusters)[0]);
+                    });
+                    
+                const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+                return () => clearInterval(timer);
+            }, []);
+            
+            if (!clusters || !nodes || !jobs || !edges || !activeTab) {
+                return (
+                    <div style={{
+                        height: '100vh',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexDirection: 'column',
+                        gap: '16px'
+                    }}>
+                        <div className="logo-icon" style={{ width: 48, height: 48, fontSize: 24 }}>◈</div>
+                        <div style={{ color: 'var(--text-muted)' }}>Loading NOMADE...</div>
+                    </div>
+                );
+            }
+            
+            return (
+                <div>
+                    <header className="header">
+                        <div className="logo">
+                            <div className="logo-icon">◈</div>
+                            <span>NØMADE</span>
+                        </div>
+                        
+                        <nav className="tabs">
+                            {Object.entries(clusters).map(([id, cluster]) => {
+                                const clusterNodes = Object.values(nodes).filter(n => n.cluster === id);
+                                const downCount = clusterNodes.filter(n => n.status === 'down').length;
+                                return (
+                                    <div
+                                        key={id}
+                                        className={`tab ${activeTab === id ? 'active' : ''}`}
+                                        onClick={() => { setActiveTab(id); setSelectedNode(null); }}
+                                    >
+                                        {cluster.name}
+                                        {downCount > 0 && (
+                                            <span className="tab-badge" style={{ background: 'var(--red-muted)', color: 'var(--red)' }}>
+                                                {downCount}
+                                            </span>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            <div
+                                className={`tab ${activeTab === 'network' ? 'active' : ''}`}
+                                onClick={() => { setActiveTab('network'); setSelectedNode(null); }}
+                            >
+                                Network View
+                            </div>
+                        </nav>
+                        
+                        <div className="header-right">
+                            <div className="data-source">{dataSource}</div>
+                            <div className="timestamp">
+                                {currentTime.toLocaleTimeString()}
+                            </div>
+                        </div>
+                    </header>
+                    
+                    <main className="main">
+                        {activeTab === 'network' ? (
+                            <NetworkView 
+                                jobs={jobs} 
+                                edges={edges} 
+                                featureStats={featureStats}
+                                correlationData={correlationData}
+                                suggestedAxes={suggestedAxes}
+                                networkStats={networkStats}
+                                networkMethod={networkMethod}
+                            />
+                        ) : (
+                            <>
+                                <ClusterView
+                                    cluster={clusters[activeTab]}
+                                    nodes={Object.values(nodes).filter(n => n.cluster === activeTab)}
+                                    selectedNode={selectedNode}
+                                    onSelectNode={setSelectedNode}
+                                />
+                                <NodeSidebar node={selectedNode ? nodes[selectedNode] : null} />
+                            </>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+        
+        function ClusterView({ cluster, nodes, selectedNode, onSelectNode }) {
+            const stats = useMemo(() => {
+                const online = nodes.filter(n => n.status === 'online');
+                const totalJobs = online.reduce((sum, n) => sum + (n.jobs_today || 0), 0);
+                const successJobs = online.reduce((sum, n) => sum + (n.jobs_success || 0), 0);
+                const avgSuccess = online.length > 0 
+                    ? online.reduce((sum, n) => sum + (n.success_rate || 0), 0) / online.length 
+                    : 0;
+                return {
+                    online: online.length,
+                    down: nodes.length - online.length,
+                    totalJobs,
+                    successJobs,
+                    failedJobs: totalJobs - successJobs,
+                    avgSuccess
+                };
+            }, [nodes]);
+            
+            const getHealthColor = (rate) => {
+                if (rate >= 0.85) return 'green';
+                if (rate >= 0.60) return 'yellow';
+                return 'red';
+            };
+            
+            return (
+                <div className="content">
+                    <div className="cluster-header">
+                        <h1 className="cluster-title">{cluster.name}</h1>
+                        <p className="cluster-desc">{cluster.description}</p>
+                    </div>
+                    
+                    <div className="stats-bar">
+                        <div className="stat">
+                            <div className="stat-value green">{stats.online}</div>
+                            <div className="stat-label">Online</div>
+                        </div>
+                        <div className="stat">
+                            <div className="stat-value red">{stats.down}</div>
+                            <div className="stat-label">Down</div>
+                        </div>
+                        <div className="stat">
+                            <div className="stat-value">{stats.totalJobs.toLocaleString()}</div>
+                            <div className="stat-label">Jobs Today</div>
+                        </div>
+                        <div className="stat">
+                            <div className="stat-value green">{stats.successJobs.toLocaleString()}</div>
+                            <div className="stat-label">Succeeded</div>
+                        </div>
+                        <div className="stat">
+                            <div className="stat-value red">{stats.failedJobs.toLocaleString()}</div>
+                            <div className="stat-label">Failed</div>
+                        </div>
+                        <div className="stat">
+                            <div className={`stat-value ${getHealthColor(stats.avgSuccess)}`}>
+                                {(stats.avgSuccess * 100).toFixed(1)}%
+                            </div>
+                            <div className="stat-label">Avg Success</div>
+                        </div>
+                    </div>
+                    
+                    <div className="node-grid">
+                        {nodes.map(node => (
+                            <div
+                                key={node.name}
+                                className={`node-card ${node.status === 'down' ? 'down' : ''} ${selectedNode === node.name ? 'selected' : ''}`}
+                                onClick={() => onSelectNode(node.name)}
+                            >
+                                <div className="node-name">{node.name}</div>
+                                <div className={`node-indicator ${node.status === 'down' ? 'offline' : getHealthColor(node.success_rate || 0)}`}>
+                                    {node.status === 'down' ? '—' : `${Math.round((node.success_rate || 0) * 100)}%`}
+                                </div>
+                                <div className="node-jobs">
+                                    {node.status === 'down' ? (node.slurm_state || 'OFFLINE') : `${node.jobs_today || 0} jobs`}
+                                </div>
+                                {node.has_gpu && <div className="node-gpu-badge">GPU</div>}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+        
+        function NodeSidebar({ node }) {
+            if (!node) {
+                return (
+                    <aside className="sidebar">
+                        <div className="sidebar-empty">
+                            <div className="sidebar-empty-icon">◇</div>
+                            <div>Select a node to view details</div>
+                        </div>
+                    </aside>
+                );
+            }
+            
+            const getHealthColor = (rate) => {
+                if (rate >= 0.85) return 'green';
+                if (rate >= 0.60) return 'yellow';
+                return 'red';
+            };
+            
+            return (
+                <aside className="sidebar">
+                    <div className="node-detail-header">
+                        <span className="node-detail-name">{node.name}</span>
+                        <span className={`node-status-badge ${node.status}`}>
+                            {node.slurm_state || node.status}
+                        </span>
+                    </div>
+                    
+                    {node.status === 'down' ? (
+                        <div className="detail-section">
+                            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '32px 0' }}>
+                                <div style={{ fontSize: '32px', marginBottom: '8px' }}>⚠</div>
+                                <div>Node is offline</div>
+                                {node.drain_reason && (
+                                    <div style={{ fontSize: '12px', marginTop: '8px', color: 'var(--red)' }}>
+                                        {node.drain_reason}
+                                    </div>
+                                )}
+                                <div style={{ fontSize: '12px', marginTop: '8px' }}>
+                                    Last seen: {new Date(node.last_seen).toLocaleString()}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="detail-section">
+                                <div className="detail-section-title">Job Statistics</div>
+                                <div className="detail-row">
+                                    <span className="detail-label">Jobs Today</span>
+                                    <span className="detail-value">{node.jobs_today || 0}</span>
+                                </div>
+                                <div className="detail-row">
+                                    <span className="detail-label">Succeeded</span>
+                                    <span className="detail-value green">{node.jobs_success || 0}</span>
+                                </div>
+                                <div className="detail-row">
+                                    <span className="detail-label">Failed</span>
+                                    <span className="detail-value red">{node.jobs_failed || 0}</span>
+                                </div>
+                                <div className="detail-row">
+                                    <span className="detail-label">Success Rate</span>
+                                    <span className={`detail-value ${getHealthColor(node.success_rate || 0)}`}>
+                                        {((node.success_rate || 0) * 100).toFixed(1)}%
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div className="detail-section">
+                                <div className="detail-section-title">Resource Utilization</div>
+                                <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span className="detail-label">CPU</span>
+                                        <span className="detail-value">{node.cpu_util || 0}%</span>
+                                    </div>
+                                    <div className="progress-bar">
+                                        <div 
+                                            className={`progress-fill ${(node.cpu_util || 0) > 90 ? 'red' : (node.cpu_util || 0) > 70 ? 'yellow' : 'cyan'}`}
+                                            style={{ width: `${node.cpu_util || 0}%` }}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <span className="detail-label">Memory</span>
+                                        <span className="detail-value">{node.mem_util || 0}%</span>
+                                    </div>
+                                    <div className="progress-bar">
+                                        <div 
+                                            className={`progress-fill ${(node.mem_util || 0) > 90 ? 'red' : (node.mem_util || 0) > 70 ? 'yellow' : 'green'}`}
+                                            style={{ width: `${node.mem_util || 0}%` }}
+                                        />
+                                    </div>
+                                </div>
+                                {node.has_gpu && (
+                                    <div className="detail-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span className="detail-label">GPU ({node.gpu_name || 'GPU'})</span>
+                                            <span className="detail-value">{node.gpu_util || 0}%</span>
+                                        </div>
+                                        <div className="progress-bar">
+                                            <div 
+                                                className="progress-fill purple"
+                                                style={{ width: `${node.gpu_util || 0}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="detail-row">
+                                    <span className="detail-label">Load Average</span>
+                                    <span className="detail-value">{node.load_avg || 0}</span>
+                                </div>
+                            </div>
+                            
+                            {node.failures && Object.keys(node.failures).length > 0 && (
+                                <div className="detail-section">
+                                    <div className="detail-section-title">Failure Breakdown</div>
+                                    <div className="failure-list">
+                                        {Object.entries(node.failures)
+                                            .sort((a, b) => b[1] - a[1])
+                                            .map(([type, count]) => (
+                                                <div key={type} className="failure-item">
+                                                    <span className="failure-count">{count}</span>
+                                                    <span className="failure-type">{type}</span>
+                                                </div>
+                                            ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {node.top_users && node.top_users.length > 0 && (
+                                <div className="detail-section">
+                                    <div className="detail-section-title">Top Users</div>
+                                    <div className="user-list">
+                                        {node.top_users.map(({ user, jobs }) => (
+                                            <div key={user} className="user-item">
+                                                <div className="user-avatar">
+                                                    {user[0].toUpperCase()}
+                                                </div>
+                                                <span className="user-name">{user}</span>
+                                                <span className="user-jobs">{jobs} jobs</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </aside>
+            );
+        }
+        
+        function NetworkView({ jobs, edges, featureStats, correlationData, suggestedAxes, networkStats, networkMethod }) {
+            const containerRef = useRef(null);
+            const sceneRef = useRef(null);
+            const nodeGroupRef = useRef(null);
+            const edgeGroupRef = useRef(null);
+            const [viewMode, setViewMode] = useState('force'); // Default to force-directed
+            const [showStats, setShowStats] = useState(false);
+            const [showCorrelation, setShowCorrelation] = useState(false);
+            const [showMethod, setShowMethod] = useState(false);
+            const [forceIterations, setForceIterations] = useState(0);
+            const forcePositionsRef = useRef(null);
+            const animationRef = useRef(null);
+            
+            // Force-directed layout computation
+            const computeForceLayout = useMemo(() => {
+                if (!jobs || !edges) return null;
+                
+                const n = jobs.length;
+                
+                // Initialize positions randomly in a sphere
+                const positions = jobs.map(() => ({
+                    x: (Math.random() - 0.5) * 50 + 25,
+                    y: (Math.random() - 0.5) * 50 + 25,
+                    z: (Math.random() - 0.5) * 50 + 25,
+                    vx: 0, vy: 0, vz: 0
+                }));
+                
+                // Build adjacency list for faster edge lookup
+                const neighbors = new Map();
+                for (let i = 0; i < n; i++) neighbors.set(i, new Set());
+                edges.forEach(e => {
+                    neighbors.get(e.source).add(e.target);
+                    neighbors.get(e.target).add(e.source);
+                });
+                
+                // Fruchterman-Reingold parameters
+                const area = 50 * 50 * 50;
+                const k = Math.pow(area / n, 1/3) * 0.5; // Optimal distance
+                const iterations = 150;
+                let temperature = 50;
+                const cooling = 0.95;
+                
+                for (let iter = 0; iter < iterations; iter++) {
+                    // Calculate repulsive forces (all pairs)
+                    const disp = positions.map(() => ({ x: 0, y: 0, z: 0 }));
+                    
+                    for (let i = 0; i < n; i++) {
+                        for (let j = i + 1; j < n; j++) {
+                            const dx = positions[i].x - positions[j].x;
+                            const dy = positions[i].y - positions[j].y;
+                            const dz = positions[i].z - positions[j].z;
+                            const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.01;
+                            
+                            // Repulsive force: k^2 / dist
+                            const force = (k * k) / dist;
+                            const fx = (dx / dist) * force;
+                            const fy = (dy / dist) * force;
+                            const fz = (dz / dist) * force;
+                            
+                            disp[i].x += fx; disp[i].y += fy; disp[i].z += fz;
+                            disp[j].x -= fx; disp[j].y -= fy; disp[j].z -= fz;
+                        }
+                    }
+                    
+                    // Calculate attractive forces (edges only)
+                    edges.forEach(e => {
+                        const i = e.source, j = e.target;
+                        const dx = positions[i].x - positions[j].x;
+                        const dy = positions[i].y - positions[j].y;
+                        const dz = positions[i].z - positions[j].z;
+                        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz) || 0.01;
+                        
+                        // Attractive force: dist^2 / k, scaled by similarity
+                        const strength = e.similarity || 1;
+                        const force = (dist * dist / k) * strength;
+                        const fx = (dx / dist) * force;
+                        const fy = (dy / dist) * force;
+                        const fz = (dz / dist) * force;
+                        
+                        disp[i].x -= fx; disp[i].y -= fy; disp[i].z -= fz;
+                        disp[j].x += fx; disp[j].y += fy; disp[j].z += fz;
+                    });
+                    
+                    // Apply displacements with temperature limiting
+                    for (let i = 0; i < n; i++) {
+                        const dispMag = Math.sqrt(disp[i].x**2 + disp[i].y**2 + disp[i].z**2) || 0.01;
+                        const scale = Math.min(dispMag, temperature) / dispMag;
+                        
+                        positions[i].x += disp[i].x * scale;
+                        positions[i].y += disp[i].y * scale;
+                        positions[i].z += disp[i].z * scale;
+                        
+                        // Keep in bounds
+                        positions[i].x = Math.max(0, Math.min(50, positions[i].x));
+                        positions[i].y = Math.max(0, Math.min(50, positions[i].y));
+                        positions[i].z = Math.max(0, Math.min(50, positions[i].z));
+                    }
+                    
+                    temperature *= cooling;
+                }
+                
+                return positions;
+            }, [jobs, edges]);
+            
+            // Available numeric features for axis selection
+            const availableFeatures = useMemo(() => {
+                if (!featureStats) return [];
+                return Object.entries(featureStats)
+                    .filter(([k, v]) => v.range > 0)  // Only features with variation
+                    .sort((a, b) => b[1].cv - a[1].cv)  // Sort by coefficient of variation
+                    .map(([k, v]) => ({ name: k, ...v }));
+            }, [featureStats]);
+            
+            // Default axes from suggestions or fallback
+            const defaultAxes = useMemo(() => {
+                if (suggestedAxes && suggestedAxes.length >= 3) {
+                    return { x: suggestedAxes[0], y: suggestedAxes[1], z: suggestedAxes[2] };
+                }
+                return { x: 'runtime_sec', y: 'wait_time_sec', z: 'total_write_mb' };
+            }, [suggestedAxes]);
+            
+            const [axisX, setAxisX] = useState(defaultAxes.x);
+            const [axisY, setAxisY] = useState(defaultAxes.y);
+            const [axisZ, setAxisZ] = useState(defaultAxes.z);
+            
+            // Update defaults when suggestions change
+            useEffect(() => {
+                if (suggestedAxes && suggestedAxes.length >= 3) {
+                    setAxisX(suggestedAxes[0]);
+                    setAxisY(suggestedAxes[1]);
+                    setAxisZ(suggestedAxes[2]);
+                }
+            }, [suggestedAxes]);
+            
+            // Get correlation between two features
+            const getCorrelation = (f1, f2) => {
+                if (!correlationData || !correlationData.features) return 0;
+                const idx1 = correlationData.features.indexOf(f1);
+                const idx2 = correlationData.features.indexOf(f2);
+                if (idx1 === -1 || idx2 === -1) return 0;
+                return correlationData.matrix[idx1][idx2];
+            };
+            
+            // Check for correlations between selected axes
+            const axisCorrelations = useMemo(() => {
+                const warnings = [];
+                const pairs = [
+                    { a: 'X', b: 'Y', f1: axisX, f2: axisY },
+                    { a: 'X', b: 'Z', f1: axisX, f2: axisZ },
+                    { a: 'Y', b: 'Z', f1: axisY, f2: axisZ },
+                ];
+                for (const { a, b, f1, f2 } of pairs) {
+                    const r = getCorrelation(f1, f2);
+                    if (Math.abs(r) >= 0.7) {
+                        warnings.push({
+                            axes: `${a}-${b}`,
+                            features: [f1, f2],
+                            correlation: r,
+                            strength: Math.abs(r) >= 0.85 ? 'strong' : 'moderate'
+                        });
+                    }
+                }
+                return warnings;
+            }, [axisX, axisY, axisZ, correlationData]);
+            
+            const stats = useMemo(() => {
+                const completed = jobs.filter(j => (j.state || '').toUpperCase() === 'COMPLETED').length;
+                const timeout = jobs.filter(j => (j.state || '').toUpperCase() === 'TIMEOUT').length;
+                const failed = jobs.length - completed - timeout;
+                return {
+                    total: jobs.length,
+                    completed,
+                    timeout,
+                    failed,
+                    successRate: (completed / jobs.length * 100).toFixed(1),
+                    edges: edges.length
+                };
+            }, [jobs, edges]);
+            
+            // Normalize values to 0-50 range for visualization
+            const normalizeValue = (value, feature) => {
+                if (!featureStats || !featureStats[feature]) return value * 0.5;
+                const { min, max } = featureStats[feature];
+                if (max === min) return 25;
+                return ((value - min) / (max - min)) * 50;
+            };
+            
+            const getPosition = (job, index) => {
+                if (viewMode === 'force' && computeForceLayout) {
+                    return computeForceLayout[index];
+                }
+                if (viewMode === 'pca') {
+                    return pcaPositions[index];
+                }
+                return {
+                    x: normalizeValue(job[axisX] || 0, axisX),
+                    y: normalizeValue(job[axisY] || 0, axisY),
+                    z: normalizeValue(job[axisZ] || 0, axisZ)
+                };
+            };
+            
+            const pcaPositions = useMemo(() => {
+                const data = jobs.map(j => [
+                    j[axisX] || 0,
+                    j[axisY] || 0,
+                    j[axisZ] || 0
+                ]);
+                const means = [0, 1, 2].map(i => data.reduce((s, d) => s + d[i], 0) / data.length);
+                const centered = data.map(d => d.map((v, i) => v - means[i]));
+                
+                const cov = [[0,0,0],[0,0,0],[0,0,0]];
+                for (let i = 0; i < 3; i++) {
+                    for (let j = 0; j < 3; j++) {
+                        cov[i][j] = centered.reduce((s, d) => s + d[i] * d[j], 0) / (data.length - 1);
+                    }
+                }
+                
+                const powerIteration = (mat, numIter = 50) => {
+                    let v = [1, 1, 1];
+                    for (let iter = 0; iter < numIter; iter++) {
+                        const newV = [0, 0, 0];
+                        for (let i = 0; i < 3; i++) {
+                            for (let j = 0; j < 3; j++) {
+                                newV[i] += mat[i][j] * v[j];
+                            }
+                        }
+                        const norm = Math.sqrt(newV.reduce((s, x) => s + x*x, 0));
+                        v = newV.map(x => x / norm);
+                    }
+                    return v;
+                };
+                
+                const pc1 = powerIteration(cov);
+                const deflated = cov.map((row, i) => row.map((val, j) => val - pc1[i] * pc1[j] * cov[i][j] * 10));
+                const pc2 = powerIteration(deflated);
+                const pc3 = [
+                    pc1[1]*pc2[2] - pc1[2]*pc2[1],
+                    pc1[2]*pc2[0] - pc1[0]*pc2[2],
+                    pc1[0]*pc2[1] - pc1[1]*pc2[0]
+                ];
+                
+                return centered.map(d => ({
+                    x: (d[0]*pc1[0] + d[1]*pc1[1] + d[2]*pc1[2]) * 0.8 + 25,
+                    y: (d[0]*pc2[0] + d[1]*pc2[1] + d[2]*pc2[2]) * 0.8 + 25,
+                    z: (d[0]*pc3[0] + d[1]*pc3[1] + d[2]*pc3[2]) * 0.8 + 25
+                }));
+            }, [jobs, axisX, axisY, axisZ]);
+            
+            // Update positions when axes or view mode change
+            useEffect(() => {
+                if (!nodeGroupRef.current || !edgeGroupRef.current) return;
+                
+                nodeGroupRef.current.children.forEach((mesh, i) => {
+                    const pos = getPosition(jobs[i], i);
+                    mesh.position.set(pos.x, pos.y, pos.z);
+                });
+                
+                edgeGroupRef.current.children.forEach((line, i) => {
+                    const edge = edges[i];
+                    if (!edge) return;
+                    const pos1 = getPosition(jobs[edge.source], edge.source);
+                    const pos2 = getPosition(jobs[edge.target], edge.target);
+                    
+                    const positions = line.geometry.attributes.position.array;
+                    positions[0] = pos1.x; positions[1] = pos1.y; positions[2] = pos1.z;
+                    positions[3] = pos2.x; positions[4] = pos2.y; positions[5] = pos2.z;
+                    line.geometry.attributes.position.needsUpdate = true;
+                });
+            }, [viewMode, axisX, axisY, axisZ, jobs, edges, pcaPositions, computeForceLayout]);
+            
+            useEffect(() => {
+                if (!containerRef.current || !jobs || !edges) return;
+                
+                const container = containerRef.current;
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                
+                const scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x161b22);
+                sceneRef.current = scene;
+                
+                const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
+                camera.position.set(80, 80, 80);
+                camera.lookAt(0, 0, 0);
+                
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                container.appendChild(renderer.domElement);
+                
+                // Raycaster for mouse interaction
+                const raycaster = new THREE.Raycaster();
+                const mouse = new THREE.Vector2();
+                
+                // Tooltip element
+                const tooltip = document.createElement('div');
+                tooltip.style.cssText = `
+                    position: absolute;
+                    background: rgba(22, 27, 34, 0.95);
+                    border: 1px solid #30363d;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    font-size: 11px;
+                    color: #e6edf3;
+                    pointer-events: none;
+                    display: none;
+                    z-index: 1000;
+                    max-width: 280px;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+                `;
+                container.appendChild(tooltip);
+                
+                const gridHelper = new THREE.GridHelper(100, 20, 0x30363d, 0x21262d);
+                scene.add(gridHelper);
+                
+                const axesGroup = new THREE.Group();
+                const axisMaterial = new THREE.LineBasicMaterial({ color: 0x6e7681 });
+                
+                [[100, 0, 0], [0, 100, 0], [0, 0, 100]].forEach(([x, y, z]) => {
+                    const points = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(x, y, z)];
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, axisMaterial);
+                    axesGroup.add(line);
+                });
+                scene.add(axesGroup);
+                
+                const nodeGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+                const completedMaterial = new THREE.MeshBasicMaterial({ color: 0x3fb950 });  // Green
+                const timeoutMaterial = new THREE.MeshBasicMaterial({ color: 0xd29922 });    // Yellow/amber
+                const failedMaterial = new THREE.MeshBasicMaterial({ color: 0xf85149 });     // Red
+                const hoverMaterial = new THREE.MeshBasicMaterial({ color: 0x58a6ff });
+                
+                const getJobMaterial = (job) => {
+                    const state = (job.state || '').toUpperCase();
+                    if (state === 'COMPLETED') return completedMaterial.clone();
+                    if (state === 'TIMEOUT') return timeoutMaterial.clone();
+                    return failedMaterial.clone();  // FAILED, OUT_OF_MEMORY, NODE_FAIL, etc.
+                };
+                
+                const getJobColorHex = (job) => {
+                    const state = (job.state || '').toUpperCase();
+                    if (state === 'COMPLETED') return 0x3fb950;
+                    if (state === 'TIMEOUT') return 0xd29922;
+                    return 0xf85149;
+                };
+                
+                const nodeGroup = new THREE.Group();
+                jobs.forEach((job, i) => {
+                    const material = getJobMaterial(job);
+                    const mesh = new THREE.Mesh(nodeGeometry, material);
+                    const pos = getPosition(job, i);
+                    mesh.position.set(pos.x, pos.y, pos.z);
+                    mesh.userData = { index: i, job, originalColor: getJobColorHex(job) };
+                    nodeGroup.add(mesh);
+                });
+                scene.add(nodeGroup);
+                nodeGroupRef.current = nodeGroup;
+                
+                const edgeMaterial = new THREE.LineBasicMaterial({ 
+                    color: 0x58a6ff, 
+                    transparent: true, 
+                    opacity: 0.15 
+                });
+                
+                const edgeGroup = new THREE.Group();
+                edges.forEach(edge => {
+                    const pos1 = getPosition(jobs[edge.source], edge.source);
+                    const pos2 = getPosition(jobs[edge.target], edge.target);
+                    
+                    const points = [
+                        new THREE.Vector3(pos1.x, pos1.y, pos1.z),
+                        new THREE.Vector3(pos2.x, pos2.y, pos2.z)
+                    ];
+                    
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, edgeMaterial.clone());
+                    line.userData = { edge };
+                    edgeGroup.add(line);
+                });
+                scene.add(edgeGroup);
+                edgeGroupRef.current = edgeGroup;
+                
+                let isDragging = false;
+                let previousMousePosition = { x: 0, y: 0 };
+                let theta = Math.PI / 4;
+                let phi = Math.PI / 4;
+                let radius = 120;
+                let hoveredNode = null;
+                
+                const updateCamera = () => {
+                    camera.position.x = radius * Math.sin(phi) * Math.cos(theta);
+                    camera.position.y = radius * Math.cos(phi);
+                    camera.position.z = radius * Math.sin(phi) * Math.sin(theta);
+                    camera.lookAt(25, 25, 25);
+                };
+                
+                updateCamera();
+                
+                const formatValue = (val) => {
+                    if (val === undefined || val === null) return '—';
+                    if (typeof val === 'number') {
+                        if (val > 1000) return val.toLocaleString();
+                        if (val % 1 !== 0) return val.toFixed(2);
+                    }
+                    return String(val);
+                };
+                
+                const showTooltip = (mesh, event) => {
+                    const job = mesh.userData.job;
+                    const stateColor = job.success ? '#3fb950' : '#f85149';
+                    const state = job.state || (job.success ? 'COMPLETED' : 'FAILED');
+                    
+                    tooltip.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span style="font-weight: 600; font-size: 13px;">Job ${job.job_id}</span>
+                            <span style="background: ${stateColor}22; color: ${stateColor}; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600;">${state}</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-size: 10px;">
+                            <div><span style="color: #8b949e;">Partition:</span> ${job.partition || '—'}</div>
+                            <div><span style="color: #8b949e;">Runtime:</span> ${formatValue(job.runtime_sec)}s</div>
+                            <div><span style="color: #8b949e;">Wait:</span> ${formatValue(job.wait_time_sec)}s</div>
+                            <div><span style="color: #8b949e;">CPUs:</span> ${formatValue(job.req_cpus)}</div>
+                            <div><span style="color: #8b949e;">Memory:</span> ${formatValue(job.req_mem_mb)} MB</div>
+                            <div><span style="color: #8b949e;">Write:</span> ${formatValue(job.total_write_mb)} MB</div>
+                            ${job.health_score ? `<div><span style="color: #8b949e;">Health:</span> ${(job.health_score * 100).toFixed(0)}%</div>` : ''}
+                            ${job.time_efficiency ? `<div><span style="color: #8b949e;">Time Eff:</span> ${(job.time_efficiency * 100).toFixed(0)}%</div>` : ''}
+                        </div>
+                    `;
+                    
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (event.clientX - container.getBoundingClientRect().left + 15) + 'px';
+                    tooltip.style.top = (event.clientY - container.getBoundingClientRect().top - 10) + 'px';
+                };
+                
+                const hideTooltip = () => {
+                    tooltip.style.display = 'none';
+                };
+                
+                container.addEventListener('mousedown', (e) => {
+                    isDragging = true;
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                });
+                
+                container.addEventListener('mousemove', (e) => {
+                    if (isDragging) {
+                        const deltaX = e.clientX - previousMousePosition.x;
+                        const deltaY = e.clientY - previousMousePosition.y;
+                        
+                        theta += deltaX * 0.005;
+                        phi = Math.max(0.1, Math.min(Math.PI - 0.1, phi + deltaY * 0.005));
+                        
+                        updateCamera();
+                        previousMousePosition = { x: e.clientX, y: e.clientY };
+                        hideTooltip();
+                        return;
+                    }
+                    
+                    // Raycasting for hover
+                    const rect = container.getBoundingClientRect();
+                    mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+                    mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+                    
+                    raycaster.setFromCamera(mouse, camera);
+                    const intersects = raycaster.intersectObjects(nodeGroup.children);
+                    
+                    // Reset previous hover
+                    if (hoveredNode && (!intersects.length || intersects[0].object !== hoveredNode)) {
+                        hoveredNode.material.color.setHex(hoveredNode.userData.originalColor);
+                        hoveredNode.scale.set(1, 1, 1);
+                        hoveredNode = null;
+                        hideTooltip();
+                    }
+                    
+                    // Set new hover
+                    if (intersects.length > 0) {
+                        const mesh = intersects[0].object;
+                        if (mesh !== hoveredNode) {
+                            hoveredNode = mesh;
+                            mesh.material.color.setHex(0x58a6ff);
+                            mesh.scale.set(1.5, 1.5, 1.5);
+                            showTooltip(mesh, e);
+                        } else {
+                            // Update tooltip position
+                            tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+                            tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+                        }
+                    }
+                });
+                
+                container.addEventListener('mouseup', () => { isDragging = false; });
+                container.addEventListener('mouseleave', () => { 
+                    isDragging = false; 
+                    hideTooltip();
+                    if (hoveredNode) {
+                        hoveredNode.material.color.setHex(hoveredNode.userData.originalColor);
+                        hoveredNode.scale.set(1, 1, 1);
+                        hoveredNode = null;
+                    }
+                });
+                
+                container.addEventListener('wheel', (e) => {
+                    e.preventDefault();
+                    radius = Math.max(50, Math.min(250, radius + e.deltaY * 0.1));
+                    updateCamera();
+                });
+                
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    renderer.render(scene, camera);
+                };
+                animate();
+                
+                return () => {
+                    renderer.dispose();
+                    if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
+                    container.removeChild(renderer.domElement);
+                };
+            }, [jobs, edges]);
+            
+            const formatFeatureName = (name) => {
+                return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            };
+            
+            // Color scale for correlation heatmap
+            const getCorrelationColor = (r) => {
+                if (r >= 0.85) return '#3fb950';      // Strong positive - green
+                if (r >= 0.7) return '#7ee787';       // Moderate positive - light green
+                if (r >= 0.3) return '#a5d6a7';       // Weak positive - very light green
+                if (r > -0.3) return '#6e7681';       // Near zero - gray
+                if (r > -0.7) return '#ffab91';       // Weak negative - light red
+                if (r > -0.85) return '#f85149';      // Moderate negative - red
+                return '#da3633';                      // Strong negative - dark red
+            };
+            
+            return (
+                <div className="content" style={{ padding: '24px' }}>
+                    <div className="cluster-header">
+                        <h1 className="cluster-title">Job Network</h1>
+                        <p className="cluster-desc">
+                            {viewMode === 'force' 
+                                ? '3D force-directed layout - connected jobs cluster together'
+                                : '3D visualization of job similarity based on selected features'}
+                        </p>
+                    </div>
+                    
+                    <div className="network-container" ref={containerRef}>
+                        <div className="network-controls">
+                            <button 
+                                className={`network-btn ${viewMode === 'force' ? 'active' : ''}`}
+                                onClick={() => setViewMode('force')}
+                            >
+                                Force Layout
+                            </button>
+                            <button 
+                                className={`network-btn ${viewMode === 'raw' ? 'active' : ''}`}
+                                onClick={() => setViewMode('raw')}
+                            >
+                                Raw Axes
+                            </button>
+                            <button 
+                                className={`network-btn ${viewMode === 'pca' ? 'active' : ''}`}
+                                onClick={() => setViewMode('pca')}
+                            >
+                                PCA View
+                            </button>
+                            <button 
+                                className={`network-btn ${showStats ? 'active' : ''}`}
+                                onClick={() => { setShowStats(!showStats); setShowCorrelation(false); setShowMethod(false); }}
+                                style={{ marginLeft: '16px' }}
+                            >
+                                Variance
+                            </button>
+                            <button 
+                                className={`network-btn ${showCorrelation ? 'active' : ''}`}
+                                onClick={() => { setShowCorrelation(!showCorrelation); setShowStats(false); setShowMethod(false); }}
+                            >
+                                Correlation
+                            </button>
+                            <button 
+                                className={`network-btn ${showMethod ? 'active' : ''}`}
+                                onClick={() => { setShowMethod(!showMethod); setShowStats(false); setShowCorrelation(false); }}
+                            >
+                                Method
+                            </button>
+                        </div>
+                        
+                        {/* Correlation Warning */}
+                        {axisCorrelations.length > 0 && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '60px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                background: 'rgba(210, 153, 34, 0.15)',
+                                border: '1px solid var(--yellow)',
+                                borderRadius: '8px',
+                                padding: '8px 16px',
+                                fontSize: '12px',
+                                color: 'var(--yellow)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                zIndex: 100
+                            }}>
+                                <span style={{ fontSize: '16px' }}>⚠</span>
+                                <span>
+                                    {axisCorrelations.map(w => 
+                                        `${w.axes}: r=${w.correlation.toFixed(2)} (${w.strength})`
+                                    ).join(' | ')}
+                                    {' '}- Consider selecting less correlated features
+                                </span>
+                            </div>
+                        )}
+                        
+                        {/* Axis Selectors - only show for raw/pca modes */}
+                        {viewMode !== 'force' && (
+                        <div style={{
+                            position: 'absolute',
+                            bottom: '16px',
+                            left: '16px',
+                            background: 'var(--bg-elevated)',
+                            border: '1px solid var(--border)',
+                            borderRadius: '8px',
+                            padding: '12px 16px',
+                            fontSize: '12px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '8px'
+                        }}>
+                            <div style={{ fontWeight: '600', marginBottom: '4px', color: 'var(--text-muted)' }}>
+                                AXIS SELECTION
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: '#f85149', fontWeight: '600', width: '16px' }}>X</span>
+                                <select 
+                                    value={axisX} 
+                                    onChange={(e) => setAxisX(e.target.value)}
+                                    style={{
+                                        background: 'var(--bg-hover)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '4px',
+                                        color: 'var(--text-primary)',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        minWidth: '140px'
+                                    }}
+                                >
+                                    {availableFeatures.map(f => (
+                                        <option key={f.name} value={f.name}>
+                                            {formatFeatureName(f.name)} (CV: {f.cv}%)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: '#3fb950', fontWeight: '600', width: '16px' }}>Y</span>
+                                <select 
+                                    value={axisY} 
+                                    onChange={(e) => setAxisY(e.target.value)}
+                                    style={{
+                                        background: 'var(--bg-hover)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '4px',
+                                        color: 'var(--text-primary)',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        minWidth: '140px'
+                                    }}
+                                >
+                                    {availableFeatures.map(f => (
+                                        <option key={f.name} value={f.name}>
+                                            {formatFeatureName(f.name)} (CV: {f.cv}%)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: '#58a6ff', fontWeight: '600', width: '16px' }}>Z</span>
+                                <select 
+                                    value={axisZ} 
+                                    onChange={(e) => setAxisZ(e.target.value)}
+                                    style={{
+                                        background: 'var(--bg-hover)',
+                                        border: '1px solid var(--border)',
+                                        borderRadius: '4px',
+                                        color: 'var(--text-primary)',
+                                        padding: '4px 8px',
+                                        fontSize: '11px',
+                                        minWidth: '140px'
+                                    }}
+                                >
+                                    {availableFeatures.map(f => (
+                                        <option key={f.name} value={f.name}>
+                                            {formatFeatureName(f.name)} (CV: {f.cv}%)
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        )}
+                        
+                        {/* Feature Stats Panel */}
+                        {showStats && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '60px',
+                                left: '16px',
+                                background: 'var(--bg-elevated)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '8px',
+                                padding: '12px 16px',
+                                fontSize: '11px',
+                                maxHeight: '300px',
+                                overflowY: 'auto',
+                                minWidth: '280px'
+                            }}>
+                                <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--text-muted)' }}>
+                                    FEATURE VARIANCE (sorted by CV)
+                                </div>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead>
+                                        <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                                            <th style={{ textAlign: 'left', padding: '4px 0' }}>Feature</th>
+                                            <th style={{ textAlign: 'right', padding: '4px 4px' }}>CV%</th>
+                                            <th style={{ textAlign: 'right', padding: '4px 4px' }}>Range</th>
+                                            <th style={{ textAlign: 'right', padding: '4px 0' }}>Non-0%</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {availableFeatures.slice(0, 12).map(f => (
+                                            <tr key={f.name} style={{ 
+                                                borderBottom: '1px solid var(--border)',
+                                                background: [axisX, axisY, axisZ].includes(f.name) ? 'rgba(88, 166, 255, 0.1)' : 'transparent'
+                                            }}>
+                                                <td style={{ padding: '4px 0', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    {formatFeatureName(f.name)}
+                                                </td>
+                                                <td style={{ 
+                                                    textAlign: 'right', 
+                                                    padding: '4px 4px',
+                                                    color: f.cv > 50 ? 'var(--green)' : f.cv > 20 ? 'var(--yellow)' : 'var(--text-muted)'
+                                                }}>
+                                                    {f.cv}%
+                                                </td>
+                                                <td style={{ textAlign: 'right', padding: '4px 4px', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    {f.range > 1000 ? `${(f.range/1000).toFixed(1)}k` : f.range.toFixed(1)}
+                                                </td>
+                                                <td style={{ 
+                                                    textAlign: 'right', 
+                                                    padding: '4px 0',
+                                                    color: f.non_zero_pct > 80 ? 'var(--green)' : f.non_zero_pct > 50 ? 'var(--yellow)' : 'var(--red)'
+                                                }}>
+                                                    {f.non_zero_pct}%
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                                <div style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '10px' }}>
+                                    CV = Coefficient of Variation (higher = more spread)
+                                </div>
+                            </div>
+                        )}
+                        
+                        {/* Correlation Matrix Panel */}
+                        {showCorrelation && correlationData && correlationData.features && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '60px',
+                                left: '16px',
+                                background: 'var(--bg-elevated)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '8px',
+                                padding: '12px 16px',
+                                fontSize: '10px',
+                                maxHeight: '400px',
+                                overflowY: 'auto',
+                                overflowX: 'auto'
+                            }}>
+                                <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>
+                                    CORRELATION MATRIX
+                                </div>
+                                
+                                {/* Heatmap */}
+                                <div style={{ display: 'flex', gap: '1px' }}>
+                                    {/* Row labels */}
+                                    <div style={{ display: 'flex', flexDirection: 'column', marginRight: '4px' }}>
+                                        <div style={{ height: '20px' }}></div>
+                                        {correlationData.features.slice(0, 10).map(f => (
+                                            <div key={f} style={{ 
+                                                height: '20px', 
+                                                display: 'flex', 
+                                                alignItems: 'center',
+                                                color: [axisX, axisY, axisZ].includes(f) ? 'var(--cyan)' : 'var(--text-secondary)',
+                                                fontFamily: 'IBM Plex Mono, monospace',
+                                                fontSize: '9px',
+                                                whiteSpace: 'nowrap',
+                                                paddingRight: '4px'
+                                            }}>
+                                                {f.length > 12 ? f.slice(0, 10) + '..' : f}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    
+                                    {/* Matrix cells */}
+                                    <div>
+                                        {/* Column labels */}
+                                        <div style={{ display: 'flex', gap: '1px', marginBottom: '2px' }}>
+                                            {correlationData.features.slice(0, 10).map(f => (
+                                                <div key={f} style={{ 
+                                                    width: '20px', 
+                                                    height: '20px',
+                                                    display: 'flex',
+                                                    alignItems: 'flex-end',
+                                                    justifyContent: 'center',
+                                                    color: [axisX, axisY, axisZ].includes(f) ? 'var(--cyan)' : 'var(--text-muted)',
+                                                    fontSize: '8px',
+                                                    transform: 'rotate(-45deg)',
+                                                    transformOrigin: 'center'
+                                                }}>
+                                                    {f.slice(0, 3)}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Matrix rows */}
+                                        {correlationData.matrix.slice(0, 10).map((row, i) => (
+                                            <div key={i} style={{ display: 'flex', gap: '1px' }}>
+                                                {row.slice(0, 10).map((r, j) => {
+                                                    const f1 = correlationData.features[i];
+                                                    const f2 = correlationData.features[j];
+                                                    const isSelected = [axisX, axisY, axisZ].includes(f1) && 
+                                                                      [axisX, axisY, axisZ].includes(f2);
+                                                    return (
+                                                        <div 
+                                                            key={j}
+                                                            title={`${f1} × ${f2}: r=${r.toFixed(2)}`}
+                                                            style={{
+                                                                width: '20px',
+                                                                height: '20px',
+                                                                background: getCorrelationColor(r),
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                fontSize: '8px',
+                                                                color: Math.abs(r) > 0.5 ? '#fff' : 'var(--text-muted)',
+                                                                borderRadius: '2px',
+                                                                border: isSelected ? '2px solid var(--cyan)' : 'none',
+                                                                cursor: 'default'
+                                                            }}
+                                                        >
+                                                            {i === j ? '—' : (Math.abs(r) >= 0.5 ? r.toFixed(1) : '')}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                
+                                {/* Legend */}
+                                <div style={{ marginTop: '12px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ color: 'var(--text-muted)' }}>Legend:</span>
+                                    {[
+                                        { r: 0.9, label: '+Strong' },
+                                        { r: 0.5, label: '+Mod' },
+                                        { r: 0, label: 'None' },
+                                        { r: -0.5, label: '-Mod' },
+                                        { r: -0.9, label: '-Strong' },
+                                    ].map(({ r, label }) => (
+                                        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                            <div style={{ 
+                                                width: '12px', 
+                                                height: '12px', 
+                                                background: getCorrelationColor(r),
+                                                borderRadius: '2px'
+                                            }}></div>
+                                            <span style={{ fontSize: '9px' }}>{label}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                
+                                {/* High correlations list */}
+                                {correlationData.high_correlations && correlationData.high_correlations.length > 0 && (
+                                    <div style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+                                        <div style={{ fontWeight: '600', marginBottom: '4px', color: 'var(--yellow)' }}>
+                                            ⚠ High Correlations ({correlationData.high_correlations.length})
+                                        </div>
+                                        {correlationData.high_correlations.slice(0, 5).map((hc, i) => (
+                                            <div key={i} style={{ 
+                                                fontSize: '9px', 
+                                                color: 'var(--text-secondary)',
+                                                padding: '2px 0'
+                                            }}>
+                                                {hc.feature1} ↔ {hc.feature2}: <span style={{ color: 'var(--yellow)' }}>r={hc.correlation}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        
+                        {/* Network Method Panel */}
+                        {showMethod && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '60px',
+                                left: '16px',
+                                background: 'var(--bg-elevated)',
+                                border: '1px solid var(--border)',
+                                borderRadius: '8px',
+                                padding: '16px',
+                                fontSize: '11px',
+                                maxWidth: '320px'
+                            }}>
+                                <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--cyan)', fontSize: '12px' }}>
+                                    NETWORK METHOD
+                                </div>
+                                
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginBottom: '4px' }}>
+                                        Simpson's β-diversity (Bipartite)
+                                    </div>
+                                    <div style={{ color: 'var(--text-muted)', fontSize: '10px', lineHeight: '1.5' }}>
+                                        Based on Vilhena & Antonelli (2015, Nature Communications).
+                                        Jobs are connected based on shared resource usage patterns,
+                                        treating each resource bin as a "site" in biogeographical terms.
+                                    </div>
+                                </div>
+                                
+                                <div style={{ 
+                                    background: 'var(--bg-hover)', 
+                                    borderRadius: '6px', 
+                                    padding: '10px',
+                                    marginBottom: '12px',
+                                    fontFamily: 'IBM Plex Mono, monospace',
+                                    fontSize: '10px'
+                                }}>
+                                    <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Formula:</div>
+                                    <div style={{ color: 'var(--green)' }}>
+                                        Simpson = a / (a + min(b, c))
+                                    </div>
+                                    <div style={{ color: 'var(--text-muted)', marginTop: '8px', fontSize: '9px' }}>
+                                        a = shared bins<br/>
+                                        b = unique to job₁<br/>
+                                        c = unique to job₂
+                                    </div>
+                                </div>
+                                
+                                <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginBottom: '12px' }}>
+                                    <strong style={{ color: 'var(--text-secondary)' }}>Why Simpson?</strong><br/>
+                                    Unlike Jaccard or cosine similarity, Simpson focuses on the
+                                    <em> proportion of the smaller set</em> that is shared. This avoids
+                                    bias when comparing jobs with different resource footprints.
+                                </div>
+                                
+                                {networkStats && (
+                                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                                        <div style={{ color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' }}>
+                                            NETWORK STATISTICS
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                                            <div>
+                                                <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Threshold</div>
+                                                <div style={{ color: 'var(--cyan)', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    ≥ {networkStats.threshold || 0.5}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Avg Similarity</div>
+                                                <div style={{ color: 'var(--text-primary)', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    {networkStats.avg_similarity || '—'}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Edge Density</div>
+                                                <div style={{ color: 'var(--text-primary)', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    {((networkStats.edge_density || 0) * 100).toFixed(1)}%
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div style={{ color: 'var(--text-muted)', fontSize: '9px' }}>Comparisons</div>
+                                                <div style={{ color: 'var(--text-primary)', fontFamily: 'IBM Plex Mono, monospace' }}>
+                                                    {(networkStats.n_comparisons || 0).toLocaleString()}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                
+                                <div style={{ 
+                                    marginTop: '12px', 
+                                    paddingTop: '12px', 
+                                    borderTop: '1px solid var(--border)',
+                                    color: 'var(--text-muted)',
+                                    fontSize: '9px'
+                                }}>
+                                    <strong>Discretization:</strong> Features binned into low/med/high (quantile-based)
+                                </div>
+                            </div>
+                        )}
+                        
+                        <div className="network-stats">
+                            <div className="network-stat">
+                                <span>Jobs</span>
+                                <span className="network-stat-value">{stats.total}</span>
+                            </div>
+                            <div className="network-stat">
+                                <span>Edges</span>
+                                <span className="network-stat-value">{stats.edges.toLocaleString()}</span>
+                            </div>
+                            <div className="network-stat">
+                                <span>Completion</span>
+                                <span className="network-stat-value" style={{ color: 'var(--green)' }}>{stats.successRate}%</span>
+                            </div>
+                        </div>
+                        
+                        <div className="network-legend">
+                            <div className="legend-item">
+                                <div className="legend-dot" style={{ background: '#3fb950' }}></div>
+                                <span>Completed ({stats.completed})</span>
+                            </div>
+                            <div className="legend-item">
+                                <div className="legend-dot" style={{ background: '#d29922' }}></div>
+                                <span>Timeout ({stats.timeout})</span>
+                            </div>
+                            <div className="legend-item">
+                                <div className="legend-dot" style={{ background: '#f85149' }}></div>
+                                <span>Failed ({stats.failed})</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>'''
+
+
+# ============================================================================
+# HTTP Server
+# ============================================================================
+
+class DashboardHandler(http.server.SimpleHTTPRequestHandler):
+    """Custom handler for the dashboard."""
+    
+    data_manager: DataManager = None
+    
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        
+        if parsed.path == '/' or parsed.path == '/index.html':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(DASHBOARD_HTML.encode())
+            
+        elif parsed.path == '/api/data':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            dm = DashboardHandler.data_manager
+            data = {
+                "clusters": dm.clusters,
+                "nodes": dm.nodes,
+                "jobs": dm.jobs,
+                "edges": dm.edges,
+                "data_source": dm.data_source,
+                "feature_stats": dm.feature_stats,
+                "correlation_data": dm.correlation_data,
+                "suggested_axes": dm.suggested_axes,
+                "network_stats": dm.network_stats,
+                "network_method": "simpson_bipartite"  # Vilhena & Antonelli method
+            }
+            self.wfile.write(json.dumps(data).encode())
+            
+        elif parsed.path == '/api/refresh':
+            DashboardHandler.data_manager.refresh()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "refreshed"}).encode())
+            
+        elif parsed.path == '/api/stats':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(DashboardHandler.data_manager.get_stats()).encode())
+            
+        else:
+            self.send_error(404)
+    
+    def log_message(self, format, *args):
+        pass  # Quiet logging
+
+
+def serve_dashboard(host='localhost', port=8050, config_path=None):
+    """Start the dashboard server."""
+    
+    # Load configuration
+    config = load_config(config_path)
+    
+    # Initialize data manager
+    data_manager = DataManager(config)
+    DashboardHandler.data_manager = data_manager
+    
+    # Get stats
+    stats = data_manager.get_stats()
+    
+    print("=" * 60)
+    print("              NØMADE Dashboard")
+    print("=" * 60)
+    print(f"  Server:      http://{host}:{port}")
+    print(f"  Data Source: {stats['data_source']}")
+    print("-" * 60)
+    print(f"  Clusters:    {stats['clusters']}")
+    print(f"  Nodes:       {stats['nodes_online']}/{stats['nodes_total']} online")
+    print(f"  Jobs:        {stats['jobs']} ({stats['jobs_success']} success, {stats['jobs_failed']} failed)")
+    print(f"  Edges:       {stats['edges']}")
+    print("=" * 60)
+    print("  Press Ctrl+C to stop")
+    print()
+    
+    with socketserver.TCPServer((host, port), DashboardHandler) as httpd:
+        httpd.serve_forever()
+
+
+if __name__ == '__main__':
+    import sys
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8050
+    serve_dashboard(port=port)

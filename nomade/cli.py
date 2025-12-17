@@ -65,7 +65,7 @@ def get_db_path(config: dict[str, Any]) -> Path:
 
 @click.group()
 @click.option('-c', '--config', 'config_path', 
-              type=click.Path(exists=True),
+              type=click.Path(),
               default='/etc/nomade/nomade.toml',
               help='Path to config file')
 @click.option('-v', '--verbose', is_flag=True, help='Enable debug logging')
@@ -81,13 +81,17 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
         logging.getLogger().setLevel(logging.DEBUG)
     
     # Try to load config, but don't fail if not found
-    try:
-        ctx.obj['config'] = load_config(Path(config_path))
-        ctx.obj['config_path'] = config_path
-    except click.ClickException:
+    config_file = Path(config_path)
+    if config_file.exists():
+        try:
+            ctx.obj['config'] = load_config(config_file)
+            ctx.obj['config_path'] = config_path
+        except Exception:
+            ctx.obj['config'] = {}
+            ctx.obj['config_path'] = None
+    else:
         ctx.obj['config'] = {}
         ctx.obj['config_path'] = None
-
 
 @cli.command()
 @click.option('--collector', '-C', multiple=True, help='Specific collectors to run')
@@ -962,6 +966,57 @@ def version(ctx: click.Context) -> None:
     click.echo("NØMADE v0.2.0")
     click.echo("NØde MAnagement DEvice")
 
+
+@cli.command()
+@click.option('--host', default='localhost', help='Host to bind to (use 0.0.0.0 for all interfaces)')
+@click.option('--port', '-p', type=int, default=8050, help='Port to listen on')
+@click.option('--data', '-d', type=click.Path(), help='Data source (db file or metrics log)')
+@click.pass_context
+def dashboard(ctx, host, port, data):
+    """Start the interactive web dashboard.
+    
+    The dashboard provides a 3D visualization of job networks with two view modes:
+    
+    - Raw Axes: Jobs positioned by nfs_write, local_write, io_wait
+    - PCA View: Jobs positioned by principal components (patterns emerge from data)
+    
+    Remote access via SSH tunnel:
+        ssh -L 8050:localhost:8050 badenpowell
+        Then open http://localhost:8050 in your browser
+    
+    Examples:
+        nomade dashboard                      # Start with demo data
+        nomade dashboard --port 9000          # Custom port
+        nomade dashboard --data /path/to.db   # Use database
+    """
+    from nomade.viz.server import serve_dashboard
+    
+    # Try to find data source
+    data_source = data
+    if not data_source:
+        config = ctx.obj.get('config', {})
+        # Try database first
+        db_path = get_db_path(config)
+        if db_path.exists():
+            data_source = str(db_path)
+        else:
+            # Try simulation metrics
+            metrics_paths = [
+                Path('/tmp/nomade-metrics.log'),
+                Path.home() / 'nomade-metrics.log',
+            ]
+            for mp in metrics_paths:
+                if mp.exists():
+                    data_source = str(mp)
+                    break
+    
+    click.echo(click.style("===========================================", fg='cyan'))
+    click.echo(click.style("           ", fg='cyan') + 
+               click.style("NOMADE Dashboard", fg='white', bold=True))
+    click.echo(click.style("===========================================", fg='cyan'))
+    click.echo()
+    
+    serve_dashboard(host, port, data_source)
 
 def main() -> None:
     """Entry point for CLI."""
