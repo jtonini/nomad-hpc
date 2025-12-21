@@ -2657,7 +2657,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 <div className="node-jobs">
                                     {node.status === 'down' ? (node.slurm_state || 'OFFLINE') : `${node.jobs_today || 0} jobs`}
                                 </div>
-                                {node.has_gpu && <div className="node-gpu-badge">GPU</div>}
+                                <div className="node-gpu-badge" style={{ background: node.has_gpu ? "#1a1a1a" : "rgba(255,255,255,0.9)", color: node.has_gpu ? "#ffffff" : "#1a1a1a" }}>{node.has_gpu ? "GPU" : "CPU"}</div>
                             </div>
                         ))}
                     </div>
@@ -4216,18 +4216,19 @@ def serve_dashboard(host='localhost', port=8050, config_path=None):
         assort_sig = "sig" if abs(z) > 2 else "ns"
         mntd_sig = "sig" if abs(ses_mntd) > 2 else "ns"
         if r > 0.1:
-            assort_msg = "failures cluster together (resource pattern)"
+            assort_msg = "failures cluster (resource pattern)"
         elif r < -0.1:
-            assort_msg = "failures mixed with successes (code/user issue)"
+            assort_msg = "failures dispersed (code/user issue)"
         else:
-            assort_msg = "no clear pattern"
-        print(f"  Assortativity: r={r:.3f} (z={z:.1f}, {assort_sig}) - {assort_msg}")
-        print(f"  SES.MNTD:      {ses_mntd:.2f} ({mntd_sig}) - distance clustering in feature space")
+            assort_msg = "random"
+        print(f"  Assortativity:  r={r:>6.3f}  z={z:>5.1f} ({assort_sig:>3})  {assort_msg}")
+        print(f"  SES.MNTD:       {ses_mntd:>7.2f}        ({mntd_sig:>3})  spatial clustering")
         hotspots = cq.get("hotspots", [])
         if hotspots:
-            print("  Failure hotspots:")
+            print("  Hotspots:")
             for h in hotspots[:3]:
-                print(f"    - {h['feature']}={h['bin']}: {h['failure_rate']:.0f}% fail (vs {h['baseline_rate']:.0f}% baseline, {h['ratio']}x)")
+                feat = f"{h['feature']}={h['bin']}"
+                print(f"    {feat:<20} {h['failure_rate']:>5.0f}% fail  (base {h['baseline_rate']:.0f}%, {h['ratio']:.1f}x)")
     print("=" * 60)
     if host in ('localhost', '127.0.0.1', '0.0.0.0'):
         import socket
