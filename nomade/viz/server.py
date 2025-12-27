@@ -3557,7 +3557,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 onClick={() => { setShowML(!showML); setShowStats(false); setShowCorrelation(false); setShowMethod(false); setShowClustering(false); }}
                                 style={{ background: showML ? "#e74c3c" : "#3498db" }}
                             >
-                                🔮 ML Risk
+                                ML Risk
                             </button>
                         </div>
                         
@@ -4160,7 +4160,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 overflowY: "auto"
                             }}>
                                 <div style={{ fontWeight: "600", marginBottom: "12px", color: "#e74c3c", fontSize: "12px" }}>
-                                    ⚠️ ML RISK ANALYSIS
+                                    ML RISK ANALYSIS
                                 </div>
                                 <div style={{ marginBottom: "12px", color: "var(--text-muted)", fontSize: "10px" }}>
                                     Status: {mlPredictions.status} | Anomalies: {mlPredictions.n_anomalies || 0} / {mlPredictions.n_jobs || 0}
