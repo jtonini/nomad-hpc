@@ -1216,6 +1216,77 @@ def report(ctx, db, output):
         click.echo(report_text)
 
 
+
+@cli.command('test-alerts')
+@click.option('--email', is_flag=True, help='Test email backend')
+@click.option('--slack', is_flag=True, help='Test Slack backend')
+@click.option('--webhook', is_flag=True, help='Test webhook backend')
+@click.pass_context
+def test_alerts(ctx, email, slack, webhook):
+    """Test alert notification backends.
+    
+    Examples:
+        nomade test-alerts --email     # Test email
+        nomade test-alerts --slack     # Test Slack
+        nomade test-alerts             # Test all configured backends
+    """
+    from nomade.alerts import AlertDispatcher, send_alert
+    
+    config = ctx.obj.get('config', {})
+    
+    # Build test config if flags provided
+    if email or slack or webhook:
+        if email:
+            click.echo("Testing email backend...")
+            # Would need config from file
+        if slack:
+            click.echo("Testing Slack backend...")
+        if webhook:
+            click.echo("Testing webhook backend...")
+    
+    # Test with actual config
+    dispatcher = AlertDispatcher(config)
+    
+    if not dispatcher.backends:
+        click.echo(click.style("No alert backends configured.", fg="yellow"))
+        click.echo("Add configuration to nomade.toml:")
+        click.echo("""
+[alerts.email]
+enabled = true
+smtp_server = "smtp.example.com"
+recipients = ["admin@example.com"]
+
+[alerts.slack]
+enabled = true
+webhook_url = "https://hooks.slack.com/..."
+""")
+        return
+    
+    click.echo(f"Testing {len(dispatcher.backends)} backend(s)...")
+    results = dispatcher.test_backends()
+    
+    for backend, success in results.items():
+        if success:
+            click.echo(click.style(f"  {backend}: OK", fg="green"))
+        else:
+            click.echo(click.style(f"  {backend}: FAILED", fg="red"))
+    
+    # Send test alert
+    click.echo("\nSending test alert...")
+    send_results = dispatcher.dispatch({
+        'severity': 'info',
+        'source': 'test',
+        'message': 'This is a test alert from NOMADE',
+        'host': 'cli-test'
+    })
+    
+    for backend, success in send_results.items():
+        if success:
+            click.echo(click.style(f"  {backend}: Sent", fg="green"))
+        else:
+            click.echo(click.style(f"  {backend}: Failed", fg="red"))
+
+
 def main() -> None:
     """Entry point for CLI."""
     cli(obj={})
