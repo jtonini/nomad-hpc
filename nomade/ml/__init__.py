@@ -49,3 +49,8 @@ __all__ = [
     'init_ml_tables', 'save_predictions_to_db', 'load_predictions_from_db',
     'save_ensemble_models', 'load_latest_models', 'get_prediction_history'
 ]
+
+try:
+    from .continuous import ContinuousLearner
+except ImportError:
+    pass

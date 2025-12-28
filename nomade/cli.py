@@ -1287,6 +1287,139 @@ webhook_url = "https://hooks.slack.com/..."
             click.echo(click.style(f"  {backend}: Failed", fg="red"))
 
 
+
+@cli.command()
+@click.option('--db', type=click.Path(), help='Database path')
+@click.option('--strategy', type=click.Choice(['time', 'count', 'drift']), 
+              default='count', help='Retraining strategy')
+@click.option('--threshold', type=int, default=100, 
+              help='Job count threshold (for count strategy)')
+@click.option('--interval', type=int, default=6, 
+              help='Hours between training (for time strategy)')
+@click.option('--epochs', type=int, default=100, help='Training epochs')
+@click.option('--force', is_flag=True, help='Force training regardless of strategy')
+@click.option('--daemon', is_flag=True, help='Run as daemon')
+@click.option('--check-interval', type=int, default=300, 
+              help='Daemon check interval in seconds')
+@click.option('--status', 'show_status', is_flag=True, help='Show training status')
+@click.option('--history', 'show_history', is_flag=True, help='Show training history')
+@click.option('-v', '--verbose', is_flag=True, help='Verbose output')
+@click.pass_context
+def learn(ctx, db, strategy, threshold, interval, epochs, force, daemon, 
+          check_interval, show_status, show_history, verbose):
+    """Continuous learning - retrain models as new data arrives.
+    
+    \b
+    Strategies:
+      count  Retrain after N new jobs (default: 100)
+      time   Retrain every N hours (default: 6)
+      drift  Retrain when prediction accuracy drops
+    
+    \b
+    Examples:
+      nomade learn --status           Show training status
+      nomade learn --force            Train now
+      nomade learn --strategy count   Train after 100 new jobs
+      nomade learn --daemon           Run continuously
+    """
+    from nomade.ml import is_torch_available
+    from nomade.ml.continuous import ContinuousLearner
+    
+    if not is_torch_available():
+        click.echo(click.style("Error: PyTorch not available", fg="red"))
+        return
+    
+    db_path = db
+    if not db_path:
+        config = ctx.obj.get('config', {})
+        db_path = str(get_db_path(config))
+    
+    if not Path(db_path).exists():
+        click.echo(click.style(f"Database not found: {db_path}", fg="red"))
+        return
+    
+    # Build config
+    learn_config = {
+        'learning': {
+            'strategy': strategy,
+            'job_threshold': threshold,
+            'interval_hours': interval,
+            'epochs': epochs
+        }
+    }
+    
+    learner = ContinuousLearner(db_path, learn_config)
+    
+    # Show status
+    if show_status:
+        status = learner.get_training_status()
+        click.echo(click.style("=" * 50, fg="cyan"))
+        click.echo(click.style("  NOMADE Learning Status", fg="white", bold=True))
+        click.echo(click.style("=" * 50, fg="cyan"))
+        click.echo(f"  Strategy: {status['strategy']}")
+        click.echo(f"  Total jobs: {status['total_jobs']}")
+        click.echo(f"  Jobs since last training: {status['jobs_since_last_training']}")
+        click.echo(f"  Last trained: {status['last_trained_at'] or 'Never'}")
+        
+        should_train, reason = learner.should_retrain()
+        if should_train:
+            click.echo(click.style(f"  Status: Training needed - {reason}", fg="yellow"))
+        else:
+            click.echo(click.style(f"  Status: Up to date - {reason}", fg="green"))
+        return
+    
+    # Show history
+    if show_history:
+        history = learner.get_training_history()
+        click.echo(click.style("=" * 70, fg="cyan"))
+        click.echo(click.style("  Training History", fg="white", bold=True))
+        click.echo(click.style("=" * 70, fg="cyan"))
+        
+        if not history:
+            click.echo("  No training runs yet")
+            return
+        
+        click.echo(f"  {'Completed':<20} {'Status':<10} {'Jobs':<8} {'GNN':<8} {'LSTM':<8}")
+        click.echo(f"  {'-'*20} {'-'*10} {'-'*8} {'-'*8} {'-'*8}")
+        
+        for run in history:
+            completed = run.get('completed_at', 'N/A')[:19] if run.get('completed_at') else 'N/A'
+            status_color = 'green' if run['status'] == 'completed' else 'red'
+            gnn = f"{run.get('gnn_accuracy', 0)*100:.1f}%" if run.get('gnn_accuracy') else 'N/A'
+            lstm = f"{run.get('lstm_accuracy', 0)*100:.1f}%" if run.get('lstm_accuracy') else 'N/A'
+            
+            click.echo(f"  {completed:<20} " + 
+                      click.style(f"{run['status']:<10}", fg=status_color) +
+                      f" {run.get('jobs_trained', 'N/A'):<8} {gnn:<8} {lstm:<8}")
+        return
+    
+    # Run daemon
+    if daemon:
+        click.echo(click.style("Starting continuous learning daemon...", fg="cyan"))
+        click.echo(f"  Strategy: {strategy}")
+        click.echo(f"  Check interval: {check_interval}s")
+        click.echo("  Press Ctrl+C to stop")
+        try:
+            learner.run_daemon(check_interval=check_interval, verbose=verbose)
+        except KeyboardInterrupt:
+            click.echo("\nDaemon stopped")
+        return
+    
+    # Single training run
+    result = learner.train(force=force, verbose=verbose)
+    
+    if result['status'] == 'skipped':
+        click.echo(click.style(f"Training skipped: {result['reason']}", fg="yellow"))
+    elif result['status'] == 'completed':
+        click.echo(click.style("=" * 50, fg="green"))
+        click.echo(click.style("  Training Completed", fg="white", bold=True))
+        click.echo(click.style("=" * 50, fg="green"))
+        click.echo(f"  Prediction ID: {result.get('prediction_id')}")
+        click.echo(f"  High-risk jobs: {len(result.get('high_risk', []))}")
+    else:
+        click.echo(click.style(f"Training failed: {result.get('error')}", fg="red"))
+
+
 def main() -> None:
     """Entry point for CLI."""
     cli(obj={})
