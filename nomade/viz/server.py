@@ -1723,9 +1723,9 @@ def compute_bipartite_matrix(jobs: list, features: list = None, n_bins: int = 3)
 class DataManager:
     """Manages data loading from database or demo fallback."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, db_path: str = None):
         self.config = config
-        self.db_path = find_database()
+        self.db_path = Path(db_path) if db_path else find_database()
         self.data_source = "demo"
         
         self._clusters = None
@@ -4373,14 +4373,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         pass  # Quiet logging
 
 
-def serve_dashboard(host='localhost', port=8050, config_path=None):
+def serve_dashboard(host='localhost', port=8050, config_path=None, db_path=None):
     """Start the dashboard server."""
     
     # Load configuration
     config = load_config(config_path)
     
     # Initialize data manager
-    data_manager = DataManager(config)
+    data_manager = DataManager(config, db_path=db_path)
     DashboardHandler.data_manager = data_manager
     
     # Get stats

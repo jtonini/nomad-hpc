@@ -1561,6 +1561,35 @@ enabled = true
     click.echo(f"  4. View dashboard: nomade dashboard")
 
 
+
+@cli.command()
+@click.option('--jobs', '-n', type=int, default=1000, help='Number of jobs to generate')
+@click.option('--days', '-d', type=int, default=7, help='Days of history to simulate')
+@click.option('--seed', '-s', type=int, default=None, help='Random seed for reproducibility')
+@click.option('--port', '-p', type=int, default=5000, help='Dashboard port')
+@click.option('--no-launch', is_flag=True, help='Generate data only, do not launch dashboard')
+def demo(jobs, days, seed, port, no_launch):
+    """Run demo mode with synthetic data.
+
+    Generates realistic HPC job data and launches the dashboard.
+    Perfect for testing NØMADE without a real HPC cluster.
+
+    Examples:
+        nomade demo                  # Generate 1000 jobs, launch dashboard
+        nomade demo --jobs 500       # Generate 500 jobs
+        nomade demo --no-launch      # Generate only, don't launch dashboard
+        nomade demo --seed 42        # Reproducible data
+    """
+    from nomade.demo import run_demo
+    run_demo(
+        n_jobs=jobs,
+        days=days,
+        seed=seed,
+        launch_dashboard=not no_launch,
+        port=port,
+    )
+
+
 def main() -> None:
     """Entry point for CLI."""
     cli(obj={})
