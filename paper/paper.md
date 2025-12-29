@@ -52,9 +52,13 @@ NØMADE is implemented in Python and follows a modular architecture (\autoref{fi
 
 ![NØMADE architecture showing the data flow from collectors through the prediction engine to alert dispatch.\label{fig:architecture}](figures/architecture.png){ width=100% }
 
+![NØMADE dashboard showing cluster health with per-node job statistics, CPU utilization rings, and failure breakdown.\label{fig:dashboard}](figures/dashboard.png){ width=100% }
+
+![Network visualization showing jobs clustered by feature similarity. Failed jobs (red/orange) cluster separately from successful jobs (green), enabling pattern-based failure prediction.\label{fig:network}](figures/dashboard2.png){ width=100% }
+
 **Collectors** gather metrics from system tools (`iostat`, `vmstat`, `nvidia-smi`), SLURM commands (`sacct`, `squeue`, `sinfo`), and per-job I/O statistics from `/proc/[pid]/io`. A SLURM prolog hook captures job context at submission time.
 
-**Feature Engineering** transforms raw metrics into a 19-dimensional feature vector per job, including CPU and memory efficiency from `sacct`, NFS write ratios from the job monitor, and system-level indicators (I/O wait, memory pressure, swap activity). These features enable similarity-based analysis across jobs.
+**Feature Engineering** transforms raw metrics into a 17-dimensional feature vector per job, including CPU and memory efficiency from `sacct`, NFS write ratios from the job monitor, and system-level indicators (I/O wait, memory pressure, swap activity). These features enable similarity-based analysis across jobs.
 
 **ML Prediction** uses an ensemble of three models:
 
