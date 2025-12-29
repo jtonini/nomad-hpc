@@ -1,0 +1,335 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN"
+                  "JATS-publishing1.dtd">
+<article xmlns:mml="http://www.w3.org/1998/Math/MathML" xmlns:xlink="http://www.w3.org/1999/xlink" dtd-version="1.2" article-type="other">
+<front>
+<journal-meta>
+<journal-id></journal-id>
+<journal-title-group>
+<journal-title>Journal of Open Source Software</journal-title>
+<abbrev-journal-title>JOSS</abbrev-journal-title>
+</journal-title-group>
+<issn publication-format="electronic">2475-9066</issn>
+<publisher>
+<publisher-name>Open Journals</publisher-name>
+</publisher>
+</journal-meta>
+<article-meta>
+<article-id pub-id-type="publisher-id">0</article-id>
+<article-id pub-id-type="doi">N/A</article-id>
+<title-group>
+<article-title>NØMADE: Lightweight HPC Monitoring with Machine
+Learning-Based Failure Prediction</article-title>
+</title-group>
+<contrib-group>
+<contrib contrib-type="author" corresp="yes">
+<contrib-id contrib-id-type="orcid">https://orcid.org/0000-0002-4730-3805</contrib-id>
+<name>
+<surname>Tonini</surname>
+<given-names>João Filipe Riva</given-names>
+</name>
+<xref ref-type="aff" rid="aff-1"/>
+<xref ref-type="corresp" rid="cor-1"><sup>*</sup></xref>
+</contrib>
+<aff id="aff-1">
+<institution-wrap>
+<institution>Academic Research Computing, University of Richmond, VA
+23173, USA</institution>
+</institution-wrap>
+</aff>
+</contrib-group>
+<author-notes>
+<corresp id="cor-1">* E-mail: <email></email></corresp>
+</author-notes>
+<volume>¿VOL?</volume>
+<issue>¿ISSUE?</issue>
+<fpage>¿PAGE?</fpage>
+<permissions>
+<copyright-statement>Authors of papers retain copyright and release the
+work under a Creative Commons Attribution 4.0 International License (CC
+BY 4.0)</copyright-statement>
+<copyright-year>1970</copyright-year>
+<copyright-holder>The article authors</copyright-holder>
+<license license-type="open-access" xlink:href="https://creativecommons.org/licenses/by/4.0/">
+<license-p>Authors of papers retain copyright and release the work under
+a Creative Commons Attribution 4.0 International License (CC BY
+4.0)</license-p>
+</license>
+</permissions>
+<kwd-group kwd-group-type="author">
+<kwd>Python</kwd>
+<kwd>HPC</kwd>
+<kwd>high-performance computing</kwd>
+<kwd>monitoring</kwd>
+<kwd>machine learning</kwd>
+<kwd>SLURM</kwd>
+<kwd>predictive analytics</kwd>
+</kwd-group>
+</article-meta>
+</front>
+<body>
+<sec id="summary">
+  <title>Summary</title>
+  <p>NØMADE (NOde MAnagement DEvice) is a lightweight monitoring and
+  predictive analytics tool for High-Performance Computing (HPC)
+  clusters. It collects system metrics from SLURM-managed environments,
+  stores time-series data in SQLite, and employs machine learning to
+  predict job failures before they occur. The tool provides a real-time
+  web dashboard and supports alerts via email, Slack, or webhooks.
+  NØMADE requires no external databases or complex infrastructure—only
+  Python and standard system tools.</p>
+  <p>A key innovation is the application of biogeographical network
+  analysis concepts to HPC monitoring. Inspired by methods for
+  identifying transition zones between bioregions
+  (<xref alt="Vilhena &amp; Antonelli, 2015" rid="ref-vilhena2015" ref-type="bibr">Vilhena
+  &amp; Antonelli, 2015</xref>), NØMADE treats HPC resource domains
+  (compute, storage, network) as interconnected regions where failures
+  cluster at domain boundaries—such as transitions between local scratch
+  and network-attached storage (NAS), or between CPU and GPU workloads.
+  This enables failure pattern recognition that emerges from the data
+  rather than from predefined rules.</p>
+</sec>
+<sec id="statement-of-need">
+  <title>Statement of Need</title>
+  <p>HPC administrators face a persistent challenge: detecting job
+  failures before they impact researchers. Enterprise monitoring
+  solutions like Prometheus, Grafana, or Nagios require significant
+  infrastructure and target general IT systems rather than HPC-specific
+  workloads. Existing HPC tools such as TACC Stats
+  (<xref alt="Evans et al., 2014" rid="ref-evans2014" ref-type="bibr">Evans
+  et al., 2014</xref>), XDMoD
+  (<xref alt="Palmer et al., 2015" rid="ref-palmer2015" ref-type="bibr">Palmer
+  et al., 2015</xref>), and LLNL’s Lightweight Distributed Metric
+  Service
+  (<xref alt="Agelastos et al., 2014" rid="ref-agelastos2014" ref-type="bibr">Agelastos
+  et al., 2014</xref>) provide detailed metrics but require substantial
+  deployment effort and focus on post-hoc analysis rather than real-time
+  prediction.</p>
+  <p>Common HPC failure patterns include:</p>
+  <list list-type="bullet">
+    <list-item>
+      <p><bold>NFS saturation</bold>: Jobs writing to network storage
+      instead of local scratch</p>
+    </list-item>
+    <list-item>
+      <p><bold>Memory leaks</bold>: Gradual consumption leading to
+      out-of-memory kills</p>
+    </list-item>
+    <list-item>
+      <p><bold>GPU thermal throttling</bold>: Temperature-induced
+      performance degradation</p>
+    </list-item>
+    <list-item>
+      <p><bold>Queue starvation</bold>: Resource contention causing
+      excessive wait times</p>
+    </list-item>
+  </list>
+  <p>These failures often exhibit warning signs minutes to hours before
+  critical thresholds are breached. NØMADE addresses this gap by
+  providing:</p>
+  <list list-type="bullet">
+    <list-item>
+      <p><bold>Zero-infrastructure deployment</bold>: Single SQLite
+      database, no external services</p>
+    </list-item>
+    <list-item>
+      <p><bold>Real-time prediction</bold>: ML ensemble identifies
+      high-risk jobs before failure</p>
+    </list-item>
+    <list-item>
+      <p><bold>Predictive alerts</bold>: Derivative analysis detects
+      accelerating resource consumption</p>
+    </list-item>
+    <list-item>
+      <p><bold>Domain-aware analysis</bold>: Recognizes HPC-specific
+      failure patterns at resource boundaries</p>
+    </list-item>
+  </list>
+  <p>The tool is suited for small-to-medium HPC centers, research groups
+  managing clusters, or as a complement to existing monitoring
+  infrastructure.</p>
+</sec>
+<sec id="implementation">
+  <title>Implementation</title>
+  <p>NØMADE is implemented in Python and follows a modular architecture
+  (<xref alt="[fig:architecture]" rid="figU003Aarchitecture">[fig:architecture]</xref>):</p>
+  <fig>
+    <caption><p>NØMADE architecture showing the data flow from
+    collectors through the prediction engine to alert
+    dispatch.<styled-content id="figU003Aarchitecture"></styled-content></p></caption>
+    <graphic mimetype="image" mime-subtype="png" xlink:href="architecture.png" />
+  </fig>
+  <fig>
+    <caption><p>NØMADE dashboard showing cluster health with per-node
+    job statistics, CPU utilization rings, and failure
+    breakdown.<styled-content id="figU003Adashboard"></styled-content></p></caption>
+    <graphic mimetype="image" mime-subtype="png" xlink:href="dashboard.png" />
+  </fig>
+  <fig>
+    <caption><p>Network visualization showing jobs clustered by feature
+    similarity. Failed jobs (red/orange) cluster separately from
+    successful jobs (green), enabling pattern-based failure
+    prediction.<styled-content id="figU003Anetwork"></styled-content></p></caption>
+    <graphic mimetype="image" mime-subtype="png" xlink:href="dashboard2.png" />
+  </fig>
+  <p><bold>Collectors</bold> gather metrics from system tools
+  (<monospace>iostat</monospace>, <monospace>vmstat</monospace>,
+  <monospace>nvidia-smi</monospace>), SLURM commands
+  (<monospace>sacct</monospace>, <monospace>squeue</monospace>,
+  <monospace>sinfo</monospace>), and per-job I/O statistics from
+  <monospace>/proc/[pid]/io</monospace>. A SLURM prolog hook captures
+  job context at submission time.</p>
+  <p><bold>Feature Engineering</bold> transforms raw metrics into a
+  17-dimensional feature vector per job, including CPU and memory
+  efficiency from <monospace>sacct</monospace>, NFS write ratios from
+  the job monitor, and system-level indicators (I/O wait, memory
+  pressure, swap activity). These features enable similarity-based
+  analysis across jobs.</p>
+  <p><bold>ML Prediction</bold> uses an ensemble of three models:</p>
+  <list list-type="bullet">
+    <list-item>
+      <p>Graph Neural Network (GNN): Captures relationships between
+      similar jobs based on Simpson similarity of feature vectors</p>
+    </list-item>
+    <list-item>
+      <p>LSTM: Detects temporal patterns and early warning
+      trajectories</p>
+    </list-item>
+    <list-item>
+      <p>Autoencoder: Identifies anomalous jobs that deviate from normal
+      behavior</p>
+    </list-item>
+  </list>
+  <p>The ensemble outputs a continuous risk score (0–1) rather than
+  binary classification, providing nuanced assessment of job health.</p>
+  <p><bold>Alert System</bold> supports both threshold-based alerts
+  (disk usage, GPU temperature) and predictive alerts using derivative
+  analysis. When the rate of change indicates a threshold will be
+  breached, alerts fire before the actual breach occurs. Notifications
+  route through email, Slack, or webhooks with configurable cooldowns to
+  prevent alert fatigue.</p>
+</sec>
+<sec id="usage">
+  <title>Usage</title>
+  <p>NØMADE installs via pip and initializes with two commands:</p>
+  <code language="bash">pip install nomade-hpc
+nomade init
+nomade collect    # Start data collection
+nomade dashboard  # Launch web interface</code>
+  <p>For HPC-wide deployment, system installation configures systemd
+  services and SLURM prolog hooks:</p>
+  <code language="bash">sudo nomade init --system
+sudo systemctl enable --now nomade nomade-learn</code>
+  <p>The dashboard displays real-time cluster health, job risk
+  assessments, and historical trends. Configuration uses TOML files
+  supporting custom thresholds, alert destinations, and collection
+  intervals.</p>
+</sec>
+<sec id="acknowledgements">
+  <title>Acknowledgements</title>
+  <p>The author thanks George Flanagin for advice and inspiration on HPC
+  system administration, and the University of Richmond Research
+  Computing group for cluster access and testing.</p>
+</sec>
+</body>
+<back>
+<ref-list>
+  <title></title>
+  <ref id="ref-vilhena2015">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Vilhena</surname><given-names>Daril A</given-names></name>
+        <name><surname>Antonelli</surname><given-names>Alexandre</given-names></name>
+      </person-group>
+      <article-title>A network approach for identifying and delimiting biogeographical regions</article-title>
+      <source>Nature Communications</source>
+      <publisher-name>Nature Publishing Group</publisher-name>
+      <year iso-8601-date="2015">2015</year>
+      <volume>6</volume>
+      <issue>1</issue>
+      <pub-id pub-id-type="doi">10.1038/ncomms7848</pub-id>
+      <fpage>6848</fpage>
+      <lpage></lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-evans2014">
+    <element-citation publication-type="paper-conference">
+      <person-group person-group-type="author">
+        <name><surname>Evans</surname><given-names>R Todd</given-names></name>
+        <name><surname>Barth</surname><given-names>William L</given-names></name>
+        <name><surname>Browne</surname><given-names>James C</given-names></name>
+        <name><surname>DeLeon</surname><given-names>Robert L</given-names></name>
+        <name><surname>Furlani</surname><given-names>Thomas R</given-names></name>
+        <name><surname>Gallo</surname><given-names>Steven M</given-names></name>
+        <name><surname>Jones</surname><given-names>Matthew D</given-names></name>
+        <name><surname>Patra</surname><given-names>Abani K</given-names></name>
+      </person-group>
+      <article-title>TACC Stats: Analysis of HPC system resource usage</article-title>
+      <source>Proceedings of the 2014 annual conference on extreme science and engineering discovery environment</source>
+      <publisher-name>ACM</publisher-name>
+      <year iso-8601-date="2014">2014</year>
+      <pub-id pub-id-type="doi">10.1145/2616498.2616533</pub-id>
+      <fpage>1</fpage>
+      <lpage>8</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-palmer2015">
+    <element-citation publication-type="article-journal">
+      <person-group person-group-type="author">
+        <name><surname>Palmer</surname><given-names>Jeffrey T</given-names></name>
+        <name><surname>Gallo</surname><given-names>Steven M</given-names></name>
+        <name><surname>Furlani</surname><given-names>Thomas R</given-names></name>
+        <name><surname>Jones</surname><given-names>Matthew D</given-names></name>
+        <name><surname>DeLeon</surname><given-names>Robert L</given-names></name>
+        <name><surname>White</surname><given-names>Joseph P</given-names></name>
+        <name><surname>Simakov</surname><given-names>Nikolay</given-names></name>
+        <name><surname>Patra</surname><given-names>Abani K</given-names></name>
+        <name><surname>Sperhac</surname><given-names>Jeanette</given-names></name>
+        <name><surname>Yearke</surname><given-names>Thomas</given-names></name>
+        <name><surname>Rathsam</surname><given-names>Ryan</given-names></name>
+        <name><surname>Inber</surname><given-names>Martins</given-names></name>
+        <name><surname>Cornelius</surname><given-names>Cynthia D</given-names></name>
+        <name><surname>Browne</surname><given-names>James C</given-names></name>
+      </person-group>
+      <article-title>XDMoD: A tool for the comprehensive management of high-performance computing resources</article-title>
+      <source>Computing in Science &amp; Engineering</source>
+      <publisher-name>IEEE</publisher-name>
+      <year iso-8601-date="2015">2015</year>
+      <volume>17</volume>
+      <issue>2</issue>
+      <pub-id pub-id-type="doi">10.1109/MCSE.2015.32</pub-id>
+      <fpage>52</fpage>
+      <lpage>62</lpage>
+    </element-citation>
+  </ref>
+  <ref id="ref-agelastos2014">
+    <element-citation publication-type="paper-conference">
+      <person-group person-group-type="author">
+        <name><surname>Agelastos</surname><given-names>Anthony</given-names></name>
+        <name><surname>Allan</surname><given-names>Benjamin</given-names></name>
+        <name><surname>Brandt</surname><given-names>Jim</given-names></name>
+        <name><surname>Cassella</surname><given-names>Paul</given-names></name>
+        <name><surname>Enos</surname><given-names>Jeremy</given-names></name>
+        <name><surname>Fullop</surname><given-names>Joshi</given-names></name>
+        <name><surname>Gentile</surname><given-names>Ann</given-names></name>
+        <name><surname>Monk</surname><given-names>Steve</given-names></name>
+        <name><surname>Naksinehaboon</surname><given-names>Nichamon</given-names></name>
+        <name><surname>Ogden</surname><given-names>Jeff</given-names></name>
+        <name><surname>Rajan</surname><given-names>Mahesh</given-names></name>
+        <name><surname>Showerman</surname><given-names>Michael</given-names></name>
+        <name><surname>Stevenson</surname><given-names>Joel</given-names></name>
+        <name><surname>Taber</surname><given-names>Narate</given-names></name>
+        <name><surname>Tucker</surname><given-names>Tom</given-names></name>
+      </person-group>
+      <article-title>The lightweight distributed metric service: A scalable infrastructure for continuous monitoring of large scale computing systems and applications</article-title>
+      <source>SC ’14: Proceedings of the international conference for high performance computing, networking, storage and analysis</source>
+      <publisher-name>IEEE</publisher-name>
+      <year iso-8601-date="2014">2014</year>
+      <pub-id pub-id-type="doi">10.1109/SC.2014.18</pub-id>
+      <fpage>154</fpage>
+      <lpage>165</lpage>
+    </element-citation>
+  </ref>
+</ref-list>
+</back>
+</article>
