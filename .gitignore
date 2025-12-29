@@ -72,3 +72,5 @@ Thumbs.db
 # Distribution
 *.tar.gz
 *.zip
+paper/jats/
+paper/paper.pdf
