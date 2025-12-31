@@ -67,14 +67,6 @@ def load_config(config_path: Optional[Path] = None) -> dict:
     if config_path is None:
         config_path = find_config_file()
     
-    # Convert string path to Path object if needed
-    # Skip if path is a directory (not a config file)
-    if config_path and Path(config_path).is_dir():
-        logger.debug(f"Skipping directory: {config_path}")
-        return config
-    if config_path and isinstance(config_path, str):
-        config_path = Path(config_path)
-    
     if config_path and config_path.exists() and tomllib:
         logger.info(f"Loading config from {config_path}")
         try:
@@ -120,15 +112,6 @@ def get_db_connection(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def row_get(row, key, default=None):
-    """Safely get a value from sqlite3.Row (which doesn't have .get())."""
-    try:
-        val = row[key]
-        return val if val is not None else default
-    except (IndexError, KeyError):
-        return default
 
 
 # ============================================================================
@@ -216,49 +199,6 @@ def load_clusters_from_db(db_path: Path) -> dict:
         
     except Exception as e:
         logger.warning(f"Failed to load clusters from database: {e}")
-    
-    # Fallback: Try simulator's simple nodes table
-    if not clusters:
-        try:
-            conn = get_db_connection(db_path)
-            rows = conn.execute("""
-                SELECT hostname, cluster, partition, status, cpu_count, gpu_count, memory_mb
-                FROM nodes
-            """).fetchall()
-            if rows:
-            
-                # Group by cluster
-                cluster_nodes = defaultdict(list)
-                gpu_nodes = set()
-                cluster_partitions = defaultdict(set)
-                
-                for row in rows:
-                    node = row["hostname"]
-                    cluster_name = row["cluster"] or "default"
-                    partitions = row["partition"] or ""
-                    
-                    cluster_nodes[cluster_name].append(node)
-                    cluster_partitions[cluster_name].update(partitions.split(","))
-                    
-                    if row["gpu_count"] and row["gpu_count"] > 0:
-                        gpu_nodes.add(node)
-                
-                for cluster_name, nodes in cluster_nodes.items():
-                    cluster_id = cluster_name.lower().replace(" ", "-")
-                    part_list = sorted(p for p in cluster_partitions[cluster_name] if p)
-                    clusters[cluster_id] = {
-                        "name": cluster_name,
-                        "description": f"{len(nodes)}-node cluster (" + ", ".join(part_list) + ")",
-                        "description": f"{len(nodes)}-node partition",
-                        "nodes": sorted(nodes),
-                        "gpu_nodes": [n for n in nodes if n in gpu_nodes],
-                        "type": "gpu" if any(n in gpu_nodes for n in nodes) else "cpu"
-                    }
-                
-                logger.info(f"Loaded clusters from simulator nodes table")
-            conn.close()
-        except Exception as e:
-            logger.debug(f"No simulator nodes table: {e}")
     
     return clusters
 
@@ -413,81 +353,6 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
         except sqlite3.OperationalError:
             pass
             
-        # Fallback: Try simulator's simple nodes table
-        if not nodes:
-            try:
-                rows = conn.execute("""
-                    SELECT hostname, cluster, partition, status, cpu_count, gpu_count, memory_mb
-                    FROM nodes
-                """).fetchall()
-                
-                if rows:
-                    # Get job statistics per node
-                    job_stats = {}
-                    try:
-                        job_rows = conn.execute("""
-                            SELECT 
-                                node_list, state, failure_reason,
-                                COUNT(*) as count
-                            FROM jobs
-                            GROUP BY node_list, state, failure_reason
-                        """).fetchall()
-                        
-                        for row in job_rows:
-                            if row['node_list']:
-                                node = row['node_list'].strip()
-                                if node not in job_stats:
-                                    job_stats[node] = {'success': 0, 'failed': 0, 'failures': {}}
-                                if row['state'] == 'COMPLETED':
-                                    job_stats[node]['success'] += row['count']
-                                else:
-                                    job_stats[node]['failed'] += row['count']
-                                    # Track failure types
-                                    fr = row_get(row, 'failure_reason', 3)
-                                    fr_names = {1:'timeout', 2:'cancelled', 3:'failed', 4:'oom', 5:'segfault', 6:'node_fail', 7:'dependency'}
-                                    fr_name = fr_names.get(fr, 'other')
-                                    job_stats[node]['failures'][fr_name] = job_stats[node]['failures'].get(fr_name, 0) + row['count']
-                    except:
-                        pass
-                    
-                    for row in rows:
-                        node_name = row['hostname']
-                        partitions = row['partition'] or 'default'
-                        primary_partition = partitions.split(',')[0]
-                        cluster_id = (row["cluster"] or "default").lower().replace(' ', '-')
-                        
-                        has_gpu = row['gpu_count'] and row['gpu_count'] > 0
-                        is_down = row['status'] and row['status'].upper() in ('DOWN', 'DRAIN', 'FAIL')
-                        
-                        # Get job stats
-                        stats = job_stats.get(node_name, {'success': 0, 'failed': 0, 'failures': {}})
-                        total_jobs = stats['success'] + stats['failed']
-                        success_rate = stats['success'] / total_jobs if total_jobs > 0 else 1.0
-                        
-                        nodes[node_name] = {
-                            "name": node_name,
-                            "cluster": cluster_id,
-                            "status": "down" if is_down else "online",
-                            "slurm_state": row['status'],
-                            "success_rate": success_rate,
-                            "jobs_today": total_jobs,
-                            "jobs_success": stats['success'],
-                            "jobs_failed": stats['failed'],
-                            "failures": stats['failures'],
-                            "top_users": [],
-                            "has_gpu": has_gpu,
-                            "gpu_util": random.randint(40, 95) if has_gpu and not is_down else 0,
-                            "gpu_name": f"GPU x{row['gpu_count']}" if has_gpu else None,
-                            "cpu_util": random.randint(30, 90) if not is_down else 0,
-                            "mem_util": random.randint(20, 80) if not is_down else 0,
-                            "load_avg": round(random.uniform(0.5, 16), 2) if not is_down else 0,
-                            "last_seen": datetime.now().isoformat()
-                        }
-                    
-                    logger.info(f"Loaded nodes from simulator nodes table")
-            except Exception as e:
-                logger.debug(f"No simulator nodes table: {e}")
-            
         conn.close()
         
     except Exception as e:
@@ -496,7 +361,7 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
     return nodes
 
 
-def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
+def load_jobs_from_db(db_path: Path, limit: int = 500) -> list:
     """Load job data for network visualization with all available features."""
     jobs = []
     
@@ -515,9 +380,6 @@ def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
                     j.req_cpus,
                     j.req_mem_mb,
                     j.req_time_seconds,
-                    j.failure_reason,
-                    j.exit_code,
-                    j.exit_signal,
                     js.total_nfs_write_gb,
                     js.total_local_write_gb,
                     js.avg_io_wait_percent,
@@ -561,7 +423,7 @@ def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
                     io_info = io_data.get(job_id, {})
                     
                     # Get failure_reason from job if available, otherwise compute from state
-                    failure_reason = row_get(row, 'failure_reason', 0)
+                    failure_reason = row.get('failure_reason', 0)
                     if failure_reason is None:
                         # Compute from state if not set
                         state = row['state'] or ''
@@ -584,8 +446,8 @@ def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
                         "partition": row['partition'],
                         "success": row['state'] == 'COMPLETED',
                         "failure_reason": failure_reason,
-                        "exit_code": row_get(row, 'exit_code'),
-                        "exit_signal": row_get(row, 'exit_signal'),
+                        "exit_code": row.get('exit_code'),
+                        "exit_signal": row.get('exit_signal'),
                         # Time features
                         "runtime_sec": row['runtime_seconds'] or 0,
                         "wait_time_sec": row['wait_time_seconds'] or 0,
@@ -630,7 +492,7 @@ def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
             if rows:
                 for row in rows:
                     # Get failure_reason from job if available, otherwise compute from state
-                    failure_reason = row_get(row, 'failure_reason', 0)
+                    failure_reason = row.get('failure_reason', 0)
                     if failure_reason is None:
                         state = row['state'] or ''
                         if state == 'COMPLETED':
@@ -652,8 +514,8 @@ def load_jobs_from_db(db_path: Path, limit: int = 5000) -> list:
                         "partition": row['partition'],
                         "success": row['state'] == 'COMPLETED',
                         "failure_reason": failure_reason,
-                        "exit_code": row_get(row, 'exit_code'),
-                        "exit_signal": row_get(row, 'exit_signal'),
+                        "exit_code": row.get('exit_code'),
+                        "exit_signal": row.get('exit_signal'),
                         "runtime_sec": row['runtime_seconds'] or 0,
                         "wait_time_sec": row['wait_time_seconds'] or 0,
                         "nfs_write_gb": 0,
@@ -824,343 +686,8 @@ def suggest_decorrelated_axes(feature_stats: dict, correlation_data: dict, n: in
     Suggest N features that are both high-variance AND decorrelated from each other.
     Uses a greedy selection approach.
     """
-    if not feature_stats or not correlation_data.get("features"):
-        return ["runtime_sec", "nfs_write_gb", "io_wait_pct"]
-    
-    features = correlation_data["features"]
-    matrix = correlation_data["matrix"]
-    variance_rank = {f: feature_stats.get(f, {}).get("variance", 0) for f in features}
-    
-    selected = []
-    remaining = sorted(features, key=lambda f: -variance_rank.get(f, 0))
-    
-    while len(selected) < n and remaining:
-        candidate = remaining.pop(0)
-        dominated = False
-        for sel in selected:
-            try:
-                i1 = features.index(candidate)
-                i2 = features.index(sel)
-                if abs(matrix[i1][i2]) > 0.7:
-                    dominated = True
-                    break
-            except (ValueError, IndexError):
-                pass
-        if not dominated:
-            selected.append(candidate)
-    
-    return selected if selected else ["runtime_sec", "nfs_write_gb", "io_wait_pct"]
     if not feature_stats or not correlation_data.get('features'):
         return suggest_best_axes(feature_stats, n)
-
-
-def compute_failure_hotspots(jobs: list, n_bins: int = 3) -> list:
-    """
-    Identify resource bins that are over-represented in failures.
-    Returns list of hotspots with feature, bin, failure_rate, and baseline_rate.
-    """
-    if not jobs:
-        return []
-    
-    # Features to analyze
-    features = ["nfs_write_gb", "local_write_gb", "io_wait_pct", "runtime_sec", "req_mem_mb"]
-    available_features = [f for f in features if any(j.get(f) is not None for j in jobs)]
-    
-    if not available_features:
-        return []
-    
-    hotspots = []
-    
-    for feature in available_features:
-        # Get values
-        values = [j.get(feature, 0) or 0 for j in jobs]
-        if max(values) == min(values):
-            continue
-        
-        # Compute quantile boundaries
-        sorted_vals = sorted(values)
-        n = len(sorted_vals)
-        boundaries = [sorted_vals[int(n * i / n_bins)] for i in range(1, n_bins)]
-        
-        # Assign bins
-        def get_bin(v):
-            for i, b in enumerate(boundaries):
-                if v <= b:
-                    return ["low", "med", "high"][i]
-            return "high"
-        
-        # Count failures per bin
-        bin_counts = {"low": {"total": 0, "failed": 0}, "med": {"total": 0, "failed": 0}, "high": {"total": 0, "failed": 0}}
-        
-        for j, v in zip(jobs, values):
-            b = get_bin(v)
-            bin_counts[b]["total"] += 1
-            if j.get("failure_reason", 0) != 0:
-                bin_counts[b]["failed"] += 1
-        
-        # Calculate rates and find hotspots
-        total_jobs = len(jobs)
-        total_failures = sum(1 for j in jobs if j.get("failure_reason", 0) != 0)
-        baseline_rate = total_failures / total_jobs if total_jobs > 0 else 0
-        
-        for bin_name, counts in bin_counts.items():
-            if counts["total"] < 10:  # Skip small samples
-                continue
-            failure_rate = counts["failed"] / counts["total"]
-            # Check if significantly higher than baseline
-            if failure_rate > baseline_rate * 1.3:  # 30% higher than baseline
-                hotspots.append({
-                    "feature": feature,
-                    "bin": bin_name,
-                    "failure_rate": round(failure_rate * 100, 1),
-                    "baseline_rate": round(baseline_rate * 100, 1),
-                    "n_jobs": counts["total"],
-                    "n_failures": counts["failed"],
-                    "ratio": round(failure_rate / baseline_rate, 2) if baseline_rate > 0 else 0
-                })
-    
-    # Sort by ratio (most over-represented first)
-    hotspots.sort(key=lambda x: -x["ratio"])
-    return hotspots[:5]  # Top 5 hotspots
-
-
-def compute_clustering_quality(jobs: list, edges: list) -> dict:
-    """
-    Compute metrics measuring how well failure types cluster in the network.
-    
-    Inspired by phylogenetic community structure metrics:
-    - MNTD (Mean Nearest Taxon Distance) → Mean nearest same-class distance
-    - NTI/NRI (z-score vs null) → Compare to randomized labels
-    - Assortativity → Do same-type nodes connect preferentially?
-    
-    Returns dict with:
-        - assortativity: Coefficient measuring same-type connectivity (-1 to +1)
-        - neighborhood_purity: Average fraction of same-class neighbors
-        - mntd_ratio: Mean nearest same-class distance / mean nearest any distance
-        - z_scores: Significance vs null model for each metric
-        - interpretation: Human-readable summary
-    """
-    import random as rand
-    
-    if not jobs or not edges:
-        return {"error": "Insufficient data", "assortativity": 0, "neighborhood_purity": 0}
-    
-    n_jobs = len(jobs)
-    
-    # Build adjacency list
-    neighbors = {i: set() for i in range(n_jobs)}
-    for edge in edges:
-        src, tgt = edge['source'], edge['target']
-        if src < n_jobs and tgt < n_jobs:
-            neighbors[src].add(tgt)
-            neighbors[tgt].add(src)
-    
-    # Get failure labels (binary: success vs any failure)
-    labels_binary = [0 if j.get('failure_reason', 0) == 0 else 1 for j in jobs]
-    
-    # Get detailed failure labels (0-7)
-    labels_detailed = [j.get('failure_reason', 0) for j in jobs]
-    
-    # Count label frequencies
-    n_success = sum(1 for l in labels_binary if l == 0)
-    n_failure = n_jobs - n_success
-    
-    # =========================================================================
-    # 1. Assortativity Coefficient (binary: success vs failure)
-    # =========================================================================
-    # Measures tendency of nodes to connect to same-type nodes
-    # Range: -1 (disassortative) to +1 (assortative)
-    
-    def compute_assortativity(labels):
-        """Compute assortativity coefficient for categorical labels."""
-        e_same = 0  # Edges between same type
-        e_total = len(edges)
-        
-        if e_total == 0:
-            return 0
-        
-        for edge in edges:
-            src, tgt = edge['source'], edge['target']
-            if src < len(labels) and tgt < len(labels):
-                if labels[src] == labels[tgt]:
-                    e_same += 1
-        
-        # Observed fraction of same-type edges
-        observed = e_same / e_total
-        
-        # Expected fraction under random mixing
-        # Sum of (fraction of each type)^2
-        label_counts = {}
-        for l in labels:
-            label_counts[l] = label_counts.get(l, 0) + 1
-        
-        expected = sum((c / len(labels)) ** 2 for c in label_counts.values())
-        
-        # Assortativity coefficient
-        if expected >= 1:
-            return 0
-        
-        r = (observed - expected) / (1 - expected)
-        return round(max(-1, min(1, r)), 4)
-    
-    assortativity_binary = compute_assortativity(labels_binary)
-    assortativity_detailed = compute_assortativity(labels_detailed)
-    
-    # =========================================================================
-    # 2. Neighborhood Purity (local clustering)
-    # =========================================================================
-    # For each node, what fraction of neighbors share its label?
-    
-    def compute_purity(labels):
-        """Average fraction of same-label neighbors."""
-        purities = []
-        for i in range(len(labels)):
-            if len(neighbors[i]) == 0:
-                continue
-            same_label = sum(1 for j in neighbors[i] if j < len(labels) and labels[j] == labels[i])
-            purities.append(same_label / len(neighbors[i]))
-        
-        if not purities:
-            return 0
-        return round(sum(purities) / len(purities), 4)
-    
-    purity_binary = compute_purity(labels_binary)
-    purity_detailed = compute_purity(labels_detailed)
-    
-    # =========================================================================
-    # 3. Mean Nearest Same-Class Distance (MNTD analog)
-    # =========================================================================
-    # Ratio of distance to nearest same-class vs nearest any-class
-    # < 1 means same-class nodes are closer (clustering)
-    # > 1 means same-class nodes are farther (overdispersion)
-    
-    def compute_mntd_ratio(labels):
-        """Compute ratio of same-class to any-class nearest distances."""
-        # Use edge weights as inverse distance (higher similarity = closer)
-        # Build distance matrix from edges
-        distances = {}
-        for edge in edges:
-            src, tgt = edge['source'], edge['target']
-            dist = 1 - edge.get('similarity', 0.5)  # Convert similarity to distance
-            distances[(src, tgt)] = dist
-            distances[(tgt, src)] = dist
-        
-        same_class_dists = []
-        any_class_dists = []
-        
-        for i in range(len(labels)):
-            # Find nearest same-class neighbor
-            same_class_nearest = float('inf')
-            any_class_nearest = float('inf')
-            
-            for j in neighbors[i]:
-                if j >= len(labels):
-                    continue
-                dist = distances.get((i, j), 1.0)
-                
-                if dist < any_class_nearest:
-                    any_class_nearest = dist
-                
-                if labels[j] == labels[i] and dist < same_class_nearest:
-                    same_class_nearest = dist
-            
-            if same_class_nearest < float('inf'):
-                same_class_dists.append(same_class_nearest)
-            if any_class_nearest < float('inf'):
-                any_class_dists.append(any_class_nearest)
-        
-        if not same_class_dists or not any_class_dists:
-            return 1.0
-        
-        mean_same = sum(same_class_dists) / len(same_class_dists)
-        mean_any = sum(any_class_dists) / len(any_class_dists)
-        
-        if mean_any == 0:
-            return 1.0
-        
-        return round(mean_same / mean_any, 4)
-    
-    mntd_ratio = compute_mntd_ratio(labels_binary)
-    
-    # =========================================================================
-    # 4. Z-scores against null model (NTI/NRI analog)
-    # =========================================================================
-    # Shuffle labels N times, compute metrics, get z-score
-    n_permutations = 999
-    null_assortativity = []
-    null_purity = []
-    null_mntd = []
-    
-    for _ in range(n_permutations):
-        shuffled = labels_binary.copy()
-        rand.shuffle(shuffled)
-        null_assortativity.append(compute_assortativity(shuffled))
-        null_purity.append(compute_purity(shuffled))
-        null_mntd.append(compute_mntd_ratio(shuffled))
-    
-    def z_score(observed, null_values):
-        if not null_values:
-            return 0
-        mean_null = sum(null_values) / len(null_values)
-        var_null = sum((x - mean_null) ** 2 for x in null_values) / len(null_values)
-        std_null = var_null ** 0.5 if var_null > 0 else 1
-        return round((observed - mean_null) / std_null, 2)
-    
-    z_assortativity = z_score(assortativity_binary, null_assortativity)
-    z_purity = z_score(purity_binary, null_purity)
-    ses_mntd = z_score(mntd_ratio, null_mntd)
-    
-    # =========================================================================
-    # 5. Interpretation
-    # =========================================================================
-    
-    interpretations = []
-    
-    # Assortativity interpretation
-    if assortativity_binary > 0.2:
-        interpretations.append(f"Strong clustering: failures tend to connect to other failures (r={assortativity_binary})")
-    elif assortativity_binary > 0.05:
-        interpretations.append(f"Moderate clustering: some tendency for failures to group (r={assortativity_binary})")
-    elif assortativity_binary < -0.1:
-        interpretations.append(f"Dispersed: failures are spread among successes (r={assortativity_binary})")
-    else:
-        interpretations.append(f"Random: no clear clustering pattern (r={assortativity_binary})")
-    
-    # Significance interpretation
-    if abs(z_assortativity) > 2:
-        interpretations.append(f"Pattern is statistically significant (z={z_assortativity})")
-    else:
-        interpretations.append(f"Pattern not significantly different from random (z={z_assortativity})")
-    
-    # MNTD interpretation
-    if mntd_ratio < 0.8:
-        interpretations.append(f"Same-type jobs are closer than expected (MNTD ratio={mntd_ratio})")
-    elif mntd_ratio > 1.2:
-        interpretations.append(f"Same-type jobs are farther than expected (MNTD ratio={mntd_ratio})")
-    
-    return {
-        "assortativity": {
-            "binary": assortativity_binary,  # Success vs failure
-            "detailed": assortativity_detailed,  # All 8 failure types
-            "z_score": z_assortativity,
-        },
-        "neighborhood_purity": {
-            "binary": purity_binary,
-            "detailed": purity_detailed,
-            "z_score": z_purity,
-        },
-        "mntd_ratio": mntd_ratio,
-        "ses_mntd": ses_mntd,
-        "sample_sizes": {
-            "n_jobs": n_jobs,
-            "n_edges": len(edges),
-            "n_success": n_success,
-            "n_failure": n_failure,
-        },
-        "interpretation": interpretations,
-        "is_clustered": assortativity_binary > 0.1 and z_assortativity > 1.5,
-        "hotspots": compute_failure_hotspots(jobs),
-    }
     
     corr_features = correlation_data['features']
     corr_matrix = correlation_data['matrix']
@@ -1674,223 +1201,6 @@ def build_bipartite_network(jobs: list, features: list = None,
         'stats': stats
     }
 
-def normalize_features(jobs: list, features: list = None) -> tuple:
-    """
-    Extract and normalize feature vectors from jobs using z-score.
-    
-    Returns:
-        Tuple of (normalized_vectors, feature_names, normalization_params)
-    """
-    if not jobs:
-        return [], [], {}
-    
-    # Auto-detect numeric features
-    if features is None:
-        sample = jobs[0]
-        features = [k for k, v in sample.items() 
-                   if isinstance(v, (int, float)) and k not in ('job_id', 'success', 'exit_code')]
-    
-    # Extract raw vectors
-    raw_vectors = []
-    for job in jobs:
-        vec = [job.get(f, 0) or 0 for f in features]
-        raw_vectors.append(vec)
-    
-    # Compute mean and std for each feature
-    n_features = len(features)
-    n_jobs = len(jobs)
-    
-    if n_jobs == 0 or n_features == 0:
-        return [], features, {}
-    
-    means = [0.0] * n_features
-    for vec in raw_vectors:
-        for i, v in enumerate(vec):
-            means[i] += v
-    means = [m / n_jobs for m in means]
-    
-    stds = [0.0] * n_features
-    for vec in raw_vectors:
-        for i, v in enumerate(vec):
-            stds[i] += (v - means[i]) ** 2
-    stds = [math.sqrt(s / n_jobs) if n_jobs > 0 else 1.0 for s in stds]
-    stds = [s if s > 1e-10 else 1.0 for s in stds]  # Avoid division by zero
-    
-    # Z-score normalization
-    normalized = []
-    for vec in raw_vectors:
-        norm_vec = [(v - means[i]) / stds[i] for i, v in enumerate(vec)]
-        normalized.append(norm_vec)
-    
-    params = {
-        'features': features,
-        'means': means,
-        'stds': stds,
-        'normalized': True
-    }
-    
-    return normalized, features, params
-
-
-def cosine_similarity(vec1: list, vec2: list) -> float:
-    """
-    Compute cosine similarity between two vectors.
-    
-    cosine_sim = (A · B) / (||A|| * ||B||)
-    
-    Returns value in [-1, 1] where:
-        1 = identical direction
-        0 = orthogonal
-       -1 = opposite direction
-    """
-    if len(vec1) != len(vec2) or len(vec1) == 0:
-        return 0.0
-    
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    mag1 = math.sqrt(sum(x * x for x in vec1))
-    mag2 = math.sqrt(sum(x * x for x in vec2))
-    
-    if mag1 < 1e-10 or mag2 < 1e-10:
-        return 0.0
-    
-    return dot_product / (mag1 * mag2)
-
-
-def build_cosine_network(
-    jobs: list,
-    features: list = None,
-    threshold: float = 0.7,
-    normalize: bool = True,
-    max_edges: int = 10000
-) -> dict:
-    """
-    Build job similarity network using cosine similarity on continuous features.
-    
-    Unlike Simpson (which discretizes), this operates on raw continuous vectors.
-    Jobs are connected if their resource usage vectors point in similar directions.
-    
-    Args:
-        jobs: List of job dicts with numeric features
-        features: List of feature names to use (None = auto-detect)
-        threshold: Cosine similarity threshold for edge creation (0.7 default)
-        normalize: Whether to z-score normalize features (recommended)
-        max_edges: Maximum edges to prevent memory issues
-    
-    Returns:
-        dict with:
-        - 'edges': List of edge dicts with source, target, similarity
-        - 'normalization': Info about how features were normalized
-        - 'stats': Network statistics
-    """
-    if not jobs:
-        return {'edges': [], 'normalization': {}, 'stats': {}}
-    
-    # Normalize features
-    if normalize:
-        vectors, feature_names, norm_params = normalize_features(jobs, features)
-    else:
-        if features is None:
-            sample = jobs[0]
-            features = [k for k, v in sample.items() 
-                       if isinstance(v, (int, float)) and k not in ('job_id', 'success', 'exit_code')]
-        vectors = [[job.get(f, 0) or 0 for f in features] for job in jobs]
-        feature_names = features
-        norm_params = {'features': features, 'normalized': False}
-    
-    if not vectors or not vectors[0]:
-        return {'edges': [], 'normalization': norm_params, 'stats': {'error': 'No valid features'}}
-    
-    # Compute pairwise cosine similarity
-    edges = []
-    n_jobs = len(jobs)
-    n_comparisons = 0
-    similarity_sum = 0
-    n_above_threshold = 0
-    
-    for i in range(n_jobs):
-        for j in range(i + 1, n_jobs):
-            sim = cosine_similarity(vectors[i], vectors[j])
-            n_comparisons += 1
-            similarity_sum += sim
-            
-            if sim >= threshold:
-                n_above_threshold += 1
-                if len(edges) < max_edges:
-                    edges.append({
-                        "source": i,
-                        "target": j,
-                        "similarity": round(sim, 4)
-                    })
-    
-    # Compute network statistics
-    avg_similarity = similarity_sum / n_comparisons if n_comparisons > 0 else 0
-    edge_density = len(edges) / n_comparisons if n_comparisons > 0 else 0
-    
-    stats = {
-        'n_jobs': n_jobs,
-        'n_features': len(feature_names),
-        'n_comparisons': n_comparisons,
-        'n_edges': len(edges),
-        'n_above_threshold': n_above_threshold,
-        'avg_similarity': round(avg_similarity, 4),
-        'edge_density': round(edge_density, 4),
-        'threshold': threshold,
-        'method': 'cosine',
-        'truncated': len(edges) >= max_edges
-    }
-    
-    return {
-        'edges': edges,
-        'normalization': norm_params,
-        'stats': stats
-    }
-
-
-def build_similarity_network(
-    jobs: list,
-    method: str = 'cosine',
-    features: list = None,
-    threshold: float = None,
-    **kwargs
-) -> dict:
-    """
-    Build job similarity network using specified method.
-    
-    This is the unified interface - use this instead of calling
-    build_cosine_network or build_bipartite_network directly.
-    
-    Args:
-        jobs: List of job dicts with numeric features
-        method: 'cosine' (default) or 'simpson'
-        features: List of feature names to use
-        threshold: Similarity threshold (default: 0.7 for cosine, 0.5 for simpson)
-        **kwargs: Additional arguments passed to specific method
-    
-    Returns:
-        dict with edges, stats, and method-specific info
-    """
-    if method == 'cosine':
-        if threshold is None:
-            threshold = 0.7
-        return build_cosine_network(
-            jobs, 
-            features=features, 
-            threshold=threshold,
-            **kwargs
-        )
-    
-    elif method == 'simpson':
-        if threshold is None:
-            threshold = 0.5
-        return build_bipartite_network(
-            jobs,
-            features=features,
-            threshold=threshold,
-            **kwargs
-        )
-    
-    else:
-        raise ValueError(f"Unknown method: {method}. Use 'cosine' or 'simpson'.")
 
 def compute_bipartite_matrix(jobs: list, features: list = None, n_bins: int = 3) -> dict:
     """
@@ -1940,9 +1250,9 @@ def compute_bipartite_matrix(jobs: list, features: list = None, n_bins: int = 3)
 class DataManager:
     """Manages data loading from database or demo fallback."""
     
-    def __init__(self, config: dict, db_path: str = None):
+    def __init__(self, config: dict):
         self.config = config
-        self.db_path = Path(db_path) if db_path else find_database()
+        self.db_path = find_database()
         self.data_source = "demo"
         
         self._clusters = None
@@ -1953,9 +1263,7 @@ class DataManager:
         self._correlation_data = None
         self._suggested_axes = None
         self._network_stats = None
-        self._ml_predictions = None
         self._discretization = None
-        self._clustering_quality = None
         
         self._load_data()
     
@@ -2002,25 +1310,17 @@ class DataManager:
                     self._edges = load_similarity_edges_from_db(self.db_path, job_ids)
                     
                     if not self._edges:
-                        network_result = build_similarity_network(
-                            self._jobs,
-                            method='cosine',
+                        # Build bipartite network using Vilhena & Antonelli method
+                        network_result = build_bipartite_network(
+                            self._jobs, 
                             features=self._suggested_axes,
-                            threshold=0.7
+                            threshold=0.5,  # Simpson similarity threshold
+                            n_bins=3        # low/med/high bins
                         )
                         self._edges = network_result['edges']
                         self._network_stats = network_result['stats']
-                        self._discretization = network_result.get('discretization') or network_result.get('normalization')
-                        logger.info(f"Built cosine network: {len(self._edges)} edges (threshold ≥ 0.7)")
-                        
-                        # Compute clustering quality metrics
-                        self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
-                        if self._clustering_quality.get('is_clustered'):
-                            logger.info(f"Clustering detected: assortativity={self._clustering_quality['assortativity']['binary']}")
-                        else:
-                            logger.info(f"No significant clustering (assortativity={self._clustering_quality['assortativity']['binary']})")
-                        # Run ML predictions
-                        self.run_ml_predictions()
+                        self._discretization = network_result['discretization']
+                        logger.info(f"Built bipartite network: {len(self._edges)} edges (Simpson β-sim ≥ 0.5)")
                 else:
                     # Use demo jobs
                     self._jobs = generate_demo_jobs(150)
@@ -2030,15 +1330,12 @@ class DataManager:
                         self._feature_stats,
                         self._correlation_data
                     )
-                    network_result = build_similarity_network(self._jobs, method='cosine', threshold=0.7)
+                    network_result = build_bipartite_network(self._jobs, threshold=0.5)
                     self._edges = network_result['edges']
                     self._network_stats = network_result['stats']
-                    self._discretization = network_result.get('discretization') or network_result.get('normalization')
-                    self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
+                    self._discretization = network_result['discretization']
                     logger.info("Using demo job data for network view")
                     
-                    # Run ML predictions
-                    self.run_ml_predictions()
                 return
         
         # Fall back to demo data
@@ -2053,12 +1350,10 @@ class DataManager:
             self._feature_stats,
             self._correlation_data
         )
-        network_result = build_similarity_network(self._jobs, method='cosine', threshold=0.7)
+        network_result = build_bipartite_network(self._jobs, threshold=0.5)
         self._edges = network_result['edges']
         self._network_stats = network_result['stats']
-        self._discretization = network_result.get('discretization') or network_result.get('normalization')
-        self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
-        self.run_ml_predictions()
+        self._discretization = network_result['discretization']
     
     @property
     def clusters(self):
@@ -2096,83 +1391,10 @@ class DataManager:
     def discretization(self):
         return self._discretization
     
-    @property
-    def clustering_quality(self):
-        return self._clustering_quality
-    @property
-    def ml_predictions(self):
-        return self._ml_predictions
-    
     def refresh(self):
         """Refresh data from source."""
         self._load_data()
     
-    
-    def run_ml_predictions(self):
-        """Run ML ensemble predictions on current jobs."""
-        try:
-            from nomade.ml import is_torch_available
-            if not is_torch_available():
-                self._ml_predictions = {"status": "pytorch_not_available"}
-                return
-            
-            from nomade.ml.ensemble import FailureEnsemble
-            from nomade.ml.gnn_torch import FailureGNN, prepare_pyg_data
-            from nomade.ml.autoencoder import JobAutoencoder, prepare_autoencoder_data
-            import torch
-            
-            jobs = self._jobs
-            edges = self._edges
-            
-            if not jobs or len(jobs) < 10:
-                self._ml_predictions = {"status": "insufficient_data"}
-                return
-            
-            # Prepare GNN data
-            gnn_edges = [{"source": e["source"], "target": e["target"]} for e in edges]
-            gnn_data = prepare_pyg_data(jobs, gnn_edges)
-            
-            # Quick GNN prediction (untrained - just structure)
-            gnn_model = FailureGNN(input_dim=gnn_data.x.size(1), hidden_dim=32, output_dim=8)
-            
-            # Autoencoder for anomaly detection
-            ae_features, ae_labels, _ = prepare_autoencoder_data(jobs)
-            ae_model = JobAutoencoder(input_dim=ae_features.size(1), latent_dim=4)
-            
-            # Simple anomaly scores (reconstruction error without training)
-            ae_model.eval()
-            with torch.no_grad():
-                recon = ae_model(ae_features)
-                errors = ((ae_features - recon) ** 2).mean(dim=1)
-                threshold = errors.mean() + 2 * errors.std()
-                anomalies = errors > threshold
-            
-            # Identify high-risk jobs
-            high_risk = []
-            for i, (job, is_anomaly, error) in enumerate(zip(jobs, anomalies.tolist(), errors.tolist())):
-                if is_anomaly or job.get("failure_reason", 0) != 0:
-                    high_risk.append({
-                        "job_idx": i,
-                        "job_id": job.get("job_id", i),
-                        "anomaly_score": round(error, 4),
-                        "is_anomaly": is_anomaly,
-                        "failure_reason": job.get("failure_reason", 0)
-                    })
-            
-            high_risk.sort(key=lambda x: -x["anomaly_score"])
-            
-            self._ml_predictions = {
-                "status": "ready",
-                "n_jobs": len(jobs),
-                "n_anomalies": int(anomalies.sum()),
-                "threshold": round(float(threshold), 4),
-                "high_risk": high_risk[:50]  # Top 50
-            }
-            logger.info(f"ML predictions: {len(high_risk)} high-risk jobs identified")
-            
-        except Exception as e:
-            logger.error(f"ML prediction error: {e}")
-            self._ml_predictions = {"status": "error", "message": str(e)}
     def get_stats(self) -> dict:
         """Get summary statistics."""
         online_nodes = sum(1 for n in self._nodes.values() if n['status'] == 'online')
@@ -2759,8 +1981,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             const [suggestedAxes, setSuggestedAxes] = useState(null);
             const [networkStats, setNetworkStats] = useState(null);
             const [networkMethod, setNetworkMethod] = useState(null);
-            const [clusteringQuality, setClusteringQuality] = useState(null);
-            const [mlPredictions, setMlPredictions] = useState(null);
             const [dataSource, setDataSource] = useState('loading...');
             const [activeTab, setActiveTab] = useState(null);
             const [selectedNode, setSelectedNode] = useState(null);
@@ -2779,8 +1999,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                         setSuggestedAxes(data.suggested_axes);
                         setNetworkStats(data.network_stats);
                         setNetworkMethod(data.network_method);
-                        setClusteringQuality(data.clustering_quality);
-                        setMlPredictions(data.ml_predictions);
                         setDataSource(data.data_source || 'unknown');
                         setActiveTab(Object.keys(data.clusters)[0]);
                     });
@@ -2858,8 +2076,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 suggestedAxes={suggestedAxes}
                                 networkStats={networkStats}
                                 networkMethod={networkMethod}
-                                clusteringQuality={clusteringQuality}
-                                mlPredictions={mlPredictions}
                             />
                         ) : (
                             <>
@@ -2951,7 +2167,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 <div className="node-jobs">
                                     {node.status === 'down' ? (node.slurm_state || 'OFFLINE') : `${node.jobs_today || 0} jobs`}
                                 </div>
-                                <div className="node-gpu-badge" style={{ background: node.has_gpu ? "#1a1a1a" : "rgba(255,255,255,0.9)", color: node.has_gpu ? "#ffffff" : "#1a1a1a" }}>{node.has_gpu ? "GPU" : "CPU"}</div>
+                                {node.has_gpu && <div className="node-gpu-badge">GPU</div>}
                             </div>
                         ))}
                     </div>
@@ -3109,7 +2325,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             );
         }
         
-        function NetworkView({ jobs, edges, featureStats, correlationData, suggestedAxes, networkStats, networkMethod, clusteringQuality, mlPredictions }) {
+        function NetworkView({ jobs, edges, featureStats, correlationData, suggestedAxes, networkStats, networkMethod }) {
             const containerRef = useRef(null);
             const sceneRef = useRef(null);
             const nodeGroupRef = useRef(null);
@@ -3118,9 +2334,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             const [showStats, setShowStats] = useState(false);
             const [showCorrelation, setShowCorrelation] = useState(false);
             const [showMethod, setShowMethod] = useState(false);
-            const [showClustering, setShowClustering] = useState(false);
-            const [showML, setShowML] = useState(false);
-            const [mlTraining, setMlTraining] = useState(false);
             const [forceIterations, setForceIterations] = useState(0);
             const forcePositionsRef = useRef(null);
             const animationRef = useRef(null);
@@ -3745,35 +2958,22 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             </button>
                             <button 
                                 className={`network-btn ${showStats ? 'active' : ''}`}
-                                onClick={() => { setShowStats(!showStats); setShowCorrelation(false); setShowMethod(false); setShowClustering(false); }}
+                                onClick={() => { setShowStats(!showStats); setShowCorrelation(false); setShowMethod(false); }}
                                 style={{ marginLeft: '16px' }}
                             >
                                 Variance
                             </button>
                             <button 
                                 className={`network-btn ${showCorrelation ? 'active' : ''}`}
-                                onClick={() => { setShowCorrelation(!showCorrelation); setShowStats(false); setShowMethod(false); setShowClustering(false); }}
+                                onClick={() => { setShowCorrelation(!showCorrelation); setShowStats(false); setShowMethod(false); }}
                             >
                                 Correlation
                             </button>
                             <button 
                                 className={`network-btn ${showMethod ? 'active' : ''}`}
-                                onClick={() => { setShowMethod(!showMethod); setShowStats(false); setShowCorrelation(false); setShowClustering(false); }}
+                                onClick={() => { setShowMethod(!showMethod); setShowStats(false); setShowCorrelation(false); }}
                             >
                                 Method
-                            </button>
-                            <button 
-                                className={`network-btn ${showClustering ? 'active' : ''}`}
-                                onClick={() => { setShowClustering(!showClustering); setShowStats(false); setShowCorrelation(false); setShowMethod(false); }}
-                            >
-                                Clustering
-                            </button>
-                            <button
-                                className={`network-btn ${showML ? "active" : ""}`}
-                                onClick={() => { setShowML(!showML); setShowStats(false); setShowCorrelation(false); setShowMethod(false); setShowClustering(false); }}
-                                style={{ background: showML ? "#e74c3c" : "#3498db" }}
-                            >
-                                ML Risk
                             </button>
                         </div>
                         
@@ -4109,19 +3309,21 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--cyan)', fontSize: '12px' }}>
                                     NETWORK METHOD
                                 </div>
-                                    <div style={{ marginBottom: '12px' }}>
+                                
+                                <div style={{ marginBottom: '12px' }}>
                                     <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginBottom: '4px' }}>
-                                        Cosine Similarity (Continuous)
+                                        Simpson's β-diversity (Bipartite)
                                     </div>
                                     <div style={{ color: 'var(--text-muted)', fontSize: '10px', lineHeight: '1.5' }}>
-                                        Jobs are connected based on similar resource usage vectors.
-                                        Features are z-score normalized before comparison.
+                                        Based on Vilhena & Antonelli (2015, Nature Communications).
+                                        Jobs are connected based on shared resource usage patterns,
+                                        treating each resource bin as a "site" in biogeographical terms.
                                     </div>
                                 </div>
-
-                                <div style={{
-                                    background: 'var(--bg-hover)',
-                                    borderRadius: '6px',
+                                
+                                <div style={{ 
+                                    background: 'var(--bg-hover)', 
+                                    borderRadius: '6px', 
                                     padding: '10px',
                                     marginBottom: '12px',
                                     fontFamily: 'IBM Plex Mono, monospace',
@@ -4129,20 +3331,22 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 }}>
                                     <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Formula:</div>
                                     <div style={{ color: 'var(--green)' }}>
-                                        cos(θ) = (A · B) / (||A|| × ||B||)
+                                        Simpson = a / (a + min(b, c))
                                     </div>
                                     <div style={{ color: 'var(--text-muted)', marginTop: '8px', fontSize: '9px' }}>
-                                        A, B = job feature vectors<br/>
-                                        Result: 1 = identical, 0 = orthogonal
+                                        a = shared bins<br/>
+                                        b = unique to job₁<br/>
+                                        c = unique to job₂
                                     </div>
                                 </div>
-
+                                
                                 <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginBottom: '12px' }}>
-                                    <strong style={{ color: 'var(--text-secondary)' }}>Why Cosine?</strong><br/>
-                                    Works on continuous features without discretization.
-                                    Standard in ML, measures direction similarity regardless of magnitude.
-                                </div>                               
-
+                                    <strong style={{ color: 'var(--text-secondary)' }}>Why Simpson?</strong><br/>
+                                    Unlike Jaccard or cosine similarity, Simpson focuses on the
+                                    <em> proportion of the smaller set</em> that is shared. This avoids
+                                    bias when comparing jobs with different resource footprints.
+                                </div>
+                                
                                 {networkStats && (
                                     <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
                                         <div style={{ color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' }}>
@@ -4186,251 +3390,6 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 }}>
                                     <strong>Discretization:</strong> Features binned into low/med/high (quantile-based)
                                 </div>
-                            </div>
-                        )}
-                        
-                        {/* Clustering Quality Panel */}
-                        {showClustering && clusteringQuality && (
-                            <div style={{
-                                position: 'absolute',
-                                top: '60px',
-                                left: '16px',
-                                background: 'var(--bg-elevated)',
-                                border: '1px solid var(--border)',
-                                borderRadius: '8px',
-                                padding: '16px',
-                                fontSize: '11px',
-                                maxWidth: '360px'
-                            }}>
-                                <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--purple)', fontSize: '12px' }}>
-                                    FAILURE CLUSTERING ANALYSIS
-                                </div>
-                                
-                                <div style={{ marginBottom: '12px', color: 'var(--text-muted)', fontSize: '10px', lineHeight: '1.5' }}>
-                                    Metrics inspired by phylogenetic community structure (MNTD, NTI).
-                                    Tests whether failures cluster together in the network.
-                                </div>
-                                
-                                {/* Assortativity */}
-                                <div style={{ 
-                                    background: 'var(--bg-hover)', 
-                                    borderRadius: '6px', 
-                                    padding: '10px',
-                                    marginBottom: '10px'
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                        <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Assortativity</span>
-                                        <span style={{ 
-                                            color: clusteringQuality.assortativity?.binary > 0.1 ? 'var(--green)' : 
-                                                   clusteringQuality.assortativity?.binary < -0.1 ? 'var(--red)' : 'var(--text-secondary)',
-                                            fontFamily: 'IBM Plex Mono, monospace'
-                                        }}>
-                                            r = {clusteringQuality.assortativity?.binary?.toFixed(3) || '—'}
-                                        </span>
-                                    </div>
-                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
-                                        {clusteringQuality.assortativity?.binary > 0.1 ? 
-                                            '✓ Failures tend to connect to other failures' :
-                                         clusteringQuality.assortativity?.binary < -0.1 ?
-                                            '✗ Failures dispersed among successes' :
-                                            '○ No strong clustering pattern'}
-                                    </div>
-                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                                        z-score: {clusteringQuality.assortativity?.z_score || '—'}
-                                        {Math.abs(clusteringQuality.assortativity?.z_score || 0) > 2 ? ' (significant)' : ' (not significant)'}
-                                    </div>
-                                </div>
-                                
-                                {/* Neighborhood Purity */}
-                                <div style={{ 
-                                    background: 'var(--bg-hover)', 
-                                    borderRadius: '6px', 
-                                    padding: '10px',
-                                    marginBottom: '10px'
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                        <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Neighborhood Purity</span>
-                                        <span style={{ 
-                                            color: 'var(--text-primary)',
-                                            fontFamily: 'IBM Plex Mono, monospace'
-                                        }}>
-                                            {((clusteringQuality.neighborhood_purity?.binary || 0) * 100).toFixed(1)}%
-                                        </span>
-                                    </div>
-                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
-                                        Average fraction of same-class neighbors
-                                    </div>
-                                </div>
-                                
-                                {/* MNTD Ratio */}
-                                <div style={{ 
-                                    background: 'var(--bg-hover)', 
-                                    borderRadius: '6px', 
-                                    padding: '10px',
-                                    marginBottom: '10px'
-                                }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                        <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>MNTD Ratio</span>
-                                        <span style={{ 
-                                            color: clusteringQuality.mntd_ratio < 0.9 ? 'var(--green)' : 
-                                                   clusteringQuality.mntd_ratio > 1.1 ? 'var(--red)' : 'var(--text-secondary)',
-                                            fontFamily: 'IBM Plex Mono, monospace'
-                                        }}>
-                                            {clusteringQuality.mntd_ratio?.toFixed(3) || '—'}
-                                        </span>
-                                    </div>
-                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
-                                        {clusteringQuality.mntd_ratio < 0.9 ? 
-                                            '✓ Same-class jobs are closer than expected' :
-                                         clusteringQuality.mntd_ratio > 1.1 ?
-                                            '✗ Same-class jobs are farther than expected' :
-                                            '○ Distance to same-class ≈ random'}
-                                    </div>
-                                </div>
-                                
-                                {/* SES.MNTD */}
-                                <div style={{
-                                    background: "var(--bg-hover)",
-                                    borderRadius: "6px",
-                                    padding: "10px",
-                                    marginBottom: "10px"
-                                }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                                        <span style={{ color: "var(--text-muted)", fontWeight: "600" }}>SES.MNTD</span>
-                                        <span style={{
-                                            color: clusteringQuality.ses_mntd < -2 ? "var(--green)" :
-                                                   clusteringQuality.ses_mntd > 2 ? "var(--red)" : "var(--text-secondary)",
-                                            fontFamily: "IBM Plex Mono, monospace"
-                                        }}>
-                                            {clusteringQuality.ses_mntd?.toFixed(2) || "—"}
-                                        </span>
-                                    </div>
-                                    <div style={{ fontSize: "9px", color: "var(--text-muted)" }}>
-                                        {clusteringQuality.ses_mntd < -2 ?
-                                            "✓ Significant clustering (p < 0.05)" :
-                                         clusteringQuality.ses_mntd > 2 ?
-                                            "✗ Significant overdispersion (p < 0.05)" :
-                                            "○ Not significant"}
-                                    </div>
-                                </div>
-                                
-                                {/* Interpretation */}
-                                {clusteringQuality.interpretation && (
-                                    <div style={{ 
-                                        borderTop: '1px solid var(--border)', 
-                                        paddingTop: '12px',
-                                        marginTop: '4px'
-                                    }}>
-                                        <div style={{ color: 'var(--text-muted)', fontWeight: '600', marginBottom: '8px', fontSize: '10px' }}>
-                                            INTERPRETATION
-                                        </div>
-                                        {clusteringQuality.interpretation.map((line, i) => (
-                                            <div key={i} style={{ 
-                                                color: 'var(--text-secondary)', 
-                                                fontSize: '10px',
-                                                marginBottom: '4px',
-                                                paddingLeft: '8px',
-                                                borderLeft: '2px solid var(--border)'
-                                            }}>
-                                                {line}
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                
-                                {/* Sample sizes */}
-                                <div style={{ 
-                                    marginTop: '12px', 
-                                    fontSize: '9px', 
-                                    color: 'var(--text-muted)',
-                                    display: 'flex',
-                                    gap: '16px'
-                                }}>
-                                    <span>n={clusteringQuality.sample_sizes?.n_jobs || '—'}</span>
-                                    <span>edges={clusteringQuality.sample_sizes?.n_edges?.toLocaleString() || '—'}</span>
-                                    <span style={{ color: 'var(--green)' }}>
-                                        ✓{clusteringQuality.sample_sizes?.n_success || 0}
-                                    </span>
-                                    <span style={{ color: 'var(--red)' }}>
-                                        ✗{clusteringQuality.sample_sizes?.n_failure || 0}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
-                        {showML && mlPredictions && (
-                            <div style={{
-                                position: "absolute",
-                                top: "60px",
-                                left: "16px",
-                                background: "var(--bg-elevated)",
-                                border: "1px solid var(--border)",
-                                borderRadius: "8px",
-                                padding: "16px",
-                                fontSize: "11px",
-                                maxWidth: "400px",
-                                maxHeight: "500px",
-                                overflowY: "auto"
-                            }}>
-                                <div style={{ fontWeight: "600", marginBottom: "12px", color: "#e74c3c", fontSize: "12px" }}>
-                                    ML RISK ANALYSIS
-                                </div>
-                                <div style={{ marginBottom: "12px", color: "var(--text-muted)", fontSize: "10px" }}>
-                                    Status: {mlPredictions.status} | Anomalies: {mlPredictions.n_anomalies || 0} / {mlPredictions.n_jobs || 0}
-                                    <button
-                                        onClick={() => {
-                                            setMlTraining(true);
-                                            fetch("/api/train_ml").then(r => r.json()).then(data => {
-                                                setMlTraining(false);
-                                                window.location.reload();
-                                            });
-                                        }}
-                                        disabled={mlTraining}
-                                        style={{
-                                            marginLeft: "10px",
-                                            padding: "4px 8px",
-                                            fontSize: "9px",
-                                            background: mlTraining ? "#666" : "#27ae60",
-                                            color: "white",
-                                            border: "none",
-                                            borderRadius: "4px",
-                                            cursor: mlTraining ? "wait" : "pointer"
-                                        }}
-                                    >
-                                        {mlTraining ? "Training..." : "🔄 Update Models"}
-                                    </button>
-                                </div>
-                                {mlPredictions.summary && (
-                                    <div style={{ background: "var(--bg-hover)", borderRadius: "6px", padding: "10px", marginBottom: "10px" }}>
-                                        <div style={{ fontWeight: "600", marginBottom: "6px", color: "var(--text-muted)" }}>Model Performance</div>
-                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px", fontSize: "10px" }}>
-                                            <span>GNN Accuracy:</span><span style={{ fontFamily: "monospace" }}>{((mlPredictions.summary.gnn_accuracy || 0) * 100).toFixed(1)}%</span>
-                                            <span>LSTM Accuracy:</span><span style={{ fontFamily: "monospace" }}>{((mlPredictions.summary.lstm_accuracy || 0) * 100).toFixed(1)}%</span>
-                                            <span>AE Precision:</span><span style={{ fontFamily: "monospace" }}>{((mlPredictions.summary.ae_precision || 0) * 100).toFixed(1)}%</span>
-                                            <span>AE Recall:</span><span style={{ fontFamily: "monospace" }}>{((mlPredictions.summary.ae_recall || 0) * 100).toFixed(1)}%</span>
-                                        </div>
-                                    </div>
-                                )}
-                                <div style={{ fontWeight: "600", marginBottom: "8px", color: "var(--text-muted)" }}>High-Risk Jobs (Top 10)</div>
-                                {(mlPredictions.high_risk || []).slice(0, 10).map((job, i) => (
-                                    <div key={i} style={{
-                                        background: job.is_anomaly ? "rgba(231, 76, 60, 0.1)" : "var(--bg-hover)",
-                                        borderRadius: "4px",
-                                        padding: "8px",
-                                        marginBottom: "6px",
-                                        borderLeft: job.is_anomaly ? "3px solid #e74c3c" : "3px solid var(--border)"
-                                    }}>
-                                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                                            <span style={{ fontFamily: "monospace" }}>Job {job.job_id}</span>
-                                            <span style={{ color: "#e74c3c", fontFamily: "monospace" }}>
-                                                {job.anomaly_score?.toFixed(2) || "—"}
-                                            </span>
-                                        </div>
-                                        <div style={{ fontSize: "9px", color: "var(--text-muted)", marginTop: "2px" }}>
-                                            {job.is_anomaly ? "🔴 Anomaly" : ""}
-                                            {job.failure_reason > 0 ? ` | Failure: ${job.predicted_name || job.failure_reason}` : ""}
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
                         )}
                         
@@ -4525,46 +3484,10 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "correlation_data": dm.correlation_data,
                 "suggested_axes": dm.suggested_axes,
                 "network_stats": dm.network_stats,
-                "clustering_quality": dm.clustering_quality,
-                "network_method": dm.network_stats.get("method", "cosine") if dm.network_stats else "cosine",
-                "ml_predictions": dm.ml_predictions or {"status": "not_ready"}
+                "network_method": "simpson_bipartite"  # Vilhena & Antonelli method
             }
             self.wfile.write(json.dumps(data).encode())
             
-        elif parsed.path == '/api/clustering':
-            # Dedicated endpoint for clustering quality metrics
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(DashboardHandler.data_manager.clustering_quality).encode())
-            
-        elif parsed.path == "/api/predictions":
-            # ML predictions endpoint
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            dm = DashboardHandler.data_manager
-            predictions = dm.ml_predictions or {"status": "not_trained", "high_risk": []}
-            self.wfile.write(json.dumps(predictions).encode())
-        elif parsed.path == "/api/train_ml":
-            # Train ML models endpoint
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            try:
-                dm = DashboardHandler.data_manager
-                if dm.db_path:
-                    from nomade.ml import train_and_save_ensemble, load_predictions_from_db
-                    result = train_and_save_ensemble(str(dm.db_path), epochs=50, verbose=False)
-                    dm._ml_predictions = load_predictions_from_db(str(dm.db_path))
-                    self.wfile.write(json.dumps({"status": "trained", "prediction_id": result.get("prediction_id")}).encode())
-                else:
-                    self.wfile.write(json.dumps({"status": "error", "message": "No database"}).encode())
-            except Exception as e:
-                self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode())
         elif parsed.path == '/api/refresh':
             DashboardHandler.data_manager.refresh()
             self.send_response(200)
@@ -4585,14 +3508,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
         pass  # Quiet logging
 
 
-def serve_dashboard(host='localhost', port=8050, config_path=None, db_path=None):
+def serve_dashboard(host='localhost', port=8050, config_path=None):
     """Start the dashboard server."""
     
     # Load configuration
     config = load_config(config_path)
     
     # Initialize data manager
-    data_manager = DataManager(config, db_path=db_path)
+    data_manager = DataManager(config)
     DashboardHandler.data_manager = data_manager
     
     # Get stats
@@ -4608,37 +3531,7 @@ def serve_dashboard(host='localhost', port=8050, config_path=None, db_path=None)
     print(f"  Nodes:       {stats['nodes_online']}/{stats['nodes_total']} online")
     print(f"  Jobs:        {stats['jobs']} ({stats['jobs_success']} success, {stats['jobs_failed']} failed)")
     print(f"  Edges:       {stats['edges']}")
-    print("-" * 60)
-    # Clustering metrics
-    cq = data_manager.clustering_quality
-    if cq:
-        r = cq.get("assortativity", {}).get("binary", 0)
-        z = cq.get("assortativity", {}).get("z_score", 0)
-        ses_mntd = cq.get("ses_mntd", 0)
-        assort_sig = "sig" if abs(z) > 2 else "ns"
-        mntd_sig = "sig" if abs(ses_mntd) > 2 else "ns"
-        if r > 0.1:
-            assort_msg = "failures cluster (resource pattern)"
-        elif r < -0.1:
-            assort_msg = "failures dispersed (code/user issue)"
-        else:
-            assort_msg = "random"
-        print(f"  Assortativity:  r={r:>6.3f}  z={z:>5.1f} ({assort_sig:>3})  {assort_msg}")
-        print(f"  SES.MNTD:       {ses_mntd:>7.2f}        ({mntd_sig:>3})  spatial clustering")
-        hotspots = cq.get("hotspots", [])
-        if hotspots:
-            print("  Hotspots:")
-            for h in hotspots[:3]:
-                feat = f"{h['feature']}={h['bin']}"
-                print(f"    {feat:<20} {h['failure_rate']:>5.0f}% fail  (base {h['baseline_rate']:.0f}%, {h['ratio']:.1f}x)")
     print("=" * 60)
-    if host in ('localhost', '127.0.0.1', '0.0.0.0'):
-        import socket
-        hostname = socket.gethostname()
-        print(f"  Remote access:")
-        print(f"    ssh -L {port}:localhost:{port} {hostname}")
-        print(f"    Then open: http://localhost:{port}")
-        print("-" * 60)
     print("  Press Ctrl+C to stop")
     print()
     

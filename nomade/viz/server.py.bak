@@ -1674,223 +1674,6 @@ def build_bipartite_network(jobs: list, features: list = None,
         'stats': stats
     }
 
-def normalize_features(jobs: list, features: list = None) -> tuple:
-    """
-    Extract and normalize feature vectors from jobs using z-score.
-    
-    Returns:
-        Tuple of (normalized_vectors, feature_names, normalization_params)
-    """
-    if not jobs:
-        return [], [], {}
-    
-    # Auto-detect numeric features
-    if features is None:
-        sample = jobs[0]
-        features = [k for k, v in sample.items() 
-                   if isinstance(v, (int, float)) and k not in ('job_id', 'success', 'exit_code')]
-    
-    # Extract raw vectors
-    raw_vectors = []
-    for job in jobs:
-        vec = [job.get(f, 0) or 0 for f in features]
-        raw_vectors.append(vec)
-    
-    # Compute mean and std for each feature
-    n_features = len(features)
-    n_jobs = len(jobs)
-    
-    if n_jobs == 0 or n_features == 0:
-        return [], features, {}
-    
-    means = [0.0] * n_features
-    for vec in raw_vectors:
-        for i, v in enumerate(vec):
-            means[i] += v
-    means = [m / n_jobs for m in means]
-    
-    stds = [0.0] * n_features
-    for vec in raw_vectors:
-        for i, v in enumerate(vec):
-            stds[i] += (v - means[i]) ** 2
-    stds = [math.sqrt(s / n_jobs) if n_jobs > 0 else 1.0 for s in stds]
-    stds = [s if s > 1e-10 else 1.0 for s in stds]  # Avoid division by zero
-    
-    # Z-score normalization
-    normalized = []
-    for vec in raw_vectors:
-        norm_vec = [(v - means[i]) / stds[i] for i, v in enumerate(vec)]
-        normalized.append(norm_vec)
-    
-    params = {
-        'features': features,
-        'means': means,
-        'stds': stds,
-        'normalized': True
-    }
-    
-    return normalized, features, params
-
-
-def cosine_similarity(vec1: list, vec2: list) -> float:
-    """
-    Compute cosine similarity between two vectors.
-    
-    cosine_sim = (A · B) / (||A|| * ||B||)
-    
-    Returns value in [-1, 1] where:
-        1 = identical direction
-        0 = orthogonal
-       -1 = opposite direction
-    """
-    if len(vec1) != len(vec2) or len(vec1) == 0:
-        return 0.0
-    
-    dot_product = sum(a * b for a, b in zip(vec1, vec2))
-    mag1 = math.sqrt(sum(x * x for x in vec1))
-    mag2 = math.sqrt(sum(x * x for x in vec2))
-    
-    if mag1 < 1e-10 or mag2 < 1e-10:
-        return 0.0
-    
-    return dot_product / (mag1 * mag2)
-
-
-def build_cosine_network(
-    jobs: list,
-    features: list = None,
-    threshold: float = 0.7,
-    normalize: bool = True,
-    max_edges: int = 10000
-) -> dict:
-    """
-    Build job similarity network using cosine similarity on continuous features.
-    
-    Unlike Simpson (which discretizes), this operates on raw continuous vectors.
-    Jobs are connected if their resource usage vectors point in similar directions.
-    
-    Args:
-        jobs: List of job dicts with numeric features
-        features: List of feature names to use (None = auto-detect)
-        threshold: Cosine similarity threshold for edge creation (0.7 default)
-        normalize: Whether to z-score normalize features (recommended)
-        max_edges: Maximum edges to prevent memory issues
-    
-    Returns:
-        dict with:
-        - 'edges': List of edge dicts with source, target, similarity
-        - 'normalization': Info about how features were normalized
-        - 'stats': Network statistics
-    """
-    if not jobs:
-        return {'edges': [], 'normalization': {}, 'stats': {}}
-    
-    # Normalize features
-    if normalize:
-        vectors, feature_names, norm_params = normalize_features(jobs, features)
-    else:
-        if features is None:
-            sample = jobs[0]
-            features = [k for k, v in sample.items() 
-                       if isinstance(v, (int, float)) and k not in ('job_id', 'success', 'exit_code')]
-        vectors = [[job.get(f, 0) or 0 for f in features] for job in jobs]
-        feature_names = features
-        norm_params = {'features': features, 'normalized': False}
-    
-    if not vectors or not vectors[0]:
-        return {'edges': [], 'normalization': norm_params, 'stats': {'error': 'No valid features'}}
-    
-    # Compute pairwise cosine similarity
-    edges = []
-    n_jobs = len(jobs)
-    n_comparisons = 0
-    similarity_sum = 0
-    n_above_threshold = 0
-    
-    for i in range(n_jobs):
-        for j in range(i + 1, n_jobs):
-            sim = cosine_similarity(vectors[i], vectors[j])
-            n_comparisons += 1
-            similarity_sum += sim
-            
-            if sim >= threshold:
-                n_above_threshold += 1
-                if len(edges) < max_edges:
-                    edges.append({
-                        "source": i,
-                        "target": j,
-                        "similarity": round(sim, 4)
-                    })
-    
-    # Compute network statistics
-    avg_similarity = similarity_sum / n_comparisons if n_comparisons > 0 else 0
-    edge_density = len(edges) / n_comparisons if n_comparisons > 0 else 0
-    
-    stats = {
-        'n_jobs': n_jobs,
-        'n_features': len(feature_names),
-        'n_comparisons': n_comparisons,
-        'n_edges': len(edges),
-        'n_above_threshold': n_above_threshold,
-        'avg_similarity': round(avg_similarity, 4),
-        'edge_density': round(edge_density, 4),
-        'threshold': threshold,
-        'method': 'cosine',
-        'truncated': len(edges) >= max_edges
-    }
-    
-    return {
-        'edges': edges,
-        'normalization': norm_params,
-        'stats': stats
-    }
-
-
-def build_similarity_network(
-    jobs: list,
-    method: str = 'cosine',
-    features: list = None,
-    threshold: float = None,
-    **kwargs
-) -> dict:
-    """
-    Build job similarity network using specified method.
-    
-    This is the unified interface - use this instead of calling
-    build_cosine_network or build_bipartite_network directly.
-    
-    Args:
-        jobs: List of job dicts with numeric features
-        method: 'cosine' (default) or 'simpson'
-        features: List of feature names to use
-        threshold: Similarity threshold (default: 0.7 for cosine, 0.5 for simpson)
-        **kwargs: Additional arguments passed to specific method
-    
-    Returns:
-        dict with edges, stats, and method-specific info
-    """
-    if method == 'cosine':
-        if threshold is None:
-            threshold = 0.7
-        return build_cosine_network(
-            jobs, 
-            features=features, 
-            threshold=threshold,
-            **kwargs
-        )
-    
-    elif method == 'simpson':
-        if threshold is None:
-            threshold = 0.5
-        return build_bipartite_network(
-            jobs,
-            features=features,
-            threshold=threshold,
-            **kwargs
-        )
-    
-    else:
-        raise ValueError(f"Unknown method: {method}. Use 'cosine' or 'simpson'.")
 
 def compute_bipartite_matrix(jobs: list, features: list = None, n_bins: int = 3) -> dict:
     """
@@ -2002,16 +1785,17 @@ class DataManager:
                     self._edges = load_similarity_edges_from_db(self.db_path, job_ids)
                     
                     if not self._edges:
-                        network_result = build_similarity_network(
-                            self._jobs,
-                            method='cosine',
+                        # Build bipartite network using Vilhena & Antonelli method
+                        network_result = build_bipartite_network(
+                            self._jobs, 
                             features=self._suggested_axes,
-                            threshold=0.7
+                            threshold=0.5,  # Simpson similarity threshold
+                            n_bins=3        # low/med/high bins
                         )
                         self._edges = network_result['edges']
                         self._network_stats = network_result['stats']
-                        self._discretization = network_result.get('discretization') or network_result.get('normalization')
-                        logger.info(f"Built cosine network: {len(self._edges)} edges (threshold ≥ 0.7)")
+                        self._discretization = network_result['discretization']
+                        logger.info(f"Built bipartite network: {len(self._edges)} edges (Simpson β-sim ≥ 0.5)")
                         
                         # Compute clustering quality metrics
                         self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
@@ -2030,10 +1814,10 @@ class DataManager:
                         self._feature_stats,
                         self._correlation_data
                     )
-                    network_result = build_similarity_network(self._jobs, method='cosine', threshold=0.7)
+                    network_result = build_bipartite_network(self._jobs, threshold=0.5)
                     self._edges = network_result['edges']
                     self._network_stats = network_result['stats']
-                    self._discretization = network_result.get('discretization') or network_result.get('normalization')
+                    self._discretization = network_result['discretization']
                     self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
                     logger.info("Using demo job data for network view")
                     
@@ -2053,10 +1837,10 @@ class DataManager:
             self._feature_stats,
             self._correlation_data
         )
-        network_result = build_similarity_network(self._jobs, method='cosine', threshold=0.7)
+        network_result = build_bipartite_network(self._jobs, threshold=0.5)
         self._edges = network_result['edges']
         self._network_stats = network_result['stats']
-        self._discretization = network_result.get('discretization') or network_result.get('normalization')
+        self._discretization = network_result['discretization']
         self._clustering_quality = compute_clustering_quality(self._jobs, self._edges)
         self.run_ml_predictions()
     
@@ -4109,19 +3893,21 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 <div style={{ fontWeight: '600', marginBottom: '12px', color: 'var(--cyan)', fontSize: '12px' }}>
                                     NETWORK METHOD
                                 </div>
-                                    <div style={{ marginBottom: '12px' }}>
+                                
+                                <div style={{ marginBottom: '12px' }}>
                                     <div style={{ color: 'var(--text-primary)', fontWeight: '600', marginBottom: '4px' }}>
-                                        Cosine Similarity (Continuous)
+                                        Simpson's β-diversity (Bipartite)
                                     </div>
                                     <div style={{ color: 'var(--text-muted)', fontSize: '10px', lineHeight: '1.5' }}>
-                                        Jobs are connected based on similar resource usage vectors.
-                                        Features are z-score normalized before comparison.
+                                        Based on Vilhena & Antonelli (2015, Nature Communications).
+                                        Jobs are connected based on shared resource usage patterns,
+                                        treating each resource bin as a "site" in biogeographical terms.
                                     </div>
                                 </div>
-
-                                <div style={{
-                                    background: 'var(--bg-hover)',
-                                    borderRadius: '6px',
+                                
+                                <div style={{ 
+                                    background: 'var(--bg-hover)', 
+                                    borderRadius: '6px', 
                                     padding: '10px',
                                     marginBottom: '12px',
                                     fontFamily: 'IBM Plex Mono, monospace',
@@ -4129,20 +3915,22 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 }}>
                                     <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Formula:</div>
                                     <div style={{ color: 'var(--green)' }}>
-                                        cos(θ) = (A · B) / (||A|| × ||B||)
+                                        Simpson = a / (a + min(b, c))
                                     </div>
                                     <div style={{ color: 'var(--text-muted)', marginTop: '8px', fontSize: '9px' }}>
-                                        A, B = job feature vectors<br/>
-                                        Result: 1 = identical, 0 = orthogonal
+                                        a = shared bins<br/>
+                                        b = unique to job₁<br/>
+                                        c = unique to job₂
                                     </div>
                                 </div>
-
+                                
                                 <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginBottom: '12px' }}>
-                                    <strong style={{ color: 'var(--text-secondary)' }}>Why Cosine?</strong><br/>
-                                    Works on continuous features without discretization.
-                                    Standard in ML, measures direction similarity regardless of magnitude.
-                                </div>                               
-
+                                    <strong style={{ color: 'var(--text-secondary)' }}>Why Simpson?</strong><br/>
+                                    Unlike Jaccard or cosine similarity, Simpson focuses on the
+                                    <em> proportion of the smaller set</em> that is shared. This avoids
+                                    bias when comparing jobs with different resource footprints.
+                                </div>
+                                
                                 {networkStats && (
                                     <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
                                         <div style={{ color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' }}>
@@ -4526,7 +4314,7 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
                 "suggested_axes": dm.suggested_axes,
                 "network_stats": dm.network_stats,
                 "clustering_quality": dm.clustering_quality,
-                "network_method": dm.network_stats.get("method", "cosine") if dm.network_stats else "cosine",
+                "network_method": "simpson_bipartite",
                 "ml_predictions": dm.ml_predictions or {"status": "not_ready"}
             }
             self.wfile.write(json.dumps(data).encode())

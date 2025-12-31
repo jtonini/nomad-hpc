@@ -291,11 +291,10 @@ if __name__ == '__main__':
         print(f"Loaded {len(jobs)} jobs")
         
         # Build edges
-        from nomade.viz.server import build_bipartite_network
-        network = build_bipartite_network(jobs, threshold=0.5, max_edges=15000)
+        from nomade.viz.server import build_similarity_network
+        network = build_similarity_network(jobs, method='cosine', threshold=0.7, max_edges=15000)
         edges = [{'source': e['source'], 'target': e['target']} for e in network['edges']]
-        print(f"Built {len(edges)} Simpson edges")
-        print()
+        print(f"Built {len(edges)} cosine edges")
         
         # Train ensemble
         results = train_ensemble(jobs, edges, epochs=100, verbose=True)
@@ -335,13 +334,12 @@ def train_and_save_ensemble(db_path: str, models_dir: str = None,
         print(f"Training ensemble on {len(jobs)} jobs...")
     
     # Build edges
-    from nomade.viz.server import build_bipartite_network
-    network = build_bipartite_network(jobs, threshold=0.5, max_edges=15000)
+    from nomade.viz.server import build_similarity_network
+    network = build_similarity_network(jobs, method='cosine', threshold=0.7, max_edges=15000)
     edges = [{'source': e['source'], 'target': e['target']} for e in network['edges']]
-    
     if verbose:
-        print(f"Built {len(edges)} Simpson similarity edges")
-    
+        print(f"Built {len(edges)} cosine similarity edges")
+
     # Train ensemble
     results = train_ensemble(jobs, edges, epochs=epochs, verbose=verbose)
     
