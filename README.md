@@ -247,7 +247,7 @@ NØMADE builds job similarity networks using a comprehensive feature vector that
 
 - **Raw quantitative metrics**: No arbitrary thresholds or binary labels
 - **Non-redundant features**: `vram_gb > 0` implies GPU used (no separate flag)
-- **Cosine similarity**: On normalized 17-dimension feature vectors
+- **Simpson similarity**: Biogeographical approach on discretized feature bins
 - **Continuous health score**: 0 (catastrophic) → 1 (perfect), not binary
 - **Time-correlated system state**: iostat/mpstat/vmstat data aligned to job runtime
 
