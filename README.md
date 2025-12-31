@@ -38,35 +38,35 @@ NØMADE is inspired by nomadic principles:
 │                              NØMADE                                     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                      ALERT DISPATCHER                            │   │
-│  │             Email · Slack · Webhook · Dashboard               │   │
-│  └─────────────────────────────┬───────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                      ALERT DISPATCHER                           │    │
+│  │             Email · Slack · Webhook · Dashboard                 │    │
+│  └─────────────────────────────┬───────────────────────────────────┘    │
 │                                │                                        │
-│  ┌─────────────────────────────┴───────────────────────────────────┐   │
-│  │                      ALERT ENGINE                                │   │
-│  │       Rules · Derivatives · Deduplication · Cooldowns            │   │
-│  └─────────────────────────────┬───────────────────────────────────┘   │
+│  ┌─────────────────────────────┴───────────────────────────────────┐    │
+│  │                      ALERT ENGINE                               │    │
+│  │       Rules · Derivatives · Deduplication · Cooldowns           │    │
+│  └─────────────────────────────┬───────────────────────────────────┘    │
 │                                │                                        │
-│         ┌──────────────────────┴──────────────────────┐                │
-│         ▼                                             ▼                │
-│  ┌─────────────────────┐                ┌─────────────────────────┐   │
-│  │  MONITORING ENGINE  │                │   PREDICTION ENGINE     │   │
-│  │  Threshold-based    │                │   Similarity networks   │   │
-│  │  Immediate alerts   │                │   17-dim feature space  │   │
-│  └─────────┬───────────┘                └────────────┬────────────┘   │
-│            │                                          │                │
-│            └──────────────────┬───────────────────────┘                │
-│                               │                                        │
-│  ┌────────────────────────────┴────────────────────────────────────┐  │
-│  │                         DATA LAYER                               │  │
-│  │            SQLite · Time-series · Job History · I/O Samples      │  │
-│  └────────────────────────────┬────────────────────────────────────┘  │
-│                               │                                        │
-│  ┌────────────────────────────┴────────────────────────────────────┐  │
-│  │                        COLLECTORS                                │  │
-│  │  disk│slurm│job_metrics│iostat│mpstat│vmstat│node_state│gpu│nfs │  │
-│  └──────────────────────────────────────────────────────────────────┘  │
+│         ┌──────────────────────┴──────────────────────┐                 │
+│         ▼                                             ▼                 │
+│  ┌─────────────────────┐                ┌─────────────────────────┐     │
+│  │  MONITORING ENGINE  │                │   PREDICTION ENGINE     │     │
+│  │  Threshold-based    │                │   Similarity networks   │     │
+│  │  Immediate alerts   │                │   17-dim feature space  │     │
+│  └─────────┬───────────┘                └────────────┬────────────┘     │
+│            │                                          │                 │
+│            └──────────────────┬───────────────────────┘                 │
+│                               │                                         │
+│  ┌────────────────────────────┴────────────────────────────────────┐    │
+│  │                         DATA LAYER                              │    │
+│  │            SQLite · Time-series · Job History · I/O Samples     │    │
+│  └────────────────────────────┬────────────────────────────────────┘    │
+│                               │                                         │
+│  ┌────────────────────────────┴─────────────────────────────────────┐   │
+│  │                        COLLECTORS                                │   │
+│  │  disk│slurm│job_metrics│iostat│mpstat│vmstat│node_state│gpu│nfs  │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -79,43 +79,43 @@ NØMADE is inspired by nomadic principles:
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  SYSTEM COLLECTORS (every 60s):                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ disk         │ Filesystem usage (total, used, free, projections)       │ │
-│  │ iostat       │ Device I/O: %iowait, utilization, latency               │ │
-│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │ │
-│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │ │
-│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions     │ │
-│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ disk         │ Filesystem usage (total, used, free, projections)       │  │
+│  │ iostat       │ Device I/O: %iowait, utilization, latency               │  │
+│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │  │
+│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │  │
+│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions      │  │
+│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  SLURM COLLECTORS (every 60s):                                               │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ slurm        │ Queue state: pending, running, partition stats          │ │
-│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │ │
-│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ slurm        │ Queue state: pending, running, partition stats          │  │
+│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │  │
+│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  JOB MONITOR (every 30s):                                                    │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  FEATURE VECTOR (19 dimensions for similarity analysis):                     │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │  From sacct:              From iostat:           From vmstat:          │ │
-│  │   1. health_score          11. avg_iowait         17. memory_pressure  │ │
-│  │   2. cpu_efficiency        12. peak_iowait        18. swap_activity    │ │
-│  │   3. memory_efficiency     13. device_util        19. procs_blocked    │ │
-│  │   4. used_gpu                                                          │ │
-│  │   5. had_swap             From mpstat:                                 │ │
-│  │                            14. avg_core_busy                           │ │
-│  │  From job_monitor:         15. imbalance_ratio                         │ │
-│  │   6. total_write_gb        16. max_core_busy                           │ │
-│  │   7. write_rate_mbps                                                   │ │
-│  │   8. nfs_ratio                                                         │ │
-│  │   9. runtime_minutes                                                   │ │
-│  │  10. write_intensity                                                   │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │  From sacct:              From iostat:           From vmstat:          │  │
+│  │   1. health_score          11. avg_iowait         17. memory_pressure  │  │
+│  │   2. cpu_efficiency        12. peak_iowait        18. swap_activity    │  │
+│  │   3. memory_efficiency     13. device_util        19. procs_blocked    │  │
+│  │   4. used_gpu                                                          │  │
+│  │   5. had_swap             From mpstat:                                 │  │
+│  │                            14. avg_core_busy                           │  │
+│  │  From job_monitor:         15. imbalance_ratio                         │  │
+│  │   6. total_write_gb        16. max_core_busy                           │  │
+│  │   7. write_rate_mbps                                                   │  │
+│  │   8. nfs_ratio                                                         │  │
+│  │   9. runtime_minutes                                                   │  │
+│  │  10. write_intensity                                                   │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -202,43 +202,43 @@ NØMADE builds job similarity networks using a comprehensive feature vector that
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  JOB OUTCOME (from sacct):                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  health_score      │ 0.0 (catastrophic) → 1.0 (perfect)             │   │
-│  │  cpu_efficiency    │ actual/requested CPU utilization               │   │
-│  │  memory_efficiency │ actual/requested memory utilization            │   │
-│  │  used_gpu          │ job utilized GPU resources                     │   │
-│  │  had_swap          │ job triggered swap usage                       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  health_score      │ 0.0 (catastrophic) → 1.0 (perfect)             │    │
+│  │  cpu_efficiency    │ actual/requested CPU utilization               │    │
+│  │  memory_efficiency │ actual/requested memory utilization            │    │
+│  │  used_gpu          │ job utilized GPU resources                     │    │
+│  │  had_swap          │ job triggered swap usage                       │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 │  I/O BEHAVIOR (from job_monitor):                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  total_write_gb    │ total data written during job                  │   │
-│  │  write_rate_mbps   │ peak write throughput                          │   │
-│  │  nfs_ratio         │ NFS writes / total writes (0-1)                │   │
-│  │  runtime_minutes   │ job duration                                   │   │
-│  │  write_intensity   │ GB written per minute                          │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  total_write_gb    │ total data written during job                  │    │
+│  │  write_rate_mbps   │ peak write throughput                          │    │
+│  │  nfs_ratio         │ NFS writes / total writes (0-1)                │    │
+│  │  runtime_minutes   │ job duration                                   │    │
+│  │  write_intensity   │ GB written per minute                          │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 │  SYSTEM I/O STATE (from iostat, correlated to job runtime):                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  avg_iowait        │ average %iowait during job                     │   │
-│  │  peak_iowait       │ maximum %iowait spike                          │   │
-│  │  device_util       │ average device utilization                     │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  avg_iowait        │ average %iowait during job                     │    │
+│  │  peak_iowait       │ maximum %iowait spike                          │    │
+│  │  device_util       │ average device utilization                     │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 │  CPU DISTRIBUTION (from mpstat, correlated to job runtime):                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  avg_core_busy     │ average CPU utilization across cores           │   │
-│  │  imbalance_ratio   │ std/avg busy (higher = more imbalance)         │   │
-│  │  max_core_busy     │ hottest core utilization                       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  avg_core_busy     │ average CPU utilization across cores           │    │
+│  │  imbalance_ratio   │ std/avg busy (higher = more imbalance)         │    │
+│  │  max_core_busy     │ hottest core utilization                       │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 │  MEMORY PRESSURE (from vmstat, correlated to job runtime):                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  memory_pressure   │ composite pressure indicator (0-1)             │   │
-│  │  swap_activity     │ peak swap in+out (KB/s)                        │   │
-│  │  procs_blocked     │ avg processes blocked on I/O                   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │  memory_pressure   │ composite pressure indicator (0-1)             │    │
+│  │  swap_activity     │ peak swap in+out (KB/s)                        │    │
+│  │  procs_blocked     │ avg processes blocked on I/O                   │    │ 
+│  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -839,6 +839,6 @@ If you use NOMADE in your research, please cite:
 
 ## Contact
 
-- **Author**: Joao Tonini
+- **Author**: João Tonini
 - **Email**: jtonini@richmond.edu
 - **Issues**: [GitHub Issues](https://github.com/jtonini/nomade/issues)
