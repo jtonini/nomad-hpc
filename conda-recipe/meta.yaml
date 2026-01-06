@@ -1,13 +1,13 @@
 {% set name = "nomade-hpc" %}
-{% set version = "0.3.0" %}
+{% set version = "0.3.3" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
-  # sha256 will be added after PyPI upload
+  url: https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/nomade_hpc-{{ version }}.tar.gz
+  sha256: c8d33dbe433d3c9c062203e7213c298ba172f79b3a582fc525f48ac3f9dad562
 
 build:
   number: 0
@@ -42,9 +42,9 @@ about:
   license_file: LICENSE
   summary: A lightweight HPC monitoring and predictive analytics tool
   description: |
-    NOMADE (NOde MAnagement DEvice) is a lightweight, self-contained 
+    NOMADE (NOde MAnagement DEvice) is a lightweight, self-contained
     monitoring and prediction system for HPC clusters. It uses ML-based
-    job health prediction using similarity networks and provides
+    job health prediction using cosine similarity networks and provides
     actionable recommendations.
   dev_url: https://github.com/jtonini/nomade
 

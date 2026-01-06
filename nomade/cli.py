@@ -1592,6 +1592,92 @@ def demo(jobs, days, seed, port, no_launch):
 
 def main() -> None:
     """Entry point for CLI."""
+# =============================================================================
+# COMMUNITY COMMANDS
+# =============================================================================
+
+@cli.group()
+def community():
+    """NØMADE Community Dataset commands."""
+    pass
+
+
+@community.command('export')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--output', '-o', required=True, type=click.Path(), help='Output file (.parquet or .json)')
+@click.option('--salt-file', type=click.Path(exists=True), help='File containing institution salt')
+@click.option('--salt', help='Institution salt (use --salt-file for security)')
+@click.option('--institution-type', type=click.Choice(['academic', 'government', 'industry', 'nonprofit']), 
+              default='academic', help='Institution type')
+@click.option('--cluster-type', type=click.Choice([
+    'cpu_small', 'cpu_medium', 'cpu_large',
+    'gpu_small', 'gpu_medium', 'gpu_large', 
+    'mixed_small', 'mixed_medium', 'mixed_large'
+]), default='mixed_small', help='Cluster type')
+@click.option('--start-date', help='Start date (YYYY-MM-DD)')
+@click.option('--end-date', help='End date (YYYY-MM-DD)')
+@click.pass_context
+def community_export(ctx, db_path, output, salt_file, salt, institution_type, cluster_type, start_date, end_date):
+    """Export anonymized data for community dataset."""
+    from nomade.community import export_community_data
+    from pathlib import Path
+    
+    if salt_file:
+        with open(salt_file) as f:
+            salt = f.read().strip()
+    elif not salt:
+        click.echo("Error: Either --salt or --salt-file is required", err=True)
+        raise SystemExit(1)
+    
+    if not db_path:
+        config = ctx.obj.get('config', {}) if ctx.obj else {}
+        db_path = config.get('database', {}).get('path')
+        if not db_path:
+            default_db = Path.home() / '.config' / 'nomade' / 'nomade.db'
+            if default_db.exists():
+                db_path = str(default_db)
+            else:
+                click.echo("Error: No database found. Use --db to specify path.", err=True)
+                raise SystemExit(1)
+    
+    try:
+        export_community_data(
+            db_path=Path(db_path),
+            output_path=Path(output),
+            salt=salt,
+            institution_type=institution_type,
+            cluster_type=cluster_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
+@community.command('verify')
+@click.argument('file_path', type=click.Path(exists=True))
+def community_verify(file_path):
+    """Verify an export file meets community standards."""
+    from nomade.community import verify_export
+    from pathlib import Path
+    result = verify_export(Path(file_path))
+    raise SystemExit(0 if result['valid'] else 1)
+
+
+@community.command('preview')
+@click.argument('file_path', type=click.Path(exists=True))
+@click.option('-n', 'n_samples', default=5, help='Number of sample records')
+def community_preview(file_path, n_samples):
+    """Preview an export file."""
+    from nomade.community import preview_export
+    from pathlib import Path
+    preview_export(Path(file_path), n_samples=n_samples)
+
+
+
+def main() -> None:
+    """Entry point for CLI."""
     cli(obj={})
 
 
