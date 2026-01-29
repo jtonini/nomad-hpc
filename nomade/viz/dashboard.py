@@ -2345,6 +2345,12 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             >
                                 Network View
                             </div>
+                            <div
+                                className={`tab ${activeTab === 'interactive' ? 'active' : ''}`}
+                                onClick={() => { setActiveTab('interactive'); setSelectedNode(null); }}
+                            >
+                                Interactive
+                            </div>
                         </nav>
                         
                         <div className="header-right">
@@ -2366,6 +2372,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 networkStats={networkStats}
                                 networkMethod={networkMethod}
                             />
+                        ) : activeTab === 'interactive' ? (
+                            <InteractiveView />
                         ) : (
                             <>
                                 <ClusterView
@@ -2382,6 +2390,163 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             );
         }
         
+
+        function InteractiveView() {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+
+            useEffect(() => {
+                fetchData();
+                const interval = setInterval(fetchData, 30000);
+                return () => clearInterval(interval);
+            }, []);
+
+            const fetchData = async () => {
+                try {
+                    const response = await fetch('/api/interactive');
+                    const result = await response.json();
+                    if (result.error) {
+                        setError(result.error);
+                    } else {
+                        setData(result);
+                        setError(null);
+                    }
+                } catch (e) {
+                    setError('Failed to fetch interactive sessions');
+                }
+                setLoading(false);
+            };
+
+            if (loading) {
+                return <div className="loading" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading interactive sessions...</div>;
+            }
+
+            if (error) {
+                return <div className="error" style={{ padding: '40px', textAlign: 'center', color: 'var(--red)' }}>{error}</div>;
+            }
+
+            if (!data) return null;
+
+            const { summary, by_type, users, alerts, thresholds } = data;
+
+            return (
+                <div className="interactive-view" style={{ padding: '24px', width: '100%', overflow: 'auto' }}>
+                    <div style={{ marginBottom: '24px' }}>
+                        <h2 style={{ fontSize: '20px', marginBottom: '16px' }}>Interactive Sessions</h2>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
+                            <div className="stat-card" style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>Total Sessions</div>
+                                <div style={{ fontSize: '24px', fontWeight: '600' }}>{summary.total_sessions}</div>
+                            </div>
+                            <div className="stat-card" style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>Idle Sessions</div>
+                                <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--yellow)' }}>{summary.idle_sessions}</div>
+                            </div>
+                            <div className="stat-card" style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>Memory Used</div>
+                                <div style={{ fontSize: '24px', fontWeight: '600' }}>{summary.total_memory_gb} GB</div>
+                            </div>
+                            <div className="stat-card" style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>Users</div>
+                                <div style={{ fontSize: '24px', fontWeight: '600' }}>{summary.unique_users}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                        <div style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <h3 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>Sessions by Type</h3>
+                            <table style={{ width: '100%', fontSize: '13px' }}>
+                                <thead>
+                                    <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                                        <th style={{ padding: '8px 0' }}>Type</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Total</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Idle</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Memory</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {Object.entries(by_type).filter(([_, v]) => v.total > 0).map(([type, stats]) => (
+                                        <tr key={type} style={{ borderTop: '1px solid var(--border)' }}>
+                                            <td style={{ padding: '8px 0' }}>{type}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{stats.total}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--yellow)' }}>{stats.idle}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{Math.round(stats.memory_mb)} MB</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div style={{ background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <h3 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--text-secondary)' }}>Top Users by Memory</h3>
+                            <table style={{ width: '100%', fontSize: '13px' }}>
+                                <thead>
+                                    <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                                        <th style={{ padding: '8px 0' }}>User</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Sessions</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>RStudio</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Jupyter</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Memory</th>
+                                        <th style={{ padding: '8px 0', textAlign: 'right' }}>Idle</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {users.slice(0, 10).map(user => (
+                                        <tr key={user.user} style={{ borderTop: '1px solid var(--border)' }}>
+                                            <td style={{ padding: '8px 0', fontFamily: 'monospace' }}>{user.user}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{user.sessions}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{user.rstudio}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{user.jupyter}</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right' }}>{Math.round(user.memory_mb)} MB</td>
+                                            <td style={{ padding: '8px 0', textAlign: 'right', color: user.idle > thresholds.max_idle_sessions ? 'var(--red)' : 'var(--yellow)' }}>{user.idle}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    {(alerts.idle_session_hogs.length > 0 || alerts.stale_sessions.length > 0 || alerts.memory_hogs.length > 0) && (
+                        <div style={{ marginTop: '24px', background: 'var(--bg-surface)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                            <h3 style={{ fontSize: '14px', marginBottom: '12px', color: 'var(--red)' }}>Alerts</h3>
+                            {alerts.idle_session_hogs.length > 0 && (
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Users with more than {thresholds.max_idle_sessions} idle sessions:</div>
+                                    {alerts.idle_session_hogs.map(u => (
+                                        <div key={u.user} style={{ fontSize: '13px', padding: '4px 0' }}>
+                                            <span style={{ fontFamily: 'monospace' }}>{u.user}</span>: {u.idle} idle ({u.rstudio} RStudio, {u.jupyter} Jupyter), {Math.round(u.memory_mb)} MB
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {alerts.stale_sessions.length > 0 && (
+                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Stale sessions (idle more than {thresholds.idle_session_hours}h):</div>
+                                    {alerts.stale_sessions.slice(0, 5).map((s, i) => (
+                                        <div key={i} style={{ fontSize: '13px', padding: '4px 0' }}>
+                                            <span style={{ fontFamily: 'monospace' }}>{s.user}</span>: {s.session_type}, {Math.round(s.age_hours)}h old, {Math.round(s.mem_mb)} MB
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {alerts.memory_hogs.length > 0 && (
+                                <div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Memory hogs (more than {thresholds.memory_hog_mb/1024} GB):</div>
+                                    {alerts.memory_hogs.slice(0, 5).map((s, i) => (
+                                        <div key={i} style={{ fontSize: '13px', padding: '4px 0' }}>
+                                            <span style={{ fontFamily: 'monospace' }}>{s.user}</span>: {s.session_type}, {(s.mem_mb/1024).toFixed(1)} GB
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function ClusterView({ cluster, nodes, selectedNode, onSelectNode }) {
             const stats = useMemo(() => {
                 const online = nodes.filter(n => n.status === 'online');
@@ -3953,6 +4118,17 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(DashboardHandler.data_manager.get_stats()).encode())
 
+        elif parsed.path == '/api/interactive':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                from nomade.collectors.interactive import get_report
+                report = get_report()
+                self.wfile.write(json.dumps(report).encode())
+            except Exception as e:
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
         elif parsed.path.startswith('/api/failed_jobs'):
             # Parse query parameters
             query = parse_qs(parsed.query)
