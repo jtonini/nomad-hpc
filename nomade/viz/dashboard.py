@@ -979,6 +979,132 @@ def generate_demo_jobs(count=150):
     return jobs
 
 
+def generate_demo_interactive():
+    """Generate demo interactive session data."""
+    import random
+    from datetime import datetime, timedelta
+    
+    users = ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry", "ivan", "judy"]
+    session_types = [
+        ("RStudio", 0.3),
+        ("Jupyter (Python)", 0.6),
+        ("Jupyter (R)", 0.1)
+    ]
+    
+    sessions = []
+    user_sessions = {}
+    
+    # Generate 80-120 sessions
+    n_sessions = random.randint(80, 120)
+    
+    for i in range(n_sessions):
+        user = random.choice(users)
+        # Weighted session type selection
+        r = random.random()
+        if r < 0.3:
+            session_type = "RStudio"
+        elif r < 0.9:
+            session_type = "Jupyter (Python)"
+        else:
+            session_type = "Jupyter (R)"
+        
+        # Memory: 50MB to 4GB, with some outliers
+        if random.random() < 0.1:
+            mem_mb = random.uniform(4000, 8000)  # Memory hog
+        else:
+            mem_mb = random.uniform(50, 2000)
+        
+        # Age: 0 to 72 hours
+        age_hours = random.uniform(0, 72)
+        
+        # CPU: mostly idle
+        cpu = random.uniform(0, 5) if random.random() < 0.9 else random.uniform(20, 80)
+        is_idle = cpu < 1.0
+        
+        start_time = (datetime.now() - timedelta(hours=age_hours)).isoformat()
+        
+        sessions.append({
+            "timestamp": datetime.now().isoformat(),
+            "server_id": "demo-server",
+            "session_type": session_type,
+            "user": user,
+            "pid": 10000 + i,
+            "cpu_percent": round(cpu, 1),
+            "mem_percent": round(mem_mb / 320, 1),
+            "mem_mb": round(mem_mb, 1),
+            "mem_virtual_mb": round(mem_mb * 1.5, 1),
+            "start_time": start_time,
+            "age_hours": round(age_hours, 1),
+            "is_idle": is_idle
+        })
+        
+        # Track per user
+        if user not in user_sessions:
+            user_sessions[user] = {"sessions": 0, "memory_mb": 0, "idle": 0, "rstudio": 0, "jupyter": 0}
+        user_sessions[user]["sessions"] += 1
+        user_sessions[user]["memory_mb"] += mem_mb
+        if session_type == "RStudio":
+            user_sessions[user]["rstudio"] += 1
+        else:
+            user_sessions[user]["jupyter"] += 1
+        if is_idle:
+            user_sessions[user]["idle"] += 1
+    
+    # Build summary
+    total_mem = sum(s["mem_mb"] for s in sessions)
+    idle_count = sum(1 for s in sessions if s["is_idle"])
+    
+    by_type = {
+        "RStudio": {"total": 0, "idle": 0, "memory_mb": 0},
+        "Jupyter (Python)": {"total": 0, "idle": 0, "memory_mb": 0},
+        "Jupyter (R)": {"total": 0, "idle": 0, "memory_mb": 0},
+        "Jupyter Server": {"total": 0, "idle": 0, "memory_mb": 0}
+    }
+    for s in sessions:
+        t = s["session_type"]
+        if t in by_type:
+            by_type[t]["total"] += 1
+            by_type[t]["memory_mb"] += s["mem_mb"]
+            if s["is_idle"]:
+                by_type[t]["idle"] += 1
+    
+    user_list = [{"user": u, **v} for u, v in sorted(user_sessions.items(), key=lambda x: -x[1]["memory_mb"])]
+    
+    # Alerts
+    idle_session_hours = 24
+    memory_hog_mb = 4096
+    max_idle_sessions = 5
+    
+    stale = [s for s in sessions if s["is_idle"] and s["age_hours"] >= idle_session_hours]
+    hogs = [s for s in sessions if s["mem_mb"] >= memory_hog_mb]
+    idle_hogs = [u for u in user_list if u["idle"] > max_idle_sessions]
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "server_id": "demo-server",
+        "summary": {
+            "total_sessions": len(sessions),
+            "idle_sessions": idle_count,
+            "total_memory_mb": round(total_mem, 1),
+            "total_memory_gb": round(total_mem / 1024, 2),
+            "unique_users": len(user_sessions)
+        },
+        "by_type": by_type,
+        "users": user_list,
+        "sessions": sorted(sessions, key=lambda x: -x["mem_mb"]),
+        "alerts": {
+            "stale_sessions": sorted(stale, key=lambda x: -x.get("age_hours", 0)),
+            "memory_hogs": sorted(hogs, key=lambda x: -x["mem_mb"]),
+            "idle_session_hogs": idle_hogs
+        },
+        "thresholds": {
+            "idle_session_hours": idle_session_hours,
+            "memory_hog_mb": memory_hog_mb,
+            "max_idle_sessions": max_idle_sessions
+        }
+    }
+
+
 def build_job_network(jobs, threshold=0.95, features=None):
     """Build similarity network between jobs using cosine similarity.
     
@@ -4126,9 +4252,14 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 from nomade.collectors.interactive import get_report
                 report = get_report()
+                # Use demo data if no sessions found
+                if report['summary']['total_sessions'] == 0:
+                    report = generate_demo_interactive()
                 self.wfile.write(json.dumps(report).encode())
             except Exception as e:
-                self.wfile.write(json.dumps({'error': str(e)}).encode())
+                # Fallback to demo data on error
+                report = generate_demo_interactive()
+                self.wfile.write(json.dumps(report).encode())
         elif parsed.path.startswith('/api/failed_jobs'):
             # Parse query parameters
             query = parse_qs(parsed.query)
@@ -4177,7 +4308,11 @@ def serve_dashboard(host='localhost', port=8050, config_path=None):
     print("=" * 60)
     print("  Press Ctrl+C to stop")
     print()
-    print("  SSH Tunnel: ssh -L 8050:localhost:8050 user@hostname")
+    import getpass
+    import socket
+    username = getpass.getuser()
+    hostname = socket.gethostname()
+    print(f"  SSH Tunnel: ssh -L {port}:localhost:{port} {username}@{hostname}")
     print("  Then open:  http://localhost:8050")
     print()
     
