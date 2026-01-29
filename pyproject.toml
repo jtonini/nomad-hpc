@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomade-hpc"
-version = "0.3.4"
+version = "0.4.0"
 description = "A lightweight HPC monitoring and predictive analytics tool"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
