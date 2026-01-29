@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""
+Standalone interactive session report for Python 3.6+
+Usage: nomade-interactive-report [--quiet] [--json]
+"""
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from collectors.interactive import get_report, print_report
+
+def main():
+    quiet = '--quiet' in sys.argv or '-q' in sys.argv
+    as_json = '--json' in sys.argv
+    
+    data = get_report()
+    
+    if as_json:
+        import json
+        print(json.dumps(data, indent=2))
+        return
+    
+    if quiet:
+        alerts = data.get('alerts', {})
+        has_alerts = False
+        
+        if alerts.get('idle_session_hogs'):
+            has_alerts = True
+            print("[!] Users with >5 idle sessions:")
+            for u in alerts['idle_session_hogs']:
+                print("    {}: {} idle ({} RStudio, {} Jupyter), {:.0f} MB".format(
+                    u['user'], u['idle'], u['rstudio'], u['jupyter'], u['memory_mb']))
+        
+        if alerts.get('stale_sessions'):
+            has_alerts = True
+            print("\n[!] Stale sessions (idle >24h): {}".format(len(alerts['stale_sessions'])))
+            for s in alerts['stale_sessions'][:10]:
+                print("    {}: {}, {:.0f}h old, {:.0f} MB".format(
+                    s['user'], s['session_type'], s['age_hours'], s['mem_mb']))
+        
+        if alerts.get('memory_hogs'):
+            has_alerts = True
+            print("\n[!] Memory hogs (>4GB): {}".format(len(alerts['memory_hogs'])))
+            for s in alerts['memory_hogs'][:10]:
+                print("    {}: {}, {:.1f} GB".format(
+                    s['user'], s['session_type'], s['mem_mb']/1024))
+        
+        if not has_alerts:
+            print("No alerts - all sessions within thresholds")
+        return
+    
+    print_report(data)
+
+if __name__ == '__main__':
+    main()
