@@ -336,3 +336,37 @@ similarity_days = 90
 
 # Run cleanup on this schedule (cron format)
 cleanup_schedule = "0 3 * * *"  # 3 AM daily
+
+# ============================================
+# INTERACTIVE SERVERS
+# ============================================
+
+[interactive]
+# Monitor interactive computing servers (RStudio, Jupyter)
+# These are non-SLURM servers where users run sessions directly
+enabled = false
+
+# Collection interval (seconds)
+collect_interval = 300  # Every 5 minutes
+
+# Thresholds for alerts
+idle_session_hours = 24      # Sessions idle longer than this are "stale"
+memory_hog_mb = 4096         # Sessions using more than this are flagged
+max_idle_sessions = 5        # Users with more idle sessions get flagged
+
+# Define interactive servers to monitor
+# Each server needs a unique identifier
+
+# [[interactive.servers]]
+# id = "interactive-server-1"
+# name = "Interactive Server"
+# description = "RStudio and Jupyter server"
+# 
+# # Connection method: "local" (run on this machine) or "ssh" (remote)
+# method = "local"
+# 
+# # SSH settings (only if method = "ssh")
+# # ssh_host = "server.example.edu"
+# # ssh_user = "nomade"
+# # ssh_key = "/home/nomade/.ssh/id_rsa"
+# # ssh_timeout = 30

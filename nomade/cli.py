@@ -32,6 +32,7 @@ from nomade.collectors.vmstat import VMStatCollector
 from nomade.collectors.node_state import NodeStateCollector
 from nomade.collectors.gpu import GPUCollector
 from nomade.collectors.nfs import NFSCollector
+from nomade.collectors.interactive import InteractiveCollector
 from nomade.analysis.derivatives import (
     DerivativeAnalyzer,
     analyze_disk_trend,
@@ -171,6 +172,12 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
     if not collector or 'nfs' in collector:
         if nfs_config.get('enabled', True):
             collectors.append(NFSCollector(nfs_config, db_path))
+
+    # Interactive session collector
+    interactive_config = config.get("interactive", {})
+    if not collector or "interactive" in collector:
+        if interactive_config.get("enabled", False):
+            collectors.append(InteractiveCollector(interactive_config, db_path))
     
     if not collectors:
         raise click.ClickException("No collectors enabled")

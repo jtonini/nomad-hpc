@@ -636,3 +636,65 @@ WHERE j.end_time > datetime('now', '-30 days')
 GROUP BY j.user_name
 HAVING total_jobs >= 5
 ORDER BY avg_health ASC;
+
+-- ============================================
+-- INTERACTIVE SESSIONS
+-- ============================================
+
+-- Interactive server definitions
+CREATE TABLE IF NOT EXISTS interactive_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    method TEXT NOT NULL CHECK (method IN ('local', 'ssh')),
+    ssh_host TEXT,
+    ssh_user TEXT,
+    enabled BOOLEAN DEFAULT TRUE,
+    last_collection DATETIME
+);
+
+-- Interactive session snapshots
+CREATE TABLE IF NOT EXISTS interactive_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    server_id TEXT NOT NULL,
+    user TEXT NOT NULL,
+    session_type TEXT NOT NULL,  -- RStudio, Jupyter (Python), Jupyter (R), Jupyter Server
+    pid INTEGER,
+    cpu_percent REAL,
+    mem_percent REAL,
+    mem_mb REAL,
+    mem_virtual_mb REAL,
+    start_time DATETIME,
+    age_hours REAL,
+    is_idle BOOLEAN,
+    
+    FOREIGN KEY (server_id) REFERENCES interactive_servers(id)
+);
+
+CREATE INDEX idx_interactive_sessions_ts ON interactive_sessions(timestamp);
+CREATE INDEX idx_interactive_sessions_server ON interactive_sessions(server_id, timestamp);
+CREATE INDEX idx_interactive_sessions_user ON interactive_sessions(user, timestamp);
+
+-- Interactive session summary (aggregated per collection)
+CREATE TABLE IF NOT EXISTS interactive_summary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    server_id TEXT NOT NULL,
+    total_sessions INTEGER,
+    idle_sessions INTEGER,
+    total_memory_mb REAL,
+    unique_users INTEGER,
+    rstudio_sessions INTEGER,
+    jupyter_python_sessions INTEGER,
+    jupyter_r_sessions INTEGER,
+    stale_sessions INTEGER,      -- idle > threshold hours
+    memory_hog_sessions INTEGER, -- mem > threshold MB
+    
+    FOREIGN KEY (server_id) REFERENCES interactive_servers(id)
+);
+
+CREATE INDEX idx_interactive_summary_ts ON interactive_summary(timestamp);
+CREATE INDEX idx_interactive_summary_server ON interactive_summary(server_id, timestamp);
+
+INSERT OR IGNORE INTO schema_version (version, description) VALUES (4, 'Added interactive session tables');
