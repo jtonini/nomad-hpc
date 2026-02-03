@@ -1,9 +1,10 @@
 # NØMADE
 
-**NØde MAnagement DEvice** — A lightweight HPC monitoring and predictive analytics tool.
+**NØde MAnagement DEvice** — A lightweight HPC monitoring, visualization, and predictive analytics tool.
 
 > *"Travels light, adapts to its environment, and doesn't need permanent infrastructure."*
 
+[![PyPI](https://img.shields.io/pypi/v/nomade-hpc.svg)](https://pypi.org/project/nomade-hpc/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
@@ -11,15 +12,17 @@
 
 ## Overview
 
-NØMADE is a lightweight, self-contained monitoring and prediction system for HPC clusters. Unlike heavyweight monitoring solutions that require complex infrastructure, NØMADE is designed to be deployed quickly, run with minimal resources, and provide actionable insights through both real-time alerts and predictive analytics.
+NØMADE is a lightweight, self-contained monitoring and prediction system for HPC clusters. Unlike heavyweight monitoring solutions that require complex infrastructure, NØMADE is designed to be deployed quickly, run with minimal resources, and provide actionable insights through real-time alerts, interactive session monitoring, and predictive analytics.
 
 ### Key Features
 
+- **Multi-Cluster Dashboard**: Monitor multiple HPC clusters and workstations from a single interface, with nodes grouped by partition and real-time utilization badges
+- **Interactive Session Monitoring**: Track RStudio and Jupyter sessions across clusters — identify idle sessions, memory hogs, and stale notebooks
 - **Real-time Monitoring**: Track disk usage, SLURM queues, node health, license servers, and job metrics
 - **Derivative Analysis**: Detect accelerating trends before they become critical (not just threshold alerts)
-- **Predictive Analytics**: ML-based job health prediction using similarity networks
+- **Predictive Analytics**: ML-based job health prediction using cosine similarity networks
+- **3D Visualization**: Interactive Fruchterman-Reingold force-directed network visualization with safe/danger zones
 - **Actionable Recommendations**: Data-driven defaults and user-specific suggestions
-- **3D Visualization**: Interactive network visualization with safe/danger zones
 - **Lightweight**: SQLite database, minimal dependencies, no external services required
 
 ### Philosophy
@@ -31,336 +34,7 @@ NØMADE is inspired by nomadic principles:
 
 ---
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              NØMADE                                     │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │                      ALERT DISPATCHER                           │    │
-│  │             Email · Slack · Webhook · Dashboard                 │    │
-│  └─────────────────────────────┬───────────────────────────────────┘    │
-│                                │                                        │
-│  ┌─────────────────────────────┴───────────────────────────────────┐    │
-│  │                      ALERT ENGINE                               │    │
-│  │       Rules · Derivatives · Deduplication · Cooldowns           │    │
-│  └─────────────────────────────┬───────────────────────────────────┘    │
-│                                │                                        │
-│         ┌──────────────────────┴──────────────────────┐                 │
-│         ▼                                             ▼                 │
-│  ┌─────────────────────┐                ┌─────────────────────────┐     │
-│  │  MONITORING ENGINE  │                │   PREDICTION ENGINE     │     │
-│  │  Threshold-based    │                │   Similarity networks   │     │
-│  │  Immediate alerts   │                │   17-dim feature space  │     │
-│  └─────────┬───────────┘                └─────────────┬───────────┘     │
-│            │                                          │                 │
-│            └──────────────────┬───────────────────────┘                 │
-│                               │                                         │
-│  ┌────────────────────────────┴────────────────────────────────────┐    │
-│  │                         DATA LAYER                              │    │
-│  │            SQLite · Time-series · Job History · I/O Samples     │    │
-│  └────────────────────────────┬────────────────────────────────────┘    │
-│                               │                                         │
-│  ┌────────────────────────────┴─────────────────────────────────────┐   │
-│  │                        COLLECTORS                                │   │
-│  │  disk│slurm│job_metrics│iostat│mpstat│vmstat│node_state│gpu│nfs  │   │
-│  └──────────────────────────────────────────────────────────────────┘   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Data Collection Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                         NØMADE Data Collection                               │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  SYSTEM COLLECTORS (every 60s):                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ disk         │ Filesystem usage (total, used, free, projections)       │  │
-│  │ iostat       │ Device I/O: %iowait, utilization, latency               │  │
-│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │  │
-│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │  │
-│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions      │  │
-│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  SLURM COLLECTORS (every 60s):                                               │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ slurm        │ Queue state: pending, running, partition stats          │  │
-│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │  │
-│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  JOB MONITOR (every 30s):                                                    │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  FEATURE VECTOR (17 dimensions for similarity analysis):                     │
-│  ┌────────────────────────────────────────────────────────────────────────┐  │
-│  │  From sacct:              From iostat:           From vmstat:          │  │
-│  │   1. health_score          11. avg_iowait         17. memory_pressure  │  │
-│  │   2. cpu_efficiency        12. peak_iowait        18. swap_activity    │  │
-│  │   3. memory_efficiency     13. device_util        19. procs_blocked    │  │
-│  │   4. used_gpu                                                          │  │
-│  │   5. had_swap             From mpstat:                                 │  │
-│  │                            14. avg_core_busy                           │  │
-│  │  From job_monitor:         15. imbalance_ratio                         │  │
-│  │   6. total_write_gb        16. max_core_busy                           │  │
-│  │   7. write_rate_mbps                                                   │  │
-│  │   8. nfs_ratio                                                         │  │
-│  │   9. runtime_minutes                                                   │  │
-│  │  10. write_intensity                                                   │  │
-│  └────────────────────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Collector Details
-
-| Collector | Source | Data Collected | Graceful Skip |
-|-----------|--------|----------------|---------------|
-| `disk` | `shutil.disk_usage` | Filesystem total/used/free, projections | No |
-| `slurm` | `squeue`, `sinfo` | Queue depth, partition stats, wait times | No |
-| `job_metrics` | `sacct` | Job history, CPU/mem efficiency, health scores | No |
-| `iostat` | `iostat -x` | %iowait, device utilization, latency | No |
-| `mpstat` | `mpstat -P ALL` | Per-core CPU, imbalance ratio, saturation | No |
-| `vmstat` | `vmstat` | Memory pressure, swap, blocked processes | No |
-| `node_state` | `scontrol show node` | Node allocation, drain reasons, CPU load | No |
-| `gpu` | `nvidia-smi` | GPU util, memory, temp, power | Yes (if no GPU) |
-| `nfs` | `nfsiostat` | NFS ops/sec, throughput, RTT | Yes (if no NFS) |
-| `job_monitor` | `/proc/[pid]/io` | Per-job NFS vs local I/O attribution | No |
-
-### Two Engines, One System
-
-1. **Monitoring Engine**: Real-time threshold and derivative-based alerts
-   - Catches immediate issues (disk full, node down, stuck jobs)
-   - Uses first and second derivatives for early warning
-   - "Your disk fill rate is *accelerating* — full in 3 days, not 10"
-
-2. **Prediction Engine**: Pattern-based ML analytics
-   - Catches patterns before they become issues
-   - Uses job similarity networks and health prediction
-   - "Jobs with your I/O pattern have 72% failure rate"
-
----
-
-## Monitoring Capabilities
-
-### Disk Storage
-- Filesystem usage monitoring (/, /home, /scratch, /project)
-- Per-user and per-group quota tracking
-- Fill rate calculation and projection
-- **Derivative analysis**: Detect accelerating growth before thresholds trigger
-- Orphan file and stale data detection
-- Localscratch cleanup verification
-
-### SLURM Queue
-- Queue depth and wait time tracking
-- Stuck and zombie job detection
-- Node drain status monitoring
-- Fairshare imbalance alerts
-- Pending job analysis (why is my job waiting?)
-- Job array health monitoring
-
-### Node Health
-- Node up/down/drain status
-- Hardware error detection (ECC, GPU, disk)
-- Temperature monitoring (CPU, GPU)
-- NFS mount health
-- Service status (slurmctld, slurmd, munge)
-- Network connectivity checks
-
-### License Servers
-- FlexLM and RLM license tracking
-- Real-time availability monitoring
-- Usage pattern analysis
-- Server connectivity alerts
-- Expiration warnings
-
-### Job Metrics
-- Per-job resource usage (CPU, memory, GPU)
-- I/O patterns (NFS vs local storage)
-- Runtime and efficiency metrics
-- Collected via SLURM prolog/epilog hooks
-
----
-
-## Prediction Capabilities
-
-### 17-Dimension Feature Vector
-
-NØMADE builds job similarity networks using a comprehensive feature vector that captures multiple aspects of job behavior:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Feature Vector Architecture                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  JOB OUTCOME (from sacct):                                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  health_score      │ 0.0 (catastrophic) → 1.0 (perfect)             │    │
-│  │  cpu_efficiency    │ actual/requested CPU utilization               │    │
-│  │  memory_efficiency │ actual/requested memory utilization            │    │
-│  │  used_gpu          │ job utilized GPU resources                     │    │
-│  │  had_swap          │ job triggered swap usage                       │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  I/O BEHAVIOR (from job_monitor):                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  total_write_gb    │ total data written during job                  │    │
-│  │  write_rate_mbps   │ peak write throughput                          │    │
-│  │  nfs_ratio         │ NFS writes / total writes (0-1)                │    │
-│  │  runtime_minutes   │ job duration                                   │    │
-│  │  write_intensity   │ GB written per minute                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  SYSTEM I/O STATE (from iostat, correlated to job runtime):                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  avg_iowait        │ average %iowait during job                     │    │
-│  │  peak_iowait       │ maximum %iowait spike                          │    │
-│  │  device_util       │ average device utilization                     │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  CPU DISTRIBUTION (from mpstat, correlated to job runtime):                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  avg_core_busy     │ average CPU utilization across cores           │    │
-│  │  imbalance_ratio   │ std/avg busy (higher = more imbalance)         │    │
-│  │  max_core_busy     │ hottest core utilization                       │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-│  MEMORY PRESSURE (from vmstat, correlated to job runtime):                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  memory_pressure   │ composite pressure indicator (0-1)             │    │
-│  │  swap_activity     │ peak swap in+out (KB/s)                        │    │
-│  │  procs_blocked     │ avg processes blocked on I/O                   │    │ 
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Quantitative Similarity Network
-
-- **Raw quantitative metrics**: No arbitrary thresholds or binary labels
-- **Non-redundant features**: `vram_gb > 0` implies GPU used (no separate flag)
-- **Cosine similarity**: Z-score normalized feature vectors, threshold ≥ 0.7
-- **Continuous health score**: 0 (catastrophic) → 1 (perfect), not binary
-- **Time-correlated system state**: iostat/mpstat/vmstat data aligned to job runtime
-
-### Simulation & Validation
-
-- **Generative model**: Learn distributions from empirical data
-- **Simulation cloud**: Thousands of synthetic jobs for coverage validation
-- **Anomaly detection**: Real jobs outside simulation bounds
-- **Temporal drift**: Monitor for model staleness
-
-### Error Analysis & Defaults
-
-- **Type 1 errors** (false alarms): Predicted failure, actually succeeded
-- **Type 2 errors** (missed failures): Predicted success, actually failed
-- **Threshold optimization**: Balance alert fatigue vs missed problems
-- **Data-driven defaults**: "Use localscratch → +23% success rate"
-
-### Visualization
-
-- **3D network visualization**: Three.js interactive display
-- **Axes**: NFS Write / Local Write / I/O Wait
-- **Safe zone**: Low NFS, high local, low I/O wait (green region)
-- **Danger zone**: High NFS, low local, high I/O wait (red region)
-- **Real-time tracking**: Watch jobs move through feature space
-
----
-
-## Derivative Analysis
-
-A key innovation in NØMADE is the use of first and second derivatives for early warning:
-
-```
-VALUE (0th derivative):     "Disk is at 850 GB"
-FIRST DERIVATIVE:           "Disk is filling at 15 GB/day"  
-SECOND DERIVATIVE:          "Fill rate is ACCELERATING at 3 GB/day²"
-```
-
-### Why Second Derivatives Matter
-
-Traditional threshold alerts only trigger when a value crosses a limit. By monitoring the second derivative (acceleration), NØMADE can detect:
-
-- **Exponential growth**: Before linear projections underestimate
-- **Sudden changes**: Spikes in usage patterns
-- **Developing problems**: I/O storms, memory leaks, cascading failures
-
-### Applications
-
-| Metric | Accelerating (d²>0) | Decelerating (d²<0) |
-|--------|---------------------|---------------------|
-| Disk usage | ! Exponential fill | OK Cleanup in progress |
-| Queue depth | ! System issue | OK Draining normally |
-| Failure rate |  Cascading problem | OK Issue resolving |
-| NFS latency | ! I/O storm developing | OK Load decreasing |
-| Job memory | ! Memory leak / OOM | OK Normal variation |
-| GPU temp | ! Cooling issue | OK Throttling working |
-
----
-
-## Installation
-
-### Requirements
-
-- Python 3.9+
-- SQLite 3.35+
-- SLURM (for queue and job monitoring)
-- sysstat package (iostat, mpstat)
-- procps package (vmstat) - usually pre-installed
-
-Optional:
-- nvidia-smi (for GPU monitoring)
-- nfs-common with nfsiostat (for NFS monitoring)
-- Root access (for cgroup metrics)
-
-### System Check
-
-After installation, verify all requirements:
-
-```bash
-nomade syscheck
-```
-
-Expected output:
-```
-NØMADE System Check
-════════════════════════════════════════
-Python:
-  OK Version 3.10.12 (requires >=3.9)
-  OK Required packages installed
-SLURM:
-  OK sinfo available
-  OK squeue available
-  OK sacct available
-  OK sstat available
-  OK slurmdbd enabled
-  OK JobAcctGather configured
-System Tools:
-  OK iostat available
-  OK mpstat available
-  OK vmstat available
-  ○ nvidia-smi not found (no GPU monitoring)
-  ○ nfsiostat not found (no NFS monitoring)
-  OK /proc/[pid]/io accessible
-Database:
-  OK SQLite available
-  OK Database: /var/lib/nomade/nomade.db
-  OK Schema version: 2
-Config:
-  OK Config: /etc/nomade/nomade.toml
-────────────────────────────────────────
-OK All checks passed!
-```
-
-### Quick Start
+## Quick Start
 
 **Try it now (no HPC required):**
 ```bash
@@ -368,7 +42,7 @@ pip install nomade-hpc
 nomade demo
 ```
 
-This generates synthetic data and launches the dashboard at http://localhost:5000
+This generates synthetic data and launches the dashboard at http://localhost:5000, complete with multi-cluster views, partition grouping, and interactive session monitoring.
 
 **For production HPC deployment:**
 ```bash
@@ -385,116 +59,321 @@ cd nomade
 pip install -e .
 nomade demo  # Test with synthetic data
 ```
-```
 
-### SLURM Integration (Optional)
+---
 
-For per-job metrics collection, install prolog/epilog hooks:
+## Dashboard
+
+NØMADE's web dashboard provides a comprehensive overview of your HPC infrastructure through multiple views:
+
+### Cluster Tabs
+
+Each cluster appears as a top-level tab. Within each cluster, nodes are grouped by partition with:
+
+- **Partition headers** showing name, description, node count, and down-node alerts
+- **Utilization badges** — compact CPU, MEM, and GPU usage indicators per partition
+- **Job summary** — total jobs, succeeded, and failed counts at a glance
+- **Node cards** — color-coded circles reflecting the worst of job success rate and resource pressure (CPU/MEM >75% yellow, >90% red)
+
+Click any node to open a detailed sidebar with job statistics, resource utilization bars, failure breakdown, and top users.
+
+### Interactive Sessions Tab
+
+Monitor RStudio and Jupyter sessions in real time:
+
+- **Summary cards**: Total sessions, idle count, memory usage, unique users
+- **Sessions by type**: RStudio, Jupyter (Python/R), Jupyter Server
+- **Top users by memory**: Identify resource hogs across all session types
+- **Alert panel**: Flags users with excessive idle sessions, stale notebooks, and high memory consumption
+
+### Network View
+
+3D force-directed visualization of job similarity networks:
+
+- **Fruchterman-Reingold layout**: Connected jobs cluster together based on cosine similarity
+- **PCA view**: Emergent patterns in the job feature space
+- **Axis selection**: Map any feature dimensions to X/Y/Z axes
+- **Color coding**: Jobs colored by health score from green (healthy) to red (failing)
+
+### Additional Panels
+
+- **ML Risk Panel**: High-risk job predictions with confidence scores
+- **Failed Jobs Modal**: Click any failure category to drill into affected jobs
+- **Clustering Quality**: Assortativity, neighborhood purity, SES.MNTD metrics
+
+---
+
+## Interactive Session Monitoring
+
+NØMADE can monitor RStudio Server and JupyterHub sessions, helping administrators identify and manage idle resources.
+
+### CLI Report
 
 ```bash
-# Copy hooks to SLURM configuration
-sudo cp scripts/prolog.sh /etc/slurm/prolog.d/nomade.sh
-sudo cp scripts/epilog.sh /etc/slurm/epilog.d/nomade.sh
+# Full report (Python 3.7+)
+nomade report-interactive
 
-# Update slurm.conf
-# Prolog=/etc/slurm/prolog.d/*
-# Epilog=/etc/slurm/epilog.d/*
+# Alerts only
+nomade report-interactive --quiet
 
-# Restart SLURM
-sudo systemctl restart slurmctld
+# JSON output for scripting
+nomade report-interactive --json
+
+# Custom thresholds
+nomade report-interactive --idle-hours 4 --memory-threshold 2048
 ```
+
+### Standalone Script (Python 3.6+)
+
+For older systems (e.g., CentOS 7 with Python 3.6):
+
+```bash
+./bin/nomade-interactive-report
+./bin/nomade-interactive-report --quiet
+./bin/nomade-interactive-report --json
+```
+
+### Sample Output
+
+```
+======================================================================
+              Interactive Sessions Report
+======================================================================
+  Total Sessions: 112
+  Idle Sessions:  107 (95.5%)
+  Total Memory:   11.09 GB
+  Unique Users:   28
+
+  SESSIONS BY TYPE:
+  Type                    Total     Idle  Memory (MB)
+  -------------------- -------- -------- ------------
+  Jupyter (Python)           92       89         7432
+  RStudio                    18       16         3201
+  Jupyter (R)                 1        1          312
+
+  TOP USERS BY MEMORY:
+  User         Sessions  RStudio  Jupyter   Mem (MB)   Idle
+  ------------ -------- -------- -------- ---------- ------
+  msimpso3           11        0       11       2156     11
+  ad3tb              11        0       11       1240     11
+  rp5un              10        0       10        841     10
+
+  [!] Users with >5 idle sessions:
+      msimpso3: 11 idle, 2156 MB
+      ad3tb: 11 idle, 1240 MB
+```
+
+### JupyterHub Idle Culler
+
+NØMADE pairs well with the JupyterHub idle culler to automatically clean up stale sessions:
+
+```python
+# /etc/jupyterhub/jupyterhub_config.py
+c.JupyterHub.services = [
+    {
+        'name': 'idle-culler',
+        'command': [
+            'python3', '-m', 'jupyterhub_idle_culler',
+            '--timeout=86400',      # 24 hours
+            '--cull-every=3600',    # Check hourly
+            '--concurrency=5',
+        ],
+        'admin': True,  # For JupyterHub < 2.0
+    }
+]
+```
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              NØMADE                                     │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                 WEB DASHBOARD (Flask)                           │    │
+│  │   Cluster Tabs · Partition Groups · Interactive · Network 3D   │    │
+│  └─────────────────────────────┬───────────────────────────────────┘    │
+│                                │                                        │
+│  ┌─────────────────────────────┴───────────────────────────────────┐    │
+│  │                      ALERT ENGINE                               │    │
+│  │       Rules · Derivatives · Deduplication · Cooldowns           │    │
+│  │          Email · Slack · Webhook · Dashboard                    │    │
+│  └─────────────────────────────┬───────────────────────────────────┘    │
+│                                │                                        │
+│         ┌──────────────────────┴──────────────────────┐                 │
+│         ▼                                             ▼                 │
+│  ┌─────────────────────┐                ┌─────────────────────────┐     │
+│  │  MONITORING ENGINE  │                │   PREDICTION ENGINE     │     │
+│  │  Threshold-based    │                │   Cosine similarity     │     │
+│  │  Immediate alerts   │                │   17-dim feature space  │     │
+│  └─────────┬───────────┘                └─────────────┬───────────┘     │
+│            │                                          │                 │
+│            └──────────────────┬───────────────────────┘                 │
+│                               │                                         │
+│  ┌────────────────────────────┴────────────────────────────────────┐    │
+│  │                         DATA LAYER                              │    │
+│  │            SQLite · Time-series · Job History · I/O Samples     │    │
+│  └────────────────────────────┬────────────────────────────────────┘    │
+│                               │                                         │
+│  ┌────────────────────────────┴─────────────────────────────────────┐   │
+│  │                        COLLECTORS                                │   │
+│  │  disk · slurm · job_metrics · iostat · mpstat · vmstat           │   │
+│  │  node_state · gpu · nfs · interactive                            │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Two Engines, One System
+
+1. **Monitoring Engine**: Real-time threshold and derivative-based alerts
+   - Catches immediate issues (disk full, node down, stuck jobs, idle sessions)
+   - Uses first and second derivatives for early warning
+   - "Your disk fill rate is *accelerating* — full in 3 days, not 10"
+
+2. **Prediction Engine**: Pattern-based ML analytics
+   - Catches patterns before they become issues
+   - Uses job cosine similarity networks and health prediction
+   - "Jobs with your I/O pattern have 72% failure rate"
+
+---
+
+## Data Collection
+
+### Collectors
+
+| Collector | Source | Data Collected | Graceful Skip |
+|-----------|--------|----------------|---------------|
+| `disk` | `shutil.disk_usage` | Filesystem total/used/free, projections | No |
+| `slurm` | `squeue`, `sinfo` | Queue depth, partition stats, wait times | No |
+| `job_metrics` | `sacct` | Job history, CPU/mem efficiency, health scores | No |
+| `iostat` | `iostat -x` | %iowait, device utilization, latency | No |
+| `mpstat` | `mpstat -P ALL` | Per-core CPU, imbalance ratio, saturation | No |
+| `vmstat` | `vmstat` | Memory pressure, swap, blocked processes | No |
+| `node_state` | `scontrol show node` | Node allocation, drain reasons, CPU load | No |
+| `gpu` | `nvidia-smi` | GPU util, memory, temp, power | Yes (if no GPU) |
+| `nfs` | `nfsiostat` | NFS ops/sec, throughput, RTT | Yes (if no NFS) |
+| `job_monitor` | `/proc/[pid]/io` | Per-job NFS vs local I/O attribution | No |
+| `interactive` | Process table | RStudio/Jupyter sessions, idle state, memory | No |
+
+### 17-Dimension Feature Vector
+
+NØMADE builds job similarity networks using a comprehensive feature vector:
+
+| Source | Features |
+|--------|----------|
+| `sacct` | health_score, cpu_efficiency, memory_efficiency, used_gpu, had_swap |
+| `job_monitor` | total_write_gb, write_rate_mbps, nfs_ratio, runtime_minutes, write_intensity |
+| `iostat` | avg_iowait, peak_iowait, device_util |
+| `mpstat` | avg_core_busy, imbalance_ratio, max_core_busy |
+| `vmstat` | memory_pressure, swap_activity, procs_blocked |
+
+---
+
+## Prediction Capabilities
+
+### Cosine Similarity Network
+
+NØMADE uses **cosine similarity** on Z-score normalized feature vectors to build job similarity networks:
+
+- **Continuous metrics**: Raw quantitative values, no arbitrary binning or categorical labels
+- **Non-redundant features**: Each dimension captures unique information
+- **Similarity threshold**: Default ≥ 0.7 cosine similarity to form network edges
+- **Continuous health score**: 0.0 (catastrophic) → 1.0 (perfect)
+- **Time-correlated system state**: iostat/mpstat/vmstat data aligned to job runtime windows
+
+### Fruchterman-Reingold Network Visualization
+
+The 3D network view uses a **Fruchterman-Reingold force-directed layout**:
+
+- **Repulsive forces** between all node pairs: F = k² / distance (pushes unrelated jobs apart)
+- **Attractive forces** along edges: F = distance² / k × similarity (pulls similar jobs together)
+- **Result**: Natural clustering where groups of similar jobs form visible communities
+
+Three view modes are available:
+- **Force Layout**: Jobs positioned by network structure — connected jobs cluster together
+- **Feature Axes**: Jobs positioned by selected feature dimensions (e.g., NFS ratio × CPU efficiency × I/O wait)
+- **PCA View**: Jobs positioned by principal components — reveals emergent patterns
+
+### ML Models
+
+- **GNN**: Graph neural network for network-aware prediction (PyTorch Geometric)
+- **LSTM**: Temporal pattern detection across job sequences
+- **Autoencoder**: Anomaly detection for outlier jobs
+- **Ensemble**: Weighted voting across model types
+
+---
+
+## Derivative Analysis
+
+A key innovation in NØMADE is the use of first and second derivatives for early warning:
+
+```
+VALUE (0th derivative):     "Disk is at 850 GB"
+FIRST DERIVATIVE:           "Disk is filling at 15 GB/day"
+SECOND DERIVATIVE:          "Fill rate is ACCELERATING at 3 GB/day²"
+```
+
+By monitoring the second derivative (acceleration), NØMADE detects exponential growth, sudden usage spikes, and developing problems before linear projections underestimate the risk.
+
+| Metric | Accelerating (d²>0) | Decelerating (d²<0) |
+|--------|---------------------|---------------------|
+| Disk usage | ⚠ Exponential fill | ✓ Cleanup in progress |
+| Queue depth | ⚠ System issue | ✓ Draining normally |
+| Failure rate | ⚠ Cascading problem | ✓ Issue resolving |
+| NFS latency | ⚠ I/O storm developing | ✓ Load decreasing |
 
 ---
 
 ## Configuration
 
-NØMADE uses a TOML configuration file:
+NØMADE uses a TOML configuration file (`~/.config/nomade/nomade.toml` or `/etc/nomade/nomade.toml`):
 
 ```toml
-# nomade.toml
-
 [general]
-cluster_name = "mycluster"
+log_level = "info"
 data_dir = "/var/lib/nomade"
-log_level = "INFO"
 
 [collectors]
-# All collectors enabled by default
-# Set enabled = false to disable specific collectors
+enabled = ["disk", "slurm", "node_state"]
+interval = 60
 
 [collectors.disk]
-enabled = true
 filesystems = ["/", "/home", "/scratch", "/localscratch"]
 
 [collectors.slurm]
-enabled = true
-partitions = ["standard", "debug", "gpu", "highmem"]
+partitions = []  # Empty = all partitions
 
-[collectors.job_metrics]
-enabled = true
-lookback_hours = 24
-min_runtime_seconds = 10
-
-[collectors.iostat]
-enabled = true
-# devices = ["sda", "nvme0n1"]  # Optional: specific devices only
-
-[collectors.mpstat]
-enabled = true
-store_per_core = true
-store_summary = true
-
-[collectors.vmstat]
-enabled = true
-
-[collectors.node_state]
-enabled = true
-# nodes = ["node001", "node002"]  # Optional: specific nodes only
-
-[collectors.gpu]
-enabled = true  # Gracefully skipped if no nvidia-smi
-
-[collectors.nfs]
-enabled = true  # Gracefully skipped if no nfsiostat
-
-[monitor]
-# Job I/O monitor settings
-sample_interval = 30
-nfs_paths = ["/home", "/scratch", "/project"]
-local_paths = ["/localscratch", "/tmp", "/dev/shm"]
-port = 27001
+# Cluster topology (optional — auto-detected from database if not defined)
+# [clusters]
+# name = "my-cluster"
+#
+# [clusters.partitions.general]
+# description = "General CPU partition"
+# nodes = ["node01", "node02", "node03"]
+#
+# [clusters.partitions.gpu]
+# description = "GPU partition"
+# nodes = ["gpu01", "gpu02"]
+# gpu_nodes = ["gpu01", "gpu02"]
 
 [alerts]
-# Alert dispatch configuration
-email_enabled = true
-email_to = ["admin@example.edu"]
-email_from = "nomade@cluster.example.edu"
-smtp_host = "smtp.example.edu"
-
-slack_enabled = false
-slack_webhook = ""
-
-# Alert thresholds
-disk_warning_percent = 85
-disk_critical_percent = 95
-queue_stuck_days = 7
-gpu_temp_warning = 83
-
-[alerts.derivatives]
-# Second derivative thresholds
-disk_acceleration_warning = 1.0  # GB/day²
-queue_acceleration_warning = 5   # jobs/hour²
-
-[prediction]
-# Prediction engine settings
 enabled = true
-similarity_threshold = 0.7
-health_threshold = 0.5
-retrain_interval_days = 7
+min_severity = "warning"
+cooldown_minutes = 15
+
+[alerts.thresholds.interactive]
+idle_sessions_warning = 50
+idle_sessions_critical = 100
+memory_gb_warning = 32
+memory_gb_critical = 64
 
 [dashboard]
-host = "0.0.0.0"
-port = 8080
+host = "127.0.0.1"
+port = 8050
 ```
 
 ---
@@ -504,35 +383,39 @@ port = 8080
 ### Command Line Interface
 
 ```bash
-# System status overview
-nomade status              # Full system status with all metrics
-nomade syscheck            # Verify system requirements
+# System status
+nomade status              # Full system status
+nomade syscheck            # Verify requirements
 
 # Data collection
 nomade collect --once      # Single collection cycle
-nomade collect --interval 60   # Continuous collection
-nomade collect -C disk,slurm   # Specific collectors only
+nomade collect -C disk,slurm   # Specific collectors
 
-# Job I/O monitoring
-nomade monitor             # Monitor running jobs for I/O
-nomade monitor --once      # Single snapshot
-nomade monitor -i 30       # 30-second interval
+# Dashboard
+nomade dashboard           # Launch web interface
+nomade demo                # Launch with demo data
+
+# Interactive session monitoring
+nomade report-interactive          # Full report
+nomade report-interactive --quiet  # Alerts only
+nomade report-interactive --json   # JSON output
 
 # Analysis
-nomade disk /home --hours 24   # Filesystem trend analysis
-nomade jobs --user jsmith      # Recent job history
-nomade similarity              # Job similarity analysis
-nomade similarity --find-similar 12345  # Find similar jobs
-nomade similarity --export viz.json     # Export for visualization
+nomade disk /home --hours 24       # Filesystem trends
+nomade jobs --user jsmith          # Job history
+nomade similarity                  # Similarity analysis
+
+# ML
+nomade train               # Train prediction models
+nomade predict             # Run predictions
+nomade report              # Generate ML report
 
 # Alerts
 nomade alerts              # View recent alerts
-nomade alerts --unresolved # Only unresolved alerts
+nomade alerts --unresolved # Unresolved only
 ```
 
 ### Bash Helper Functions
-
-Source the helper script for convenient shortcuts:
 
 ```bash
 source ~/nomade/scripts/nomade.sh
@@ -542,240 +425,85 @@ nhelp      # Show all commands
 | Command | Description |
 |---------|-------------|
 | `nstatus` | Quick status overview |
-| `nwatch [s]` | Live status updates (every s seconds) |
+| `nwatch [s]` | Live status updates |
 | `ndisk PATH` | Filesystem trend analysis |
 | `njobs` | Recent job history |
-| `nsimilarity` | Job similarity analysis |
 | `nalerts` | View alerts |
 | `ncollect` | Run data collection |
-| `nmonitor` | Job I/O monitoring |
-| `nsyscheck` | System requirements check |
-| `nlog` | Tail collection log |
-
-### Status Output
-
-```
-═══ NØMADE Status ═══
-
-Filesystems:
-  /                    [██████████░░░░░░░░░░] 51.4% (34.02/66.26 GB)
-  /home                [██████████░░░░░░░░░░] 51.4% (34.02/66.26 GB)
-Queue:
-  standard        Running:   4  Pending:  12
-  gpu             Running:   2  Pending:   3
-I/O:
-  CPU iowait:    2.3%
-  CPU user/sys:  45.2% / 3.1%
-  vda          util: 15.2% write: 1240 KB/s  latency: 4.2ms
-CPU Cores:
-  Cores:         32
-  Avg busy:      48.2%
-  Range:         12.0% - 98.5% (spread: 86.5%)
-  Imbalance:     0.42 (std/avg)
-  Saturated:     4 (>95% busy)
-Memory:
-  Free:          12.45 GB
-  Cache:         48.23 GB
-  Swap used:     128 MB
-  Pressure:      0.15
-Nodes:
-  node001         MIXED        CPU: 28/32 (88%)  Mem: 92%  Load: 27.4
-  node002         ALLOCATED    CPU: 32/32 (100%) Mem: 98%  Load: 31.2
-  node003         DRAIN        CPU: 0/32 (0%)    Mem: 0%   Load: 0.01
-    └─ Reason: GPU memory errors - investigating
-Collection:
-  disk            1440 runs  100% success
-  iostat          1440 runs  100% success
-  mpstat          1440 runs  100% success
-  vmstat          1440 runs  100% success
-  slurm           1440 runs  100% success
-  job_metrics     1440 runs  100% success
-  node_state      1440 runs  100% success
-```
-
-### Python API
-
-```python
-from nomade import Nomade
-
-# Initialize
-nm = Nomade(config_path='nomade.toml')
-
-# Get current disk status
-disk_status = nm.collectors.disk.get_status()
-for fs in disk_status:
-    print(f"{fs['path']}: {fs['used_pct']:.1f}%")
-    
-# Analyze trends
-analysis = nm.analysis.analyze_disk('/scratch')
-print(f"Fill rate: {analysis['first_derivative']:.1f} GB/day")
-print(f"Acceleration: {analysis['second_derivative']:.2f} GB/day²")
-print(f"Trend: {analysis['trend']}")
-
-# Predict job health
-prediction = nm.prediction.predict_job(job_metrics)
-print(f"Predicted health: {prediction['health']:.2f}")
-print(f"Risk level: {prediction['risk_level']}")
-print(f"Recommendations: {prediction['recommendations']}")
-
-# Get recommendations for a user
-recs = nm.prediction.recommend_for_user('alice')
-for rec in recs:
-    print(f"- {rec['message']}")
-```
 
 ---
 
-## Repository Structure
+## Installation
 
+### Requirements
+
+- Python 3.9+ (standalone interactive report works on Python 3.6+)
+- SQLite 3.35+
+- SLURM (for queue and job monitoring)
+- sysstat package (iostat, mpstat)
+
+Optional:
+- nvidia-smi (for GPU monitoring)
+- nfs-common with nfsiostat (for NFS monitoring)
+
+### System Check
+
+```bash
+nomade syscheck
 ```
-nomade/
-├── README.md                 # This file
-├── LICENSE                   # AGPL v3
-├── pyproject.toml           # Package configuration
-├── requirements.txt         # Dependencies
-├── nomade.toml.example      # Example configuration
-│
-├── nomade/                  # Main package
-│   ├── __init__.py
-│   ├── cli.py               # Command-line interface
-│   ├── daemon.py            # Main monitoring daemon
-│   ├── config.py            # Configuration handling
-│   │
-│   ├── collectors/          # Data collectors
-│   │   ├── __init__.py
-│   │   ├── base.py          # Base collector class
-│   │   ├── disk.py          # Disk & quota monitoring
-│   │   ├── slurm.py         # SLURM queue & jobs
-│   │   ├── nodes.py         # Node health
-│   │   ├── licenses.py      # License servers
-│   │   ├── jobs.py          # Per-job metrics
-│   │   └── network.py       # Network monitoring
-│   │
-│   ├── db/                  # Database layer
-│   │   ├── __init__.py
-│   │   ├── schema.sql       # SQLite schema
-│   │   ├── models.py        # Data models
-│   │   └── queries.py       # Common queries
-│   │
-│   ├── analysis/            # Analysis utilities
-│   │   ├── __init__.py
-│   │   ├── derivatives.py   # Derivative calculations
-│   │   ├── projections.py   # Trend projections
-│   │   └── timeseries.py    # Time-series utilities
-│   │
-│   ├── alerts/              # Alert system
-│   │   ├── __init__.py
-│   │   ├── engine.py        # Alert evaluation
-│   │   ├── rules.py         # Alert rule definitions
-│   │   └── dispatch.py      # Email/Slack/webhook
-│   │
-│   ├── prediction/          # ML prediction
-│   │   ├── __init__.py
-│   │   ├── similarity.py    # Cosine similarity
-│   │   ├── network.py       # Similarity network
-│   │   ├── health.py        # Health score prediction
-│   │   ├── simulation.py    # Simulation model
-│   │   ├── errors.py        # Type 1/2 error analysis
-│   │   └── recommendations.py  # Defaults generation
-│   │
-│   └── viz/                 # Visualization
-│       ├── __init__.py
-│       ├── dashboard.py     # Web dashboard
-│       └── static/          # React frontend
-│           ├── index.html
-│           └── components/
-│               ├── Network3D.jsx
-│               ├── DiskStatus.jsx
-│               ├── QueueStatus.jsx
-│               └── Alerts.jsx
-│
-├── scripts/                 # Utility scripts
-│   ├── prolog.sh           # SLURM prolog hook
-│   ├── epilog.sh           # SLURM epilog hook
-│   └── install_hooks.sh    # Hook installer
-│
-├── tests/                   # Test suite
-│   ├── __init__.py
-│   ├── test_collectors.py
-│   ├── test_analysis.py
-│   ├── test_alerts.py
-│   └── test_prediction.py
-│
-└── docs/                    # Documentation
-    ├── installation.md
-    ├── configuration.md
-    ├── collectors.md
-    ├── alerts.md
-    ├── prediction.md
-    └── api.md
+
+### SLURM Integration (Optional)
+
+For per-job metrics collection:
+
+```bash
+sudo cp scripts/prolog.sh /etc/slurm/prolog.d/nomade.sh
+sudo cp scripts/epilog.sh /etc/slurm/epilog.d/nomade.sh
+sudo systemctl restart slurmctld
 ```
 
 ---
 
 ## Theoretical Background
 
-NØMADE's prediction engine is inspired by biogeographical network analysis, particularly the work of Vilhena & Antonelli (2015) on mapping biomes using species occurrence data.
+### From Biogeography to HPC
 
-### Biogeography → HPC Analogy
+NØMADE's prediction engine draws inspiration from biogeographical network analysis, particularly the concept of mapping emergent regions from observational data (Vilhena & Antonelli, 2015). Just as biogeographical regions emerge from species distribution patterns rather than being predefined, NØMADE allows job behavior patterns to emerge from metric data.
 
-| Biogeography | HPC Infrastructure |
-|--------------|-------------------|
+However, NØMADE uses **cosine similarity on continuous feature vectors** rather than the Simpson similarity on categorical presence/absence data used in biogeography. This approach better captures the quantitative, multi-dimensional nature of HPC job metrics — where the *magnitude* of CPU efficiency or I/O throughput matters, not just whether a job "used" a resource.
+
+| Biogeography Concept | NØMADE Analog |
+|---------------------|---------------|
 | Species | Jobs |
-| Geographic regions | Resources (nodes, storage) |
-| Biomes | Emergent behavior clusters |
-| Species ranges | Job resource usage patterns |
+| Geographic regions | Compute resources (nodes, partitions) |
+| Emergent biomes | Job behavior clusters |
+| Species ranges | Resource usage patterns |
 | Transition zones | Domain boundaries (CPU↔GPU, NFS↔local) |
-
-### Key Insight
-
-Just as biogeographical regions emerge from species distribution data rather than being predefined, NØMADE allows behavior patterns to emerge from job metrics rather than imposing arbitrary categories.
-
-### Dual-View Analysis
-
-1. **Data space**: Jobs as points in feature space, clustered by similarity
-2. **Real space**: Jobs mapped to physical resources, showing actual infrastructure usage
 
 ---
 
 ## Roadmap
 
-### Phase 1: Monitoring Foundation ✓
-- [x] Design architecture
-- [x] Define data model
-- [x] Implement collectors (disk, SLURM, GPU, NFS, iostat, vmstat, mpstat)
-- [x] Implement alert engine
-- [x] Basic dashboard
+See [ROADMAP.md](ROADMAP.md) for the full development plan. Highlights:
 
-### Phase 2: Prediction Engine ✓
-- [x] Cosine similarity network (default), Simpson available for biogeographical analysis
-- [x] Failure classification (8 classes: SUCCESS, TIMEOUT, FAILED, OOM, etc.)
-- [x] Simulation framework (VM-based SLURM simulation)
-- [x] Clustering analysis (assortativity, SES.MNTD, neighborhood purity)
-- [x] Hotspot detection (failure-correlated feature bins)
+### Completed (v1.1.0)
+- [x] Multi-cluster tabs with partition grouping
+- [x] Interactive session monitoring (RStudio/Jupyter)
+- [x] Dashboard Interactive tab with alerts
+- [x] Standalone report script for Python 3.6 systems
+- [x] JupyterHub idle-culler integration
+- [x] Node health reflects CPU/memory pressure
+- [x] Failed jobs modal with clickable categories
+- [x] 3D force-directed network visualization
+- [x] ML prediction models (GNN, LSTM, Autoencoder, Ensemble)
 
-### Phase 3: Visualization ✓
-- [x] 3D network visualization (Three.js force-directed layout)
-- [x] Interactive dashboard with cluster/network views
-- [x] PCA view for emergent patterns
-- [x] Clustering quality panel
-- [x] ML Risk panel with high-risk job display
-
-### Phase 4: Advanced ML ✓
-- [x] GNN for network-aware prediction (PyTorch Geometric)
-- [x] LSTM for temporal pattern detection
-- [x] Autoencoder for anomaly detection (100% precision)
-- [x] Ensemble methods (weighted voting)
-- [x] Model persistence (save/load from database)
-- [x] CLI commands (train, predict, report)
-- [ ] Real-time scoring hook (SLURM prolog)
-- [ ] Continuous learning pipeline
-
-### Phase 5: Community
-- [ ] Multi-cluster federation
-- [ ] Anonymized data sharing
-- [ ] Community benchmarks
-- [ ] JOSS/SoftwareX paper submission
+### Next Up
+- [ ] Job queue panel per partition (squeue-like view)
+- [ ] Partition utilization sparkline history
+- [ ] User leaderboard and fairshare status
+- [ ] Job efficiency analysis (requested vs used)
+- [ ] Multi-site federation
+- [ ] Real-time SLURM prolog scoring hook
 
 ---
 
@@ -783,24 +511,13 @@ Just as biogeographical regions emerge from species distribution data rather tha
 
 Contributions are welcome! Please see [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
 
-### Development Setup
-
 ```bash
-# Clone and install in development mode
 git clone https://github.com/jtonini/nomade.git
 cd nomade
 python -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
-
-# Run tests
 pytest
-
-# Run linting
-ruff check .
-
-# Build documentation
-cd docs && make html
 ```
 
 ---
@@ -818,8 +535,6 @@ See [LICENSE](LICENSE) for details.
 
 ## Citation
 
-If you use NOMADE in your research, please cite:
-
 ```bibtex
 @software{nomade2026,
   author = {Tonini, Joao},
@@ -828,12 +543,6 @@ If you use NOMADE in your research, please cite:
   url = {https://github.com/jtonini/nomade}
 }
 ```
-
----
-
-## Acknowledgments
-
-- Biogeographical network analysis inspired by Vilhena & Antonelli (2015)
 
 ---
 
