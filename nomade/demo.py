@@ -233,6 +233,28 @@ class DemoDatabase:
             cluster TEXT DEFAULT 'demo', partitions TEXT, reason TEXT, features TEXT, gres TEXT, is_healthy INTEGER)""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_node_state_ts ON node_state(timestamp)")
 
+        # Group membership for edu module
+        c.execute("""CREATE TABLE IF NOT EXISTS group_membership (
+            username TEXT, group_name TEXT, gid INTEGER, cluster TEXT,
+            PRIMARY KEY (username, group_name, cluster))""")
+        
+        # Populate with demo users in demo groups
+        demo_groups = [
+            ("alice", "cs101", 2001, "demo"),
+            ("alice", "research", 3001, "demo"),
+            ("bob", "cs101", 2001, "demo"),
+            ("charlie", "cs101", 2001, "demo"),
+            ("charlie", "physics-lab", 3002, "demo"),
+            ("diana", "cs101", 2001, "demo"),
+            ("diana", "bio301", 2002, "demo"),
+            ("eve", "bio301", 2002, "demo"),
+            ("eve", "research", 3001, "demo"),
+        ]
+        for username, group_name, gid, cluster in demo_groups:
+            c.execute("""INSERT OR REPLACE INTO group_membership 
+                (username, group_name, gid, cluster) VALUES (?, ?, ?, ?)""",
+                (username, group_name, gid, cluster))
+
         conn.commit()
         conn.close()
 
