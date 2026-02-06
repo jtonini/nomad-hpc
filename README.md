@@ -369,7 +369,7 @@ c.JupyterHub.services = [
 │                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │                 WEB DASHBOARD (Flask)                           │    │
-│  │   Cluster Tabs · Resources · Activity · Interactive · Network  │    │
+│  │   Cluster Tabs · Resources · Activity · Interactive · Network   │    │
 │  └─────────────────────────────┬───────────────────────────────────┘    │
 │                                │                                        │
 │  ┌──────────────┬──────────────┴──────────────┬──────────────────┐      │
