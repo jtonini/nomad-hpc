@@ -39,79 +39,13 @@ NØMADE (NOde MAnagement DEvice) is a lightweight monitoring and predictive anal
 HPC; high-performance computing; monitoring; machine learning; SLURM; predictive analytics; failure prediction
 
 \subsection*{Introduction}
+HPC administrators face a persistent challenge: detecting job failures before they impact researchers. Enterprise monitoring solutions like Prometheus, Grafana, or Nagios require significant infrastructure and target general IT systems rather than HPC-specific workloads. Existing HPC tools such as TACC Stats \cite{tacc}, XDMoD \cite{xdmod}, and LLNL's Lightweight Distributed Metric Service \cite{ldms} provide detailed metrics but require substantial deployment effort and focus on post-hoc analysis rather than real-time prediction.
 
-HPC administrators face a persistent challenge: detecting job failures
-before they impact researchers. Traditional monitoring approaches fall
-into two categories: enterprise IT solutions and HPC-specific tools,
-each with distinct trade-offs.
+Common HPC failure patterns include NFS saturation (jobs writing to network storage instead of local scratch), memory leaks (gradual consumption leading to out-of-memory kills), GPU thermal throttling (temperature-induced performance degradation), and queue starvation (resource contention causing excessive wait times). These failures often exhibit warning signs minutes to hours before critical thresholds are breached.
 
-Enterprise monitoring solutions like Prometheus \cite{prometheus},
-Grafana, and Nagios provide mature, feature-rich platforms but require
-significant infrastructure---database servers, message queues, and
-dedicated hardware---that may be impractical for small-to-medium HPC
-centers. These tools target general IT workloads and lack native
-understanding of HPC concepts such as job schedulers, batch queues, and
-compute allocations.
+NØMADE addresses this gap by providing: (1) zero-infrastructure deployment using a single SQLite database with no external services; (2) system-level monitoring that works on any Linux system without requiring HPC software; (3) optional SLURM integration for job-level analytics and predictive alerts; and (4) similarity-based analysis that learns failure patterns from historical data.
 
-HPC-specific tools address this domain gap but introduce their own
-complexity. TACC Stats \cite{tacc} provides comprehensive hardware
-counter data and correlates system metrics with job performance,
-enabling detailed post-hoc analysis of application behavior. XDMoD
-\cite{xdmod} offers institutional-scale job accounting and resource
-utilization reporting with sophisticated visualization capabilities, but
-its deployment involves multiple database backends and web services. The
-Lightweight Distributed Metric Service (LDMS) \cite{ldms} achieves
-impressive scalability for continuous monitoring on large systems
-through its lightweight, distributed architecture. These tools excel at
-retrospective analysis---understanding what happened after a
-failure---but provide limited support for real-time prediction of
-failures before they occur.
-
-A complementary approach treats failure prediction as a pattern
-recognition problem. Jobs that fail often share common characteristics:
-excessive NFS writes, memory pressure, or inefficient CPU utilization.
-Machine learning methods have been applied to HPC failure prediction
-\cite{mlhpc}, typically using classification models trained on job
-features. However, these approaches often treat jobs as independent
-observations, ignoring the structural relationships between jobs with
-similar resource profiles.
-
-NØMADE addresses these gaps by combining zero-infrastructure deployment
-with network-based failure prediction. The key insight is that jobs with
-similar resource usage patterns tend to experience similar outcomes.
-Rather than treating each job independently, NØMADE models jobs as nodes
-in a similarity network where edges connect jobs with comparable
-behavioral fingerprints. This network structure reveals failure-prone
-regions in the feature space---clusters of jobs that share
-characteristics associated with poor outcomes---enabling both risk
-assessment for individual jobs and actionable recommendations for users.
-
-The choice of similarity metric is consequential for network topology.
-NØMADE uses cosine similarity on Z-score normalized feature vectors,
-which emphasizes the \emph{shape} of resource usage profiles rather than
-absolute magnitudes. A job requesting 64GB of memory with 50\%
-utilization has a similar profile to one requesting 8GB with 50\%
-utilization---both represent reasonable memory sizing---even though
-their absolute consumption differs by an order of magnitude. This
-approach draws inspiration from network-based methods in biogeography,
-where similarity metrics identify emergent regions from species
-distribution patterns \cite{vilhena}. Just as biogeographical networks
-reveal ecological boundaries from observational data without predefined
-regions, job similarity networks reveal behavioral boundaries between
-successful and failing workloads without predefined failure categories.
-The similarity threshold (default $\geq 0.7$) controls network density:
-higher thresholds create sparser networks with tighter clusters, while
-lower thresholds reveal broader patterns at the cost of specificity.
-
-NØMADE provides: (1) zero-infrastructure deployment using a single
-SQLite database with no external services; (2) system-level monitoring
-that works on any Linux system without requiring HPC software; (3)
-optional SLURM integration for job-level analytics and predictive
-alerts; (4) similarity network analysis that learns failure patterns
-from historical data; and (5) educational analytics that track the
-development of computational proficiency over time, enabling insights
-such as ``15 of 20 students improved memory efficiency over the
-semester.''
+A key innovation is the use of similarity networks for failure prediction. Each job is characterized by a 17-dimensional feature vector capturing resource usage patterns (CPU efficiency, memory consumption, I/O behavior, etc.). Jobs are connected in a network when their feature vectors exceed a cosine similarity threshold, creating clusters of jobs with similar resource profiles. Because jobs with similar characteristics often experience similar outcomes, the network structure reveals failure-prone regions in the feature space. This approach enables both real-time risk assessment for running jobs and actionable recommendations for users---for example, identifying that jobs with high NFS write ratios have elevated failure rates and suggesting the use of local scratch storage instead.
 
 \subsection*{Implementation and Architecture}
 NØMADE is implemented in Python and follows a modular architecture with four main components (Figure~\ref{fig:architecture}):
@@ -210,12 +144,11 @@ Python 3.9+
 
 \subsubsection*{Archive}
 \begin{tabular}{ll}
-Name: & Zenodo \\
-Persistent identifier: & \url{https://doi.org/10.5281/zenodo.18614517} \\
+Name: & PyPI (Python Package Index) \\
+Persistent identifier: & \url{https://pypi.org/project/nomade-hpc/0.3.4/} \\
 Licence: & AGPL-3.0-or-later \\
 Publisher: & João Filipe Riva Tonini \\
-Version: & 1.2.1 \\
-Date published: & February 2026 \\
+Date published: & January 2026 \\
 \end{tabular}
 
 \subsubsection*{Code Repository}
@@ -247,7 +180,7 @@ Developers can extend NØMADE in several ways:
 \item \textbf{Custom Collectors}: Add new metric sources by implementing the collector interface
 \item \textbf{Alert Channels}: Integrate additional notification services beyond email/Slack/webhooks
 \item \textbf{ML Models}: Train site-specific models using the provided feature engineering pipeline
-\item \textbf{Dashboard Widgets}: Extend the web dashboard with custom visualizations
+\item \textbf{Dashboard Widgets}: Extend the Flask-based dashboard with custom visualizations
 \end{itemize}
 
 \subsection*{Support}
@@ -284,22 +217,6 @@ Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O.,
 
 \bibitem{slurm}
 Yoo, A.B., Jette, M.A., Grondona, M. (2003). SLURM: Simple Linux Utility for Resource Management. In: Job Scheduling Strategies for Parallel Processing, Lecture Notes in Computer Science, vol. 2862, Springer, pp. 44--60. DOI: \url{https://doi.org/10.1007/10968987_3}
-
-\bibitem{prometheus}
-Prometheus Authors (2012--present). Prometheus: From metrics to insight.
-URL: \url{https://prometheus.io/}
-
-\bibitem{mlhpc}
-Tuncer, O., Ates, E., Zhang, Y., Turber, A., Brandt, J., Leung, V.J.,
-Egele, M., Coskun, A.K. (2017). Diagnosing performance variations in HPC
-applications using machine learning. In: High Performance Computing,
-Lecture Notes in Computer Science, vol. 10266, Springer, pp. 355--373.
-DOI: \url{https://doi.org/10.1007/978-3-319-58667-0_19}
-
-\bibitem{vilhena}
-Vilhena, D.A., Antonelli, A. (2015). A network approach for identifying
-and delimiting biogeographical regions. Nature Communications 6:6848.
-DOI: \url{https://doi.org/10.1038/ncomms7848}
 
 \end{thebibliography}
 
