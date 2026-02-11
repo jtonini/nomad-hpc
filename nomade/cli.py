@@ -2970,7 +2970,7 @@ def edu_explain(ctx, job_id, db_path, output_json, no_progress):
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
-        db_path = _resolve_db_path(config)
+        db_path = get_db_path(config)
 
     result = explain_job(
         job_id=job_id,
@@ -3008,7 +3008,7 @@ def edu_trajectory(ctx, username, db_path, days, output_json):
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
-        db_path = _resolve_db_path(config)
+        db_path = get_db_path(config)
 
     traj = user_trajectory(db_path, username, days)
 
@@ -3061,7 +3061,7 @@ def edu_report(ctx, group_name, db_path, days, output_json):
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
-        db_path = _resolve_db_path(config)
+        db_path = get_db_path(config)
 
     gs = group_summary(db_path, group_name, days)
 
