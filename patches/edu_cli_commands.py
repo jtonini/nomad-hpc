@@ -1,53 +1,16 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Wire nomade edu subcommands into cli.py.
+NØMADE Edu CLI Commands
 
-Adds:
-    nomade edu explain <job_id>  [--json] [--no-progress]
-    nomade edu trajectory <user> [--days N] [--json]
-    nomade edu report <group>    [--days N] [--json]
+This file contains the CLI commands for the edu module.
+It is loaded by wire_edu_cli.py and inserted into nomade/cli.py.
 
-The CLI code is kept in patches/edu_cli_commands.py for proper
-syntax highlighting and linting support.
-
-Usage:
-    python3 wire_edu_cli.py nomade/cli.py
+Having this as a separate .py file ensures:
+- Proper syntax highlighting in editors
+- Linting and type checking
+- Easy testing and modification
 """
-import sys
-from pathlib import Path
-
-
-def load_cli_block() -> str:
-    """
-    Load the edu CLI commands from the separate source file.
-    
-    This approach ensures the CLI code gets proper syntax highlighting
-    and linting in editors, addressing reviewer feedback about embedded
-    code strings.
-    """
-    # Try multiple locations
-    locations = [
-        Path(__file__).parent / 'patches' / 'edu_cli_commands.py',
-        Path(__file__).parent / 'edu_cli_commands.py',
-        Path('patches/edu_cli_commands.py'),
-    ]
-    
-    for path in locations:
-        if path.exists():
-            content = path.read_text()
-            # Skip the module docstring and imports - just get the code
-            # Find where the actual commands start
-            marker = "# ============"
-            if marker in content:
-                idx = content.index(marker)
-                return '\n' + content[idx:]
-            return '\n' + content
-    
-    # Fallback: if file not found, use inline definition
-    # This ensures the script still works standalone
-    return '''
 
 # =============================================================================
 # EDU COMMANDS
@@ -70,7 +33,17 @@ def edu():
 @click.option('--no-progress', is_flag=True, help='Skip progress comparison')
 @click.pass_context
 def edu_explain(ctx, job_id, db_path, output_json, no_progress):
-    """Explain a job in plain language with proficiency scores."""
+    """Explain a job in plain language with proficiency scores.
+
+    Analyzes a completed job across five dimensions of computational
+    proficiency: CPU efficiency, memory sizing, time estimation,
+    I/O awareness, and GPU utilization.
+
+    Examples:
+        nomade edu explain 12345
+        nomade edu explain 12345 --json
+        nomade edu explain 12345 --no-progress
+    """
     from nomade.edu.explain import explain_job
 
     if not db_path:
@@ -98,7 +71,16 @@ def edu_explain(ctx, job_id, db_path, output_json, no_progress):
 @click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
 @click.pass_context
 def edu_trajectory(ctx, username, db_path, days, output_json):
-    """Show a user's proficiency development over time."""
+    """Show a user's proficiency development over time.
+
+    Tracks how a student or researcher's HPC skills evolve across
+    their job submissions, highlighting areas of improvement and
+    dimensions that need attention.
+
+    Examples:
+        nomade edu trajectory student01
+        nomade edu trajectory student01 --days 30
+    """
     from nomade.edu.progress import user_trajectory, format_trajectory
     import json
 
@@ -109,15 +91,23 @@ def edu_trajectory(ctx, username, db_path, days, output_json):
     traj = user_trajectory(db_path, username, days)
 
     if traj is None:
-        click.echo(f"Not enough data for {username}.", err=True)
+        click.echo(f"Not enough data for {username} (need at least 3 completed jobs).", err=True)
         raise SystemExit(1)
 
     if output_json:
         result = {
             "username": traj.username,
             "total_jobs": traj.total_jobs,
+            "date_range": traj.date_range,
             "overall_improvement": traj.overall_improvement,
+            "summary": traj.summary,
             "current_scores": traj.current_scores,
+            "improvement": traj.improvement,
+            "windows": [
+                {"start": w.start, "end": w.end, "job_count": w.job_count,
+                 "scores": w.scores, "overall": w.overall}
+                for w in traj.windows
+            ],
         }
         click.echo(json.dumps(result, indent=2))
     else:
@@ -131,7 +121,19 @@ def edu_trajectory(ctx, username, db_path, days, output_json):
 @click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
 @click.pass_context
 def edu_report(ctx, group_name, db_path, days, output_json):
-    """Generate a proficiency report for a course or lab group."""
+    """Generate a proficiency report for a course or lab group.
+
+    Aggregates per-student proficiency data to produce insights like
+    "15/20 students improved memory efficiency over the semester."
+
+    The group_name maps to a Linux group (from SLURM accounting or
+    LDAP). Configure group filters in nomade.toml.
+
+    Examples:
+        nomade edu report bio301
+        nomade edu report bio301 --days 120
+        nomade edu report physics-lab --json
+    """
     from nomade.edu.progress import group_summary, format_group_summary
     import json
 
@@ -143,65 +145,33 @@ def edu_report(ctx, group_name, db_path, days, output_json):
 
     if gs is None:
         click.echo(f"No data found for group '{group_name}'.", err=True)
+        click.echo("Ensure group membership data has been collected:")
+        click.echo("  nomade collect -C groups --once")
         raise SystemExit(1)
 
     if output_json:
         result = {
             "group_name": gs.group_name,
             "member_count": gs.member_count,
+            "total_jobs": gs.total_jobs,
+            "date_range": gs.date_range,
             "improvement_rate": gs.improvement_rate,
+            "avg_overall": gs.avg_overall,
+            "avg_improvement": gs.avg_improvement,
+            "users_improving": gs.users_improving,
+            "users_stable": gs.users_stable,
+            "users_declining": gs.users_declining,
+            "dimension_avgs": gs.dimension_avgs,
+            "dimension_improvements": gs.dimension_improvements,
+            "weakest_dimension": gs.weakest_dimension,
+            "strongest_dimension": gs.strongest_dimension,
+            "users": [
+                {"username": t.username, "total_jobs": t.total_jobs,
+                 "overall_improvement": t.overall_improvement,
+                 "current_scores": t.current_scores}
+                for t in gs.users
+            ],
         }
         click.echo(json.dumps(result, indent=2))
     else:
         click.echo(format_group_summary(gs))
-'''
-
-
-def wire_cli(cli_path: Path) -> bool:
-    """Insert edu commands into cli.py."""
-    content = cli_path.read_text()
-
-    if "def edu():" in content:
-        print("  = cli.py already has edu commands")
-        return True
-
-    # Load the CLI block from separate file
-    cli_block = load_cli_block()
-
-    # Find insertion point: before main() 
-    marker = "def main() -> None:"
-    if marker not in content:
-        marker = "def main():"
-
-    if marker not in content:
-        print("  ! Could not find main() in cli.py")
-        return False
-
-    idx = content.index(marker)
-    content = content[:idx] + cli_block + "\n\n" + content[idx:]
-
-    cli_path.write_text(content)
-    print("  + Added edu commands to cli.py")
-    return True
-
-
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 wire_edu_cli.py nomade/cli.py")
-        sys.exit(1)
-
-    path = Path(sys.argv[1])
-    if not path.exists():
-        print(f"ERROR: {path} not found")
-        sys.exit(1)
-
-    print("\nWiring NØMADE Edu CLI")
-    print("=" * 30)
-    wire_cli(path)
-    print("\nDone! Test with:")
-    print("  nomade edu --help")
-    print("  nomade edu explain <job_id>")
-
-
-if __name__ == '__main__':
-    main()
