@@ -381,8 +381,6 @@ def run_demo(
     print(f"\nDatabase: {db_path}")
 
     if launch_dashboard:
-        print(f"\nLaunching dashboard on http://localhost:{port}")
-        print("Press Ctrl+C to stop\n")
         from nomade.viz.server import serve_dashboard
         serve_dashboard(host="localhost", port=port, db_path=str(db_path))
 

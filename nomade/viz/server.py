@@ -2899,31 +2899,31 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             const eduStyles = {
                 panel: { padding: '24px', maxWidth: '1200px', margin: '0 auto' },
                 filterBar: { display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' },
-                select: { padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#e0e0e0', fontSize: '14px', cursor: 'pointer' },
+                select: { padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg-hover)', color: 'var(--text-primary)', fontSize: '14px', cursor: 'pointer' },
                 cards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px', marginBottom: '32px' },
-                card: { background: 'rgba(255,255,255,0.04)', borderRadius: '10px', padding: '20px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)' },
-                cardValue: { fontSize: '28px', fontWeight: '700', color: '#e0e0e0', fontVariantNumeric: 'tabular-nums' },
-                cardLabel: { fontSize: '12px', color: '#808080', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' },
-                section: { fontSize: '16px', fontWeight: '600', color: '#c0c0c0', marginBottom: '16px', marginTop: '8px' },
+                card: { background: 'var(--bg-surface)', borderRadius: '10px', padding: '20px', textAlign: 'center', border: '1px solid var(--border)' },
+                cardValue: { fontSize: '28px', fontWeight: '700', color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' },
+                cardLabel: { fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+                section: { fontSize: '16px', fontWeight: '600', color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '8px' },
                 barRow: { display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '12px' },
-                barLabel: { width: '140px', fontSize: '13px', color: '#c0c0c0', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                barTrack: { flex: 1, height: '22px', background: 'rgba(255,255,255,0.04)', borderRadius: '4px', overflow: 'hidden' },
+                barLabel: { width: '140px', fontSize: '13px', color: 'var(--text-secondary)', textAlign: 'right', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                barTrack: { flex: 1, height: '22px', background: 'var(--bg-surface)', borderRadius: '4px', overflow: 'hidden' },
                 barFill: { height: '100%', background: 'linear-gradient(90deg, #22c55e, #4ade80)', borderRadius: '4px', transition: 'width 0.3s', minWidth: '2px' },
-                barValue: { width: '160px', fontSize: '12px', color: '#808080', flexShrink: 0 },
+                barValue: { width: '160px', fontSize: '12px', color: 'var(--text-muted)', flexShrink: 0 },
                 table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
-                th: { textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#808080', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' },
-                thNum: { textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#808080', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' },
-                td: { padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#c0c0c0' },
-                tdNum: { padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.04)', color: '#c0c0c0', textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
-                loading: { padding: '60px', textAlign: 'center', color: '#808080', fontSize: '15px' },
+                th: { textAlign: 'left', padding: '10px 12px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' },
+                thNum: { textAlign: 'right', padding: '10px 12px', borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' },
+                td: { padding: '8px 12px', borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)' },
+                tdNum: { padding: '8px 12px', borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' },
+                loading: { padding: '60px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '15px' },
                 hmRow: { display: 'flex', gap: '2px', marginBottom: '2px' },
-                hmDayLabel: { width: '40px', fontSize: '11px', color: '#808080', textAlign: 'right', paddingRight: '8px', lineHeight: '20px', flexShrink: 0 },
+                hmDayLabel: { width: '40px', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right', paddingRight: '8px', lineHeight: '20px', flexShrink: 0 },
                 hmCell: { width: '100%', maxWidth: '40px', height: '20px', borderRadius: '3px', cursor: 'default', flex: 1 },
                 hmHeader: { display: 'flex', gap: '2px', marginBottom: '4px' },
-                hmHourLabel: { width: '100%', maxWidth: '40px', fontSize: '9px', color: '#606060', textAlign: 'center', flex: 1 },
+                hmHourLabel: { width: '100%', maxWidth: '40px', fontSize: '9px', color: 'var(--text-muted)', textAlign: 'center', flex: 1 },
                 hmLabelCell: { width: '40px', paddingRight: '8px', flexShrink: 0 },
                 legend: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '16px', justifyContent: 'center' },
-                legendLabel: { fontSize: '11px', color: '#606060' },
+                legendLabel: { fontSize: '11px', color: 'var(--text-muted)' },
                 legendBar: { display: 'flex', gap: '1px', borderRadius: '3px', overflow: 'hidden' },
             };
 
@@ -3886,7 +3886,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 const height = container.clientHeight;
                 
                 const scene = new THREE.Scene();
-                scene.background = new THREE.Color(0x161b22);
+                const isLight = document.body.classList.contains('light-theme'); scene.background = new THREE.Color(isLight ? 0xf6f8fa : 0x161b22);
                 sceneRef.current = scene;
                 
                 const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
@@ -5215,24 +5215,24 @@ def generate_mobile_html(dm, stats):
     <button class="refresh-btn" onclick="location.reload()">↻</button>
     <script>
     // Theme toggle
-    function initTheme() {
+    function initTheme() {{
         const saved = localStorage.getItem('nomade-theme');
-        if (saved === 'light') {
+        if (saved === 'light') {{
             document.body.classList.add('light-theme');
-        }
-    }
-    function toggleTheme() {
+        }}
+    }}
+    function toggleTheme() {{
         document.body.classList.toggle('light-theme');
         const isLight = document.body.classList.contains('light-theme');
         localStorage.setItem('nomade-theme', isLight ? 'light' : 'dark');
         // Update button icon
         const btn = document.querySelector('.theme-toggle');
-        if (btn) {
+        if (btn) {{
             btn.innerHTML = isLight 
                 ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> Light'
                 : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> Dark';
-        }
-    }
+        }}
+    }}
     initTheme();
 
         let activeCluster = null;
@@ -5608,6 +5608,9 @@ def serve_dashboard(host='localhost', port=8050, config_path=None, db_path=None)
                 feat = f"{h['feature']}={h['bin']}"
                 print(f"    {feat:<20} {h['failure_rate']:>5.0f}% fail  (base {h['baseline_rate']:.0f}%, {h['ratio']:.1f}x)")
     print("=" * 60)
+    print("  Local access:")
+    print(f"    Open: http://localhost:{port}")
+    print()
     if host in ('localhost', '127.0.0.1', '0.0.0.0'):
         import socket
         hostname = socket.gethostname()
