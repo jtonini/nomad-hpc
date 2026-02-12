@@ -173,6 +173,44 @@ NØMADE includes a comprehensive test suite covering unit tests for collectors, 
 
 The software has been tested on clusters ranging from 6 to 200 nodes, including both CPU-only and GPU-enabled partitions. The codebase follows PEP 8 style guidelines and includes type hints for improved maintainability.
 
+\subsection*{Educational Analytics}
+
+NØMADE includes an educational analytics module (\texttt{nomade edu}) designed
+for classroom instruction, research mentorship, and HPC training programs. The
+module tracks the development of computational proficiency over time by
+analyzing per-job behavioral fingerprints across five dimensions: CPU
+efficiency, memory sizing, time estimation, I/O awareness, and GPU utilization.
+
+\textbf{Job Explanation} (\texttt{nomade edu explain}): Translates raw job data
+into plain-language feedback. For each completed job, the system provides
+dimension-specific scores (0--100), proficiency levels (Excellent, Good,
+Developing, Needs Work), and actionable recommendations. For example, a job
+with 21\% CPU utilization receives the feedback: ``Very low CPU utilization---
+requested 4 cores but used $\sim$1. Try: \texttt{\#SBATCH --ntasks=1}.''
+
+\textbf{User Trajectories} (\texttt{nomade edu trajectory}): Tracks an
+individual's improvement across their job submissions. The system computes
+sliding-window averages to identify trends (improving, stable, declining) for
+each proficiency dimension, enabling mentors to provide targeted guidance.
+
+\textbf{Group Reports} (\texttt{nomade edu report}): Aggregates proficiency
+data across course sections or research groups. Instructors can generate
+summaries such as ``15 of 20 students improved memory efficiency over the
+semester'' or identify that a majority of students struggle with I/O patterns,
+suggesting curriculum adjustments.
+
+These features address a common challenge in HPC education: students submit
+jobs that technically complete but exhibit significant resource waste or
+suboptimal patterns. Traditional approaches require manual inspection of
+\texttt{sacct} output, which is impractical for classes with hundreds of
+students. NØMADE automates this assessment while providing pedagogically useful
+feedback that helps students develop genuine computational proficiency rather
+than simply learning to avoid errors.
+
+Proficiency scores are persisted to the database, enabling longitudinal studies
+of HPC training effectiveness and research into factors that accelerate skill
+development.
+
 \section*{(2) Availability}
 
 \subsection*{Operating System}
@@ -237,9 +275,44 @@ NØMADE is designed for broad reuse across HPC environments of varying scales. T
 
 \textbf{Medium HPC Centers}: University and institutional HPC centers can deploy NØMADE as either a primary monitoring solution or as a complement to existing tools like Grafana or Nagios, adding predictive capabilities to traditional threshold-based alerting.
 
-\textbf{Research Applications}: The similarity network approach provides a framework for studying HPC failure patterns. The community data export feature (\texttt{nomade community export}) enables cross-institutional research by generating anonymized datasets suitable for collaborative analysis.
+\textbf{Research Applications}: The similarity network approach provides a
+framework for studying HPC failure patterns. The network structure, combined
+with job-level proficiency scores, enables quantitative analysis of resource
+usage patterns and their relationship to job outcomes.
 
-\textbf{Educational Use}: The demo mode and clear architecture make NØMADE suitable for teaching HPC administration and monitoring concepts.
+\textbf{Community Data Sharing}: The \texttt{nomade community export} command
+generates anonymized datasets suitable for cross-institutional research. Export
+formats include:
+\begin{itemize}
+\item \textbf{Job fingerprints}: Feature vectors with hashed user/job identifiers
+\item \textbf{Failure patterns}: Aggregated statistics on failure modes by resource profile
+\item \textbf{Proficiency distributions}: Anonymized skill development trajectories
+\end{itemize}
+These exports enable collaborative research on HPC usage patterns without
+exposing sensitive institutional data. Researchers can study questions such as:
+Which failure modes are universal vs.\ site-specific? Do proficiency
+improvement rates vary by discipline? What resource configurations correlate
+with job success across different cluster architectures?
+
+The anonymization process removes usernames, job names, and absolute timestamps
+while preserving the relational structure needed for network-based analysis.
+Exported data uses relative time offsets and hashed identifiers, making it
+suitable for publication as supplementary materials or inclusion in shared
+research datasets.
+
+\textbf{Educational Use}: Beyond the demo mode, NØMADE provides a complete
+educational analytics pipeline. Instructors can assign Linux groups to course
+sections (e.g., \texttt{cs101}, \texttt{bio301}) and use \texttt{nomade edu
+report} to track class-wide proficiency development. Individual students
+receive automated feedback via \texttt{nomade edu explain}, reducing instructor
+workload while providing immediate, actionable guidance. The module is
+particularly valuable for:
+\begin{itemize}
+\item \textbf{HPC workshops}: Pre/post assessment of participant skills
+\item \textbf{Research onboarding}: Tracking new graduate students' development
+\item \textbf{Classroom instruction}: Automated grading of computational assignments
+\item \textbf{Self-directed learning}: Students can independently review their job history
+\end{itemize}
 
 \subsection*{Extension Points}
 Developers can extend NØMADE in several ways:
