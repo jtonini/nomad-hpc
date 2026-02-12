@@ -190,32 +190,20 @@ requested 4 cores but used $\sim$1. Try: \texttt{\#SBATCH --ntasks=1}.''
 
 \begin{figure}[htbp]
 \centering
+\includegraphics[height=6.5cm]{figures/edu_explain.png}\hspace{0.5cm}\includegraphics[height=6.5cm]{figures/edu_trajectory.png}
 
-\begin{minipage}[t]{0.45\textwidth}
-\centering
-\includegraphics[height=7cm]{figures/edu_explain.png}
-\texttt{nomade edu explain 1104}
-\end{minipage}
-\hfill
-\begin{minipage}[t]{0.45\textwidth}
-\centering
-\includegraphics[width=\textwidth]{figures/edu_trajectory.png}
-\texttt{nomade edu trajectory alice}
-\end{minipage}
+\vspace{0.3cm}
 
-\vspace{0.5cm}
+\includegraphics[height=6.5cm]{figures/edu_report.png}
 
-\begin{minipage}[t]{0.45\textwidth}
-\centering
-\includegraphics[height=7cm]{figures/edu_report.png}
-\texttt{nomade edu report cs101}
-\end{minipage}
+\vspace{0.2cm}
+
+{\small \texttt{nomade edu explain 1104} \hspace{1cm} \texttt{nomade edu trajectory alice} \hspace{1cm} \texttt{nomade edu report cs101}}
 
 \caption{Educational analytics outputs. \textbf{Top left}: Job explanation
-showing proficiency scores across four dimensions with actionable
-recommendations. \textbf{Top right}: User trajectory tracking improvement over
-173 jobs. \textbf{Bottom}: Group report aggregating proficiency data for a
-course section, showing class-wide trends and per-student breakdown.}
+with proficiency scores and recommendations. \textbf{Top right}: User trajectory
+tracking improvement over 173 jobs. \textbf{Bottom}: Group report for a course
+section with per-student breakdown.}
 \label{fig:edu}
 \end{figure}
 
