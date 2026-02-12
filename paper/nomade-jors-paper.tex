@@ -188,6 +188,17 @@ Developing, Needs Work), and actionable recommendations. For example, a job
 with 21\% CPU utilization receives the feedback: ``Very low CPU utilization---
 requested 4 cores but used $\sim$1. Try: \texttt{\#SBATCH --ntasks=1}.''
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/edu_explain.png}
+\caption{Output of \texttt{nomade edu explain 1104} showing proficiency scores
+across four dimensions, actionable recommendations for improving CPU efficiency,
+and the user's progress trend over their last 30 jobs. Color-coded bars and
+trend indicators provide at-a-glance feedback suitable for both students and
+instructors.}
+\label{fig:edu_explain}
+\end{figure}
+
 \textbf{User Trajectories} (\texttt{nomade edu trajectory}): Tracks an
 individual's improvement across their job submissions. The system computes
 sliding-window averages to identify trends (improving, stable, declining) for

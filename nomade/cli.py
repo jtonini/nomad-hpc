@@ -2983,6 +2983,8 @@ def edu_explain(ctx, job_id, db_path, output_json, no_progress):
 
     if result is None:
         click.echo(f"Job {job_id} not found in database.", err=True)
+        click.echo("\nHint: Specify a database with --db or run 'nomade init' to configure.", err=True)
+        click.echo("  Example: nomade edu explain {job_id} --db ~/nomade_demo.db", err=True)
         raise SystemExit(1)
 
     click.echo(result)

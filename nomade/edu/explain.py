@@ -19,6 +19,7 @@ from __future__ import annotations
 from nomade.edu.storage import save_proficiency_score
 
 import json
+import textwrap
 import logging
 import sqlite3
 from pathlib import Path
@@ -281,7 +282,10 @@ def format_terminal(
 
         for dim in needs_work:
             color = c.score_color(dim.score)
-            lines.append(f"    {color}{dim.name}{c.RESET}: {dim.detail}")
+            # Wrap detail text to fit terminal
+            lines.append(f"    {color}{dim.name}{c.RESET}:")
+            wrapped = textwrap.fill(dim.detail, width=52, initial_indent="      ", subsequent_indent="      ")
+            lines.append(wrapped)
             if dim.suggestion:
                 for sline in dim.suggestion.split("\n"):
                     lines.append(f"      {c.CYAN}{sline}{c.RESET}")
