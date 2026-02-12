@@ -190,13 +190,33 @@ requested 4 cores but used $\sim$1. Try: \texttt{\#SBATCH --ntasks=1}.''
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.85\textwidth]{figures/edu_explain.png}
-\caption{Output of \texttt{nomade edu explain 1104} showing proficiency scores
-across four dimensions, actionable recommendations for improving CPU efficiency,
-and the user's progress trend over their last 30 jobs. Color-coded bars and
-trend indicators provide at-a-glance feedback suitable for both students and
-instructors.}
-\label{fig:edu_explain}
+
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/edu_explain.png}
+\texttt{nomade edu explain 1104}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/edu_trajectory.png}
+\texttt{nomade edu trajectory alice}
+\end{minipage}
+
+\vspace{0.5cm}
+
+\begin{minipage}[t]{0.65\textwidth}
+\centering
+\includegraphics[width=\textwidth]{figures/edu_report.png}
+\texttt{nomade edu report cs101}
+\end{minipage}
+
+\caption{Educational analytics outputs. \textbf{Top left}: Job explanation
+showing proficiency scores across four dimensions with actionable
+recommendations. \textbf{Top right}: User trajectory tracking improvement over
+173 jobs. \textbf{Bottom}: Group report aggregating proficiency data for a
+course section, showing class-wide trends and per-student breakdown.}
+\label{fig:edu}
 \end{figure}
 
 \textbf{User Trajectories} (\texttt{nomade edu trajectory}): Tracks an

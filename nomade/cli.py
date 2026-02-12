@@ -3018,6 +3018,8 @@ def edu_trajectory(ctx, username, db_path, days, output_json):
 
     if traj is None:
         click.echo(f"Not enough data for {username} (need at least 3 completed jobs).", err=True)
+        click.echo("\nHint: Specify a database with --db or run 'nomade init' to configure.", err=True)
+        click.echo(f"  Example: nomade edu trajectory {username} --db ~/nomade_demo.db", err=True)
         raise SystemExit(1)
 
     if output_json:
@@ -3073,6 +3075,8 @@ def edu_report(ctx, group_name, db_path, days, output_json):
         click.echo(f"No data found for group '{group_name}'.", err=True)
         click.echo("Ensure group membership data has been collected:")
         click.echo("  nomade collect -C groups --once")
+        click.echo("\nOr specify a database with --db:", err=True)
+        click.echo(f"  nomade edu report {group_name} --db ~/nomade_demo.db", err=True)
         raise SystemExit(1)
 
     if output_json:
