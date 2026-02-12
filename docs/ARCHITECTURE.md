@@ -8,26 +8,26 @@
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  SYSTEM COLLECTORS (every 60s):                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ disk         │ Filesystem usage (total, used, free, projections)       │ │
-│  │ iostat       │ Device I/O: %iowait, utilization, latency               │ │
-│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │ │
-│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │ │
-│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions     │ │
-│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ disk         │ Filesystem usage (total, used, free, projections)       │  │
+│  │ iostat       │ Device I/O: %iowait, utilization, latency               │  │
+│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │  │
+│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │  │
+│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions      │  │
+│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  SLURM COLLECTORS (every 60s):                                               │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ slurm        │ Queue state: pending, running, partition stats          │ │
-│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │ │
-│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ slurm        │ Queue state: pending, running, partition stats          │  │
+│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │  │
+│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  JOB MONITOR (every 30s):                                                    │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐ │
-│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │ │
-│  └──────────────┴─────────────────────────────────────────────────────────┘ │
+│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
+│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │  │
+│  └──────────────┴─────────────────────────────────────────────────────────┘  │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -35,11 +35,11 @@
 ## Feature Vector (19 dimensions)
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                    Feature Vector for Similarity Analysis                    │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  FROM SACCT (job outcome):              FROM IOSTAT (system I/O):            │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    Feature Vector for Similarity Analysis                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  FROM SACCT (job outcome):              FROM IOSTAT (system I/O):           │
 │  ┌────────────────────────────────┐     ┌────────────────────────────────┐  │
 │  │  1. health_score        [0-1]  │     │ 11. avg_iowait_percent   [0-1] │  │
 │  │  2. cpu_efficiency      [0-1]  │     │ 12. peak_iowait_percent  [0-1] │  │
@@ -59,8 +59,8 @@
 │                                         │ 18. peak_swap_activity   [0-1] │  │
 │                                         │ 19. avg_procs_blocked    [0-1] │  │
 │                                         └────────────────────────────────┘  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Collector Details
