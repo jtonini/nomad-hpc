@@ -274,6 +274,49 @@ class DemoDatabase:
                 (username, group_name, gid, cluster) VALUES (?, ?, ?, ?)""",
                 (username, group_name, gid, cluster))
 
+
+        # Job accounting for Resources tab
+        c.execute("""CREATE TABLE IF NOT EXISTS job_accounting (
+            job_id TEXT NOT NULL, cluster TEXT NOT NULL, username TEXT, account TEXT,
+            partition TEXT, state TEXT, elapsed_sec INTEGER, alloc_cpus INTEGER,
+            mem_gb REAL, gpu_count INTEGER DEFAULT 0, cpu_hours REAL DEFAULT 0,
+            gpu_hours REAL DEFAULT 0, submit_time TEXT,
+            collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (job_id, cluster))""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_jacct_user ON job_accounting(username)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_jacct_submit ON job_accounting(submit_time)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_jacct_cluster ON job_accounting(cluster)")
+
+        # Interactive servers for RStudio/Jupyter tab
+        c.execute("""CREATE TABLE IF NOT EXISTS interactive_servers (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
+            method TEXT NOT NULL, ssh_host TEXT, ssh_user TEXT,
+            enabled BOOLEAN DEFAULT TRUE, last_collection DATETIME)""")
+
+        # Interactive sessions
+        c.execute("""CREATE TABLE IF NOT EXISTS interactive_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME NOT NULL,
+            server_id TEXT NOT NULL, user TEXT NOT NULL, session_type TEXT NOT NULL,
+            pid INTEGER, cpu_percent REAL, mem_percent REAL, mem_mb REAL,
+            mem_virtual_mb REAL, start_time DATETIME, age_hours REAL, is_idle BOOLEAN)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_int_sess_ts ON interactive_sessions(timestamp)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_int_sess_user ON interactive_sessions(user)")
+
+        # Interactive summary
+        c.execute("""CREATE TABLE IF NOT EXISTS interactive_summary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME NOT NULL,
+            server_id TEXT NOT NULL, total_sessions INTEGER, idle_sessions INTEGER,
+            total_memory_mb REAL, unique_users INTEGER, rstudio_sessions INTEGER,
+            jupyter_python_sessions INTEGER, jupyter_r_sessions INTEGER,
+            stale_sessions INTEGER, memory_hog_sessions INTEGER)""")
+
+        # GPU stats
+        c.execute("""CREATE TABLE IF NOT EXISTS gpu_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME NOT NULL,
+            node_name TEXT, gpu_index INTEGER, gpu_name TEXT, gpu_util_percent REAL,
+            memory_util_percent REAL, memory_used_mb INTEGER, memory_total_mb INTEGER,
+            temperature_c INTEGER, power_draw_w REAL)""")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_gpu_stats_ts ON gpu_stats(timestamp)")
         conn.commit()
         conn.close()
 
@@ -338,7 +381,97 @@ class DemoDatabase:
                  job.nfs_write_gb, job.local_write_gb * random.uniform(0.1, 0.5),
                  job.local_write_gb, job.nfs_ratio, 1 if job.req_gpus > 0 else 0,
                  job.health_score))
+        conn.commit()
+        conn.close()
 
+    def write_job_accounting(self, jobs: list[Job]):
+        """Write job accounting data for Resources tab."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        cluster_name = DEMO_CLUSTER["name"]
+        for job in jobs:
+            cpu_hours = (job.runtime_seconds / 3600) * job.req_cpus
+            gpu_hours = (job.runtime_seconds / 3600) * job.req_gpus if job.req_gpus > 0 else 0
+            c.execute("""INSERT OR REPLACE INTO job_accounting
+                (job_id, cluster, username, account, partition, state, elapsed_sec,
+                 alloc_cpus, mem_gb, gpu_count, cpu_hours, gpu_hours, submit_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job.job_id, cluster_name, job.user_name, "default", job.partition,
+                 job.state, job.runtime_seconds, job.req_cpus, job.req_mem_mb / 1024,
+                 job.req_gpus, cpu_hours, gpu_hours, job.submit_time.isoformat()))
+        conn.commit()
+        conn.close()
+
+    def write_interactive_sessions(self):
+        """Write demo interactive sessions for RStudio/Jupyter tab."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        now = datetime.now()
+        
+        # Create demo servers
+        servers = [
+            ("rstudio-server", "RStudio Server", "Demo RStudio instance", "local"),
+            ("jupyter-hub", "JupyterHub", "Demo JupyterHub instance", "local"),
+        ]
+        for sid, name, desc, method in servers:
+            c.execute("""INSERT OR REPLACE INTO interactive_servers
+                (id, name, description, method, enabled, last_collection)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (sid, name, desc, method, True, now.isoformat()))
+        
+        # Create demo sessions
+        users = DEMO_CLUSTER["users"]
+        session_types = ["RStudio", "Jupyter (Python)", "Jupyter (R)"]
+        for i, user in enumerate(users[:4]):
+            server_id = "rstudio-server" if i % 2 == 0 else "jupyter-hub"
+            session_type = session_types[i % 3]
+            start_time = now - timedelta(hours=random.uniform(1, 48))
+            age_hours = (now - start_time).total_seconds() / 3600
+            is_idle = random.random() > 0.6
+            c.execute("""INSERT INTO interactive_sessions
+                (timestamp, server_id, user, session_type, pid, cpu_percent,
+                 mem_percent, mem_mb, mem_virtual_mb, start_time, age_hours, is_idle)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (now.isoformat(), server_id, user, session_type, 10000 + i,
+                 random.uniform(0, 25), random.uniform(5, 40),
+                 random.uniform(500, 8000), random.uniform(1000, 16000),
+                 start_time.isoformat(), age_hours, is_idle))
+
+        # Write summary
+        rstudio_count = sum(1 for u in users[:4] if users.index(u) % 2 == 0)
+        jupyter_py = sum(1 for i, u in enumerate(users[:4]) if i % 3 == 1)
+        jupyter_r = sum(1 for i, u in enumerate(users[:4]) if i % 3 == 2)
+        idle_count = sum(1 for _ in range(4) if random.random() > 0.6)
+        total_mem = sum(random.uniform(500, 8000) for _ in range(4))
+        c.execute("""INSERT INTO interactive_summary
+            (timestamp, server_id, total_sessions, idle_sessions, total_memory_mb,
+             unique_users, rstudio_sessions, jupyter_python_sessions, jupyter_r_sessions,
+             stale_sessions, memory_hog_sessions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (now.isoformat(), "demo", 4, idle_count, total_mem,
+             4, 2, 1, 1, 0, 0))
+        conn.commit()
+        conn.close()
+
+    def write_gpu_stats(self):
+        """Write GPU stats for GPU monitoring."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        now = datetime.now()
+        
+        # Get GPU nodes
+        gpu_nodes = [n for n in DEMO_CLUSTER["nodes"] if n["gpus"] > 0]
+        for node in gpu_nodes:
+            for gpu_idx in range(node["gpus"]):
+                c.execute("""INSERT INTO gpu_stats
+                    (timestamp, node_name, gpu_index, gpu_name, gpu_util_percent,
+                     memory_util_percent, memory_used_mb, memory_total_mb,
+                     temperature_c, power_draw_w)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (now.isoformat(), node["name"], gpu_idx, "NVIDIA A100",
+                     random.uniform(10, 95), random.uniform(20, 80),
+                     random.randint(8000, 32000), 40960,
+                     random.randint(35, 75), random.uniform(100, 300)))
         conn.commit()
         conn.close()
 
@@ -362,6 +495,7 @@ def run_demo(
     """
     db_path = get_demo_db_path()
 
+    import os; os.system("clear" if os.name != "nt" else "cls")
     print("NØMAD Demo Mode")
     print("=" * 40)
     print(f"Generating {n_jobs} jobs over {days} days...")
@@ -372,6 +506,9 @@ def run_demo(
     db = DemoDatabase(str(db_path))
     db.write_nodes()
     db.write_jobs(jobs)
+    db.write_job_accounting(jobs)
+    db.write_interactive_sessions()
+    db.write_gpu_stats()
 
     success = sum(1 for j in jobs if j.failure_reason == 0)
     print(f"\nGenerated:")

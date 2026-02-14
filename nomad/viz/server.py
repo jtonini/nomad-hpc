@@ -3093,6 +3093,77 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 );
             };
 
+            const InteractivePanel = () => {
+                const [sessions, setSessions] = useState(null);
+                useEffect(() => {
+                    fetch("/api/interactive")
+                        .then(r => r.json())
+                        .then(setSessions)
+                        .catch(() => setSessions({servers: [], sessions: [], summary: {}}));
+                }, []);
+                if (!sessions) return React.createElement("div", {style: eduStyles.loading}, "Loading interactive sessions...");
+                const {servers = [], sessions: sess = [], summary = {}} = sessions;
+                return React.createElement("div", {style: eduStyles.panel},
+                    React.createElement("div", {style: eduStyles.section}, "Interactive Computing Sessions"),
+                    React.createElement("div", {style: eduStyles.cards},
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, summary.total_sessions || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Active Sessions")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, summary.idle_sessions || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Idle Sessions")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, ((summary.total_memory_mb || 0) / 1024).toFixed(1) + " GB"),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Total Memory")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, summary.unique_users || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Active Users")
+                        )
+                    ),
+                    React.createElement("div", {style: eduStyles.section}, "Sessions by Type"),
+                    React.createElement("div", {style: eduStyles.cards},
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#4a9eff"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#4a9eff"}}, summary.rstudio_sessions || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "RStudio")
+                        ),
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#f5a623"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#f5a623"}}, summary.jupyter_python_sessions || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Jupyter (Python)")
+                        ),
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#7b68ee"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#7b68ee"}}, summary.jupyter_r_sessions || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Jupyter (R)")
+                        )
+                    ),
+                    React.createElement("div", {style: eduStyles.section}, "Active Sessions"),
+                    React.createElement("table", {style: eduStyles.table},
+                        React.createElement("thead", null,
+                            React.createElement("tr", null,
+                                React.createElement("th", {style: eduStyles.th}, "User"),
+                                React.createElement("th", {style: eduStyles.th}, "Type"),
+                                React.createElement("th", {style: eduStyles.th}, "Server"),
+                                React.createElement("th", {style: eduStyles.th}, "Memory (MB)"),
+                                React.createElement("th", {style: eduStyles.th}, "Age (hrs)"),
+                                React.createElement("th", {style: eduStyles.th}, "Status")
+                            )
+                        ),
+                        React.createElement("tbody", null,
+                            sess.map((s, i) => React.createElement("tr", {key: i},
+                                React.createElement("td", {style: eduStyles.td}, s.user),
+                                React.createElement("td", {style: eduStyles.td}, s.session_type),
+                                React.createElement("td", {style: eduStyles.td}, s.server_id),
+                                React.createElement("td", {style: eduStyles.td}, Math.round(s.mem_mb)),
+                                React.createElement("td", {style: eduStyles.td}, s.age_hours.toFixed(1)),
+                                React.createElement("td", {style: eduStyles.td},
+                                    React.createElement("span", {style: {color: s.is_idle ? "#f5a623" : "#4ade80"}}, s.is_idle ? "Idle" : "Active")
+                                )
+                            ))
+                        )
+                );
+            };
         function App() {
             const [clusters, setClusters] = useState(null);
             const [nodes, setNodes] = useState(null);
@@ -3198,6 +3269,12 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             >
                                 Activity
                             </div>
+                            <div
+                                className={`tab ${activeTab === 'interactive' ? 'active' : ''}`}
+                                onClick={() => { setActiveTab('interactive'); setSelectedNode(null); }}
+                            >
+                                Interactive
+                            </div>
                         </nav>
                         
                         <div className="header-right">
@@ -3226,6 +3303,8 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             <ResourcesPanel />
                         ) : activeTab === 'activity' ? (
                             <ActivityPanel />
+                        ) : activeTab === 'interactive' ? (
+                            <InteractivePanel />
                         ) : (
                             <>
                                 <ClusterView
@@ -5554,6 +5633,33 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 groups = []
             self.wfile.write(json.dumps({'groups': groups}).encode())
+        elif parsed.path == '/api/interactive':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            dm = DashboardHandler.data_manager
+            try:
+                import sqlite3 as _sql
+                conn = _sql.connect(str(dm.db_path))
+                conn.row_factory = _sql.Row
+                c = conn.cursor()
+                # Get servers
+                c.execute("SELECT * FROM interactive_servers WHERE enabled = 1")
+                servers = [dict(r) for r in c.fetchall()]
+                # Get recent sessions
+                c.execute("""SELECT * FROM interactive_sessions 
+                    WHERE timestamp = (SELECT MAX(timestamp) FROM interactive_sessions)""")
+                sessions = [dict(r) for r in c.fetchall()]
+                # Get summary
+                c.execute("""SELECT * FROM interactive_summary 
+                    WHERE timestamp = (SELECT MAX(timestamp) FROM interactive_summary) LIMIT 1""")
+                row = c.fetchone()
+                summary = dict(row) if row else {}
+                conn.close()
+            except Exception as e:
+                servers, sessions, summary = [], [], {}
+            self.wfile.write(json.dumps({'servers': servers, 'sessions': sessions, 'summary': summary}).encode())
         else:
             self.send_error(404)
     
@@ -5621,7 +5727,10 @@ def serve_dashboard(host='localhost', port=8050, config_path=None, db_path=None)
     print("  Press Ctrl+C to stop")
     print()
     
-    with socketserver.TCPServer((host, port), DashboardHandler) as httpd:
+    # Allow port reuse
+    class ReusableTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
+    with ReusableTCPServer((host, port), DashboardHandler) as httpd:
         httpd.serve_forever()
 
 
