@@ -3162,6 +3162,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                                 )
                             ))
                         )
+                    )
                 );
             };
         function App() {
@@ -3965,7 +3966,14 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 const height = container.clientHeight;
                 
                 const scene = new THREE.Scene();
-                const isLight = document.body.classList.contains('light-theme'); scene.background = new THREE.Color(isLight ? 0xf6f8fa : 0x161b22);
+                const updateBackground = () => {
+                    const isLight = document.body.classList.contains('light-theme');
+                    scene.background = new THREE.Color(isLight ? 0xffffff : 0x161b22);
+                };
+                updateBackground();
+                // Listen for theme changes
+                const observer = new MutationObserver(updateBackground);
+                observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
                 sceneRef.current = scene;
                 
                 const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
