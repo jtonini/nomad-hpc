@@ -3150,6 +3150,10 @@ def diag_node(ctx, cluster, node_name, db_path, hours, output_json):
         nomad diag node main-cluster node05 --json
     """
     from nomad.diag.node import diagnose_node, format_diagnostic
+    
+    # Clear screen for clean output
+    if not output_json:
+        click.echo("\033[2J\033[H", nl=False)
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
@@ -3201,14 +3205,35 @@ def diag_workstation(ctx, hostname, db_path, hours, output_json):
         nomad diag workstation lab-desktop-05 --hours 48
         nomad diag workstation chem-workstation --json
     """
-    click.echo("Workstation diagnostics coming soon!", err=True)
-    click.echo("")
-    click.echo("Planned features:", err=True)
-    click.echo("  Resources:  CPU, memory, disk usage, I/O bottlenecks", err=True)
-    click.echo("  Sessions:   active users, idle sessions, login history", err=True)
-    click.echo("  Processes:  runaway jobs, zombies, high CPU/memory processes", err=True)
-    click.echo("  Context:    department, group membership, usage patterns", err=True)
-    raise SystemExit(1)
+    from nomad.diag.workstation import diagnose_workstation, format_diagnostic
+    
+    # Clear screen for clean output
+    if not output_json:
+        click.echo("\033[2J\033[H", nl=False)
+
+    if not db_path:
+        config = ctx.obj.get('config', {}) if ctx.obj else {}
+        db_path = get_db_path(config)
+
+    if not db_path:
+        click.echo("Error: No database found. Use --db or run 'nomad init'.", err=True)
+        raise SystemExit(1)
+
+    diag = diagnose_workstation(db_path, hostname, hours)
+
+    if not diag:
+        click.echo(f"Workstation {hostname} not found in database.", err=True)
+        raise SystemExit(1)
+
+    if output_json:
+        import json
+        from dataclasses import asdict
+        result = asdict(diag)
+        if result.get('last_seen'):
+            result['last_seen'] = str(result['last_seen'])
+        click.echo(json.dumps(result, indent=2, default=str))
+    else:
+        click.echo(format_diagnostic(diag))
 
 
 @diag.command('nas')
@@ -3235,13 +3260,35 @@ def diag_nas(ctx, hostname, db_path, hours, output_json):
         nomad diag nas zfs-home --hours 48
         nomad diag nas nfs-server --json
     """
-    click.echo("NAS/Storage diagnostics coming soon!", err=True)
-    click.echo("")
-    click.echo("Planned features:", err=True)
-    click.echo("  General:  disk usage, I/O throughput, NFS stats, mount status", err=True)
-    click.echo("  ZFS:      pool health, scrub status, ARC stats, snapshots, quotas", err=True)
-    click.echo("  SMART:    drive health, temperature, error counts", err=True)
-    raise SystemExit(1)
+    from nomad.diag.storage import diagnose_storage, format_diagnostic
+    
+    # Clear screen for clean output
+    if not output_json:
+        click.echo("\033[2J\033[H", nl=False)
+
+    if not db_path:
+        config = ctx.obj.get('config', {}) if ctx.obj else {}
+        db_path = get_db_path(config)
+
+    if not db_path:
+        click.echo("Error: No database found. Use --db or run 'nomad init'.", err=True)
+        raise SystemExit(1)
+
+    diag = diagnose_storage(db_path, hostname, hours)
+
+    if not diag:
+        click.echo(f"Storage device {hostname} not found in database.", err=True)
+        raise SystemExit(1)
+
+    if output_json:
+        import json
+        from dataclasses import asdict
+        result = asdict(diag)
+        if result.get('last_seen'):
+            result['last_seen'] = str(result['last_seen'])
+        click.echo(json.dumps(result, indent=2, default=str))
+    else:
+        click.echo(format_diagnostic(diag))
 
 
 # =============================================================================
