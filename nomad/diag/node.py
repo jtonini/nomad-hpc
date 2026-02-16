@@ -7,6 +7,11 @@ Provides detailed analysis of node health and issues:
 - Job history and user activity
 - Failure pattern analysis
 - Root cause suggestions
+
+Integrates with:
+- analysis/derivatives.py for trend detection
+- alerts/thresholds.py for threshold checking
+- collectors/ data for historical metrics
 """
 
 import sqlite3
@@ -15,7 +20,21 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
+# Import existing analysis tools
+try:
+    from nomad.analysis.derivatives import DerivativeAnalyzer, analyze_disk_trend, AlertLevel
+    HAS_DERIVATIVES = True
+except ImportError:
+    HAS_DERIVATIVES = False
+
+try:
+    from nomad.alerts.thresholds import ThresholdChecker
+    HAS_THRESHOLDS = True
+except ImportError:
+    HAS_THRESHOLDS = False
+
 logger = logging.getLogger(__name__)
+
 
 
 @dataclass
@@ -238,8 +257,11 @@ def generate_recommendations(causes: list, state: dict, failures: dict) -> list:
             recommendations.append('Check SLURM daemon: systemctl status slurmd')
             recommendations.append('Check power/IPMI if available')
     
-    # Always recommend
-    recommendations.append('Resume node after fixing: scontrol update nodename=<node> state=resume')
+    # Only add resume if there are actual issues
+    if recommendations:
+        recommendations.append('Resume node after fixing: scontrol update nodename=<node> state=resume')
+    else:
+        recommendations.append('Node appears healthy - no action required')
     
     return list(dict.fromkeys(recommendations))  # Remove duplicates
 

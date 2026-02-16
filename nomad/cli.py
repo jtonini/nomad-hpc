@@ -3111,6 +3111,139 @@ def edu_report(ctx, group_name, db_path, days, output_json):
 
 def main() -> None:
     """Entry point for CLI."""
+
+# =============================================================================
+# DIAGNOSTICS COMMANDS
+# =============================================================================
+
+@cli.group()
+def diag():
+    """NØMAD Diagnostics — Infrastructure troubleshooting.
+
+    Analyze nodes, workstations, and storage devices to identify
+    issues and get actionable recommendations.
+
+    Examples:
+        nomad diag node hpc-cluster node01
+        nomad diag workstation ws-physics-01
+        nomad diag nas storage-01
+    """
+    pass
+
+
+@diag.command('node')
+@click.argument('cluster')
+@click.argument('node_name')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--hours', default=24, help='Hours of history to analyze (default: 24)')
+@click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
+@click.pass_context
+def diag_node(ctx, cluster, node_name, db_path, hours, output_json):
+    """Diagnose an HPC node.
+
+    Analyzes SLURM state, job history, resource utilization, and failure
+    patterns to identify issues and suggest fixes.
+
+    Examples:
+        nomad diag node hpc-cluster node01
+        nomad diag node gpu-cluster gpu01 --hours 48
+        nomad diag node main-cluster node05 --json
+    """
+    from nomad.diag.node import diagnose_node, format_diagnostic
+
+    if not db_path:
+        config = ctx.obj.get('config', {}) if ctx.obj else {}
+        db_path = get_db_path(config)
+
+    if not db_path:
+        click.echo("Error: No database found. Use --db or run 'nomad init'.", err=True)
+        raise SystemExit(1)
+
+    diag = diagnose_node(db_path, cluster, node_name, hours)
+
+    if not diag:
+        click.echo(f"Node {cluster}/{node_name} not found in database.", err=True)
+        raise SystemExit(1)
+
+    if output_json:
+        import json
+        from dataclasses import asdict
+        result = asdict(diag)
+        # Convert datetime to string
+        if result.get('last_seen'):
+            result['last_seen'] = str(result['last_seen'])
+        click.echo(json.dumps(result, indent=2, default=str))
+    else:
+        click.echo(format_diagnostic(diag))
+
+
+@diag.command('workstation')
+@click.argument('hostname')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--hours', default=24, help='Hours of history to analyze (default: 24)')
+@click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
+@click.pass_context
+def diag_workstation(ctx, hostname, db_path, hours, output_json):
+    """Diagnose a workstation.
+
+    Analyzes system state, user sessions, resource utilization, and
+    issues to identify problems and suggest fixes.
+
+    Features:
+    - CPU/memory utilization and bottlenecks
+    - Disk usage and I/O performance
+    - Active user sessions
+    - Process analysis (runaway jobs, zombies)
+    - Department/group association
+
+    Examples:
+        nomad diag workstation ws-physics-01
+        nomad diag workstation lab-desktop-05 --hours 48
+        nomad diag workstation chem-workstation --json
+    """
+    click.echo("Workstation diagnostics coming soon!", err=True)
+    click.echo("")
+    click.echo("Planned features:", err=True)
+    click.echo("  Resources:  CPU, memory, disk usage, I/O bottlenecks", err=True)
+    click.echo("  Sessions:   active users, idle sessions, login history", err=True)
+    click.echo("  Processes:  runaway jobs, zombies, high CPU/memory processes", err=True)
+    click.echo("  Context:    department, group membership, usage patterns", err=True)
+    raise SystemExit(1)
+
+
+@diag.command('nas')
+@click.argument('hostname')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--hours', default=24, help='Hours of history to analyze (default: 24)')
+@click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
+@click.pass_context
+def diag_nas(ctx, hostname, db_path, hours, output_json):
+    """Diagnose a NAS/storage device.
+
+    Analyzes storage capacity, I/O throughput, NFS performance, and
+    mount issues to identify problems and suggest fixes.
+
+    Supports ZFS-specific diagnostics:
+    - Pool health (zpool status)
+    - Scrub status and errors
+    - ARC hit rates
+    - Snapshot usage
+    - Quota enforcement
+
+    Examples:
+        nomad diag nas storage-01
+        nomad diag nas zfs-home --hours 48
+        nomad diag nas nfs-server --json
+    """
+    click.echo("NAS/Storage diagnostics coming soon!", err=True)
+    click.echo("")
+    click.echo("Planned features:", err=True)
+    click.echo("  General:  disk usage, I/O throughput, NFS stats, mount status", err=True)
+    click.echo("  ZFS:      pool health, scrub status, ARC stats, snapshots, quotas", err=True)
+    click.echo("  SMART:    drive health, temperature, error counts", err=True)
+    raise SystemExit(1)
+
+
 # =============================================================================
 # COMMUNITY COMMANDS
 # =============================================================================
