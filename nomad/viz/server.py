@@ -348,6 +348,38 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                     
                     has_gpu = row['gres'] and 'gpu' in row['gres'].lower()
                     
+                    # Get top users for this node from job_accounting or jobs table
+                    top_users = []
+                    try:
+                        user_rows = conn.execute("""
+                            SELECT username, COUNT(*) as job_count
+                            FROM job_accounting
+                            WHERE node_list LIKE ?
+                            AND end_time > datetime('now', '-1 day')
+                            GROUP BY username
+                            ORDER BY job_count DESC
+                            LIMIT 5
+                        """, (f'%{node_name}%',)).fetchall()
+                        if user_rows:
+                            top_users = [{"user": r['username'], "jobs": r['job_count']} for r in user_rows]
+                    except:
+                        pass
+                    if not top_users:
+                        try:
+                            user_rows = conn.execute("""
+                                SELECT user_name as username, COUNT(*) as job_count
+                                FROM jobs
+                                WHERE node_list LIKE ?
+                                AND end_time > datetime('now', '-1 day')
+                                GROUP BY user_name
+                                ORDER BY job_count DESC
+                                LIMIT 5
+                            """, (f'%{node_name}%',)).fetchall()
+                            if user_rows:
+                                top_users = [{"user": r['username'], "jobs": r['job_count']} for r in user_rows]
+                        except:
+                            pass
+                    
                     nodes[node_name] = {
                         "name": node_name,
                         "cluster": cluster_id,
@@ -357,8 +389,8 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                         "jobs_today": total_jobs,
                         "jobs_success": stats['success'],
                         "jobs_failed": stats['failed'],
-                        "failures": {},  # TODO: aggregate from job data
-                        "top_users": [],  # TODO: aggregate from job data
+                        "failures": {},  # TODO: aggregate failure types
+                        "top_users": top_users,
                         "has_gpu": has_gpu,
                         "gpu_util": 0,  # Will be updated from gpu_stats
                         "gpu_name": row['gres'] if has_gpu else None,
@@ -3093,6 +3125,203 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 );
             };
 
+
+            // ═══════════════════════════════════════════════════════════
+            // Workstations Panel
+            // ═══════════════════════════════════════════════════════════
+            const WorkstationsPanel = () => {
+                const [workstations, setWorkstations] = useState(null);
+                useEffect(() => {
+                    fetch("/api/workstations")
+                        .then(r => r.json())
+                        .then(setWorkstations)
+                        .catch(() => setWorkstations({workstations: [], summary: {}}));
+                }, []);
+                if (!workstations) return React.createElement("div", {style: eduStyles.loading}, "Loading workstations...");
+                const {workstations: ws = [], summary = {}} = workstations;
+                
+                // Group by department
+                const byDept = ws.reduce((acc, w) => {
+                    const dept = w.department || "Uncategorized";
+                    if (!acc[dept]) acc[dept] = [];
+                    acc[dept].push(w);
+                    return acc;
+                }, {});
+                
+                const statusColor = (status) => {
+                    if (status === "online") return "#4ade80";
+                    if (status === "degraded") return "#f5a623";
+                    return "#f87171";
+                };
+                
+                return React.createElement("div", {style: eduStyles.panel},
+                    React.createElement("div", {style: eduStyles.section}, "Workstation Overview"),
+                    React.createElement("div", {style: eduStyles.cards},
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, summary.total || ws.length),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Total Workstations")
+                        ),
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#4ade80"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#4ade80"}}, summary.online || ws.filter(w => w.status === "online").length),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Online")
+                        ),
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#f5a623"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#f5a623"}}, summary.degraded || ws.filter(w => w.status === "degraded").length),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Degraded")
+                        ),
+                        React.createElement("div", {style: {...eduStyles.card, borderColor: "#f87171"}},
+                            React.createElement("div", {style: {...eduStyles.cardValue, color: "#f87171"}}, summary.offline || ws.filter(w => w.status === "offline").length),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Offline")
+                        )
+                    ),
+                    Object.entries(byDept).map(([dept, machines]) =>
+                        React.createElement("div", {key: dept, style: {marginTop: "1.5rem"}},
+                            React.createElement("div", {style: {...eduStyles.section, fontSize: "1rem"}}, dept + " (" + machines.length + ")"),
+                            React.createElement("table", {style: eduStyles.table},
+                                React.createElement("thead", null,
+                                    React.createElement("tr", null,
+                                        React.createElement("th", {style: eduStyles.th}, "Hostname"),
+                                        React.createElement("th", {style: eduStyles.th}, "Status"),
+                                        React.createElement("th", {style: eduStyles.th}, "CPU Load"),
+                                        React.createElement("th", {style: eduStyles.th}, "Memory"),
+                                        React.createElement("th", {style: eduStyles.th}, "Disk"),
+                                        React.createElement("th", {style: eduStyles.th}, "Users")
+                                    )
+                                ),
+                                React.createElement("tbody", null,
+                                    machines.map((w, i) => React.createElement("tr", {key: i},
+                                        React.createElement("td", {style: eduStyles.td}, w.hostname),
+                                        React.createElement("td", {style: eduStyles.td},
+                                            React.createElement("span", {style: {color: statusColor(w.status)}}, w.status)
+                                        ),
+                                        React.createElement("td", {style: eduStyles.td}, (w.load_avg_1m || 0).toFixed(2) + " / " + (w.cpu_count || "?")),
+                                        React.createElement("td", {style: eduStyles.td}, 
+                                            w.memory_total_mb ? Math.round(w.memory_used_mb / w.memory_total_mb * 100) + "%" : "N/A"
+                                        ),
+                                        React.createElement("td", {style: eduStyles.td}, (w.disk_usage_pct || 0).toFixed(1) + "%"),
+                                        React.createElement("td", {style: eduStyles.td}, w.users_logged_in || 0)
+                                    ))
+                                )
+                            )
+                        )
+                    )
+                );
+            };
+
+            // ═══════════════════════════════════════════════════════════
+            // Storage Panel
+            // ═══════════════════════════════════════════════════════════
+            const StoragePanel = () => {
+                const [storage, setStorage] = useState(null);
+                useEffect(() => {
+                    fetch("/api/storage")
+                        .then(r => r.json())
+                        .then(setStorage)
+                        .catch(() => setStorage({devices: [], summary: {}}));
+                }, []);
+                if (!storage) return React.createElement("div", {style: eduStyles.loading}, "Loading storage devices...");
+                const {devices = [], summary = {}} = storage;
+                
+                const formatBytes = (bytes) => {
+                    if (!bytes) return "0 B";
+                    const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+                    let i = 0;
+                    while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+                    return bytes.toFixed(1) + " " + units[i];
+                };
+                
+                const usageColor = (pct) => {
+                    if (pct >= 95) return "#f87171";
+                    if (pct >= 85) return "#f5a623";
+                    return "#4ade80";
+                };
+                
+                const healthColor = (health) => {
+                    if (health === "ONLINE") return "#4ade80";
+                    if (health === "DEGRADED") return "#f5a623";
+                    return "#f87171";
+                };
+                
+                return React.createElement("div", {style: eduStyles.panel},
+                    React.createElement("div", {style: eduStyles.section}, "Storage Overview"),
+                    React.createElement("div", {style: eduStyles.cards},
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, devices.length),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Storage Devices")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, formatBytes(summary.total_bytes || devices.reduce((a, d) => a + (d.total_bytes || 0), 0))),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Total Capacity")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, formatBytes(summary.used_bytes || devices.reduce((a, d) => a + (d.used_bytes || 0), 0))),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "Used")
+                        ),
+                        React.createElement("div", {style: eduStyles.card},
+                            React.createElement("div", {style: eduStyles.cardValue}, summary.nfs_clients || 0),
+                            React.createElement("div", {style: eduStyles.cardLabel}, "NFS Clients")
+                        )
+                    ),
+                    React.createElement("div", {style: eduStyles.section}, "Storage Devices"),
+                    devices.map((dev, i) =>
+                        React.createElement("div", {key: i, style: {
+                            background: "var(--card-bg)",
+                            border: "1px solid var(--border)",
+                            borderRadius: "8px",
+                            padding: "1rem",
+                            marginBottom: "1rem"
+                        }},
+                            React.createElement("div", {style: {display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem"}},
+                                React.createElement("span", {style: {fontWeight: "bold", fontSize: "1.1rem"}}, dev.hostname),
+                                React.createElement("span", {style: {
+                                    color: dev.status === "online" ? "#4ade80" : dev.status === "degraded" ? "#f5a623" : "#f87171",
+                                    fontWeight: "bold"
+                                }}, dev.status?.toUpperCase())
+                            ),
+                            React.createElement("div", {style: {color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: "0.5rem"}}, 
+                                "Type: " + (dev.storage_type || "unknown") + " | NFS Clients: " + (dev.nfs_clients_connected || 0)
+                            ),
+                            React.createElement("div", {style: {marginBottom: "0.5rem"}},
+                                React.createElement("div", {style: {display: "flex", justifyContent: "space-between", marginBottom: "0.25rem"}},
+                                    React.createElement("span", null, "Capacity"),
+                                    React.createElement("span", {style: {color: usageColor(dev.usage_pct || 0)}}, 
+                                        formatBytes(dev.used_bytes) + " / " + formatBytes(dev.total_bytes) + " (" + (dev.usage_pct || 0).toFixed(1) + "%)"
+                                    )
+                                ),
+                                React.createElement("div", {style: {
+                                    background: "var(--border)",
+                                    borderRadius: "4px",
+                                    height: "8px",
+                                    overflow: "hidden"
+                                }},
+                                    React.createElement("div", {style: {
+                                        background: usageColor(dev.usage_pct || 0),
+                                        height: "100%",
+                                        width: (dev.usage_pct || 0) + "%",
+                                        transition: "width 0.3s"
+                                    }})
+                                )
+                            ),
+                            dev.pools && dev.pools.length > 0 && React.createElement("div", {style: {marginTop: "0.75rem"}},
+                                React.createElement("div", {style: {fontWeight: "bold", marginBottom: "0.5rem"}}, "ZFS Pools"),
+                                dev.pools.map((pool, j) => React.createElement("div", {key: j, style: {
+                                    display: "flex", 
+                                    justifyContent: "space-between",
+                                    padding: "0.25rem 0",
+                                    borderBottom: "1px solid var(--border)"
+                                }},
+                                    React.createElement("span", null, pool.name),
+                                    React.createElement("span", null,
+                                        React.createElement("span", {style: {color: healthColor(pool.health), marginRight: "1rem"}}, pool.health),
+                                        React.createElement("span", {style: {color: usageColor(pool.capacity_pct || 0)}}, (pool.capacity_pct || 0).toFixed(1) + "%")
+                                    )
+                                ))
+                            )
+                        )
+                    )
+                );
+            };
+
             const InteractivePanel = () => {
                 const [sessions, setSessions] = useState(null);
                 useEffect(() => {
@@ -3276,6 +3505,18 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             >
                                 Interactive
                             </div>
+                            <div
+                                className={`tab ${activeTab === 'workstations' ? 'active' : ''}`}
+                                onClick={() => { setActiveTab('workstations'); setSelectedNode(null); }}
+                            >
+                                Workstations
+                            </div>
+                            <div
+                                className={`tab ${activeTab === 'storage' ? 'active' : ''}`}
+                                onClick={() => { setActiveTab('storage'); setSelectedNode(null); }}
+                            >
+                                Storage
+                            </div>
                         </nav>
                         
                         <div className="header-right">
@@ -3306,6 +3547,10 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                             <ActivityPanel />
                         ) : activeTab === 'interactive' ? (
                             <InteractivePanel />
+                        ) : activeTab === 'workstations' ? (
+                            <WorkstationsPanel />
+                        ) : activeTab === 'storage' ? (
+                            <StoragePanel />
                         ) : (
                             <>
                                 <ClusterView
@@ -5668,6 +5913,84 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 servers, sessions, summary = [], [], {}
             self.wfile.write(json.dumps({'servers': servers, 'sessions': sessions, 'summary': summary}).encode())
+
+        elif parsed.path == '/api/workstations':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            dm = DashboardHandler.data_manager
+            try:
+                import sqlite3 as _sql
+                conn = _sql.connect(str(dm.db_path))
+                conn.row_factory = _sql.Row
+                c = conn.cursor()
+                # Get latest workstation state for each hostname
+                c.execute("""
+                    SELECT w.* FROM workstation_state w
+                    INNER JOIN (
+                        SELECT hostname, MAX(timestamp) as max_ts
+                        FROM workstation_state GROUP BY hostname
+                    ) latest ON w.hostname = latest.hostname AND w.timestamp = latest.max_ts
+                """)
+                workstations = [dict(r) for r in c.fetchall()]
+                conn.close()
+                # Calculate summary
+                summary = {
+                    'total': len(workstations),
+                    'online': sum(1 for w in workstations if w.get('status') == 'online'),
+                    'degraded': sum(1 for w in workstations if w.get('status') == 'degraded'),
+                    'offline': sum(1 for w in workstations if w.get('status') in ('offline', 'error')),
+                }
+            except Exception as e:
+                workstations, summary = [], {}
+            self.wfile.write(json.dumps({'workstations': workstations, 'summary': summary}).encode())
+
+        elif parsed.path == '/api/storage':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            dm = DashboardHandler.data_manager
+            try:
+                import sqlite3 as _sql
+                conn = _sql.connect(str(dm.db_path))
+                conn.row_factory = _sql.Row
+                c = conn.cursor()
+                # Get latest storage state for each hostname
+                c.execute("""
+                    SELECT s.* FROM storage_state s
+                    INNER JOIN (
+                        SELECT hostname, MAX(timestamp) as max_ts
+                        FROM storage_state GROUP BY hostname
+                    ) latest ON s.hostname = latest.hostname AND s.timestamp = latest.max_ts
+                """)
+                rows = [dict(r) for r in c.fetchall()]
+                conn.close()
+                # Parse JSON fields
+                devices = []
+                for row in rows:
+                    dev = dict(row)
+                    for field in ['pools_json', 'arc_stats_json', 'nfs_exports_json']:
+                        if dev.get(field):
+                            try:
+                                import json as _json
+                                dev[field.replace('_json', '')] = _json.loads(dev[field])
+                            except:
+                                dev[field.replace('_json', '')] = None
+                            del dev[field]
+                    devices.append(dev)
+                # Calculate summary
+                summary = {
+                    'total': len(devices),
+                    'total_bytes': sum(d.get('total_bytes', 0) or 0 for d in devices),
+                    'used_bytes': sum(d.get('used_bytes', 0) or 0 for d in devices),
+                    'nfs_clients': sum(d.get('nfs_clients_connected', 0) or 0 for d in devices),
+                }
+            except Exception as e:
+                devices, summary = [], {}
+            self.wfile.write(json.dumps({'devices': devices, 'summary': summary}).encode())
+
         else:
             self.send_error(404)
     
