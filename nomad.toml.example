@@ -168,6 +168,74 @@ cgroup_path = "/sys/fs/cgroup"
 monitor_gpus = true
 nvidia_smi_path = "/usr/bin/nvidia-smi"
 
+
+# ============================================
+# WORKSTATION COLLECTOR
+# ============================================
+[collectors.workstation]
+# Enable workstation monitoring
+enabled = false
+
+# Collection interval (seconds)
+interval = 300
+
+# List of workstations to monitor
+# Each workstation needs hostname and optional department
+[[workstations]]
+hostname = "ws-physics-01"
+department = "physics"
+
+[[workstations]]
+hostname = "ws-chem-lab"
+department = "chemistry"
+
+[[workstations]]
+hostname = "ws-bio-analysis"
+department = "biology"
+
+# SSH settings for remote collection
+ssh_timeout = 10
+ssh_batch_mode = true
+
+# ============================================
+# STORAGE/NAS COLLECTOR
+# ============================================
+[collectors.storage]
+# Enable storage/NAS monitoring
+enabled = false
+
+# Collection interval (seconds)
+interval = 300
+
+# List of storage devices to monitor
+# Supported types: zfs, nfs, local
+[[storage_devices]]
+hostname = "nas-01"
+type = "zfs"
+description = "Primary ZFS storage"
+
+[[storage_devices]]
+hostname = "nfs-home"
+type = "nfs"
+description = "Home directories NFS server"
+
+# ZFS-specific settings
+[collectors.storage.zfs]
+# Monitor ARC statistics
+monitor_arc = true
+# Alert on scrub errors
+scrub_error_alert = true
+# Alert when pool capacity exceeds this percentage
+capacity_warning = 80
+capacity_critical = 90
+
+# NFS-specific settings
+[collectors.storage.nfs]
+# Monitor NFS client connections
+monitor_clients = true
+# Monitor export status
+monitor_exports = true
+
 # ============================================
 # ALERTS
 # ============================================

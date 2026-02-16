@@ -23,10 +23,12 @@ from .node_state import NodeStateCollector
 from .gpu import GPUCollector
 from .nfs import NFSCollector
 from .groups import GroupCollector
+from .workstation import WorkstationCollector
+from .storage import StorageCollector
 
 __all__ = [
     'BaseCollector',
-    'CollectionError', 
+    'CollectionError',
     'CollectionResult',
     'CollectorRegistry',
     'registry',
@@ -40,4 +42,6 @@ __all__ = [
     'GPUCollector',
     'NFSCollector',
     'GroupCollector',
+    'WorkstationCollector',
+    'StorageCollector',
 ]
