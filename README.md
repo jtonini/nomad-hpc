@@ -11,7 +11,7 @@
 
 ---
 
-📖 **[Full Documentation](https://jtonini.github.io/nomad/)** — Installation guides, configuration, CLI reference, network methodology, ML framework, and more.
+📖 **[Full Documentation](https://jtonini.github.io/nomad-hpc/)** — Installation guides, configuration, CLI reference, network methodology, ML framework, and more.
 
 ---
 
@@ -132,17 +132,17 @@ nomad syscheck
 
 ## Documentation
 
-📖 **[jtonini.github.io/nomad](https://jtonini.github.io/nomad/)**
+📖 **[jtonini.github.io/nomad](https://jtonini.github.io/nomad-hpc/)**
 
-- [Installation & Configuration](https://jtonini.github.io/nomad/installation/)
-- [System Install (`--system`)](https://jtonini.github.io/nomad/system-install/)
-- [Dashboard Guide](https://jtonini.github.io/nomad/dashboard/)
-- [Educational Analytics](https://jtonini.github.io/nomad/edu/)
-- [Network Methodology](https://jtonini.github.io/nomad/network/)
-- [ML Framework](https://jtonini.github.io/nomad/ml/)
-- [Proficiency Scoring](https://jtonini.github.io/nomad/proficiency/)
-- [CLI Reference](https://jtonini.github.io/nomad/cli/)
-- [Configuration Options](https://jtonini.github.io/nomad/config/)
+- [Installation & Configuration](https://jtonini.github.io/nomad-hpc/installation/)
+- [System Install (`--system`)](https://jtonini.github.io/nomad-hpc/system-install/)
+- [Dashboard Guide](https://jtonini.github.io/nomad-hpc/dashboard/)
+- [Educational Analytics](https://jtonini.github.io/nomad-hpc/edu/)
+- [Network Methodology](https://jtonini.github.io/nomad-hpc/network/)
+- [ML Framework](https://jtonini.github.io/nomad-hpc/ml/)
+- [Proficiency Scoring](https://jtonini.github.io/nomad-hpc/proficiency/)
+- [CLI Reference](https://jtonini.github.io/nomad-hpc/cli/)
+- [Configuration Options](https://jtonini.github.io/nomad-hpc/config/)
 
 ---
 
