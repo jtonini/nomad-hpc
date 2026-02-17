@@ -87,10 +87,10 @@ dev = [
 nomad = "nomad.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/jtonini/nomad"
-Documentation = "https://github.com/jtonini/nomad#readme"
-Repository = "https://github.com/jtonini/nomad"
-Issues = "https://github.com/jtonini/nomad/issues"
+Homepage = "https://nomad-hpc.com"
+Documentation = "https://jtonini.github.io/nomad-hpc/"
+Repository = "https://github.com/jtonini/nomad-hpc"
+Issues = "https://github.com/jtonini/nomad-hpc/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
