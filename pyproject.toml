@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomad-hpc"
-version = "1.2.1"
+version = "1.2.2"
 description = "A lightweight HPC monitoring and predictive analytics tool"
 readme = "README.md"
-license = {text = "AGPL-3.0-or-later"}
+license = "AGPL-3.0-or-later"
 authors = [
     {name = "Joao Tonini", email = "jtonini@richmond.edu"}
 ]
