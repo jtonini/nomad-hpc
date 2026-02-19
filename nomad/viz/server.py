@@ -104,12 +104,9 @@ def find_database() -> Optional[Path]:
     """Search for NOMAD database."""
     search_paths = [
         Path("/var/lib/nomad/nomad.db"),
-        Path.home() / "nomad" / "vm-simulation" / "nomad.db",  # VM simulation data
         Path.home() / "nomad" / "nomad.db",
-        Path.home() / "nomad.db",
+        Path.home() / ".config" / "nomad" / "nomad.db",
         Path("nomad.db"),
-        # Also check for cluster_monitor.db as fallback
-        Path.home() / "cluster_monitor.db",
     ]
     for path in search_paths:
         if path.exists():
