@@ -2280,16 +2280,16 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
             --bg-deep: #ffffff;
             --bg-surface: #f6f8fa;
             --bg-elevated: #ffffff;
-            --bg-hover: #f3f4f6;
-            --border: #d0d7de;
-            --text-primary: #1f2328;
-            --text-secondary: #656d76;
-            --text-muted: #8c959f;
-            --green: #1a7f37;
-            --yellow: #9a6700;
-            --red: #cf222e;
-            --cyan: #0969da;
-            --purple: #8250df;
+            --bg-hover: #e8eaed;
+            --border: #c0c7ce;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a4a4a;
+            --text-muted: #666666;
+            --green: #0d6a28;
+            --yellow: #7a5200;
+            --red: #b91c1c;
+            --cyan: #0550a0;
+            --purple: #6b21a8;
         }
         .light-theme .node-card {
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -2356,8 +2356,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
         .logo-icon {
             width: 32px;
             height: 32px;
-            background: linear-gradient(135deg, var(--cyan), var(--purple));
-            border-radius: 8px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -3448,7 +3447,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                         flexDirection: 'column',
                         gap: '16px'
                     }}>
-                        <div className="logo-icon" style={{ width: 48, height: 48, fontSize: 24 }}>◈</div>
+                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3Cstyle%3E.bg%7Bfill:%230a0a12%7D.ring%7Bfill:none;stroke:%2300BACF;stroke-width:3%7D.ring-inner%7Bfill:none;stroke:%2300BACF;stroke-width:1.5%7D.grid%7Bstroke:%2300BACF;stroke-width:.5;opacity:.2%7D.oslash%7Bfont-family:Helvetica,Arial,sans-serif;font-size:28px;fill:%23B64326;font-weight:500%7D.needle-n%7Bfill:%23B64326%7D.needle-s%7Bfill:%2300BACF%7D.node%7Bfill:%2300BACF%7D.cardinal%7Bfont-family:Helvetica,Arial,sans-serif;font-size:10px;fill:%2300BACF;font-weight:500%7D%3C/style%3E%3C/defs%3E%3Ccircle class='bg' cx='100' cy='100' r='98'/%3E%3Ccircle class='ring' cx='100' cy='100' r='95'/%3E%3Ccircle class='ring-inner' cx='100' cy='100' r='60'/%3E%3Cg class='grid'%3E%3Cline x1='100' y1='5' x2='100' y2='195'/%3E%3Cline x1='5' y1='100' x2='195' y2='100'/%3E%3Cline x1='32' y1='32' x2='168' y2='168'/%3E%3Cline x1='168' y1='32' x2='32' y2='168'/%3E%3C/g%3E%3Ccircle class='grid' cx='100' cy='100' r='78' fill='none'/%3E%3Ccircle class='node' cx='100' cy='42' r='3'/%3E%3Ccircle class='node' cx='158' cy='100' r='3'/%3E%3Ccircle class='node' cx='100' cy='158' r='3'/%3E%3Ccircle class='node' cx='42' cy='100' r='3'/%3E%3Ctext class='cardinal' x='100' y='56' text-anchor='middle'%3EN%3C/text%3E%3Ctext class='cardinal' x='146' y='104' text-anchor='middle'%3EE%3C/text%3E%3Ctext class='cardinal' x='100' y='150' text-anchor='middle'%3ES%3C/text%3E%3Ctext class='cardinal' x='54' y='104' text-anchor='middle'%3EW%3C/text%3E%3Cg transform='rotate(45,100,100)'%3E%3Cpolygon class='needle-n' points='100,65 96,100 104,100'/%3E%3Cpolygon class='needle-s' points='100,135 104,100 96,100'/%3E%3C/g%3E%3Ccircle cx='100' cy='100' r='18' fill='%230a0a12' stroke='%2300BACF' stroke-width='2'/%3E%3Ctext class='oslash' x='100' y='108' text-anchor='middle'%3EØ%3C/text%3E%3C/svg%3E" style={{ width: 48, height: 48, borderRadius: 8 }} alt="NOMAD-HPC" />
                         <div style={{ color: 'var(--text-muted)' }}>Loading NOMAD...</div>
                     </div>
                 );
@@ -3458,7 +3457,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                 <div>
                     <header className="header">
                         <div className="logo">
-                            <div className="logo-icon">◈</div>
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3Cstyle%3E.bg%7Bfill:%230a0a12%7D.ring%7Bfill:none;stroke:%2300BACF;stroke-width:3%7D.ring-inner%7Bfill:none;stroke:%2300BACF;stroke-width:1.5%7D.grid%7Bstroke:%2300BACF;stroke-width:.5;opacity:.2%7D.text-brand%7Bfont-family:Helvetica,Arial,sans-serif;font-size:12px;fill:%2300BACF;letter-spacing:6px;font-weight:500%7D.text-sub%7Bfont-family:Helvetica,Arial,sans-serif;font-size:7px;fill:%2300BACF;letter-spacing:2px;opacity:.8%7D.oslash%7Bfont-family:Helvetica,Arial,sans-serif;font-size:28px;fill:%23B64326;font-weight:500%7D.needle-n%7Bfill:%23B64326%7D.needle-s%7Bfill:%2300BACF%7D.node%7Bfill:%2300BACF%7D.cardinal%7Bfont-family:Helvetica,Arial,sans-serif;font-size:10px;fill:%2300BACF;font-weight:500%7D%3C/style%3E%3C/defs%3E%3Ccircle class='bg' cx='100' cy='100' r='98'/%3E%3Ccircle class='ring' cx='100' cy='100' r='95'/%3E%3Ccircle class='ring-inner' cx='100' cy='100' r='60'/%3E%3Cg class='grid'%3E%3Cline x1='100' y1='5' x2='100' y2='195'/%3E%3Cline x1='5' y1='100' x2='195' y2='100'/%3E%3Cline x1='32' y1='32' x2='168' y2='168'/%3E%3Cline x1='168' y1='32' x2='32' y2='168'/%3E%3C/g%3E%3Ccircle class='grid' cx='100' cy='100' r='78' fill='none'/%3E%3Ccircle class='node' cx='100' cy='42' r='3'/%3E%3Ccircle class='node' cx='158' cy='100' r='3'/%3E%3Ccircle class='node' cx='100' cy='158' r='3'/%3E%3Ccircle class='node' cx='42' cy='100' r='3'/%3E%3Ctext class='cardinal' x='100' y='56' text-anchor='middle'%3EN%3C/text%3E%3Ctext class='cardinal' x='146' y='104' text-anchor='middle'%3EE%3C/text%3E%3Ctext class='cardinal' x='100' y='150' text-anchor='middle'%3ES%3C/text%3E%3Ctext class='cardinal' x='54' y='104' text-anchor='middle'%3EW%3C/text%3E%3Cg transform='rotate(45,100,100)'%3E%3Cpolygon class='needle-n' points='100,65 96,100 104,100'/%3E%3Cpolygon class='needle-s' points='100,135 104,100 96,100'/%3E%3C/g%3E%3Ccircle cx='100' cy='100' r='18' fill='%230a0a12' stroke='%2300BACF' stroke-width='2'/%3E%3Ctext class='oslash' x='100' y='108' text-anchor='middle'%3EØ%3C/text%3E%3C/svg%3E" className="logo-icon" style={{ width: 32, height: 32, borderRadius: 6 }} alt="NOMAD-HPC" />
                             <span>NØMAD</span>
                         </div>
                         

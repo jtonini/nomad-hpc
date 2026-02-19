@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <style>
+      .bg { fill: #0a0a12; }
+      .ring { fill: none; stroke: #00BACF; stroke-width: 3; }
+      .ring-inner { fill: none; stroke: #00BACF; stroke-width: 1.5; }
+      .grid { stroke: #00BACF; stroke-width: 0.5; opacity: 0.2; }
+      .oslash { font-family: Helvetica, Arial, sans-serif; font-size: 28px; fill: #B64326; font-weight: 500; }
+      .needle-n { fill: #B64326; }
+      .needle-s { fill: #00BACF; }
+      .node { fill: #00BACF; }
+      .cardinal { font-family: Helvetica, Arial, sans-serif; font-size: 10px; fill: #00BACF; font-weight: 500; }
+    </style>
+  </defs>
+  <circle class="bg" cx="100" cy="100" r="98"/>
+  <circle class="ring" cx="100" cy="100" r="95"/>
+  <circle class="ring-inner" cx="100" cy="100" r="60"/>
+  <g class="grid">
+    <line x1="100" y1="5" x2="100" y2="195"/>
+    <line x1="5" y1="100" x2="195" y2="100"/>
+    <line x1="32" y1="32" x2="168" y2="168"/>
+    <line x1="168" y1="32" x2="32" y2="168"/>
+  </g>
+  <circle class="grid" cx="100" cy="100" r="78" fill="none"/>
+  <circle class="node" cx="100" cy="42" r="3"/>
+  <circle class="node" cx="158" cy="100" r="3"/>
+  <circle class="node" cx="100" cy="158" r="3"/>
+  <circle class="node" cx="42" cy="100" r="3"/>
+  <text class="cardinal" x="100" y="56" text-anchor="middle">N</text>
+  <text class="cardinal" x="146" y="104" text-anchor="middle">E</text>
+  <text class="cardinal" x="100" y="150" text-anchor="middle">S</text>
+  <text class="cardinal" x="54" y="104" text-anchor="middle">W</text>
+  <g transform="rotate(45, 100, 100)">
+    <polygon class="needle-n" points="100,65 96,100 104,100"/>
+    <polygon class="needle-s" points="100,135 104,100 96,100"/>
+  </g>
+  <circle cx="100" cy="100" r="18" fill="#0a0a12" stroke="#00BACF" stroke-width="2"/>
+  <text class="oslash" x="100" y="108" text-anchor="middle">Ø</text>
+</svg>
