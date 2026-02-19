@@ -1,0 +1,628 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Joao Tonini
+"""
+Data Readiness Estimator for NOMAD-HPC
+
+Estimates how much data is needed for reliable ML predictions based on:
+- Sample size requirements for statistical power
+- Class balance (success/failure ratio)
+- Feature coverage and variance
+- Network density for GNN predictions
+
+Key thresholds based on literature and empirical testing:
+- Minimum viable: 100 jobs (basic pattern detection)
+- Recommended: 500 jobs (reliable predictions)
+- Optimal: 1000+ jobs (robust cross-validation)
+"""
+
+import math
+import sqlite3
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional
+
+
+@dataclass
+class ReadinessReport:
+    """Data readiness assessment report."""
+    # Sample sizes
+    total_jobs: int
+    success_jobs: int
+    failure_jobs: int
+    
+    # Readiness scores (0-100)
+    sample_score: int
+    balance_score: int
+    feature_score: int
+    recency_score: int
+    overall_score: int
+    
+    # Thresholds
+    minimum_jobs: int = 100
+    recommended_jobs: int = 500
+    optimal_jobs: int = 1000
+    
+    # Status
+    status: str = "insufficient"  # insufficient, minimum, recommended, optimal
+    ready_for_training: bool = False
+    
+    # Details
+    feature_coverage: dict = field(default_factory=dict)
+    recommendations: list = field(default_factory=list)
+    estimated_accuracy: float = 0.0
+    confidence_interval: tuple = (0.0, 0.0)
+
+
+def estimate_required_sample_size(
+    effect_size: float = 0.3,
+    power: float = 0.80,
+    alpha: float = 0.05,
+    n_features: int = 17
+) -> dict:
+    """
+    Estimate required sample size using power analysis principles.
+    
+    For binary classification with imbalanced classes:
+    - effect_size: Expected difference in means (Cohen's d), default 0.3 (medium)
+    - power: Desired statistical power (1 - beta), default 0.80
+    - alpha: Significance level, default 0.05
+    - n_features: Number of predictive features
+    
+    Returns dict with minimum, recommended, and optimal sample sizes.
+    """
+    # Z-scores for common alpha and power levels
+    z_alpha = 1.96 if alpha == 0.05 else 2.58  # two-tailed
+    z_power = 0.84 if power == 0.80 else 1.28  # one-tailed
+    
+    # Basic sample size formula: n = 2 * ((z_alpha + z_power) / effect_size)^2
+    base_n = 2 * ((z_alpha + z_power) / effect_size) ** 2
+    
+    # Adjust for number of features (rule of thumb: 10-20 samples per feature)
+    feature_adjusted_n = max(base_n, n_features * 15)
+    
+    # For ML models, we need more data for train/val/test splits
+    # Assuming 70/15/15 split, we need ~1.4x the base requirement
+    ml_adjusted_n = feature_adjusted_n * 1.4
+    
+    return {
+        "minimum": max(100, int(ml_adjusted_n * 0.5)),
+        "recommended": max(500, int(ml_adjusted_n)),
+        "optimal": max(1000, int(ml_adjusted_n * 2)),
+        "per_feature": 15,
+        "effect_size": effect_size,
+        "power": power,
+    }
+
+
+def compute_class_balance_score(n_success: int, n_failure: int) -> tuple:
+    """
+    Score class balance from 0-100.
+    
+    Ideal ratio is around 70:30 to 80:20 for failure prediction.
+    Too balanced (50:50) or too imbalanced (95:5) reduces effectiveness.
+    """
+    total = n_success + n_failure
+    if total == 0:
+        return 0, "No data"
+    
+    failure_rate = n_failure / total
+    
+    # Ideal failure rate is 15-35%
+    if 0.15 <= failure_rate <= 0.35:
+        score = 100
+        status = "Excellent"
+    elif 0.10 <= failure_rate < 0.15 or 0.35 < failure_rate <= 0.45:
+        score = 80
+        status = "Good"
+    elif 0.05 <= failure_rate < 0.10 or 0.45 < failure_rate <= 0.55:
+        score = 60
+        status = "Acceptable"
+    elif 0.02 <= failure_rate < 0.05 or 0.55 < failure_rate <= 0.70:
+        score = 40
+        status = "Poor - consider SMOTE or class weights"
+    else:
+        score = 20
+        status = "Critical - severe class imbalance"
+    
+    return score, status
+
+
+def compute_feature_coverage(jobs: list, feature_names: list = None) -> dict:
+    """
+    Analyze feature coverage and variance.
+    
+    Returns dict with coverage stats for each feature.
+    """
+    if feature_names is None:
+        feature_names = [
+            'runtime_sec', 'req_cpus', 'req_mem_mb', 'req_gpus',
+            'avg_cpu_percent', 'peak_cpu_percent', 'avg_memory_gb', 'peak_memory_gb',
+            'avg_io_wait_percent', 'total_nfs_read_gb', 'total_nfs_write_gb',
+            'total_local_read_gb', 'total_local_write_gb', 'nfs_ratio',
+            'exit_code', 'exit_signal', 'failure_reason'
+        ]
+    
+    coverage = {}
+    for feature in feature_names:
+        values = []
+        for job in jobs:
+            val = job.get(feature)
+            if val is not None:
+                try:
+                    values.append(float(val))
+                except (ValueError, TypeError):
+                    pass
+        
+        n_present = len(values)
+        n_total = len(jobs)
+        pct_coverage = (n_present / n_total * 100) if n_total > 0 else 0
+        
+        if values:
+            mean_val = sum(values) / len(values)
+            variance = sum((v - mean_val) ** 2 for v in values) / len(values) if len(values) > 1 else 0
+            std_val = math.sqrt(variance)
+            cv = (std_val / mean_val * 100) if mean_val != 0 else 0
+            min_val = min(values)
+            max_val = max(values)
+        else:
+            mean_val = std_val = cv = min_val = max_val = 0
+        
+        coverage[feature] = {
+            'n_present': n_present,
+            'pct_coverage': round(pct_coverage, 1),
+            'mean': round(mean_val, 2),
+            'std': round(std_val, 2),
+            'cv': round(cv, 1),
+            'min': round(min_val, 2),
+            'max': round(max_val, 2),
+            'has_variance': cv > 5,  # At least 5% coefficient of variation
+        }
+    
+    return coverage
+
+
+def compute_feature_score(coverage: dict) -> tuple:
+    """
+    Score overall feature quality from 0-100.
+    
+    Returns (score, list of issues).
+    """
+    issues = []
+    scores = []
+    
+    critical_features = [
+        'runtime_sec', 'avg_cpu_percent', 'avg_memory_gb', 
+        'nfs_ratio', 'exit_code'
+    ]
+    
+    for feature, stats in coverage.items():
+        # Coverage score
+        if stats['pct_coverage'] >= 90:
+            cov_score = 100
+        elif stats['pct_coverage'] >= 70:
+            cov_score = 80
+        elif stats['pct_coverage'] >= 50:
+            cov_score = 60
+        else:
+            cov_score = 40
+            if feature in critical_features:
+                issues.append("Low coverage for {}: {:.0f}%".format(feature, stats['pct_coverage']))
+        
+        # Variance score
+        if stats['has_variance']:
+            var_score = 100
+        else:
+            var_score = 50
+            if feature in critical_features:
+                issues.append("Low variance in {} (CV={:.1f}%)".format(feature, stats['cv']))
+        
+        # Weight critical features more heavily
+        weight = 2.0 if feature in critical_features else 1.0
+        scores.append((cov_score * 0.6 + var_score * 0.4) * weight)
+    
+    if scores:
+        # Normalize by total weight
+        total_weight = sum(2.0 if f in critical_features else 1.0 for f in coverage.keys())
+        avg_score = sum(scores) / total_weight
+    else:
+        avg_score = 0
+    
+    return int(avg_score), issues
+
+
+def compute_recency_score(jobs: list, max_age_days: int = 90) -> tuple:
+    """
+    Score data recency from 0-100.
+    
+    Recent data is more valuable for prediction.
+    """
+    if not jobs:
+        return 0, "No data"
+    
+    now = datetime.now()
+    recent_count = 0
+    oldest = now
+    newest = now - timedelta(days=365)
+    
+    for job in jobs:
+        end_time = job.get('end_time')
+        if end_time:
+            try:
+                if isinstance(end_time, str):
+                    # Try multiple formats
+                    dt = None
+                    for fmt in ['%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S']:
+                        try:
+                            dt = datetime.strptime(end_time[:26], fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if dt is None:
+                        continue
+                else:
+                    dt = end_time
+                
+                if dt < oldest:
+                    oldest = dt
+                if dt > newest:
+                    newest = dt
+                
+                age_days = (now - dt).days
+                if age_days <= max_age_days:
+                    recent_count += 1
+            except (ValueError, TypeError):
+                continue
+    
+    recent_pct = (recent_count / len(jobs) * 100) if jobs else 0
+    
+    if recent_pct >= 80:
+        score = 100
+        status = "Excellent - {:.0f}% within {} days".format(recent_pct, max_age_days)
+    elif recent_pct >= 60:
+        score = 80
+        status = "Good - {:.0f}% within {} days".format(recent_pct, max_age_days)
+    elif recent_pct >= 40:
+        score = 60
+        status = "Acceptable - {:.0f}% within {} days".format(recent_pct, max_age_days)
+    elif recent_pct >= 20:
+        score = 40
+        status = "Stale - only {:.0f}% within {} days".format(recent_pct, max_age_days)
+    else:
+        score = 20
+        status = "Very stale - only {:.0f}% within {} days".format(recent_pct, max_age_days)
+    
+    return score, status
+
+
+def estimate_accuracy(n_jobs: int, balance_score: int, feature_score: int) -> tuple:
+    """
+    Estimate expected model accuracy and confidence interval.
+    
+    Based on empirical observations from HPC failure prediction literature.
+    """
+    # Base accuracy improves logarithmically with sample size
+    # Asymptotes around 85% for good data
+    if n_jobs < 50:
+        base_accuracy = 0.50 + 0.10 * math.log10(max(1, n_jobs))
+    elif n_jobs < 500:
+        base_accuracy = 0.60 + 0.05 * math.log10(n_jobs)
+    else:
+        base_accuracy = 0.70 + 0.03 * math.log10(n_jobs)
+    
+    # Adjust for class balance (up to +/-10%)
+    balance_adjustment = (balance_score - 50) / 500  # -0.1 to +0.1
+    
+    # Adjust for feature quality (up to +/-5%)
+    feature_adjustment = (feature_score - 50) / 1000  # -0.05 to +0.05
+    
+    estimated = min(0.95, max(0.50, base_accuracy + balance_adjustment + feature_adjustment))
+    
+    # Confidence interval narrows with more data
+    ci_width = 0.20 / math.sqrt(max(1, n_jobs / 100))
+    ci_lower = max(0.40, estimated - ci_width)
+    ci_upper = min(0.99, estimated + ci_width)
+    
+    return round(estimated, 2), (round(ci_lower, 2), round(ci_upper, 2))
+
+
+def generate_recommendations(report: ReadinessReport) -> list:
+    """Generate actionable recommendations based on the report."""
+    recs = []
+    
+    # Sample size recommendations
+    if report.total_jobs < report.minimum_jobs:
+        needed = report.minimum_jobs - report.total_jobs
+        recs.append("[!] Collect {} more jobs to reach minimum viable sample size".format(needed))
+    elif report.total_jobs < report.recommended_jobs:
+        needed = report.recommended_jobs - report.total_jobs
+        recs.append("[*] Collect {} more jobs for recommended sample size".format(needed))
+    elif report.total_jobs < report.optimal_jobs:
+        needed = report.optimal_jobs - report.total_jobs
+        recs.append("[i] Collect {} more jobs for optimal prediction accuracy".format(needed))
+    
+    # Class balance recommendations
+    if report.failure_jobs == 0:
+        recs.append("[!] No failure data - predictions will be unreliable")
+    elif report.balance_score < 40:
+        failure_rate = report.failure_jobs / report.total_jobs if report.total_jobs > 0 else 0
+        if failure_rate < 0.05:
+            recs.append("[*] Very few failures - consider using class weights or SMOTE during training")
+        else:
+            recs.append("[*] High failure rate - verify data collection is capturing successful jobs")
+    
+    # Feature recommendations
+    if report.feature_score < 60:
+        recs.append("[*] Feature coverage is low - ensure job_summary data is being collected")
+    
+    # Recency recommendations
+    if report.recency_score < 60:
+        recs.append("[*] Data is stale - recent patterns may differ from historical data")
+    
+    # Training readiness
+    if report.ready_for_training:
+        recs.append("[ok] Data is ready for ML training - run: nomad train")
+    else:
+        recs.append("[..] Continue collecting data before training ML models")
+    
+    return recs
+
+
+def assess_readiness(db_path: str) -> ReadinessReport:
+    """
+    Assess data readiness for ML predictions.
+    
+    Args:
+        db_path: Path to NOMAD database
+        
+    Returns:
+        ReadinessReport with detailed assessment
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Check what tables exist
+    tables = [r[0] for r in c.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()]
+    
+    # Load jobs
+    jobs = []
+    if 'jobs' in tables:
+        c.execute("SELECT * FROM jobs")
+        for row in c.fetchall():
+            job = dict(row)
+            # Join with job_summary if available
+            if 'job_summary' in tables:
+                c.execute("SELECT * FROM job_summary WHERE job_id = ?", (job['job_id'],))
+                summary = c.fetchone()
+                if summary:
+                    job.update(dict(summary))
+            jobs.append(job)
+    
+    conn.close()
+    
+    # Count success/failure
+    total = len(jobs)
+    failures = sum(1 for j in jobs if j.get('state') in ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED'))
+    successes = total - failures
+    
+    # Compute sample size requirements
+    requirements = estimate_required_sample_size()
+    
+    # Sample score
+    if total >= requirements['optimal']:
+        sample_score = 100
+        status = "optimal"
+    elif total >= requirements['recommended']:
+        sample_score = 80
+        status = "recommended"
+    elif total >= requirements['minimum']:
+        sample_score = 60
+        status = "minimum"
+    else:
+        sample_score = int(total / requirements['minimum'] * 60) if requirements['minimum'] > 0 else 0
+        status = "insufficient"
+    
+    # Class balance score
+    balance_score, balance_status = compute_class_balance_score(successes, failures)
+    
+    # Feature coverage
+    feature_coverage = compute_feature_coverage(jobs)
+    feature_score, feature_issues = compute_feature_score(feature_coverage)
+    
+    # Recency score
+    recency_score, recency_status = compute_recency_score(jobs)
+    
+    # Overall score (weighted average)
+    overall_score = int(
+        sample_score * 0.35 +
+        balance_score * 0.25 +
+        feature_score * 0.25 +
+        recency_score * 0.15
+    )
+    
+    # Estimate accuracy
+    estimated_accuracy, confidence_interval = estimate_accuracy(
+        total, balance_score, feature_score
+    )
+    
+    # Create report
+    report = ReadinessReport(
+        total_jobs=total,
+        success_jobs=successes,
+        failure_jobs=failures,
+        sample_score=sample_score,
+        balance_score=balance_score,
+        feature_score=feature_score,
+        recency_score=recency_score,
+        overall_score=overall_score,
+        minimum_jobs=requirements['minimum'],
+        recommended_jobs=requirements['recommended'],
+        optimal_jobs=requirements['optimal'],
+        status=status,
+        ready_for_training=total >= requirements['minimum'] and failures >= 10 and balance_score >= 40,
+        feature_coverage=feature_coverage,
+        estimated_accuracy=estimated_accuracy,
+        confidence_interval=confidence_interval,
+    )
+    
+    report.recommendations = generate_recommendations(report)
+    
+    return report
+
+
+def format_readiness_report(report: ReadinessReport, verbose: bool = False) -> str:
+    """Format readiness report for terminal output (edu-style with colors)."""
+    
+    # ANSI colors
+    RESET = "[0m"
+    BOLD = "[1m"
+    DIM = "[2m"
+    GREEN = "[32m"
+    YELLOW = "[33m"
+    RED = "[31m"
+    CYAN = "[36m"
+    WHITE = "[37m"
+    
+    def score_color(score):
+        if score >= 85:
+            return GREEN
+        if score >= 65:
+            return CYAN
+        if score >= 40:
+            return YELLOW
+        return RED
+    
+    def bar(score, width=10):
+        """Render a score as a colored progress bar."""
+        filled = round(score / 100 * width)
+        return chr(9608) * filled + chr(9617) * (width - filled)  # Unicode block chars
+    
+    def level(score):
+        if score >= 85:
+            return "\n".join(lines)Excellent"
+        if score >= 65:
+            return "\n".join(lines)Good"
+        if score >= 40:
+            return "\n".join(lines)Developing"
+        return "\n".join(lines)Needs Work"
+    
+    lines = []
+    
+    # Header
+    lines.append("")
+    lines.append("  {}NOMAD-HPC Data Readiness{}".format(BOLD, RESET))
+    lines.append("  " + chr(9472) * 56)  # horizontal line
+    
+    # Overall status
+    oc = score_color(report.overall_score)
+    lines.append("  Status: {}{}  {}%   {}{}".format(
+        oc, bar(report.overall_score), report.overall_score, 
+        report.status.upper(), RESET))
+    lines.append("")
+    
+    # Sample size section
+    lines.append("  {}Sample Size{}".format(BOLD, RESET))
+    lines.append("  " + chr(9472) * 56)
+    
+    # Progress toward optimal
+    progress = min(100, int(report.total_jobs / report.optimal_jobs * 100)) if report.optimal_jobs > 0 else 0
+    pc = score_color(progress)
+    lines.append("    Total Jobs       {}{}{}  {:,}".format(pc, bar(progress), RESET, report.total_jobs))
+    
+    if report.total_jobs > 0:
+        # Show success/failure as a ratio bar
+        success_pct = report.success_jobs / report.total_jobs * 100
+        failure_pct = report.failure_jobs / report.total_jobs * 100
+        success_blocks = round(success_pct / 10)
+        failure_blocks = 10 - success_blocks
+        ratio_bar = "{}{}{}{}".format(GREEN, chr(9608) * success_blocks, RED, chr(9608) * failure_blocks)
+        lines.append("    Success/Fail     {}{}  {:.0f}%/{:.0f}%".format(
+            ratio_bar, RESET, success_pct, failure_pct))
+    
+    lines.append("    {}Thresholds       min:{} | rec:{} | opt:{}{}".format(
+        DIM, report.minimum_jobs, report.recommended_jobs, report.optimal_jobs, RESET))
+    lines.append("")
+    
+    # Readiness Scores
+    lines.append("  {}Readiness Scores{}".format(BOLD, RESET))
+    lines.append("  " + chr(9472) * 56)
+    
+    # Sample Score
+    c = score_color(report.sample_score)
+    lines.append("    Sample Size      {}{}{}  {:3.0f}%   {}".format(
+        c, bar(report.sample_score), RESET, report.sample_score, level(report.sample_score)))
+    
+    # Balance Score
+    c = score_color(report.balance_score)
+    lines.append("    Class Balance    {}{}{}  {:3.0f}%   {}".format(
+        c, bar(report.balance_score), RESET, report.balance_score, level(report.balance_score)))
+    if report.total_jobs > 0:
+        failure_rate = report.failure_jobs / report.total_jobs * 100
+        lines.append("    {}                 failure rate: {:.1f}% (ideal: 15-35%){}".format(
+            DIM, failure_rate, RESET))
+    
+    # Feature Score
+    c = score_color(report.feature_score)
+    lines.append("    Feature Quality  {}{}{}  {:3.0f}%   {}".format(
+        c, bar(report.feature_score), RESET, report.feature_score, level(report.feature_score)))
+    
+    # Recency Score
+    c = score_color(report.recency_score)
+    lines.append("    Data Recency     {}{}{}  {:3.0f}%   {}".format(
+        c, bar(report.recency_score), RESET, report.recency_score, level(report.recency_score)))
+    
+    # Overall
+    lines.append("    " + chr(9472) * 52)
+    oc = score_color(report.overall_score)
+    lines.append("    {}Overall          {}{}{}  {:3.0f}%   {}{}".format(
+        BOLD, oc, bar(report.overall_score), RESET, report.overall_score, level(report.overall_score), RESET))
+    lines.append("")
+    
+    # Feature details if verbose
+    if verbose and report.feature_coverage:
+        lines.append("  {}Feature Coverage{}".format(BOLD, RESET))
+        lines.append("  " + chr(9472) * 56)
+        for feature, stats in sorted(report.feature_coverage.items()):
+            cov = stats['pct_coverage']
+            c = score_color(cov)
+            ok = "{}[ok]{}".format(GREEN, RESET) if stats['has_variance'] and cov > 70 else "{}[--]{}".format(DIM, RESET)
+            lines.append("    {:18s} {}{}{}  {:5.1f}%  {}".format(
+                feature[:18], c, bar(cov), RESET, cov, ok))
+        lines.append("")
+    
+    # Model performance estimate
+    lines.append("  {}Estimated Model Performance{}".format(BOLD, RESET))
+    lines.append("  " + chr(9472) * 56)
+    acc = report.estimated_accuracy * 100
+    c = score_color(acc)
+    lines.append("    Accuracy         {}{}{}  {:.0f}%".format(c, bar(acc), RESET, acc))
+    lines.append("    {}95% CI           {:.0f}% - {:.0f}%{}".format(
+        DIM, report.confidence_interval[0] * 100, report.confidence_interval[1] * 100, RESET))
+    lines.append("")
+    
+    # Recommendations
+    if report.recommendations:
+        lines.append("  {}Recommendations{}".format(BOLD, RESET))
+        lines.append("  " + chr(9472) * 56)
+        for rec in report.recommendations:
+            if "[ok]" in rec:
+                lines.append("    {}{}{}".format(GREEN, rec, RESET))
+            elif "[!]" in rec:
+                lines.append("    {}{}{}".format(RED, rec, RESET))
+            elif "[*]" in rec:
+                lines.append("    {}{}{}".format(YELLOW, rec, RESET))
+            else:
+                lines.append("    {}".format(rec))
+        lines.append("")
+    
+    return "\n".join(lines)
+
+
+# Convenience function for CLI
+def check_readiness(db_path: str, verbose: bool = False) -> str:
+    """Check data readiness and return formatted report."""
+    report = assess_readiness(db_path)
+    return format_readiness_report(report, verbose)

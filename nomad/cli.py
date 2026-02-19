@@ -1072,6 +1072,42 @@ def dashboard(ctx, host, port, data):
 
 @cli.command()
 @click.option("--db", type=click.Path(), help="Database path")
+@click.option("-v", "--verbose", is_flag=True, help="Show feature details")
+@click.pass_context
+def readiness(ctx, db, verbose):
+    """Check data readiness for ML training.
+    
+    Analyzes your job data and reports:
+    - Sample size adequacy (minimum, recommended, optimal thresholds)
+    - Class balance (success/failure ratio)
+    - Feature coverage and variance
+    - Data recency
+    - Estimated model accuracy at current sample size
+    
+    Examples:
+        nomad readiness                # Check readiness
+        nomad readiness -v             # Verbose with feature details
+        nomad readiness --db data.db   # Specify database
+    """
+    from nomad.ml.estimator import check_readiness
+    
+    db_path = db
+    if not db_path:
+        config = ctx.obj.get("config", {})
+        db_path = str(get_db_path(config))
+    
+    if not Path(db_path).exists():
+        click.echo(click.style("Database not found: {}".format(db_path), fg="red"))
+        click.echo("Run 'nomad collect' first to gather job data.")
+        return
+    
+    report = check_readiness(db_path, verbose=verbose)
+    click.echo(report)
+
+
+
+@cli.command()
+@click.option("--db", type=click.Path(), help="Database path")
 @click.option("--epochs", "-e", type=int, default=100, help="Training epochs")
 @click.option("--verbose", "-v", is_flag=True, help="Show training progress")
 @click.pass_context

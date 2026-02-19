@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <style>
+      .bg { fill: #0a0a12; }
+      .ring { fill: none; stroke: #00BACF; stroke-width: 3; filter: url(#glow); }
+      .ring-inner { fill: none; stroke: #00BACF; stroke-width: 1.5; filter: url(#glow); }
+      .grid { stroke: #00BACF; stroke-width: 0.5; opacity: 0.2; }
+      .text-brand { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 12px; fill: #00BACF; letter-spacing: 6px; font-weight: 500; filter: url(#glow); }
+      .text-sub { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 7px; fill: #00BACF; letter-spacing: 2px; opacity: 0.8; }
+      .oslash { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 28px; fill: #B64326; font-weight: 500; filter: url(#glow-orange); }
+      .needle-n { fill: #B64326; filter: url(#glow-orange); }
+      .needle-s { fill: #00BACF; filter: url(#glow); }
+      .node { fill: #00BACF; filter: url(#glow); }
+      .cardinal { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10px; fill: #00BACF; font-weight: 500; }
+    </style>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glow-orange" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <circle class="bg" cx="100" cy="100" r="98"/>
+  
+  <!-- Outer ring -->
+  <circle class="ring" cx="100" cy="100" r="95"/>
+  
+  <!-- Inner ring -->
+  <circle class="ring-inner" cx="100" cy="100" r="60"/>
+  
+  <!-- Radial grid lines -->
+  <g class="grid">
+    <line x1="100" y1="5" x2="100" y2="195"/>
+    <line x1="5" y1="100" x2="195" y2="100"/>
+    <line x1="32" y1="32" x2="168" y2="168"/>
+    <line x1="168" y1="32" x2="32" y2="168"/>
+  </g>
+  
+  <!-- Circular grid -->
+  <circle class="grid" cx="100" cy="100" r="78" fill="none"/>
+  
+  <!-- Brand text - top arc -->
+  <path id="arc-top" fill="none" d="M 25,100 A 75,75 0 0,1 175,100"/>
+  <text class="text-brand">
+    <textPath href="#arc-top" startOffset="50%" text-anchor="middle">NØMAD-HPC</textPath>
+  </text>
+  
+  <!-- Tagline - bottom arc -->
+  <path id="arc-bottom" fill="none" d="M 22,100 A 78,78 0 0,0 178,100"/>
+  <text class="text-sub">
+    <textPath href="#arc-bottom" startOffset="50%" text-anchor="middle">MONITORING • ANALYSIS • DIAGNOSTICS</textPath>
+  </text>
+  
+  <!-- Cardinal nodes -->
+  <circle class="node" cx="100" cy="42" r="3"/>
+  <circle class="node" cx="158" cy="100" r="3"/>
+  <circle class="node" cx="100" cy="158" r="3"/>
+  <circle class="node" cx="42" cy="100" r="3"/>
+  
+  <!-- Cardinal labels -->
+  <text class="cardinal" x="100" y="56" text-anchor="middle">N</text>
+  <text class="cardinal" x="146" y="104" text-anchor="middle">E</text>
+  <text class="cardinal" x="100" y="150" text-anchor="middle">S</text>
+  <text class="cardinal" x="54" y="104" text-anchor="middle">W</text>
+  
+  <!-- Compass needle pointing NE -->
+  <g transform="rotate(45, 100, 100)">
+    <polygon class="needle-n" points="100,65 96,100 104,100"/>
+    <polygon class="needle-s" points="100,135 104,100 96,100"/>
+  </g>
+  
+  <!-- Center -->
+  <circle cx="100" cy="100" r="18" fill="#0a0a12" stroke="#00BACF" stroke-width="2" filter="url(#glow)"/>
+  <text class="oslash" x="100" y="108" text-anchor="middle">Ø</text>
+</svg>
