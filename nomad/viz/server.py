@@ -107,6 +107,8 @@ def find_database() -> Optional[Path]:
         Path.home() / "nomad" / "nomad.db",
         Path.home() / ".config" / "nomad" / "nomad.db",
         Path("nomad.db"),
+        # Demo database created by 'nomad demo'
+        Path.home() / "nomad_demo.db",
     ]
     for path in search_paths:
         if path.exists():
