@@ -76,3 +76,16 @@ paper/jats/
 paper/paper.pdf
 BUSINESS_NOTES.md
 BUSINESS_NOTES.md
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
