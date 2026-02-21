@@ -114,7 +114,7 @@ such as ``15 of 20 students improved memory efficiency over the
 semester.''
 
 \subsection*{Implementation and Architecture}
-NØMAD is implemented in Python and follows a modular architecture with four main components (Figure~\ref{fig:architecture}):
+NØMAD is implemented in Python and follows a modular architecture with seven main components (Figure~\ref{fig:architecture}):
 
 \begin{figure}[htbp]
 \centering
@@ -148,13 +148,20 @@ NØMAD provides a real-time web dashboard for monitoring cluster health and job 
 \label{fig:dashboard}
 \end{figure}
 
-The dashboard provides additional analytics views for resource tracking and infrastructure monitoring. The resource analytics view (Figure~\ref{fig:resources}) shows CPU and GPU usage by group and user, job submission patterns as a heatmap, and active interactive computing sessions. The infrastructure monitoring view (Figure~\ref{fig:infrastructure}) extends visibility to departmental workstations and storage servers, enabling correlation of job failures with infrastructure-wide issues.
+The dashboard provides additional analytics views for resource tracking and infrastructure monitoring. The usage analytics view (Figure~\ref{fig:usage}) shows CPU and GPU usage by group and user, plus job submission patterns as a heatmap. Interactive computing sessions (Figure~\ref{fig:interactive}) display active RStudio and Jupyter sessions. The infrastructure monitoring view (Figure~\ref{fig:infrastructure}) extends visibility to departmental workstations and storage servers.
 
 \begin{figure}[htbp]
 \centering
-\includegraphics[width=0.85\textwidth]{figures/resource-analytics.png}
-\caption{Resource analytics views. \textbf{Top}: Resource usage summary showing CPU-hours, GPU-hours, and usage breakdown by group and user. \textbf{Middle}: Activity heatmap displaying job submissions by day and hour, revealing usage patterns (busiest: Monday 11:00). \textbf{Bottom}: Interactive computing sessions showing active RStudio and Jupyter sessions with memory usage and session age.}
-\label{fig:resources}
+\includegraphics[width=0.85\textwidth]{figures/usage-analytics.png}
+\caption{Usage analytics views. \textbf{Top}: Resource usage summary showing CPU-hours, GPU-hours, and breakdown by group and user. \textbf{Bottom}: Activity heatmap displaying job submissions by day and hour, revealing usage patterns.}
+\label{fig:usage}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/interactive-sessions.png}
+\caption{Interactive computing sessions dashboard showing active RStudio and Jupyter sessions with memory usage, session age, and status.}
+\label{fig:interactive}
 \end{figure}
 
 
