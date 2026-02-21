@@ -85,7 +85,9 @@ successful and failing workloads without predefined failure categories.
 The similarity threshold (default $\geq 0.7$) controls network density:
 higher thresholds create sparser networks with tighter clusters, while
 lower thresholds reveal broader patterns at the cost of specificity.
-In practice, NØMAD achieves zero-infrastructure deployment through a single SQLite database with no external services required. The system provides system-level monitoring that works on any Linux machine without requiring HPC software, while optional SLURM integration enables job-level analytics and predictive alerts. The similarity network analysis learns failure patterns directly from historical data, adapting to site-specific workload characteristics. Beyond operational monitoring, an educational analytics module tracks the development of computational proficiency over time, enabling instructors to generate insights such as ``15 of 20 students improved memory efficiency over the semester.''
+
+In practice, NØMAD achieves zero-infrastructure deployment through a single SQLite database with no external services required. The system provides system-level monitoring that works on any Linux machine without requiring HPC software, while optional SLURM integration enables job-level analytics and predictive alerts. The similarity network analysis learns failure patterns directly from historical data, adapting to site-specific workload characteristics. Beyond operational monitoring, an educational analytics module tracks the development of computational proficiency over time, enabling instructors to generate insights on students efficiency in using HPC resources.''
+
 \subsection*{Implementation and Architecture}
 NØMAD is implemented in Python and follows a modular architecture with seven main components (Figure~\ref{fig:architecture}):
 
