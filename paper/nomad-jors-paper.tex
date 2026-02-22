@@ -153,8 +153,9 @@ A distinguishing feature of NØMAD is the job similarity network visualization (
 \end{figure}
 
 The feature variance panel helps administrators verify normal cluster operation and identify which metrics contribute most to failure prediction.
+
 \subsection*{Quality Control}
-NØMAD includes a comprehensive test suite that ensures reliability across all components. Unit tests cover collectors, feature engineering, and ML components individually, while integration tests verify the full data pipeline from metric collection through prediction. For evaluation without a production cluster, a demo mode (\texttt{nomad demo}) generates synthetic HPC data with realistic patterns. Continuous integration via GitHub Actions runs the test suite on every commit.
+NØMAD includes a comprehensive test suite that ensures reliability across all components. Unit tests cover collectors, feature engineering, and ML components individually, while integration tests verify the full data pipeline from metric collection through prediction. For evaluation without a production cluster, a demo mode (\texttt{nomad demo}) generates synthetic HPC data with realistic patterns. GitHub Actions automates package publishing to PyPI on each release.
 
 The software has been tested on clusters ranging from 6 to 200 nodes, including both CPU-only and GPU-enabled partitions. The codebase follows PEP 8 style guidelines and includes type hints for improved maintainability.
 \subsection*{Educational Analytics}
