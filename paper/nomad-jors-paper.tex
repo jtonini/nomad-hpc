@@ -27,7 +27,7 @@ NØMAD: Lightweight HPC Monitoring and Diagnostics with Machine Learning-Based F
 
 \subsection*{Paper Author Roles and Affiliations}
 \begin{enumerate}
-\item Academic Research Computing, University of Richmond, Richmond, VA 23173, USA.\\
+\item Academic Research Computing, Office of the Provost, University of Richmond, Richmond, VA 23173, USA.\\
 Email: jtonini@richmond.edu\\
 ORCID: 0000-0002-4730-3805
 \end{enumerate}
@@ -42,49 +42,15 @@ HPC; high-performance computing; monitoring; machine learning; SLURM; predictive
 
 HPC administrators face a persistent challenge: detecting job failures before they impact researchers. While traditional monitoring tools offer valuable capabilities, they have evolved along two separate paths---enterprise IT solutions and HPC-specific tools---neither of which fully addresses this need.
 
-Enterprise monitoring solutions like Prometheus \cite{prometheus},
-Grafana \cite{grafana}, and Nagios \cite{nagios} provide mature, feature-rich platforms but require
-significant infrastructure---database servers, message queues, and
-dedicated hardware---that may be impractical for small-to-medium HPC
-centers. These tools target general IT workloads and lack native
-understanding of HPC concepts such as job schedulers, batch queues, and
-compute allocations.
+Enterprise monitoring solutions like Prometheus \cite{prometheus}, Grafana \cite{grafana}, and Nagios \cite{nagios} provide mature, feature-rich platforms but require significant infrastructure---database servers, message queues, and dedicated hardware---that may be impractical for small-to-medium HPC centers. These tools target general IT workloads and lack native understanding of HPC concepts such as job schedulers, batch queues, and compute allocations.
+
 HPC-specific tools address this domain gap but introduce their own complexity. TACC Stats \cite{tacc}, for example, provides comprehensive hardware counter data and correlates system metrics with job performance, enabling detailed post-hoc analysis of application behavior. At the institutional scale, XDMoD \cite{xdmod} offers sophisticated job accounting and resource utilization reporting, though its deployment requires multiple database backends and web services. For large-scale continuous monitoring, the Lightweight Distributed Metric Service (LDMS) \cite{ldms} achieves impressive scalability through a distributed architecture. What these tools share, despite their different approaches, is an emphasis on retrospective analysis---understanding what happened after a failure---rather than real-time prediction of failures before they occur.
 
-A complementary approach treats failure prediction as a pattern recognition problem. Jobs that fail often share common characteristics:
-excessive NFS writes, memory pressure, or inefficient CPU utilization.
-Machine learning methods have been applied to HPC failure prediction
-\cite{mlhpc}, typically using classification models trained on job
-features. However, these approaches often treat jobs as independent
-observations, ignoring the structural relationships between jobs with
-similar resource profiles.
+A complementary approach treats failure prediction as a pattern recognition problem. Jobs that fail often share common characteristics: excessive NFS writes, memory pressure, or inefficient CPU utilization. Machine learning methods have been applied to HPC failure prediction \cite{mlhpc}, typically using classification models trained on job features. However, these approaches often treat jobs as independent observations, ignoring the structural relationships between jobs with similar resource profiles.
 
-NØMAD addresses these gaps by combining zero-infrastructure deployment
-with network-based failure prediction. The key insight is that jobs with
-similar resource usage patterns tend to experience similar outcomes.
-Rather than treating each job independently, NØMAD models jobs as nodes
-in a similarity network where edges connect jobs with comparable
-behavioral fingerprints. This network structure reveals failure-prone
-regions in the feature space---clusters of jobs that share
-characteristics associated with poor outcomes---enabling both risk
-assessment for individual jobs and actionable recommendations for users.
+NØMAD addresses these gaps by combining zero-infrastructure deployment with network-based failure prediction. The key insight is that jobs with similar resource usage patterns tend to experience similar outcomes. Rather than treating each job independently, NØMAD models jobs as nodes in a similarity network where edges connect jobs with comparable behavioral fingerprints. This network structure reveals failure-prone regions in the feature space---clusters of jobs that share characteristics associated with poor outcomes---enabling both risk assessment for individual jobs and actionable recommendations for users.
 
-The choice of similarity metric is consequential for network topology.
-NØMAD uses cosine similarity on Z-score normalized feature vectors,
-which emphasizes the \emph{shape} of resource usage profiles rather than
-absolute magnitudes. A job requesting 64GB of memory with 50\%
-utilization has a similar profile to one requesting 8GB with 50\%
-utilization---both represent reasonable memory sizing---even though
-their absolute consumption differs by an order of magnitude. This
-approach draws inspiration from network-based methods in biogeography,
-where similarity metrics identify emergent regions from species
-distribution patterns \cite{vilhena}. Just as biogeographical networks
-reveal ecological boundaries from observational data without predefined
-regions, job similarity networks reveal behavioral boundaries between
-successful and failing workloads without predefined failure categories.
-The similarity threshold (default $\geq 0.7$) controls network density:
-higher thresholds create sparser networks with tighter clusters, while
-lower thresholds reveal broader patterns at the cost of specificity.
+The choice of similarity metric is consequential for network topology. NØMAD uses cosine similarity on Z-score normalized feature vectors, which emphasizes the \emph{shape} of resource usage profiles rather than absolute magnitudes. A job requesting 64GB of memory with 50\% utilization has a similar profile to one requesting 8GB with 50\% utilization---both represent reasonable memory sizing---even though their absolute consumption differs by an order of magnitude. This approach draws inspiration from network-based methods in biogeography, where similarity metrics identify emergent regions from species distribution patterns \cite{vilhena}. Just as biogeographical networks reveal ecological boundaries from observational data without predefined regions, job similarity networks reveal behavioral boundaries between successful and failing workloads without predefined failure categories. The similarity threshold (default $\geq 0.7$) controls network density: higher thresholds create sparser networks with tighter clusters, while lower thresholds reveal broader patterns at the cost of specificity.
 
 In practice, NØMAD achieves zero-infrastructure deployment through a single SQLite database with no external services required. The system provides system-level monitoring that works on any Linux machine without requiring HPC software, while optional SLURM integration enables job-level analytics and predictive alerts. The similarity network analysis learns failure patterns directly from historical data, adapting to site-specific workload characteristics. Beyond operational monitoring, an educational analytics module tracks the development of computational proficiency over time, enabling instructors to generate insights on students efficiency in using HPC resources.''
 
@@ -112,6 +78,7 @@ For troubleshooting, the \textbf{Diagnostics Module} provides targeted analysis 
 
 Finally, \textbf{Infrastructure Monitoring} extends visibility beyond compute nodes to encompass the broader research environment. The dashboard includes dedicated views for departmental workstations---tracking CPU, memory, disk usage, and logged-in users---as well as storage servers with ZFS pool health, NFS client connections, and I/O metrics. This holistic perspective enables administrators to correlate job failures with infrastructure-wide issues such as NFS server congestion or storage capacity constraints.
 \subsection*{Web Dashboard}
+
 NØMAD provides a real-time web dashboard for monitoring cluster health and job status (Figure~\ref{fig:dashboard}). The dashboard displays partition-specific metrics including queue depth, node utilization, and resource consumption patterns.
 
 \begin{figure}[htbp]
@@ -136,12 +103,14 @@ The dashboard provides additional analytics views for resource tracking and infr
 \caption{Interactive computing sessions dashboard showing active RStudio and Jupyter sessions with memory usage, session age, and status.}
 \label{fig:interactive}
 \end{figure}
+
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.85\textwidth]{figures/infrastructure.png}
 \caption{Infrastructure monitoring views. \textbf{Top}: Workstation overview showing departmental machines (Biology, Chemistry, Physics, Math/CS) with status, CPU load, memory, disk usage, and logged-in users. \textbf{Bottom}: Storage overview displaying NFS servers with capacity, usage, ZFS pool health, and connected clients.}
 \label{fig:infrastructure}
 \end{figure}
+
 \subsection*{Job Similarity Network}
 A distinguishing feature of NØMAD is the job similarity network visualization (Figure~\ref{fig:network}). Jobs are represented as nodes in a 3D space defined by their I/O characteristics: NFS write ratio, local write volume, and I/O wait percentage. When full job metrics are available, edges connect jobs with cosine similarity $\geq 0.7$ based on their feature vectors.
 
@@ -155,12 +124,13 @@ A distinguishing feature of NØMAD is the job similarity network visualization (
 The feature variance panel helps administrators verify normal cluster operation and identify which metrics contribute most to failure prediction.
 
 \subsection*{Quality Control}
-NØMAD includes a comprehensive test suite that ensures reliability across all components. Unit tests cover collectors, feature engineering, and ML components individually, while integration tests verify the full data pipeline from metric collection through prediction. For evaluation without a production cluster, a demo mode (\texttt{nomad demo}) generates synthetic HPC data with realistic patterns. GitHub Actions automates package publishing to PyPI on each release.
+NØMAD includes a comprehensive test suite that ensures reliability across all components. Unit tests cover collectors and the educational analytics module, with the test suite designed to expand as the project matures. For evaluation without a production cluster, a demo mode (\texttt{nomad demo}) generates synthetic HPC data with realistic patterns. GitHub Actions automates package publishing to PyPI on each release.
 
-The software has been tested on clusters ranging from 6 to 200 nodes, including both CPU-only and GPU-enabled partitions. The codebase follows PEP 8 style guidelines and includes type hints for improved maintainability.
+The software has been validated using simulated cluster configurations ranging from 6 to 200 nodes, including both CPU-only and GPU-enabled partitions. The codebase follows PEP 8 style guidelines and includes type hints for improved maintainability.
+
 \subsection*{Educational Analytics}
 
-NØMAD includes an educational analytics module (\texttt{nomad edu}) designed for classroom instruction, research mentorship, and HPC training programs. The module tracks the development of computational proficiency over time by analyzing per-job behavioral fingerprints across five dimensions: CPU efficiency, memory sizing, time estimation, I/O awareness, and GPU utilization.
+NØMAD includes an educational analytics module (\texttt{nomad edu}) designed for classroom instruction, research mentorship, and HPC training programs. The module tracks the development of computational proficiency over time by analyzing per-job behavioral fingerprints across five dimensions: CPU efficiency, memory sizing, time estimation, I/O awareness, and GPU utilization (Figure~\ref{fig:edu}).
 
 The \textbf{Job Explanation} feature (\texttt{nomad edu explain}) translates raw job data into plain-language feedback that students can immediately act upon. For each completed job, the system provides dimension-specific scores (0--100), proficiency levels (Excellent, Good, Developing, Needs Work), and actionable recommendations. For example, a job with 21\% CPU utilization receives the feedback: ``Very low CPU utilization---requested 4 cores but used $\sim$1. Try: \texttt{\#SBATCH --ntasks=1}.''
 
@@ -175,27 +145,16 @@ The \textbf{Job Explanation} feature (\texttt{nomad edu explain}) translates raw
 \vspace{0.2cm}
 
 
-\caption{Educational analytics outputs. \textbf{Top left} (\texttt{nomad edu explain 1104}): Job explanation
-with proficiency scores and recommendations. \textbf{Top right} (\texttt{nomad edu trajectory alice}): User trajectory
-tracking improvement over 173 jobs. \textbf{Bottom} (\texttt{nomad edu report cs101}): Group report for a course
-section with per-student breakdown.}
+\caption{Educational analytics outputs. \textbf{Top left} (\texttt{nomad edu explain 1104}): Job explanation with proficiency scores and recommendations. \textbf{Top right} (\texttt{nomad edu trajectory alice}): User trajectory tracking improvement over 173 jobs. \textbf{Bottom} (\texttt{nomad edu report cs101}): Group report for a course section with per-student breakdown.}
 \label{fig:edu}
 \end{figure}
 
 Beyond individual job feedback, \textbf{User Trajectories} (\texttt{nomad edu trajectory}) track each person's improvement across their job submissions. The system computes sliding-window averages to identify trends---improving, stable, or declining---for each proficiency dimension, enabling mentors to provide targeted guidance where it is most needed.
 
-At the class level, \textbf{Group Reports} (\texttt{nomad edu report}) aggregate proficiency data across course sections or research groups. Instructors can generate summaries such as ``15 of 20 students improved memory efficiency over the semester'' or identify that a majority of students struggle with I/O patterns, suggesting curriculum adjustments.
-These features address a common challenge in HPC education: students submit
-jobs that technically complete but exhibit significant resource waste or
-suboptimal patterns. Traditional approaches require manual inspection of
-\texttt{sacct} output, which is impractical for classes with hundreds of
-students. NØMAD automates this assessment while providing pedagogically useful
-feedback that helps students develop genuine computational proficiency rather
-than simply learning to avoid errors.
+At the class level, \textbf{Group Reports} (\texttt{nomad edu report}) aggregate proficiency data across course sections or research groups. Instructors can generate summaries such as ``15 of 20 students improved memory efficiency over the semester'' or identify that a majority of students struggle with I/O patterns, suggesting curriculum adjustments. These features address a common challenge in HPC education: students submit jobs that technically complete but exhibit significant resource waste or suboptimal patterns. Traditional approaches require manual inspection of \texttt{sacct} output, which is impractical for classes with hundreds of students. NØMAD automates this assessment while providing pedagogically useful
+feedback that helps students develop genuine computational proficiency rather than simply learning to avoid errors.
 
-Proficiency scores are persisted to the database, enabling longitudinal studies
-of HPC training effectiveness and research into factors that accelerate skill
-development.
+Proficiency scores are persisted to the database, enabling longitudinal studies of HPC training effectiveness and research into factors that accelerate skill development.
 
 \section*{(2) Availability}
 
@@ -249,6 +208,7 @@ Identifier: & \url{https://github.com/jtonini/nomad-hpc} \\
 Licence: & AGPL-3.0-or-later \\
 Date published: & December 2025 \\
 \end{tabular}
+
 \subsubsection*{Package Repository}
 \begin{tabular}{ll}
 Name: & PyPI \\
@@ -261,6 +221,7 @@ Installation: & \texttt{pip install nomad-hpc} \\
 URL: & \url{https://nomad-hpc.com} \\
 Documentation: & \url{https://jtonini.github.io/nomad-hpc/} \\
 \end{tabular}
+
 \subsection*{Language}
 English
 
@@ -272,52 +233,27 @@ NØMAD is designed for broad reuse across HPC environments of varying scales. Th
 
 \textbf{Medium HPC Centers}: University and institutional HPC centers can deploy NØMAD as either a primary monitoring solution or as a complement to existing tools like Grafana or Nagios, adding predictive capabilities to traditional threshold-based alerting.
 
-\textbf{Research Applications}: The similarity network approach provides a
-framework for studying HPC failure patterns. The network structure, combined
-with job-level proficiency scores, enables quantitative analysis of resource
-usage patterns and their relationship to job outcomes.
+\textbf{Research Applications}: The similarity network approach provides a framework for studying HPC failure patterns. The network structure, combined with job-level proficiency scores, enables quantitative analysis of resource usage patterns and their relationship to job outcomes.
 
-\textbf{Community Data Sharing}: The \texttt{nomad community export} command
-generates anonymized datasets suitable for cross-institutional research. Export
-formats include:
+\textbf{Community Data Sharing}: The \texttt{nomad community export} command generates anonymized datasets suitable for cross-institutional research. Export formats include:
+
 \begin{itemize}
 \item \textbf{Job fingerprints}: Feature vectors with hashed user/job identifiers
 \item \textbf{Failure patterns}: Aggregated statistics on failure modes by resource profile
 \item \textbf{Proficiency distributions}: Anonymized skill development trajectories
 \end{itemize}
-These exports enable collaborative research on HPC usage patterns without
-exposing sensitive institutional data. Researchers can study questions such as:
-Which failure modes are universal vs.\ site-specific? Do proficiency
-improvement rates vary by discipline? What resource configurations correlate
-with job success across different cluster architectures?
 
-The anonymization process removes usernames, job names, and absolute timestamps
-while preserving the relational structure needed for network-based analysis.
-Exported data uses relative time offsets and hashed identifiers, making it
-suitable for publication as supplementary materials or inclusion in shared
-research datasets.
+These exports enable collaborative research on HPC usage patterns without exposing sensitive institutional data. Researchers can study questions such as: Which failure modes are universal vs.\ site-specific? Do proficiency improvement rates vary by discipline? What resource configurations correlate with job success across different cluster architectures?
 
-\textbf{Educational Use}: Beyond the demo mode, NØMAD provides a complete
-educational analytics pipeline. Instructors can assign Linux groups to course
-sections (e.g., \texttt{cs101}, \texttt{bio301}) and use \texttt{nomad edu
-report} to track class-wide proficiency development. Individual students
-receive automated feedback via \texttt{nomad edu explain}, reducing instructor
-workload while providing immediate, actionable guidance. The module is
-particularly valuable for:
+The anonymization process removes usernames, job names, and absolute timestamps while preserving the relational structure needed for network-based analysis. Exported data uses relative time offsets and hashed identifiers, making it suitable for publication as supplementary materials or inclusion in shared research datasets.
+
+\textbf{Educational Use}: Beyond the demo mode, NØMAD provides a complete educational analytics pipeline. Instructors can assign Linux groups to course sections (e.g., \texttt{cs101}, \texttt{bio301}) and use \texttt{nomad edu report} to track class-wide proficiency development. Individual students receive automated feedback via \texttt{nomad edu explain}, reducing instructor workload while providing immediate, actionable guidance. The module is particularly valuable for:
+
 \begin{itemize}
 \item \textbf{HPC workshops}: Pre/post assessment of participant skills
 \item \textbf{Research onboarding}: Tracking new graduate students' development
 \item \textbf{Classroom instruction}: Automated grading of computational assignments
 \item \textbf{Self-directed learning}: Students can independently review their job history
-\end{itemize}
-
-\subsection*{Extension Points}
-Developers can extend NØMAD in several ways:
-\begin{itemize}
-\item \textbf{Custom Collectors}: Add new metric sources by implementing the collector interface
-\item \textbf{Alert Channels}: Integrate additional notification services beyond email/Slack/webhooks
-\item \textbf{ML Models}: Train site-specific models using the provided feature engineering pipeline
-\item \textbf{Dashboard Widgets}: Extend the web dashboard with custom visualizations
 \end{itemize}
 
 \subsection*{Support}
@@ -330,10 +266,7 @@ Developers can extend NØMAD in several ways:
 Users and developers are welcome to submit bug reports, feature requests, and pull requests via GitHub.
 
 \section*{Acknowledgements}
-The author thanks George Flanagin for advice and inspiration on HPC system administration, and the University of Richmond's Office of the Provost for financial and resource support.
-
-\section*{Funding Statement}
-This work was supported by the University of Richmond.
+The author thanks George Flanagin for advice and inspiration on HPC system administration, and the University of Richmond's Office of the Provost for support.
 
 \section*{Competing Interests}
 The author declares no competing interests.
