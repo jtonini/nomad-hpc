@@ -16,7 +16,6 @@
 ---
 
 ## Quick Start
-
 ```bash
 pip install nomad-hpc
 nomad demo                    # Try with synthetic data
@@ -36,33 +35,37 @@ nomad dashboard               # Launch web interface
 | Feature | Description | Command |
 |---------|-------------|---------|
 | **Dashboard** | Real-time multi-cluster monitoring with partition views | `nomad dashboard` |
+| **Workstation Monitoring** | Track departmental workstations (CPU, memory, disk, users) | Dashboard → Workstations |
+| **Storage Monitoring** | Monitor NFS servers, ZFS pools, IOPS, and client connections | Dashboard → Storage |
+| **Interactive Sessions** | Monitor RStudio/Jupyter sessions with memory and age | Dashboard → Interactive |
+| **Data Readiness** | Assess ML model readiness with sample size and variance analysis | `nomad readiness` |
+| **Diagnostics** | Analyze network, storage, and node-level bottlenecks | `nomad diag` |
 | **Educational Analytics** | Track computational proficiency development | `nomad edu explain <job>` |
 | **Alerts** | Threshold + predictive alerts (email, Slack, webhook) | `nomad alerts` |
 | **ML Prediction** | Job failure prediction using similarity networks | `nomad predict` |
 | **Community Export** | Anonymized datasets for cross-institutional research | `nomad community export` |
-| **Interactive Sessions** | Monitor RStudio/Jupyter sessions | `nomad report-interactive` |
-| **Derivative Analysis** | Detect accelerating trends before thresholds | Built into alerts |
 
 ---
 
 ## Architecture
-
 ```
-┌────────────────────────────────────────────────────────────┐
-│                         NØMAD                              │
-├──────────────┬──────────────┬──────────────┬───────────────┤
-│  Collectors  │   Analysis   │     Viz      │    Alerts     │
-├──────────────┼──────────────┼──────────────┼───────────────┤
-│ disk         │ derivatives  │ dashboard    │ thresholds    │
-│ iostat       │ similarity   │ network 3D   │ predictive    │
-│ slurm        │ ML ensemble  │ partitions   │ email/slack   │
-│ gpu          │ edu scoring  │ edu views    │ webhooks      │
-│ nfs          │              │              │               │
-└──────────────┴──────────────┴──────────────┴───────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │  SQLite Database  │
-                    └───────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                              NØMAD                                  │
+├───────────────┬───────────────┬───────────────┬─────────────────────┤
+│  Collectors   │   Analysis    │     Viz       │      Alerts         │
+├───────────────┼───────────────┼───────────────┼─────────────────────┤
+│ disk          │ derivatives   │ dashboard     │ thresholds          │
+│ iostat        │ similarity    │ network 3D    │ predictive          │
+│ slurm         │ ML ensemble   │ partitions    │ email/slack         │
+│ gpu           │ edu scoring   │ workstations  │ webhooks            │
+│ nfs           │ readiness     │ storage       │                     │
+│ workstation   │ diagnostics   │ interactive   │                     │
+│ storage       │               │               │                     │
+└───────────────┴───────────────┴───────────────┴─────────────────────┘
+                                │
+                      ┌─────────┴─────────┐
+                      │  SQLite Database  │
+                      └───────────────────┘
 ```
 
 ---
@@ -74,8 +77,18 @@ nomad dashboard               # Launch web interface
 nomad init                    # Setup wizard
 nomad collect                 # Start collectors
 nomad dashboard               # Web interface
-nomad demo                    # Demo mode
+nomad dashboard --db file.db  # Use specific database
+nomad demo                    # Demo mode with synthetic data
 nomad status                  # System status
+```
+
+### Data Readiness & Diagnostics
+```bash
+nomad readiness               # Check ML training readiness
+nomad readiness -v            # Verbose with feature details
+nomad diag network            # Network performance analysis
+nomad diag storage            # Storage health and I/O patterns
+nomad diag node               # Node-level resource bottlenecks
 ```
 
 ### Educational Analytics
@@ -104,6 +117,22 @@ nomad alerts --unresolved     # Unresolved only
 
 ---
 
+## Dashboard Views
+
+The web dashboard includes multiple views accessible via tabs:
+
+- **Cluster Overview**: Real-time node status with health rings showing CPU utilization
+- **Network View**: 3D job similarity network with failure clustering analysis
+- **Resources**: CPU-hours, GPU-hours, and usage breakdown by group/user
+- **Activity**: Job submission heatmap showing patterns by day and hour
+- **Interactive**: Active RStudio and Jupyter sessions with memory usage
+- **Workstations**: Departmental machines with CPU, memory, disk, and logged-in users
+- **Storage**: NFS servers with ZFS pool health, capacity, and client connections
+
+Toggle between light and dark themes with the Theme button.
+
+---
+
 ## Installation
 
 ### From PyPI
@@ -114,7 +143,7 @@ pip install nomad-hpc
 ### From Source
 ```bash
 git clone https://github.com/jtonini/nomad-hpc
-cd nomad && pip install -e .
+cd nomad-hpc && pip install -e .
 ```
 
 ### Requirements
@@ -155,7 +184,6 @@ Dual-licensed:
 ---
 
 ## Citation
-
 ```bibtex
 @software{nomad2026,
   author = {Tonini, João Filipe Riva},
