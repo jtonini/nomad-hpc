@@ -397,7 +397,7 @@ def status(ctx: click.Context, db: str) -> None:
             color = 'green' if pct < 70 else 'yellow' if pct < 85 else 'red'
             bar_len = int(pct / 5)
             bar = '█' * bar_len + '░' * (20 - bar_len)
-            click.echo(f"  {row['hostname']:<20} [{bar}] {click.style(f'{pct}%', fg=color):>6} ({row['used_gb']}/{row['total_gb']} GB)")
+            click.echo(f"  {row['hostname']:<20} [{click.style(bar, fg=color)}] {click.style(f'{pct}%', fg=color)} ({row['used_gb']}/{row['total_gb']} GB)")
     except Exception:
         click.echo("  No filesystem data available")
 
@@ -606,7 +606,8 @@ def status(ctx: click.Context, db: str) -> None:
     
     # Recent collection stats
     click.echo(click.style("Collection:", bold=True))
-    collection_rows = conn.execute(
+    try:
+        collection_rows = conn.execute(
         """
         SELECT collector, 
                COUNT(*) as runs,
@@ -616,18 +617,17 @@ def status(ctx: click.Context, db: str) -> None:
         WHERE started_at > datetime('now', '-24 hours')
         GROUP BY collector
         """
-    ).fetchall()
-    
-    if collection_rows:
-        for row in collection_rows:
-            success_rate = (row['successes'] / row['runs'] * 100) if row['runs'] else 0
-            color = 'green' if success_rate == 100 else 'yellow' if success_rate > 90 else 'red'
-            click.echo(f"  {row['collector']:<15} {row['runs']:>3} runs  {click.style(f'{success_rate:.0f}% success', fg=color)}")
-    else:
-        click.echo("  No collection data")
-    
+        ).fetchall()
+        if collection_rows:
+            for row in collection_rows:
+                success_rate = (row['successes'] / row['runs'] * 100) if row['runs'] else 0
+                color = 'green' if success_rate == 100 else 'yellow' if success_rate > 90 else 'red'
+                click.echo(f"  {row['collector']:<15} {row['runs']:>3} runs  {click.style(f'{success_rate:.0f}% success', fg=color)}")
+            else:
+                click.echo("  No collection data")
+    except Exception:
+            click.echo(" No collection data available") 
     click.echo()
-
 
 @cli.command()
 @click.option('--db', type=click.Path(), help='Database path override')
