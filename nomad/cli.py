@@ -263,7 +263,7 @@ def analyze(ctx: click.Context, path: str, hours: int, limit_gb: float, db: str)
     rows = conn.execute(
         """
         SELECT timestamp, used_bytes, used_percent, total_bytes
-        FROM filesystems
+        FROM storage_state
         WHERE path = ?
           AND timestamp > datetime('now', ?)
         ORDER BY timestamp ASC
@@ -376,51 +376,53 @@ def status(ctx: click.Context, db: str) -> None:
     
     # Filesystem status
     click.echo(click.style("Filesystems:", bold=True))
-    fs_rows = conn.execute(
-        """
-        SELECT path, 
-               round(used_bytes/1e9, 2) as used_gb,
-               round(total_bytes/1e9, 2) as total_gb,
-               round(used_percent, 1) as pct,
-               timestamp
-        FROM filesystems f1
-        WHERE timestamp = (
-            SELECT MAX(timestamp) FROM filesystems f2 WHERE f2.path = f1.path
-        )
-        ORDER BY path
-        """
-    ).fetchall()
-    
-    for row in fs_rows:
-        pct = row['pct']
-        color = 'green' if pct < 70 else 'yellow' if pct < 85 else 'red'
-        bar_len = int(pct / 5)
-        bar = '█' * bar_len + '░' * (20 - bar_len)
-        click.echo(f"  {row['path']:<20} [{bar}] {click.style(f'{pct}%', fg=color):>6} ({row['used_gb']}/{row['total_gb']} GB)")
-    
-    click.echo()
-    
+    try:
+        fs_rows = conn.execute(
+            """
+            SELECT hostname,
+                   round(used_bytes/1e9, 2) as used_gb,
+                   round(total_bytes/1e9, 2) as total_gb,
+                   round(usage_percent, 1) as pct,
+                   timestamp
+            FROM storage_state f1
+            WHERE timestamp = (
+                SELECT MAX(timestamp) FROM storage_state f2 WHERE f2.hostname = f1.hostname
+            )
+            ORDER BY hostname
+            """
+        ).fetchall()
+
+        for row in fs_rows:
+            pct = row['pct']
+            color = 'green' if pct < 70 else 'yellow' if pct < 85 else 'red'
+            bar_len = int(pct / 5)
+            bar = '█' * bar_len + '░' * (20 - bar_len)
+            click.echo(f"  {row['hostname']:<20} [{bar}] {click.style(f'{pct}%', fg=color):>6} ({row['used_gb']}/{row['total_gb']} GB)")
+    except Exception:
+        click.echo("  No filesystem data available")
+
     # Queue status
     click.echo(click.style("Queue:", bold=True))
-    queue_rows = conn.execute(
-        """
-        SELECT partition, pending_jobs, running_jobs, total_jobs, timestamp
-        FROM queue_state q1
-        WHERE timestamp = (
-            SELECT MAX(timestamp) FROM queue_state q2 WHERE q2.partition = q1.partition
-        )
-        ORDER BY partition
-        """
-    ).fetchall()
-    
-    if queue_rows:
-        for row in queue_rows:
-            click.echo(f"  {row['partition']:<15} Running: {row['running_jobs']:>3}  Pending: {row['pending_jobs']:>3}")
-    else:
-        click.echo("  No queue data")
-    
-    click.echo()
-    
+    try:
+        queue_rows = conn.execute(
+            """
+            SELECT partition, pending_jobs, running_jobs, total_jobs, timestamp
+            FROM queue_state q1
+            WHERE timestamp = (
+                SELECT MAX(timestamp) FROM queue_state q2 WHERE q2.partition = q1.partition
+            )
+            ORDER BY partition
+            """
+        ).fetchall()
+
+        if queue_rows:
+            for row in queue_rows:
+                click.echo(f"  {row['partition']:<15} Running: {row['running_jobs']:>3}  Pending: {row['pending_jobs']:>3}")
+        else:
+            click.echo("  No queue data")
+    except Exception:
+        click.echo("  No queue data available")
+
     # I/O status (from iostat)
     click.echo(click.style("I/O:", bold=True))
     try:
@@ -646,7 +648,18 @@ def alerts(ctx: click.Context, db: str, unresolved: bool, severity: str) -> None
     
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    
+
+    # Check if alerts table exists
+    table_check = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='alerts'"
+    ).fetchone()
+    if not table_check:
+        click.echo()
+        click.echo("  No alerts table found. Use NØMAD Console for real-time alerts.")
+        click.echo()
+        conn.close()
+        return
+
     # Build query
     query = "SELECT * FROM alerts WHERE 1=1"
     params = []

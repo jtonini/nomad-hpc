@@ -58,7 +58,7 @@ class StorageDiagnostic:
     total_bytes: int = 0
     used_bytes: int = 0
     free_bytes: int = 0
-    usage_pct: float = 0.0
+    usage_percent: float = 0.0
     
     # ZFS-specific
     pools: list = field(default_factory=list)
@@ -117,7 +117,7 @@ def get_state_history(db_path: str, hostname: str, hours: int = 24) -> list:
         since = (datetime.now() - timedelta(hours=hours)).isoformat()
         rows = conn.execute("""
             SELECT timestamp, status, total_bytes, used_bytes, free_bytes,
-                   usage_pct, read_bytes_sec, write_bytes_sec, pools_json
+                   usage_percent, throughput_read_mbps, throughput_write_mbps, pools_json
             FROM storage_state 
             WHERE hostname = ? AND timestamp > ?
             ORDER BY timestamp DESC
@@ -222,18 +222,18 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, pools: li
     status = state.get('status', '')
     
     # Check overall capacity
-    usage_pct = state.get('usage_pct', 0)
-    if usage_pct > 95:
+    usage_percent = state.get('usage_percent', 0)
+    if usage_percent > 95:
         causes.append({
             'cause': 'Storage Almost Full',
             'confidence': 'high',
-            'detail': f'Capacity at {usage_pct:.1f}% - critical level'
+            'detail': f'Capacity at {usage_percent:.1f}% - critical level'
         })
-    elif usage_pct > 85:
+    elif usage_percent > 85:
         causes.append({
             'cause': 'High Storage Usage',
             'confidence': 'medium',
-            'detail': f'Capacity at {usage_pct:.1f}% - should be monitored'
+            'detail': f'Capacity at {usage_percent:.1f}% - should be monitored'
         })
     
     # Check ZFS pools
@@ -387,7 +387,7 @@ def diagnose_storage(
         diag.total_bytes = state.get('total_bytes', 0)
         diag.used_bytes = state.get('used_bytes', 0)
         diag.free_bytes = state.get('free_bytes', 0)
-        diag.usage_pct = state.get('usage_pct', 0)
+        diag.usage_percent = state.get('usage_percent', 0)
         diag.nfs_clients = state.get('nfs_clients_connected', 0)
         diag.read_bytes_sec = state.get('read_bytes_sec', 0)
         diag.write_bytes_sec = state.get('write_bytes_sec', 0)
@@ -415,7 +415,7 @@ def diagnose_storage(
     if history:
         diag.resource_history = {
             'samples': len(history),
-            'avg_usage_pct': sum(h.get('usage_pct', 0) or 0 for h in history) / max(len(history), 1),
+            'avg_usage_percent': sum(h.get('usage_percent', 0) or 0 for h in history) / max(len(history), 1),
         }
     
     # Determine causes
@@ -472,9 +472,9 @@ def format_diagnostic(diag: StorageDiagnostic) -> str:
     lines.append(f"\n  {c.BOLD}Capacity{c.RESET}")
     lines.append(f"  {'─' * 56}")
     
-    usage_color = c.RED if diag.usage_pct > 90 else c.YELLOW if diag.usage_pct > 80 else c.GREEN
+    usage_color = c.RED if diag.usage_percent > 90 else c.YELLOW if diag.usage_percent > 80 else c.GREEN
     lines.append(f"    Used:   {format_bytes(diag.used_bytes)} / {format_bytes(diag.total_bytes)}")
-    lines.append(f"    Usage:  {usage_color}{diag.usage_pct:.1f}%{c.RESET}")
+    lines.append(f"    Usage:  {usage_color}{diag.usage_percent:.1f}%{c.RESET}")
     lines.append(f"    Free:   {format_bytes(diag.free_bytes)}")
     
     # ZFS Pools

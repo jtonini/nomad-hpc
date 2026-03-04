@@ -89,6 +89,11 @@ def get_network_state(db_path: str, source: str = None, dest: str = None) -> Opt
                 WHERE source_host = ?
                 ORDER BY timestamp DESC LIMIT 1
             """, (source,)).fetchone()
+        else:
+            row = conn.execute("""
+                SELECT * FROM network_perf
+                ORDER BY timestamp DESC LIMIT 1
+            """).fetchone()
         
         conn.close()
         return dict(row) if row else None

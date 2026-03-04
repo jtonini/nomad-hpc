@@ -86,8 +86,8 @@ def get_state_history(db_path: str, hostname: str, hours: int = 24) -> list:
         conn.row_factory = sqlite3.Row
         since = (datetime.now() - timedelta(hours=hours)).isoformat()
         rows = conn.execute("""
-            SELECT timestamp, status, load_avg_1m, memory_used_mb, memory_total_mb,
-                   disk_usage_pct, swap_used_mb, users_logged_in, zombie_count
+            SELECT timestamp, status, load_1m, memory_percent, disk_percent,
+                   users_logged_in
             FROM workstation_state 
             WHERE hostname = ? AND timestamp > ?
             ORDER BY timestamp DESC
@@ -108,8 +108,8 @@ def analyze_memory_trend(history: list) -> dict:
     
     for record in history:
         timestamp = record.get('timestamp')
-        mem_total = record.get('memory_total_mb', 1)
-        mem_used = record.get('memory_used_mb', 0)
+        mem_total = record.get('memory_percent', 1)
+        mem_used = record.get('memory_percent', 0)
         
         if mem_total > 0:
             mem_pct = (mem_used / mem_total) * 100
@@ -136,7 +136,7 @@ def analyze_disk_trend(history: list) -> dict:
     
     for record in history:
         timestamp = record.get('timestamp')
-        disk_pct = record.get('disk_usage_pct', 0)
+        disk_pct = record.get('disk_percent', 0)
         
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp)
@@ -162,7 +162,7 @@ def analyze_load_trend(history: list, cpu_count: int = 1) -> dict:
     
     for record in history:
         timestamp = record.get('timestamp')
-        load = record.get('load_avg_1m', 0)
+        load = record.get('load_1m', 0)
         
         if isinstance(timestamp, str):
             timestamp = datetime.fromisoformat(timestamp)
@@ -194,8 +194,8 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
     status = state.get('status', '')
     
     # Check memory pressure
-    mem_total = state.get('memory_total_mb', 1)
-    mem_used = state.get('memory_used_mb', 0)
+    mem_total = state.get('memory_percent', 1)
+    mem_used = state.get('memory_percent', 0)
     mem_pct = (mem_used / mem_total * 100) if mem_total > 0 else 0
     
     if mem_pct > 95:
@@ -221,7 +221,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
     
     # Check disk usage
-    disk_pct = state.get('disk_usage_pct', 0)
+    disk_pct = state.get('disk_percent', 0)
     if disk_pct > 95:
         causes.append({
             'cause': 'Disk Almost Full',
@@ -236,7 +236,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
     
     # Check CPU load
-    load = state.get('load_avg_1m', 0)
+    load = state.get('load_1m', 0)
     cpu_count = state.get('cpu_count', 1)
     if load > cpu_count * 2:
         causes.append({
@@ -385,12 +385,12 @@ def diagnose_workstation(
     )
     
     if state:
-        diag.cpu_load = state.get('load_avg_1m', 0)
+        diag.cpu_load = state.get('load_1m', 0)
         diag.cpu_count = state.get('cpu_count', 1)
-        diag.memory_total_mb = state.get('memory_total_mb', 0)
-        mem_used = state.get('memory_used_mb', 0)
+        diag.memory_total_mb = state.get('memory_percent', 0)
+        mem_used = state.get('memory_percent', 0)
         diag.memory_used_pct = (mem_used / diag.memory_total_mb * 100) if diag.memory_total_mb > 0 else 0
-        diag.disk_used_pct = state.get('disk_usage_pct', 0)
+        diag.disk_used_pct = state.get('disk_percent', 0)
         diag.swap_used_mb = state.get('swap_used_mb', 0)
         diag.users_logged_in = state.get('users_logged_in', 0)
         diag.process_count = state.get('process_count', 0)
@@ -407,9 +407,9 @@ def diagnose_workstation(
     if history:
         diag.resource_history = {
             'samples': len(history),
-            'avg_load': sum(h.get('load_avg_1m', 0) or 0 for h in history) / max(len(history), 1),
+            'avg_load': sum(h.get('load_1m', 0) or 0 for h in history) / max(len(history), 1),
             'avg_mem_pct': sum(
-                (h.get('memory_used_mb', 0) / max(h.get('memory_total_mb', 1), 1) * 100) 
+                (h.get('memory_percent', 0) / max(h.get('memory_percent', 1), 1) * 100) 
                 for h in history
             ) / max(len(history), 1),
             'max_users': max(h.get('users_logged_in', 0) or 0 for h in history),
