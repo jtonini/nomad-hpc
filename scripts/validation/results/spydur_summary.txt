@@ -1,0 +1,80 @@
+
+========================================================================
+RUN INFO
+========================================================================
+                 machine: spydur
+                hostname: spydur.cluster
+             started_utc: 2026-04-30T14:04:58Z
+               ended_utc: 2026-05-07T14:04:58Z
+           samples_taken: 10080
+        interval_seconds: 60
+                walk_fds: 0
+           cpu_threshold: 10.0%
+        duration_minutes: 5.0 (=5 consecutive samples at 60s interval)
+
+========================================================================
+DATA VOLUME
+========================================================================
+  total sample rows:    405328
+  distinct ticks:       10080
+  distinct users:       28
+  distinct pids:        3078
+
+========================================================================
+PER-USER CPU DISTRIBUTION  (sum across user's processes per tick)
+========================================================================
+  user                  p50      p90      p99      max    ticks
+  perickso              0.0      3.4    566.8    670.8      110
+  ia3nk                 0.0      0.0     95.1     95.7     7495
+  arobbins              4.9     20.6     29.8     34.6      108
+  cfinegan              0.2      5.5     18.7     28.2     1090
+  tarnold2              0.0      3.2     11.8     12.3      102
+  rnelson2              0.0      0.4     10.4     11.9      337
+  bmelodepaul           0.1      0.6      8.0     10.7      403
+  mjesusdeoli           0.0      1.7      2.4      2.5        9
+  abezerra              0.0      0.6      1.5      1.6        7
+  yzhang                0.2      0.3      0.7     15.9      954
+  mhanley               0.0      0.0      0.6      0.9      145
+  installer             0.3      0.4      0.4      3.9    10080
+  fyi                   0.0      0.2      0.3      4.8     1555
+  hlopescarval          0.0      0.0      0.1      0.2      257
+  bnam                  0.0      0.0      0.1      0.9     1252
+  jgyasi                0.0      0.0      0.0      0.1    10080
+  jpeters2              0.0      0.0      0.0      0.0     7499
+  fhagemei              0.0      0.0      0.0      0.0      510
+  ebunn                 0.0      0.0      0.0      0.0        3
+  ibatista              0.0      0.0      0.0      0.0        1
+  ... and 8 more users
+
+========================================================================
+ELEVATED EVENTS  (>= 10.0% CPU for >= 5 consecutive samples)
+========================================================================
+  total elevated events: 7
+
+  user               pid  samples  peak_cpu  command
+  ia3nk           733026      161      95.7  /gromacs/bin.AVX2_256/gmx_mpi trjconv -s md.tpr -f md.xtc -o
+  arobbins        427284        7      21.8  python clusterbackup.py -p /home/arobbins/backedup -p /home/
+  perickso       1262430        7     670.8  /opt/R/4.4.0/lib/R/bin/exec/R
+  arobbins       1651015        7      23.7  python clusterbackup.py -p /home/arobbins/backedup -p /home/
+  arobbins       2873824        7      20.3  python clusterbackup.py -p /home/arobbins/backedup -p /home/
+  arobbins       4086549        7      29.2  python clusterbackup.py -p /home/arobbins/backedup -p /home/
+  arobbins       1150768        6      20.5  python clusterbackup.py -p /home/arobbins/backedup -p /home/
+
+  events per user (top 20):
+    arobbins         5
+    ia3nk            1
+    perickso         1
+
+  distinct commands appearing in elevated events:
+    python                   5 events
+    gmx_mpi                  1 events
+    R                        1 events
+
+========================================================================
+PROBE OVERHEAD
+========================================================================
+  CPU%   avg= 0.16   max=  0.3
+  RSS MB avg= 23.0   max= 23.4
+  wall s avg=0.095   max= 0.17
+  proc avg seen=913.0   avg recorded=40.0
+

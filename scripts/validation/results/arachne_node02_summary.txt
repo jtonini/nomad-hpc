@@ -1,0 +1,98 @@
+
+========================================================================
+RUN INFO
+========================================================================
+                 machine: arachne-node02
+                hostname: node02
+             started_utc: 2026-04-30T14:32:14Z
+               ended_utc: 2026-05-02T14:32:14Z
+           samples_taken: 2880
+        interval_seconds: 60
+                walk_fds: 1
+           cpu_threshold: 10.0%
+        duration_minutes: 5.0 (=5 consecutive samples at 60s interval)
+
+========================================================================
+DATA VOLUME
+========================================================================
+  total sample rows:    165483
+  distinct ticks:       2880
+  distinct users:       3
+  distinct pids:        94
+
+========================================================================
+PER-USER CPU DISTRIBUTION  (sum across user's processes per tick)
+========================================================================
+  user                  p50      p90      p99      max    ticks
+  abezerra           4576.4   4578.0   4578.5   4585.3      793
+  jsiegel            1595.2   1595.8   1596.3   1596.6     2880
+  hw6is               199.1    199.4    199.4    199.4     2880
+
+========================================================================
+ELEVATED EVENTS  (>= 10.0% CPU for >= 5 consecutive samples)
+========================================================================
+  total elevated events: 104
+
+  user               pid  samples  peak_cpu  command
+  jsiegel         541246     2880      99.7  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541247     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541248     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541249     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541250     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541251     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541252     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541253     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541480     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541481     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541482     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541483     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541484     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541485     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541486     2880      99.7  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  jsiegel         541487     2880      99.8  /usr/local/sw/columbus722/Columbus/pciudg.x -m 100000
+  hw6is             5010      905      99.7  /usr/local/sw/columbus722/Columbus/ciudg.x -m 32000
+  abezerra        630273      791      99.7  vasp_ncl
+  abezerra        630274      791      99.7  vasp_ncl
+  abezerra        630275      791      99.7  vasp_ncl
+  ... and 84 more events
+
+  events per user (top 20):
+    abezerra         46
+    hw6is            42
+    jsiegel          16
+
+  distinct commands appearing in elevated events:
+    vasp_ncl                 46 events
+    ciudg.x                  42 events
+    pciudg.x                 16 events
+
+========================================================================
+PROBE OVERHEAD
+========================================================================
+  CPU%   avg= 0.12   max=  0.2
+  RSS MB avg= 18.7   max= 21.0
+  wall s avg=0.083   max=0.235
+  proc avg seen=850.0   avg recorded=57.0
+
+========================================================================
+FILESYSTEM ATTRIBUTION  (from /proc/<pid>/fd)
+========================================================================
+  user                local      tmp    nfs_h    nfs_s    nfs_d   system    other
+  abezerra                0    10284     4754        0        0     1584      791
+  hw6is                   0        0   138240        0        0     5760        0
+  jsiegel             46080        0    28800        0        0    11520        0
+
+========================================================================
+NFS_HOME BREAKDOWN  (top path prefixes per user)
+========================================================================
+
+  abezerra:
+     4754  /home/scratch/abezerra/testAgentic/BLMNT8/03_bands
+
+  hw6is:
+    69120  /home/hw6is/COLUMBUS/4-5pyrimidine/CAS1210/TZ/Trip
+    69120  /home/hw6is/COLUMBUS/2-4pyrimidine/CAS1210/TZ/Trip
+
+  jsiegel:
+    28800  /home/jsiegel/SummerResearchArachne/DiradicalProje
+

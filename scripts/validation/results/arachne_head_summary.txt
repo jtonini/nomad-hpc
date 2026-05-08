@@ -1,0 +1,63 @@
+
+========================================================================
+RUN INFO
+========================================================================
+                 machine: arachne-head
+                hostname: arachne.richmond.edu
+             started_utc: 2026-04-30T14:14:06Z
+               ended_utc: 2026-05-07T14:14:06Z
+           samples_taken: 10080
+        interval_seconds: 60
+                walk_fds: 0
+           cpu_threshold: 10.0%
+        duration_minutes: 5.0 (=5 consecutive samples at 60s interval)
+
+========================================================================
+DATA VOLUME
+========================================================================
+  total sample rows:    531487
+  distinct ticks:       10080
+  distinct users:       11
+  distinct pids:        15239
+
+========================================================================
+PER-USER CPU DISTRIBUTION  (sum across user's processes per tick)
+========================================================================
+  user                  p50      p90      p99      max    ticks
+  abezerra              4.2      7.6     22.2    114.1     2405
+  cfinegan              0.0      0.0      0.2      4.2    10080
+  zeus                  0.1      0.1      0.2      1.4    10080
+  hw6is                 0.0      0.0      0.1      0.1      400
+  awu                   0.0      0.0      0.1      0.1       34
+  gflanagi              0.0      0.0      0.0      0.0    10080
+  iskromne              0.0      0.0      0.0      0.0    10080
+  jtonini               0.0      0.0      0.0      0.0    10080
+  tt8ur                 0.0      0.0      0.0      0.0    10080
+  kbui                  0.0      0.0      0.0      0.1      313
+  jgyasi                0.0      0.0      0.0      0.0     8253
+
+========================================================================
+ELEVATED EVENTS  (>= 10.0% CPU for >= 5 consecutive samples)
+========================================================================
+  total elevated events: 4
+
+  user               pid  samples  peak_cpu  command
+  abezerra        484406       14      34.0  /home/abezerra/.antigravity-server/bin/1.23.2-15487b3041e652
+  abezerra       3147278       11      15.4  /home/abezerra/.antigravity-server/bin/1.23.2-15487b3041e652
+  abezerra       2205454        7      24.9  /home/abezerra/.antigravity-server/bin/1.23.2-15487b3041e652
+  abezerra        484406        6      14.7  /home/abezerra/.antigravity-server/bin/1.23.2-15487b3041e652
+
+  events per user (top 20):
+    abezerra         4
+
+  distinct commands appearing in elevated events:
+    language_server_linux_x64 4 events
+
+========================================================================
+PROBE OVERHEAD
+========================================================================
+  CPU%   avg=  0.2   max=  0.3
+  RSS MB avg= 19.0   max= 19.0
+  wall s avg=0.133   max=0.174
+  proc avg seen=1115.0   avg recorded=53.0
+
