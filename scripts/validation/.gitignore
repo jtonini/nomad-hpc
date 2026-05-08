@@ -1,5 +1,5 @@
-# Local validation results -- not committed
-results/
+# Local binary artifacts -- not committed
+# (text summaries and design docs in results/ ARE tracked)
 *.db
 *.log
 *.pid
