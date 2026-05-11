@@ -31,6 +31,8 @@ class SignalType(Enum):
     CLOUD = "cloud"
     INTERACTIVE = "interactive"
     DYNAMICS = "dynamics"
+    PER_USER = "per_user"
+
 
 
 class Severity(Enum):
@@ -1090,3 +1092,119 @@ def read_all_signals(db_path: Path, hours: int = 24) -> list[Signal]:
             pass  # Individual reader failures don't break the engine
 
     return all_signals
+
+# ---------------------------------------------------------------------------
+# Per-user signals (Idea 18 Component 1)
+# ---------------------------------------------------------------------------
+
+from collections import Counter as _PerUserCounter   # avoid colliding if Counter is used elsewhere
+
+
+@dataclass
+class PerUserSignal:
+    """Signal derived from per_user_alert rows.
+
+    severity comes through unchanged from the rule definition:
+      - 'actionable'    head-node misuse warranting follow-up
+      - 'informational' softer cases (IDE-driven memory, etc.)
+    """
+    signal_type: SignalType = SignalType.PER_USER
+    severity: str = "informational"
+    hostname: str = ""
+    username: str = ""
+    rule_id: str = ""
+    rule_type: str = ""
+    occurrences: int = 1
+    last_seen: str = ""
+    command: Optional[str] = None
+    peak_cpu_percent: Optional[float] = None
+    peak_memory_bytes: Optional[int] = None
+    sustained_for_seconds: int = 0
+    context: dict = field(default_factory=dict)
+
+
+def read_per_user_signals(
+    db_path: str,
+    lookback_hours: int = 168,
+    hostname: Optional[str] = None,
+) -> list:
+    """Pull recent per_user_alert rows; aggregate by (host, user, rule, cmd)."""
+    cutoff = (datetime.now() - timedelta(hours=lookback_hours)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    where = ["fired_at >= ?"]
+    params: list = [cutoff]
+    if hostname:
+        where.append("hostname = ?")
+        params.append(hostname)
+    where_clause = " AND ".join(where)
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT hostname, username, rule_id, rule_type, severity,
+                       SUM(occurrences)            AS occurrences,
+                       MAX(last_seen)              AS last_seen,
+                       MAX(peak_cpu_percent)       AS peak_cpu_percent,
+                       MAX(peak_memory_bytes)      AS peak_memory_bytes,
+                       MAX(sustained_for_seconds)  AS sustained_for_seconds,
+                       command
+                FROM per_user_alert
+                WHERE {where_clause}
+                GROUP BY hostname, username, rule_id, command
+                ORDER BY last_seen DESC
+                """,
+                params,
+            ).fetchall()
+    except sqlite3.OperationalError:
+        # Table doesn't exist (migration v8 not applied). Soft-fail.
+        return []
+
+    signals = []
+    for r in rows:
+        signals.append(PerUserSignal(
+            signal_type=SignalType.PER_USER,
+            severity=r["severity"],
+            hostname=r["hostname"],
+            username=r["username"],
+            rule_id=r["rule_id"],
+            rule_type=r["rule_type"],
+            occurrences=int(r["occurrences"] or 1),
+            last_seen=r["last_seen"] or "",
+            command=r["command"],
+            peak_cpu_percent=r["peak_cpu_percent"],
+            peak_memory_bytes=r["peak_memory_bytes"],
+            sustained_for_seconds=int(r["sustained_for_seconds"] or 0),
+        ))
+    return signals
+
+
+def aggregate_cluster_culture_signal(signals, hostname: str):
+    """Summarise per-user activity for one host."""
+    host_signals = [s for s in signals if s.hostname == hostname]
+    if not host_signals:
+        return None
+
+    users = _PerUserCounter(s.username for s in host_signals)
+    severities = _PerUserCounter(s.severity for s in host_signals)
+    rules = _PerUserCounter(s.rule_id for s in host_signals)
+
+    return PerUserSignal(
+        signal_type=SignalType.PER_USER,
+        severity="informational",
+        hostname=hostname,
+        username="",
+        rule_id="",
+        rule_type="",
+        occurrences=len(host_signals),
+        last_seen=max(s.last_seen for s in host_signals),
+        context={
+            "kind": "cluster_culture",
+            "distinct_users": len(users),
+            "user_counts": dict(users),
+            "severity_breakdown": dict(severities),
+            "top_rules": dict(rules.most_common(3)),
+        },
+    )

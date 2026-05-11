@@ -153,6 +153,93 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         CREATE INDEX IF NOT EXISTS idx_wms_responsive
             ON workstation_mount_state(hostname, mountpoint, is_responsive);
     """),
+    (8, "Add per-user process tracking tables (Idea 18 Component 1)", """
+        CREATE TABLE IF NOT EXISTS per_user_sample (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp               DATETIME NOT NULL,
+            hostname                TEXT NOT NULL,
+            role                    TEXT NOT NULL,
+            username                TEXT NOT NULL,
+            uid                     INTEGER NOT NULL,
+            pid                     INTEGER NOT NULL,
+            process_session_id      TEXT NOT NULL,
+            command                 TEXT,
+            cmdline                 TEXT,
+            exe_path                TEXT,
+            cpu_percent             REAL,
+            memory_rss_bytes        INTEGER,
+            memory_vms_bytes        INTEGER,
+            num_threads             INTEGER,
+            num_fds                 INTEGER,
+            started_at              DATETIME,
+            elapsed_seconds         REAL,
+            ancestry_chain          TEXT,
+            whitelist_match         TEXT,
+            collector_version       TEXT,
+            source                  TEXT NOT NULL DEFAULT 'psutil'
+        );
+        CREATE INDEX IF NOT EXISTS idx_pus_ts
+            ON per_user_sample(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_pus_session
+            ON per_user_sample(process_session_id);
+        CREATE INDEX IF NOT EXISTS idx_pus_host_user_ts
+            ON per_user_sample(hostname, username, timestamp);
+
+        CREATE TABLE IF NOT EXISTS per_user_alert (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            fired_at                DATETIME NOT NULL,
+            hostname                TEXT NOT NULL,
+            role                    TEXT NOT NULL,
+            username                TEXT NOT NULL,
+            uid                     INTEGER NOT NULL,
+            pid                     INTEGER NOT NULL,
+            process_session_id      TEXT NOT NULL,
+            rule_id                 TEXT NOT NULL,
+            rule_type               TEXT NOT NULL,
+            severity                TEXT NOT NULL,
+            threshold_value         REAL,
+            threshold_unit          TEXT,
+            sustained_for_seconds   INTEGER,
+            command                 TEXT,
+            cmdline                 TEXT,
+            ancestry_chain          TEXT,
+            peak_cpu_percent        REAL,
+            peak_memory_bytes       INTEGER,
+            dedup_key               TEXT NOT NULL UNIQUE,
+            occurrences             INTEGER NOT NULL DEFAULT 1,
+            last_seen               DATETIME NOT NULL,
+            acknowledged            BOOLEAN DEFAULT FALSE,
+            resolved                BOOLEAN DEFAULT FALSE,
+            resolved_at             DATETIME,
+            notes                   TEXT,
+            edu_template_id         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pua_fired
+            ON per_user_alert(fired_at);
+        CREATE INDEX IF NOT EXISTS idx_pua_user
+            ON per_user_alert(hostname, username, fired_at);
+        CREATE INDEX IF NOT EXISTS idx_pua_severity
+            ON per_user_alert(severity, resolved);
+        CREATE INDEX IF NOT EXISTS idx_pua_dedup
+            ON per_user_alert(dedup_key);
+
+        CREATE TABLE IF NOT EXISTS per_user_fd_sample (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp               DATETIME NOT NULL,
+            hostname                TEXT NOT NULL,
+            username                TEXT NOT NULL,
+            uid                     INTEGER NOT NULL,
+            pid                     INTEGER NOT NULL,
+            process_session_id      TEXT NOT NULL,
+            fs_bucket               TEXT NOT NULL,
+            fd_count                INTEGER NOT NULL,
+            representative_path     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pufd_ts
+            ON per_user_fd_sample(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_pufd_session_bucket
+            ON per_user_fd_sample(process_session_id, fs_bucket);
+    """),
 ]
 
 

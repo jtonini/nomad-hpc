@@ -100,3 +100,6 @@ ruff-fixes.patch
 # Editor swap files we may have missed
 *.kate-swp
 .#*
+
+# Integration backups from one-shot patch scripts
+*.bak.idea18
