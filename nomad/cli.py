@@ -257,18 +257,8 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
     per_user_config = config.get('collectors', {}).get('per_user', {})
     if not collector or 'per_user' in collector:
         if per_user_config.get('enabled', False):
-            from nomad.collectors.per_user import PerUserConfig
-            from nomad.collectors.per_user.rules import DEFAULT_RULES
-            cfg = PerUserConfig(
-                enabled=True,
-                role=per_user_config.get('role', 'headnode'),
-                sample_interval_seconds=per_user_config.get('sample_interval_seconds', 60),
-                ancestry_depth=per_user_config.get('ancestry_depth', 8),
-                rules=DEFAULT_RULES,
-                fd_walk_enabled=per_user_config.get('fd_walk_enabled', False),
-                fd_walk_sample_subset=per_user_config.get('fd_walk_sample_subset', 1.0),
-            )
-            collectors.append(PerUserCollector(cfg, str(db_path)))
+            collectors.append(PerUserCollector(per_user_config, db_path))
+
 
     # Cloud collectors
     cloud_config = config.get('collectors', {}).get('cloud', {})

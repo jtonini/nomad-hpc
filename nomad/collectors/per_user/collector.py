@@ -3,19 +3,11 @@
 """
 NØMAD per-user collector (Idea 18 Component 1).
 
-Per-tick lifecycle:
-  1. iter_processes() → list of (pid, ProcessInfo, instantaneous_metrics)
-  2. For each process:
-       - skip whitelisted (record sample with whitelist_match set, no rule eval)
-       - observe() into TrackStore
-       - rule_engine.evaluate(track)
-       - on firing: write to per_user_alert (insert or update occurrences)
-  3. fd_walk for compute role (Component 2; gated)
-  4. write per_user_sample rows
-  5. gc() the track store
-
-The collector deliberately does the rule evaluation BEFORE persisting samples
-so an alert and its triggering sample land in the DB in a coherent order.
+Inherits from BaseCollector. Lifecycle:
+  - The framework calls run(), which calls collect() then store(data).
+  - collect() returns an envelope (single dict in a list) containing samples,
+    alerts, and fd_rows. The DB is not touched here.
+  - store(data) writes the envelope's contents in one transaction.
 """
 from __future__ import annotations
 
@@ -25,13 +17,15 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable
 
 try:
     import psutil
 except ImportError:                       # pragma: no cover
-    psutil = None                          # tests can stub iter_processes directly
+    psutil = None
 
+from ..base import BaseCollector, registry
 from .ancestry import (
     AncestryResult,
     ProcessInfo,
@@ -61,146 +55,133 @@ COLLECTOR_VERSION = "1.0.0-component1"
 CMDLINE_TRUNCATE = 512
 
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class PerUserConfig:
-    """Configuration loaded from [collectors.per_user] in nomad.toml.
-
-    Defaults match the validation findings; cluster-specific overrides come
-    through the existing nomad config loading machinery.
-    """
+    """Internal config. Built from the toml dict via from_dict()."""
     enabled: bool = True
-    role: str = "headnode"                 # headnode | monitoring | compute
+    role: str = "headnode"
     sample_interval_seconds: int = 60
     ancestry_depth: int = 8
-
-    rules: tuple[Rule, ...] = DEFAULT_RULES
+    rules: tuple = DEFAULT_RULES
     whitelist: WhitelistConfig = field(
         default_factory=lambda: WhitelistConfig(
-            # /opt/ DROPPED from defaults — see test_ia3nk_gmx_mpi_is_not_whitelisted_by_default.
-            # Add per-cluster in nomad.toml if needed.
             parent_paths=("/usr/local/sw/", "/var/spool/cron/"),
             users=("slurm", "munge"),
             min_uid=1000,
         )
     )
-
-    # fd walking: enable per role. compute=True powers Component 2.
     fd_walk_enabled: bool = False
-    fd_walk_sample_subset: float = 1.0     # fraction of processes to walk; 1.0 = all
+    fd_walk_sample_subset: float = 1.0
 
+    @classmethod
+    def from_dict(cls, d):
+        wl_dict = d.get("whitelist", {}) or {}
+        whitelist = WhitelistConfig(
+            parent_paths=tuple(wl_dict.get("parent_paths",
+                ("/usr/local/sw/", "/var/spool/cron/"))),
+            users=tuple(wl_dict.get("users", ("slurm", "munge"))),
+            user_commands=tuple(
+                tuple(uc) for uc in wl_dict.get("user_commands", [])
+            ),
+            min_uid=wl_dict.get("min_uid", 1000),
+        )
+        return cls(
+            enabled=d.get("enabled", True),
+            role=d.get("role", "headnode"),
+            sample_interval_seconds=d.get("sample_interval_seconds", 60),
+            ancestry_depth=d.get("ancestry_depth", 8),
+            rules=DEFAULT_RULES,
+            whitelist=whitelist,
+            fd_walk_enabled=d.get("fd_walk_enabled", False),
+            fd_walk_sample_subset=d.get("fd_walk_sample_subset", 1.0),
+        )
 
-# ---------------------------------------------------------------------------
-# What iter_processes returns
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ProcessSnapshot:
-    """One psutil sample for one process. Constructed by the collector;
-    consumed internally."""
     info: ProcessInfo
     cpu_percent: float
     memory_rss_bytes: int
     memory_vms_bytes: int
     num_threads: int
-    num_fds: int                          # count only; not the walked-result
-    started_at: float                      # unix epoch
-    cmdline: str                           # truncated
+    num_fds: int
+    started_at: float
+    cmdline: str
 
 
-# ---------------------------------------------------------------------------
-# Collector
-# ---------------------------------------------------------------------------
+def _envelope(samples, alerts, fd_rows, evicted=0):
+    return [{
+        "_kind": "per_user_envelope",
+        "samples": samples,
+        "alerts": alerts,
+        "fd_rows": fd_rows,
+        "evicted_tracks": evicted,
+    }]
 
-class PerUserCollector:
-    """The main collector.
 
-    Lifecycle is driven by the existing scheduler in nomad/collectors/base.py;
-    this class implements the standard collect()/store() interface, plus
-    holds the persistent in-memory state across ticks.
-    """
+@registry.register
+class PerUserCollector(BaseCollector):
+    """Per-user process tracking on head nodes (Idea 18 Component 1)."""
 
     name = "per_user"
     description = "Per-user CPU/memory tracking with whitelist-aware alerting"
     default_interval = 60
 
-    def __init__(
-        self,
-        config: PerUserConfig,
-        db_path: str,
-        hostname: str | None = None,
-    ) -> None:
-        self.config = config
-        self.db_path = db_path
-        self.hostname = hostname or _detect_hostname()
-        self.engine = RuleEngine(rules=config.rules)
+    def __init__(self, config, db_path):
+        super().__init__(config, db_path)
+        self.per_user_config = PerUserConfig.from_dict(config)
+        self.engine = RuleEngine(rules=self.per_user_config.rules)
+        self._hostname = _detect_hostname()
         self.tracks = TrackStore(
-            hostname=self.hostname,
+            hostname=self._hostname,
             max_window_seconds=self.engine.max_window_seconds,
         )
         self.dedup = FiringDedup()
-
-        # Capability detection happens once at startup
         self._can_walk_fds = (
-            self.config.fd_walk_enabled and can_walk_fds_of_other_users()
+            self.per_user_config.fd_walk_enabled and can_walk_fds_of_other_users()
         )
-        if self.config.fd_walk_enabled and not self._can_walk_fds:
+        if self.per_user_config.fd_walk_enabled and not self._can_walk_fds:
             logger.warning(
-                "per_user: fd_walk_enabled=True but lacking privilege; falling back "
-                "to no fd walking. Run as root via systemd to enable Component 2."
+                "per_user: fd_walk_enabled=True but lacking privilege; "
+                "falling back to no fd walking."
             )
+        self._psutil_seen = set()
+        logger.info(
+            "PerUserCollector: role=%s rules=%d",
+            self.per_user_config.role,
+            len(self.per_user_config.rules),
+        )
 
-        # Internal pid->cpu_percent_baseline cache for psutil. psutil's
-        # cpu_percent returns 0 on first call per process; we keep state
-        # across ticks so subsequent calls return real values.
-        self._psutil_seen: set[int] = set()
-
-    # -----------------------------------------------------------------------
-    # Public BaseCollector interface
-    # -----------------------------------------------------------------------
-
-    def collect(self) -> dict[str, Any]:
-        """One tick. Returns a dict with sample/alert/fd-row counts for the
-        scheduler's logging. All persistence happens here, not in store()."""
-        if not self.config.enabled:
-            return {"enabled": False}
-
+    def collect(self):
+        if not self.per_user_config.enabled:
+            return []
         t0 = time.time()
         snapshots = list(self.iter_processes())
-        live_session_ids: set[str] = set()
-        sample_rows: list[dict[str, Any]] = []
-        alert_rows: list[dict[str, Any]] = []
-        fd_rows: list[dict[str, Any]] = []
+        live_session_ids = set()
+        sample_rows = []
+        alert_rows = []
+        fd_rows = []
+        by_pid = {s.info.pid: s.info for s in snapshots}
 
         for snap in snapshots:
-            session_id = make_session_id(self.hostname, snap.info.pid, snap.started_at)
+            session_id = make_session_id(self._hostname, snap.info.pid, snap.started_at)
             live_session_ids.add(session_id)
-
             ancestry = walk_ancestry(
                 pid=snap.info.pid,
-                lookup=self._lookup_for_ancestry(snapshots),
-                max_depth=self.config.ancestry_depth,
+                lookup=by_pid.get,
+                max_depth=self.per_user_config.ancestry_depth,
             )
-            wmatch = match_whitelist(snap.info, ancestry, self.config.whitelist)
-
-            # Build sample row
+            wmatch = match_whitelist(snap.info, ancestry, self.per_user_config.whitelist)
             sample_rows.append(_build_sample_row(
-                hostname=self.hostname,
-                role=self.config.role,
+                hostname=self._hostname,
+                role=self.per_user_config.role,
                 snap=snap,
                 session_id=session_id,
                 ancestry=ancestry,
                 whitelist_match=wmatch,
             ))
-
             if wmatch is not None:
-                # Whitelisted: record sample, don't run rules
                 continue
-
-            # Observe + evaluate
             sample = Sample(
                 timestamp=t0,
                 cpu_percent=snap.cpu_percent,
@@ -217,52 +198,35 @@ class PerUserCollector:
             firings = self.engine.evaluate(track, now=t0)
             for f in firings:
                 alert_rows.append(_build_alert_row(
-                    hostname=self.hostname,
-                    role=self.config.role,
+                    hostname=self._hostname,
+                    role=self.per_user_config.role,
                     snap=snap,
                     firing=f,
                     ancestry=ancestry,
                 ))
-
-            # fd walk (compute role only, gated by capability)
-            if self._can_walk_fds and self.config.role == "compute":
+            if self._can_walk_fds and self.per_user_config.role == "compute":
                 fd_rows.extend(self._fd_walk_one(snap, session_id, t0))
 
-        # Persist
+        evicted = self.tracks.gc(now=t0, live_session_ids=live_session_ids)
+        return _envelope(sample_rows, alert_rows, fd_rows, evicted=evicted)
+
+    def store(self, data):
+        if not data:
+            return
+        env = data[0]
+        if env.get("_kind") != "per_user_envelope":
+            logger.warning("per_user.store: unexpected data shape, ignoring")
+            return
+        samples = env.get("samples") or []
+        alerts = env.get("alerts") or []
+        fd_rows = env.get("fd_rows") or []
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
-            self._persist_samples(conn, sample_rows)
-            self._persist_alerts(conn, alert_rows)
+            self._persist_samples(conn, samples)
+            self._persist_alerts(conn, alerts)
             if fd_rows:
                 self._persist_fd_samples(conn, fd_rows)
 
-        # GC
-        evicted = self.tracks.gc(now=t0, live_session_ids=live_session_ids)
-
-        elapsed = time.time() - t0
-        return {
-            "samples": len(sample_rows),
-            "alerts_fired": len(alert_rows),
-            "fd_rows": len(fd_rows),
-            "tracks_active": len(self.tracks),
-            "tracks_evicted": evicted,
-            "elapsed_seconds": elapsed,
-        }
-
-    def store(self, data: Any) -> None:                # pragma: no cover
-        """No-op: collect() persists directly. The BaseCollector contract
-        expects store() to exist; we satisfy it without doing extra work."""
-        return
-
-    # -----------------------------------------------------------------------
-    # Iteration over psutil — overridable for testing
-    # -----------------------------------------------------------------------
-
-    def iter_processes(self) -> Iterable[ProcessSnapshot]:
-        """Yield one ProcessSnapshot per visible process.
-
-        Subclasses / tests can override this to inject synthetic data without
-        touching psutil.
-        """
+    def iter_processes(self):
         if psutil is None:
             return
         attrs = ["pid", "ppid", "uids", "username", "name", "exe",
@@ -271,26 +235,19 @@ class PerUserCollector:
             try:
                 info = proc.info
                 pid = info["pid"]
-
-                # cpu_percent: first call returns 0; subsequent calls return real values
-                # We accept the 0 on first sight — the rule engine needs >1 sample anyway.
                 if pid in self._psutil_seen:
                     cpu = proc.cpu_percent(interval=None)
                 else:
-                    proc.cpu_percent(interval=None)        # prime
+                    proc.cpu_percent(interval=None)
                     self._psutil_seen.add(pid)
                     cpu = 0.0
-
                 mem = info.get("memory_info")
                 if mem is None:
                     continue
-
                 uids = info.get("uids")
                 uid = uids.real if uids is not None else -1
-
                 cmdline_list = info.get("cmdline") or []
                 cmdline = " ".join(cmdline_list)[:CMDLINE_TRUNCATE]
-
                 yield ProcessSnapshot(
                     info=ProcessInfo(
                         pid=pid,
@@ -314,20 +271,7 @@ class PerUserCollector:
                 logger.debug("iter_processes: skipping %s: %s", proc, e)
                 continue
 
-    # -----------------------------------------------------------------------
-    # Internal helpers
-    # -----------------------------------------------------------------------
-
-    def _lookup_for_ancestry(self, snapshots: list[ProcessSnapshot]):
-        """Build a pid -> ProcessInfo lookup from the current snapshot batch."""
-        by_pid = {s.info.pid: s.info for s in snapshots}
-        return by_pid.get
-
-    def _fd_walk_one(
-        self, snap: ProcessSnapshot, session_id: str, t0: float,
-    ) -> list[dict[str, Any]]:
-        """Walk fds for one process, build per-bucket rows. Soft-fails on
-        permission errors (logged once per cycle by the collector)."""
+    def _fd_walk_one(self, snap, session_id, t0):
         try:
             walk = walk_fds(snap.info.pid)
         except PermissionDenied:
@@ -335,13 +279,12 @@ class PerUserCollector:
         except Exception as e:                            # pragma: no cover
             logger.debug("fd walk failed for pid=%s: %s", snap.info.pid, e)
             return []
-
         ts = _utc_iso(t0)
         rows = []
         for bucket, count in walk.bucket_counts.items():
             rows.append({
                 "timestamp": ts,
-                "hostname": self.hostname,
+                "hostname": self._hostname,
                 "username": snap.info.username,
                 "uid": snap.info.uid,
                 "pid": snap.info.pid,
@@ -352,15 +295,10 @@ class PerUserCollector:
             })
         return rows
 
-    # -----------------------------------------------------------------------
-    # Persistence
-    # -----------------------------------------------------------------------
-
-    def _persist_samples(self, conn: sqlite3.Connection, rows: list[dict]) -> None:
+    def _persist_samples(self, conn, rows):
         if not rows:
             return
-        conn.executemany(
-            """
+        conn.executemany("""
             INSERT INTO per_user_sample (
                 timestamp, hostname, role, username, uid, pid, process_session_id,
                 command, cmdline, exe_path,
@@ -376,21 +314,12 @@ class PerUserCollector:
                 :ancestry_chain, :whitelist_match,
                 :collector_version, :source
             )
-            """,
-            rows,
-        )
+        """, rows)
 
-    def _persist_alerts(self, conn: sqlite3.Connection, rows: list[dict]) -> None:
-        """Insert new alerts; bump occurrences on duplicates.
-
-        We use INSERT ... ON CONFLICT(dedup_key) DO UPDATE so the SQL handles
-        dedup atomically. The in-memory FiringDedup is just a hint to avoid
-        the round-trip on hot keys.
-        """
+    def _persist_alerts(self, conn, rows):
         if not rows:
             return
-        conn.executemany(
-            """
+        conn.executemany("""
             INSERT INTO per_user_alert (
                 fired_at, hostname, role, username, uid, pid, process_session_id,
                 rule_id, rule_type, severity, threshold_value, threshold_unit,
@@ -409,15 +338,10 @@ class PerUserCollector:
                 last_seen = excluded.last_seen,
                 peak_cpu_percent = MAX(peak_cpu_percent, excluded.peak_cpu_percent),
                 peak_memory_bytes = MAX(peak_memory_bytes, excluded.peak_memory_bytes)
-            """,
-            rows,
-        )
-        for r in rows:
-            self.dedup.record(r["dedup_key"], r["fired_at_ts"]) if "fired_at_ts" in r else None
+        """, rows)
 
-    def _persist_fd_samples(self, conn: sqlite3.Connection, rows: list[dict]) -> None:
-        conn.executemany(
-            """
+    def _persist_fd_samples(self, conn, rows):
+        conn.executemany("""
             INSERT INTO per_user_fd_sample (
                 timestamp, hostname, username, uid, pid, process_session_id,
                 fs_bucket, fd_count, representative_path
@@ -425,24 +349,10 @@ class PerUserCollector:
                 :timestamp, :hostname, :username, :uid, :pid, :process_session_id,
                 :fs_bucket, :fd_count, :representative_path
             )
-            """,
-            rows,
-        )
+        """, rows)
 
 
-# ---------------------------------------------------------------------------
-# Row builders (free functions, easy to test)
-# ---------------------------------------------------------------------------
-
-def _build_sample_row(
-    *,
-    hostname: str,
-    role: str,
-    snap: ProcessSnapshot,
-    session_id: str,
-    ancestry: AncestryResult,
-    whitelist_match: WhitelistMatch | None,
-) -> dict[str, Any]:
+def _build_sample_row(*, hostname, role, snap, session_id, ancestry, whitelist_match):
     now_unix = time.time()
     return {
         "timestamp": _utc_iso(now_unix),
@@ -472,19 +382,11 @@ def _build_sample_row(
     }
 
 
-def _build_alert_row(
-    *,
-    hostname: str,
-    role: str,
-    snap: ProcessSnapshot,
-    firing: RuleFiring,
-    ancestry: AncestryResult,
-) -> dict[str, Any]:
+def _build_alert_row(*, hostname, role, snap, firing, ancestry):
     dedup_key = FiringDedup.make_key(hostname, firing.track.process_session_id, firing.rule.rule_id)
     fired_iso = _utc_iso(firing.fired_at)
     return {
         "fired_at": fired_iso,
-        "fired_at_ts": firing.fired_at,
         "hostname": hostname,
         "role": role,
         "username": firing.track.username,
@@ -508,14 +410,10 @@ def _build_alert_row(
     }
 
 
-# ---------------------------------------------------------------------------
-# Tiny utilities
-# ---------------------------------------------------------------------------
-
-def _utc_iso(unix_ts: float) -> str:
+def _utc_iso(unix_ts):
     return datetime.fromtimestamp(unix_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _detect_hostname() -> str:
+def _detect_hostname():
     import socket
     return socket.gethostname()

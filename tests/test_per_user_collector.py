@@ -19,7 +19,6 @@ import pytest
 
 from nomad.collectors.per_user import (
     PerUserCollector,
-    PerUserConfig,
     ProcessSnapshot,
 )
 from nomad.collectors.per_user.ancestry import ProcessInfo, WhitelistConfig
@@ -82,16 +81,13 @@ class FakeCollector(PerUserCollector):
 
 def test_collector_persists_samples_to_db(db_path):
     snaps = [make_snapshot(cpu_percent=5.0, memory_rss=100_000_000)]
-    config = PerUserConfig(role="headnode")
+    config = {"role": "headnode"}
     collector = FakeCollector(
         snapshots_per_tick=[snaps],
         config=config,
         db_path=db_path,
-        hostname="testhost",
     )
-    result = collector.collect()
-    assert result["samples"] == 1
-    assert result["alerts_fired"] == 0
+    collector.run()
 
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute("SELECT username, command, cpu_percent FROM per_user_sample").fetchall()
@@ -109,23 +105,22 @@ def test_whitelisted_process_records_sample_but_does_not_fire(db_path):
         cpu_percent=95.0,                  # would normally fire
         memory_rss=100_000_000,
     )
-    config = PerUserConfig(
-        role="headnode",
-        whitelist=WhitelistConfig(
-            parent_paths=("/usr/local/sw/",),
-            min_uid=1000,
-        ),
-    )
+    config = {
+        "role": "headnode",
+        "whitelist": {
+            "parent_paths": ["/usr/local/sw/"],
+            "min_uid": 1000,
+        },
+    }
     # 6 ticks of high CPU — would definitely fire if not whitelisted
     snaps = [[snap]] * 6
     collector = FakeCollector(
         snapshots_per_tick=snaps,
         config=config,
         db_path=db_path,
-        hostname="spydur",
     )
     for _ in range(6):
-        collector.collect()
+        collector.run()
 
     with sqlite3.connect(db_path) as conn:
         sample_count = conn.execute("SELECT COUNT(*) FROM per_user_sample").fetchone()[0]
@@ -142,12 +137,11 @@ def test_sustained_high_cpu_fires_alert(db_path):
     """Synthetic ia3nk: 95% CPU sustained across enough samples to fire 5min rule."""
     # 7 ticks of 95% CPU — the rule needs 5 minutes (5+ samples)
     snaps = [[make_snapshot(cpu_percent=95.0)] for _ in range(7)]
-    config = PerUserConfig(role="headnode")
+    config = {"role": "headnode"}
     collector = FakeCollector(
         snapshots_per_tick=snaps,
         config=config,
         db_path=db_path,
-        hostname="testhost",
     )
     # We need to advance time between ticks. Override the time source by
     # directly manipulating sample timestamps via the engine. The simplest
@@ -168,7 +162,7 @@ def test_sustained_high_cpu_fires_alert(db_path):
 
     try:
         for _ in range(7):
-            collector.collect()
+            collector.run()
             fake_now[0] += 60                   # advance 60s
     finally:
         collector_mod.time.time = real_time
@@ -187,16 +181,11 @@ def test_sustained_high_cpu_fires_alert(db_path):
 def test_alert_dedup_increments_occurrences(db_path):
     """Re-firing the same rule on the same session should bump occurrences."""
     snaps = [[make_snapshot(cpu_percent=95.0)] for _ in range(20)]
-    config = PerUserConfig(
-        role="headnode",
-        # Use shorter cooldown so we can observe re-firing within the test
-        rules=DEFAULT_RULES,
-    )
+    config = {"role": "headnode"}
     collector = FakeCollector(
         snapshots_per_tick=snaps,
         config=config,
         db_path=db_path,
-        hostname="testhost",
     )
     # Override cooldown to 5 minutes (default is 1 hour)
     collector.engine.cooldown_seconds = 300
@@ -215,7 +204,7 @@ def test_alert_dedup_increments_occurrences(db_path):
 
     try:
         for _ in range(20):                      # 20 minutes of sustained 95%
-            collector.collect()
+            collector.run()
             fake_now[0] += 60
     finally:
         collector_mod.time.time = real_time
@@ -236,12 +225,11 @@ def test_severity_tier_recorded_in_alert(db_path):
     """Memory_4gb_10min is 'informational' — verify it lands in the alert as such."""
     snap = make_snapshot(cpu_percent=5.0, memory_rss=5 * GB)
     snaps = [[snap]] * 12                        # 12 ticks * 60s = 12 min sustained
-    config = PerUserConfig(role="headnode")
+    config = {"role": "headnode"}
     collector = FakeCollector(
         snapshots_per_tick=snaps,
         config=config,
         db_path=db_path,
-        hostname="testhost",
     )
 
     import time as time_module
@@ -258,7 +246,7 @@ def test_severity_tier_recorded_in_alert(db_path):
 
     try:
         for _ in range(12):
-            collector.collect()
+            collector.run()
             fake_now[0] += 60
     finally:
         collector_mod.time.time = real_time
@@ -274,15 +262,13 @@ def test_severity_tier_recorded_in_alert(db_path):
 
 def test_collector_disabled_returns_early(db_path):
     snap = make_snapshot(cpu_percent=99.0, memory_rss=100 * GB)
-    config = PerUserConfig(enabled=False)
+    config = {"enabled": False}
     collector = FakeCollector(
         snapshots_per_tick=[[snap]],
         config=config,
         db_path=db_path,
-        hostname="h",
     )
-    result = collector.collect()
-    assert result == {"enabled": False}
+    collector.run()
     with sqlite3.connect(db_path) as conn:
         n = conn.execute("SELECT COUNT(*) FROM per_user_sample").fetchone()[0]
     assert n == 0
@@ -292,15 +278,13 @@ def test_track_store_evicts_when_process_exits(db_path):
     """Tick 1 has process A; tick 2 doesn't. A's track should be evicted."""
     snap_a = make_snapshot(pid=100, command="A", started_at=1000.0)
     snap_b = make_snapshot(pid=200, command="B", started_at=1010.0)
-    config = PerUserConfig(role="headnode")
+    config = {"role": "headnode"}
     collector = FakeCollector(
         snapshots_per_tick=[[snap_a, snap_b], [snap_b]],
         config=config,
         db_path=db_path,
-        hostname="h",
     )
-    collector.collect()
+    collector.run()
     assert len(collector.tracks) == 2
-    result = collector.collect()
-    assert result["tracks_evicted"] == 1
+    collector.run()
     assert len(collector.tracks) == 1
