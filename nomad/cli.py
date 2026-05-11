@@ -38,6 +38,7 @@ from nomad.collectors.job_metrics import JobMetricsCollector
 from nomad.collectors.mpstat import MPStatCollector
 from nomad.collectors.nfs import NFSCollector
 from nomad.collectors.node_state import NodeStateCollector
+from nomad.collectors.per_user import PerUserCollector
 from nomad.collectors.slurm import SlurmCollector
 from nomad.collectors.vmstat import VMStatCollector
 from nomad.collectors.workstation import WorkstationCollector
@@ -247,6 +248,27 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
     if not collector or 'workstation' in collector:
         if ws_config.get('enabled', False):
             collectors.append(WorkstationCollector(ws_config, db_path))
+
+    # Per-user process tracking collector (head-node misuse detection — Idea 18)
+    # Disabled by default. Enable per-host on head nodes only:
+    #   [collectors.per_user]
+    #   enabled = true
+    #   role = "headnode"
+    per_user_config = config.get('collectors', {}).get('per_user', {})
+    if not collector or 'per_user' in collector:
+        if per_user_config.get('enabled', False):
+            from nomad.collectors.per_user import PerUserConfig
+            from nomad.collectors.per_user.rules import DEFAULT_RULES
+            cfg = PerUserConfig(
+                enabled=True,
+                role=per_user_config.get('role', 'headnode'),
+                sample_interval_seconds=per_user_config.get('sample_interval_seconds', 60),
+                ancestry_depth=per_user_config.get('ancestry_depth', 8),
+                rules=DEFAULT_RULES,
+                fd_walk_enabled=per_user_config.get('fd_walk_enabled', False),
+                fd_walk_sample_subset=per_user_config.get('fd_walk_sample_subset', 1.0),
+            )
+            collectors.append(PerUserCollector(cfg, str(db_path)))
 
     # Cloud collectors
     cloud_config = config.get('collectors', {}).get('cloud', {})
