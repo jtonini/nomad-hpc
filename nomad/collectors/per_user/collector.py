@@ -145,7 +145,8 @@ class PerUserCollector(BaseCollector):
                 "per_user: fd_walk_enabled=True but lacking privilege; "
                 "falling back to no fd walking."
             )
-        self._psutil_seen = set()
+        # pid -> (user+sys cpu seconds, wall time) for cpu_percent computation
+        self._last_cpu_times: dict[int, tuple[float, float]] = {}
         logger.info(
             "PerUserCollector: role=%s rules=%d",
             self.per_user_config.role,
@@ -231,16 +232,37 @@ class PerUserCollector(BaseCollector):
             return
         attrs = ["pid", "ppid", "uids", "username", "name", "exe",
                  "memory_info", "num_threads", "num_fds", "create_time", "cmdline"]
+        now_wall = time.time()
+        seen_this_tick: set[int] = set()
         for proc in psutil.process_iter(attrs=attrs, ad_value=None):
             try:
                 info = proc.info
                 pid = info["pid"]
-                if pid in self._psutil_seen:
-                    cpu = proc.cpu_percent(interval=None)
+                seen_this_tick.add(pid)
+
+                # Compute CPU% as cpu_times delta since last tick. Robust against
+                # psutil's per-Process-instance state issue: we maintain
+                # (pid -> (total_cpu_seconds, wall_time)) ourselves, so it
+                # survives across process_iter() calls.
+                try:
+                    ct = proc.cpu_times()
+                    total_cpu = ct.user + ct.system
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+                prev = self._last_cpu_times.get(pid)
+                if prev is None:
+                    cpu = 0.0           # first sight of this pid; no delta yet
                 else:
-                    proc.cpu_percent(interval=None)
-                    self._psutil_seen.add(pid)
-                    cpu = 0.0
+                    prev_cpu, prev_wall = prev
+                    wall_delta = now_wall - prev_wall
+                    cpu_delta = total_cpu - prev_cpu
+                    if wall_delta > 0 and cpu_delta >= 0:
+                        cpu = (cpu_delta / wall_delta) * 100.0
+                    else:
+                        cpu = 0.0
+                self._last_cpu_times[pid] = (total_cpu, now_wall)
+
                 mem = info.get("memory_info")
                 if mem is None:
                     continue
@@ -270,6 +292,11 @@ class PerUserCollector(BaseCollector):
             except Exception as e:                       # pragma: no cover
                 logger.debug("iter_processes: skipping %s: %s", proc, e)
                 continue
+
+        # GC the CPU-times cache for pids that no longer exist
+        gone = set(self._last_cpu_times) - seen_this_tick
+        for pid in gone:
+            del self._last_cpu_times[pid]
 
     def _fd_walk_one(self, snap, session_id, t0):
         try:
