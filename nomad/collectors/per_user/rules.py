@@ -60,6 +60,11 @@ class Rule:
     severity: Severity = "actionable"
     source: RuleSource = "psutil"
     edu_template_id: str | None = None    # optional handoff to edu engine
+    # Fraction of samples in the sustain window that must satisfy the
+    # threshold (0.0..1.0). 1.0 = strict "all samples". Defaults below tolerate
+    # ~30% dips on CPU rules (real-world workloads are bursty) and require
+    # strict sustain on memory rules (RSS doesn't dip the same way).
+    sustain_fraction: float = 0.7
 
     def threshold_bytes(self) -> int | None:
         """For memory rules, return the threshold expressed in bytes."""
@@ -80,6 +85,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         duration_seconds=300,
         severity="actionable",
         edu_template_id="head_node_cpu_sustained",
+        sustain_fraction=0.7,              # tolerate dips on bursty CPU workloads
     ),
     Rule(
         rule_id="cpu_50pct_2min",
@@ -89,6 +95,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         duration_seconds=120,
         severity="actionable",
         edu_template_id="head_node_cpu_high",
+        sustain_fraction=0.7,              # tolerate dips on bursty CPU workloads
     ),
     Rule(
         rule_id="memory_4gb_10min",
@@ -98,6 +105,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         duration_seconds=600,
         severity="informational",          # softer — IDE/language-server case
         edu_template_id="head_node_memory_moderate",
+        sustain_fraction=1.0,              # RSS doesn't dip; require strict sustain
     ),
     Rule(
         rule_id="memory_16gb_2min",
@@ -107,6 +115,7 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         duration_seconds=120,
         severity="actionable",
         edu_template_id="head_node_memory_high",
+        sustain_fraction=1.0,              # RSS doesn't dip; require strict sustain
     ),
 )
 
@@ -232,14 +241,18 @@ class RuleEngine:
             return None
 
         if rule.rule_type == "cpu":
-            if not all(s.cpu_percent >= rule.threshold_value for s in in_window):
-                return None
+            satisfying = sum(
+                1 for s in in_window if s.cpu_percent >= rule.threshold_value
+            )
         elif rule.rule_type == "memory":
             threshold_bytes = rule.threshold_bytes()
             assert threshold_bytes is not None
-            if not all(s.memory_rss_bytes >= threshold_bytes for s in in_window):
-                return None
+            satisfying = sum(
+                1 for s in in_window if s.memory_rss_bytes >= threshold_bytes
+            )
         else:
+            return None
+        if (satisfying / len(in_window)) < rule.sustain_fraction:
             return None
 
         return RuleFiring(

@@ -143,21 +143,62 @@ def test_short_burst_fires_only_two_minute_cpu_rule():
 # Sustain windows: a brief dip below threshold should reset the window
 # ---------------------------------------------------------------------------
 
-def test_dip_below_threshold_prevents_firing():
+def test_single_dip_tolerated_by_default_sustain_fraction():
+    """sustain_fraction=0.7 means up to 30% of samples can dip below threshold
+    and the rule still fires. This is the abezerra-style bursty workload case."""
     engine = RuleEngine()
     track = make_track()
-    # 6 minutes mostly at 60% CPU, with one sample at 5%
+    # 6 minutes mostly at 60% CPU, with one sample at 5% (1/6 dip ~= 17%)
     samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
                for i in range(7)]
     samples[3] = Sample(timestamp=180.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
     feed(track, engine, samples)
     firings = engine.evaluate(track, now=360.0)
     fired_ids = {f.rule.rule_id for f in firings}
-    # cpu_10pct_5min: needs ALL samples in last 5 min >= 10%. The dip is
-    # within the last 5 min, so this should NOT fire.
-    assert "cpu_10pct_5min" not in fired_ids
-    # cpu_50pct_2min: last 2 minutes are all at 60%, so this DOES fire.
+    # 1 dip out of 6 in-window samples = 83% satisfying, well above 70% threshold
+    assert "cpu_10pct_5min" in fired_ids
+    # Last 2 minutes still all >=50%, so this fires too
     assert "cpu_50pct_2min" in fired_ids
+
+
+def test_too_many_dips_prevent_firing():
+    """If more than 30% of samples dip below, even sustain_fraction=0.7 won't fire."""
+    engine = RuleEngine()
+    track = make_track()
+    # 6 minutes at 60% with 3 samples at 5% (3/6 = 50% dip ~= over the 30% budget)
+    samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
+               for i in range(7)]
+    samples[2] = Sample(timestamp=120.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
+    samples[4] = Sample(timestamp=240.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
+    samples[5] = Sample(timestamp=300.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
+    feed(track, engine, samples)
+    firings = engine.evaluate(track, now=360.0)
+    fired_ids = {f.rule.rule_id for f in firings}
+    # 3 dips out of 6 in-window samples = 50% satisfying, below 70% threshold
+    assert "cpu_10pct_5min" not in fired_ids
+
+
+def test_strict_sustain_fraction_matches_old_all_semantics():
+    """A rule with sustain_fraction=1.0 requires ALL samples to satisfy threshold,
+    matching the pre-sustain_fraction strict behavior. This validates the
+    backward-compat path for sites that want the old strict semantics."""
+    strict_rule = Rule(
+        rule_id="strict_cpu",
+        rule_type="cpu",
+        threshold_value=10.0,
+        threshold_unit="percent",
+        duration_seconds=300,
+        sustain_fraction=1.0,
+    )
+    engine = RuleEngine(rules=(strict_rule,))
+    track = make_track()
+    samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
+               for i in range(7)]
+    samples[3] = Sample(timestamp=180.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
+    feed(track, engine, samples)
+    firings = engine.evaluate(track, now=360.0)
+    # 1 dip is enough to break strict mode
+    assert len(firings) == 0
 
 
 # ---------------------------------------------------------------------------
