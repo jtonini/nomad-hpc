@@ -675,6 +675,233 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
 
 # ── Top-level scorer ─────────────────────────────────────────────────
 
+
+# ── Workstation scoring ──────────────────────────────────────────────
+#
+# Parallel to job scoring above. A "session" is to a workstation what a
+# "job" is to a cluster: a bounded unit of use we can score for health.
+# Identified by (hostname, username, session_epoch) in
+# workstation_user_snapshot.
+#
+# Dimensions describe session health (memory pressure, duration fit).
+# Cross-cutting verdicts like "you should be on the cluster" are NOT
+# dimensions — they live in insights.py and are derived from the
+# co-occurrence of these dimensional findings. See B2 decision in
+# v1.7.0 design notes.
+
+
+# Smallest-fit cluster memory tiers (MB). Sourced from node_state on
+# spydur as of 2026-05. Ideally pulled live at runtime; constant here
+# keeps the scorer DB-free for testability.
+SPYDUR_MEMORY_TIERS_MB: tuple[int, ...] = (384_000, 768_000, 1_536_000)
+
+
+@dataclass
+class SessionFingerprint:
+    """Complete proficiency fingerprint for a single workstation session."""
+    username: str
+    hostname: str
+    session_epoch: int
+    dimensions: dict[str, DimensionScore] = field(default_factory=dict)
+
+    @property
+    def overall(self) -> float:
+        """Weighted average of applicable dimensions."""
+        applicable = [d for d in self.dimensions.values() if d.applicable]
+        if not applicable:
+            return 0.0
+        return sum(d.score for d in applicable) / len(applicable)
+
+    @property
+    def overall_level(self) -> str:
+        return proficiency_level(self.overall)
+
+    @property
+    def needs_work(self) -> list[DimensionScore]:
+        """Dimensions that need improvement, worst first."""
+        return sorted(
+            [d for d in self.dimensions.values()
+             if d.applicable and d.score < 65],
+            key=lambda d: d.score,
+        )
+
+    @property
+    def strengths(self) -> list[DimensionScore]:
+        """Dimensions showing good proficiency."""
+        return [d for d in self.dimensions.values()
+                if d.applicable and d.score >= 65]
+
+
+def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
+    """
+    Score memory pressure on a workstation session.
+
+    Unlike cluster score_memory (where low utilization is wasteful), here
+    high utilization is the bad signal: a workstation is shared with
+    other users and the OS, and a session consuming most of host RAM
+    starves everything else.
+
+    Scoring (peak / host_total):
+        <40%   → Excellent (plenty of headroom)
+        40-65% → Good
+        65-85% → Developing (noticeable pressure)
+        >85%   → Needs Work (sustained near-saturation)
+    """
+    peak_bytes = session.get("peak_memory_bytes") or 0
+    host_mb = host_state.get("memory_total_mb") or 0
+
+    if peak_bytes <= 0 or host_mb <= 0:
+        return DimensionScore(
+            name="Memory Pressure",
+            score=50,
+            level="Unknown",
+            detail="No memory snapshot data available for this session.",
+            applicable=False,
+        )
+
+    peak_mb = peak_bytes / 1024 / 1024
+    pressure = peak_mb / host_mb  # 0..1+ (can exceed 1.0 if cgroup peak
+                                  # includes cache/buffers beyond RSS)
+    pressure_pct = pressure * 100
+
+    # Score: inverse of pressure, clamped 0..100.
+    # 0% pressure → 100; 100% pressure → 0; linear between.
+    score = max(0, min(100, 100 * (1 - pressure)))
+
+    peak_gb = peak_mb / 1024
+    host_gb = host_mb / 1024
+
+    if score >= 85:
+        detail = (f"Comfortable headroom. Peaked at {peak_gb:.1f}GB of "
+                  f"{host_gb:.0f}GB host RAM ({pressure_pct:.0f}%).")
+    elif score >= 65:
+        detail = (f"Moderate memory use. Peaked at {peak_gb:.1f}GB of "
+                  f"{host_gb:.0f}GB host RAM ({pressure_pct:.0f}%).")
+    elif score >= 40:
+        detail = (f"Noticeable memory pressure. Peaked at {peak_gb:.1f}GB "
+                  f"of {host_gb:.0f}GB host RAM ({pressure_pct:.0f}%); "
+                  f"other users on this host have less to work with.")
+    else:
+        detail = (f"Sustained memory pressure. Peaked at {peak_gb:.1f}GB "
+                  f"of {host_gb:.0f}GB host RAM ({pressure_pct:.0f}%). "
+                  f"At this level the workstation is effectively yours; "
+                  f"other users will see slowdowns.")
+
+    # No Suggestion attached: the actionable recommendation
+    # ("move to spydur") is a cross-cutting verdict produced in
+    # insights.py, not a per-dimension tuning suggestion.
+    return DimensionScore(
+        name="Memory Pressure",
+        score=round(score, 1),
+        level=proficiency_level(score),
+        detail=detail,
+        suggestion=None,
+    )
+
+
+def score_duration_fit(session: dict, host_state: dict) -> DimensionScore:
+    """
+    Score whether a session's duration fits its substrate.
+
+    Short sessions are always fine; long sessions on a workstation are
+    a smell even when memory is comfortable, because they tie up an
+    interactive resource that should be available to other users.
+
+    Piecewise score on span_hours:
+        ≤2h   → 100
+        2-6h  → linear taper 100 → 60
+        6-18h → linear taper 60 → 30
+        ≥18h  → 10 (floor)
+    """
+    span_hours = session.get("span_hours")
+    if span_hours is None or span_hours < 0:
+        return DimensionScore(
+            name="Session Duration",
+            score=50,
+            level="Unknown",
+            detail="No session duration data available.",
+            applicable=False,
+        )
+
+    if span_hours <= 2:
+        score = 100.0
+    elif span_hours <= 6:
+        # 2h → 100, 6h → 60
+        score = 100 - (span_hours - 2) * (40 / 4)
+    elif span_hours <= 18:
+        # 6h → 60, 18h → 30
+        score = 60 - (span_hours - 6) * (30 / 12)
+    else:
+        score = 10.0
+
+    if score >= 85:
+        detail = (f"Session ran for {span_hours:.1f}h — typical "
+                  f"interactive use.")
+    elif score >= 65:
+        detail = (f"Session ran for {span_hours:.1f}h — extended but "
+                  f"reasonable for a workstation.")
+    elif score >= 40:
+        detail = (f"Session ran for {span_hours:.1f}h. Long enough that "
+                  f"a batch job on the cluster would have been a "
+                  f"reasonable alternative.")
+    else:
+        detail = (f"Session ran for {span_hours:.1f}h. Workloads this "
+                  f"long are what the cluster is for: jobs survive "
+                  f"disconnects, reboots, and competing users.")
+
+    return DimensionScore(
+        name="Session Duration",
+        score=round(score, 1),
+        level=proficiency_level(score),
+        detail=detail,
+        suggestion=None,
+    )
+
+
+def score_session(session: dict, host_state: dict) -> SessionFingerprint:
+    """
+    Build a complete fingerprint for one workstation session.
+
+    Parallel to score_job. Takes the session record (one row from
+    workstation_user_snapshot, augmented with derived span_hours from
+    grouping by session_epoch) and the workstation_state snapshot for
+    its host.
+    """
+    return SessionFingerprint(
+        username=session.get("username", ""),
+        hostname=session.get("hostname", ""),
+        session_epoch=session.get("session_epoch", 0),
+        dimensions={
+            "memory_pressure": score_memory_pressure(session, host_state),
+            "duration_fit":    score_duration_fit(session, host_state),
+        },
+    )
+
+
+def select_cluster_target(
+    peak_mb: float,
+    host_mb: int,
+    tiers: tuple[int, ...] = SPYDUR_MEMORY_TIERS_MB,
+) -> Optional[tuple[int, float]]:
+    """
+    Pick the smallest cluster memory tier that gives meaningful headroom.
+
+    Rule: smallest tier that is BOTH (a) ≥ peak_mb × 1.5 and (b) ≥ 2× host
+    workstation RAM. The 2× host rule prevents recommending a near-equal
+    box ("move from 256GB to 384GB" is not a real upgrade).
+
+    Returns (target_mb, ratio_vs_host) or None if no tier qualifies.
+    """
+    if peak_mb <= 0 or host_mb <= 0:
+        return None
+    needed = peak_mb * 1.5
+    min_meaningful = host_mb * 2
+    threshold = max(needed, min_meaningful)
+    for tier in sorted(tiers):
+        if tier >= threshold:
+            return tier, tier / host_mb
+    return None
+
 def score_job(job: dict, summary: dict) -> JobFingerprint:
     """Score a job across all five dimensions."""
     fp = JobFingerprint(
