@@ -3935,7 +3935,7 @@ def sync(ctx, config_file, output, dry_run):
     if hub_cfg is None:
         nomad_toml_path = Path.home() / '.config' / 'nomad' / 'nomad.toml'
         click.echo(click.style(
-            f"  No hub configuration found.", fg="red"))
+            "  No hub configuration found.", fg="red"))
         click.echo()
         click.echo(f"  Add a [hub] section to {nomad_toml_path}:")
         click.echo()

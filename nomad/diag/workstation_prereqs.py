@@ -75,7 +75,7 @@ class WorkstationPrereqDiagnostic:
     """Aggregate result of all prereq checks for one workstation."""
     hostname: str
     checks: list[DiagCheck] = field(default_factory=list)
-    ssh_user: Optional[str] = None
+    ssh_user: str | None = None
     ssh_reachable: bool = True
 
     @property
@@ -109,7 +109,7 @@ def _is_local(hostname: str) -> bool:
 def _run_remote(
     hostname: str,
     cmd: str,
-    ssh_user: Optional[str] = None,
+    ssh_user: str | None = None,
     timeout: int = 10,
 ) -> tuple[int, str, str]:
     """Run a shell command locally or over SSH.
@@ -148,7 +148,7 @@ def _run_remote(
 # Each check function takes (hostname, ssh_user) and returns a DiagCheck.
 # Each is independently testable; the orchestrator just composes them.
 
-def check_ssh_reachable(hostname: str, ssh_user: Optional[str]) -> DiagCheck:
+def check_ssh_reachable(hostname: str, ssh_user: str | None) -> DiagCheck:
     """Verify we can SSH to the workstation in the first place."""
     if _is_local(hostname):
         return DiagCheck(
@@ -173,7 +173,7 @@ def check_ssh_reachable(hostname: str, ssh_user: Optional[str]) -> DiagCheck:
     )
 
 
-def check_cgroup_v2_mounted(hostname: str, ssh_user: Optional[str]) -> DiagCheck:
+def check_cgroup_v2_mounted(hostname: str, ssh_user: str | None) -> DiagCheck:
     """Confirm /sys/fs/cgroup is a cgroup2 mount."""
     rc, out, err = _run_remote(
         hostname, "stat -fc %T /sys/fs/cgroup 2>&1", ssh_user,
@@ -197,7 +197,7 @@ def check_cgroup_v2_mounted(hostname: str, ssh_user: Optional[str]) -> DiagCheck
 
 
 def check_subtree_controllers(
-    hostname: str, ssh_user: Optional[str], scope_path: str, scope_label: str,
+    hostname: str, ssh_user: str | None, scope_path: str, scope_label: str,
 ) -> list[DiagCheck]:
     """Check which controllers are enabled in a given subtree_control file.
 
@@ -248,7 +248,7 @@ def check_subtree_controllers(
 
 
 def check_persistent_systemd_config(
-    hostname: str, ssh_user: Optional[str],
+    hostname: str, ssh_user: str | None,
 ) -> DiagCheck:
     """Verify the systemd manager config that keeps controllers enabled."""
     rc, out, err = _run_remote(
@@ -300,7 +300,7 @@ def check_persistent_systemd_config(
 
 
 def check_probe_runs(
-    hostname: str, ssh_user: Optional[str],
+    hostname: str, ssh_user: str | None,
 ) -> DiagCheck:
     """Run the deployed probe and confirm it returns valid JSON output."""
     cmd = (
@@ -358,7 +358,7 @@ def check_probe_runs(
 
 
 def check_psacct_installed(
-    hostname: str, ssh_user: Optional[str],
+    hostname: str, ssh_user: str | None,
 ) -> DiagCheck:
     """Process accounting (pacct) is optional but recommended."""
     rc, out, err = _run_remote(
@@ -519,8 +519,8 @@ def check_data_flow(
 
 def check_workstation_prerequisites(
     hostname: str,
-    ssh_user: Optional[str] = None,
-    db_path: Optional[str] = None,
+    ssh_user: str | None = None,
+    db_path: str | None = None,
 ) -> WorkstationPrereqDiagnostic:
     """Run all prereq checks and return aggregated result.
 

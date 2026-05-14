@@ -18,6 +18,8 @@ from typing import Any
 
 from .base import BaseCollector, CollectionError, registry
 
+from nomad.alerts import send_alert
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,35 +101,105 @@ class NodeStateCollector(BaseCollector):
 
     def __init__(self, config: dict[str, Any], db_path: str):
         super().__init__(config, db_path)
-
         self.nodes = config.get('nodes', None)  # None = all nodes
         self.cluster_name = config.get('cluster_name', 'default')
+        self._alert_config = config.get('alerts', {}).get('node_state', {})
         logger.info(f"NodeStateCollector: nodes={self.nodes or 'all'}")
+
+    # Default state policies. Used when [alerts.node_state] is absent from
+    # nomad.toml. Substring match (case-insensitive) covers Slurm composite
+    # states like "DOWN+NOT_RESPONDING" and "MIXED+DRAIN", plus common
+    # vocabulary from PBS ("down", "offline") and LSF ("unavail", "unreach").
+    DEFAULT_CRITICAL_STATES = ('DOWN', 'NOT_RESPONDING', 'FAIL', 'OFFLINE', 'UNREACH')
+    DEFAULT_WARNING_STATES = ('DRAIN', 'DRNG', 'DRAINING', 'CLOSED', 'UNAVAIL')
 
     def collect(self) -> list[dict[str, Any]]:
         """Collect node state from scontrol."""
-
         try:
             cmd = ['scontrol', 'show', 'node']
             if self.nodes:
                 cmd.append(','.join(self.nodes))
-
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-
             if result.returncode != 0:
                 raise CollectionError(f"scontrol failed: {result.stderr}")
-
-            return self._parse_scontrol_output(result.stdout)
-
+            records = self._parse_scontrol_output(result.stdout)
+            if self._alert_config.get('enabled', True):
+                self._dispatch_state_alerts(records)
+            return records
         except FileNotFoundError:
             raise CollectionError("scontrol not found - SLURM not installed?")
         except subprocess.TimeoutExpired:
             raise CollectionError("scontrol timed out")
+
+    def _classify_state(self, state: str) -> str | None:
+        """
+        Return 'critical' | 'warning' | None for a state string.
+
+        None means the state is explicitly ignored (e.g. POWERED_DOWN at
+        sites that consider it operational, not an incident).
+
+        Configuration:
+            [alerts.node_state]
+            critical_states = ["DOWN", "NOT_RESPONDING", ...]
+            warning_states  = ["DRAIN", "DRNG", ...]
+            ignore_states   = ["POWERED_DOWN", ...]
+        """
+        s = (state or '').upper()
+        cfg = self._alert_config
+
+        ignore = [x.upper() for x in cfg.get('ignore_states', [])]
+        critical = [x.upper() for x in cfg.get('critical_states', self.DEFAULT_CRITICAL_STATES)]
+        warning = [x.upper() for x in cfg.get('warning_states', self.DEFAULT_WARNING_STATES)]
+
+        if any(tok in s for tok in ignore):
+            return None
+        if any(tok in s for tok in critical):
+            return 'critical'
+        if any(tok in s for tok in warning):
+            return 'warning'
+        return 'warning'  # is_healthy=0 but state unrecognized -> warn conservatively
+
+    def _dispatch_state_alerts(self, records: list[dict[str, Any]]) -> None:
+        """
+        Dispatch alerts for unhealthy nodes via the AlertDispatcher.
+
+        Deduplication is handled by the dispatcher's cooldown (same
+        source:host:severity within cooldown_minutes is suppressed),
+        so a node staying DOWN for hours sends one alert, not many.
+        """
+        for rec in records:
+            if rec.get('is_healthy', 1):
+                continue
+
+            severity = self._classify_state(rec.get('state', ''))
+            if severity is None:
+                continue  # explicitly ignored
+
+            node_name = rec.get('node_name', 'unknown')
+            reason = rec.get('reason') or 'no reason given'
+
+            try:
+                send_alert(
+                    severity=severity,
+                    source='node_state',
+                    message=f"Node {node_name} is {rec.get('state')} ({reason})",
+                    host=node_name,
+                    details={
+                        'state': rec.get('state'),
+                        'reason': reason,
+                        'cluster': rec.get('cluster', 'default'),
+                        'partitions': rec.get('partitions'),
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to dispatch node-state alert for {node_name}: {e}"
+                )
 
     def _parse_scontrol_output(self, output: str) -> list[dict[str, Any]]:
         """Parse scontrol show node output."""

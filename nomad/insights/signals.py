@@ -16,6 +16,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class SignalType(Enum):
     """Categories of operational signals."""
@@ -117,7 +120,7 @@ def create_site_db(db_path: Path, site: str) -> Path:
     return tmp_path
 
 
-def read_job_signals(db_path: Path, hours: int = 24) -> list[Signal]:
+def read_job_signals(db_path: Path, hours: int = 24, config: dict | None = None) -> list[Signal]:
     """Analyze recent job outcomes for failure patterns."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -243,7 +246,7 @@ def read_job_signals(db_path: Path, hours: int = 24) -> list[Signal]:
 
 # ── Disk / storage signals ───────────────────────────────────────────────
 
-def read_disk_signals(db_path: Path, hours: int = 6) -> list[Signal]:
+def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None) -> list[Signal]:
     """Check storage filesystem trends."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -427,7 +430,7 @@ def read_disk_signals(db_path: Path, hours: int = 6) -> list[Signal]:
 
 # ── GPU signals ──────────────────────────────────────────────────────────
 
-def read_gpu_signals(db_path: Path, hours: int = 24) -> list[Signal]:
+def read_gpu_signals(db_path: Path, hours: int = 24, config: dict | None = None) -> list[Signal]:
     """Analyze GPU utilization and memory patterns."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -478,7 +481,7 @@ def read_gpu_signals(db_path: Path, hours: int = 24) -> list[Signal]:
 
 # ── Queue signals ────────────────────────────────────────────────────────
 
-def read_queue_signals(db_path: Path, hours: int = 6) -> list[Signal]:
+def read_queue_signals(db_path: Path, hours: int = 6, config: dict | None = None) -> list[Signal]:
     """Analyze job queue pressure and wait times."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -550,7 +553,7 @@ def read_queue_signals(db_path: Path, hours: int = 6) -> list[Signal]:
 
 # ── Network signals ──────────────────────────────────────────────────────
 
-def read_network_signals(db_path: Path, hours: int = 6) -> list[Signal]:
+def read_network_signals(db_path: Path, hours: int = 6, config: dict | None = None) -> list[Signal]:
     """Check for network anomalies."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -598,7 +601,7 @@ def read_network_signals(db_path: Path, hours: int = 6) -> list[Signal]:
 
 # ── Alert signals ────────────────────────────────────────────────────────
 
-def read_alert_signals(db_path: Path, hours: int = 24) -> list[Signal]:
+def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = None) -> list[Signal]:
     """Read active/recent alerts from the alerts table."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -675,7 +678,7 @@ def read_alert_signals(db_path: Path, hours: int = 24) -> list[Signal]:
 
 # ── Cloud signals ────────────────────────────────────────────────────────
 
-def read_cloud_signals(db_path: Path, hours: int = 24) -> list[Signal]:
+def read_cloud_signals(db_path: Path, hours: int = 24, config: dict | None = None) -> list[Signal]:
     """Analyze cloud instance metrics for cost and performance signals."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -725,10 +728,117 @@ def read_cloud_signals(db_path: Path, hours: int = 24) -> list[Signal]:
 
     return signals
 
+def read_node_health_signals(
+    db_path: Path,
+    hours: int = 24,
+    config: dict | None = None,
+) -> list[Signal]:
+    """
+    Surface currently unhealthy nodes from the latest node_state samples.
+
+    Independent of the alerts table: queries node_state directly so the
+    digest catches node issues even when alert dispatch is unconfigured.
+
+    Configuration (nomad.toml):
+        [signals.node_state]
+        critical_states = [...]   # substrings -> critical signals
+        warning_states  = [...]   # substrings -> warning signals
+        ignore_states   = [...]   # never surface these states
+        summary_threshold = 3     # multi-node rollup fires above this count
+                                  # (0 disables the rollup signal)
+    """
+    cfg = (config or {}).get('signals', {}).get('node_state', {})
+    critical = [x.upper() for x in cfg.get('critical_states',
+                ['DOWN', 'NOT_RESPONDING', 'FAIL', 'OFFLINE', 'UNREACH'])]
+    warning = [x.upper() for x in cfg.get('warning_states',
+                ['DRAIN', 'DRNG', 'DRAINING', 'CLOSED', 'UNAVAIL'])]
+    ignore = [x.upper() for x in cfg.get('ignore_states', [])]
+    summary_threshold = cfg.get('summary_threshold', 3)
+
+    signals: list[Signal] = []
+    conn = _get_conn(db_path)
+
+    try:
+        rows = conn.execute("""
+            SELECT node_name, state, reason, cluster, partitions, timestamp
+            FROM node_state
+            WHERE (node_name, timestamp) IN (
+                SELECT node_name, MAX(timestamp)
+                FROM node_state
+                GROUP BY node_name
+            )
+              AND is_healthy = 0
+            ORDER BY node_name
+        """).fetchall()
+
+        if not rows:
+            return signals
+
+        crit_count = 0
+        for r in rows:
+            state = (r["state"] or "").upper()
+            if any(tok in state for tok in ignore):
+                continue
+
+            if any(tok in state for tok in critical):
+                sev = Severity.CRITICAL
+                title = "node_down"
+                crit_count += 1
+            elif any(tok in state for tok in warning):
+                sev = Severity.WARNING
+                title = "node_drain"
+            else:
+                sev = Severity.WARNING
+                title = "node_unhealthy"
+
+            node = r["node_name"]
+            cluster = r["cluster"] or "default"
+            reason = r["reason"] or "no reason given"
+            part = r["partitions"] or ""
+
+            detail = f"Node {node} is {state} on {cluster}"
+            if part:
+                detail += f" ({part} partition)"
+            detail += f"; reason: {reason}"
+
+            signals.append(Signal(
+                signal_type=SignalType.ALERT,
+                severity=sev,
+                title=title,
+                detail=detail,
+                metrics={
+                    "node": node,
+                    "state": state,
+                    "reason": reason,
+                    "cluster": cluster,
+                    "partitions": part,
+                    "last_seen": r["timestamp"],
+                },
+            ))
+
+        # Multi-node rollup. Fires when too many nodes are unhealthy at once.
+        # Threshold is site-tunable: small clusters set 1-2, large clusters 5-10.
+        if summary_threshold > 0 and len(signals) > summary_threshold:
+            signals.insert(0, Signal(
+                signal_type=SignalType.ALERT,
+                severity=Severity.CRITICAL if crit_count else Severity.WARNING,
+                title="multiple_nodes_unhealthy",
+                detail=(f"{len(signals)} nodes currently unhealthy "
+                        f"({crit_count} critical). Cluster capacity reduced."),
+                metrics={
+                    "total_unhealthy": len(signals),
+                    "critical_count": crit_count,
+                    "warning_count": len(signals) - crit_count,
+                },
+            ))
+    finally:
+        conn.close()
+
+    return signals
 
 # ── Workstation signals ──────────────────────────────────────────────────
 
-def read_workstation_signals(db_path: Path, hours: int = 6) -> list[Signal]:
+def read_workstation_signals(db_path: Path, hours: int = 6, config: dict | None = None) -> list[Signal]:
     """Check workstation health from workstation_state table."""
     signals: list[Signal] = []
     conn = _get_conn(db_path)
@@ -1031,7 +1141,7 @@ def _read_dynamics_for_site(
     return signals
 
 # ── Master reader ────────────────────────────────────────────────────────
-def read_dynamics_signals(db_path: Path, hours: int = 168) -> list[Signal]:
+def read_dynamics_signals(db_path: Path, hours: int = 168, config: dict | None = None) -> list[Signal]:
     """Read system dynamics metrics per-cluster."""
     # Detect multi-site (combined) database
     conn = _get_conn(db_path)
@@ -1068,28 +1178,47 @@ def read_dynamics_signals(db_path: Path, hours: int = 168) -> list[Signal]:
             db_path, hours)
 
 
-def read_all_signals(db_path: Path, hours: int = 24) -> list[Signal]:
-    """Run all signal readers and return combined results."""
+def read_all_signals(
+    db_path: Path,
+    hours: int = 24,
+    config: dict | None = None,
+) -> list[Signal]:
+    """
+    Run all signal readers and return combined results.
+
+    If config is None, loads from the standard locations via
+    nomad.config.load_config(). Each reader receives the full config
+    dict and is responsible for finding its own subsection.
+    """
+    if config is None:
+        from nomad.config import load_config
+        try:
+            config = load_config()
+        except Exception as e:
+            logger.debug(f"Could not load config; using defaults: {e}")
+            config = {}
+
     all_signals: list[Signal] = []
 
     readers = [
-        (read_job_signals, {"hours": hours}),
-        (read_disk_signals, {"hours": min(hours, 12)}),
-        (read_gpu_signals, {"hours": hours}),
-        (read_queue_signals, {"hours": min(hours, 12)}),
-        (read_network_signals, {"hours": min(hours, 12)}),
-        (read_alert_signals, {"hours": hours}),
-        (read_cloud_signals, {"hours": hours}),
+        (read_job_signals,         {"hours": hours}),
+        (read_disk_signals,        {"hours": min(hours, 12)}),
+        (read_gpu_signals,         {"hours": hours}),
+        (read_queue_signals,       {"hours": min(hours, 12)}),
+        (read_network_signals,     {"hours": min(hours, 12)}),
+        (read_alert_signals,       {"hours": hours}),
+        (read_node_health_signals, {"hours": hours}),
+        (read_cloud_signals,       {"hours": hours}),
         (read_workstation_signals, {"hours": min(hours, 12)}),
-        (read_dynamics_signals, {"hours": hours}),
+        (read_dynamics_signals,    {"hours": hours}),
     ]
 
     for reader, kwargs in readers:
         try:
-            sigs = reader(db_path, **kwargs)
+            sigs = reader(db_path, config=config, **kwargs)
             all_signals.extend(sigs)
-        except Exception:
-            pass  # Individual reader failures don't break the engine
+        except Exception as e:
+            logger.debug(f"Signal reader {reader.__name__} failed: {e}")
 
     return all_signals
 
@@ -1116,9 +1245,9 @@ class PerUserSignal:
     rule_type: str = ""
     occurrences: int = 1
     last_seen: str = ""
-    command: Optional[str] = None
-    peak_cpu_percent: Optional[float] = None
-    peak_memory_bytes: Optional[int] = None
+    command: str | None = None
+    peak_cpu_percent: float | None = None
+    peak_memory_bytes: int | None = None
     sustained_for_seconds: int = 0
     context: dict = field(default_factory=dict)
 
@@ -1126,7 +1255,7 @@ class PerUserSignal:
 def read_per_user_signals(
     db_path: str,
     lookback_hours: int = 168,
-    hostname: Optional[str] = None,
+    hostname: str | None = None,
 ) -> list:
     """Pull recent per_user_alert rows; aggregate by (host, user, rule, cmd)."""
     cutoff = (datetime.now() - timedelta(hours=lookback_hours)).strftime(

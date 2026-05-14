@@ -478,3 +478,49 @@ source = "wire-src"
 dest = "10.0.0.1"        # Private IP on direct cable
 path_type = "direct"
 user = "root"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [signals.*] — Site policy for the insight engine's signal generators.
+#
+# These thresholds control what appears in the daily brief (nomad insights
+# brief) and on the dashboard. They are SEPARATE from [alerts.thresholds.*],
+# which controls the realtime dispatch path (email, Slack).
+#
+# Two namespaces, two purposes:
+#   [signals.*]            -> what shows in the brief / dashboard
+#   [alerts.thresholds.*]  -> what triggers immediate notifications
+#
+# Sites typically want both, often with the same values. Tune separately
+# when you want digest visibility without paging, or vice versa.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[signals.node_state]
+# State-string substrings (case-insensitive). Matching order:
+# ignore -> critical -> warning -> fallback (warning).
+#
+# Defaults cover Slurm composite states (e.g. "DOWN+NOT_RESPONDING",
+# "MIXED+DRAIN") and common vocabulary from PBS/Torque and LSF.
+critical_states  = ["DOWN", "NOT_RESPONDING", "FAIL", "OFFLINE", "UNREACH"]
+warning_states   = ["DRAIN", "DRNG", "DRAINING", "CLOSED", "UNAVAIL"]
+
+# States to never surface, even when the collector flags is_healthy=0.
+# Useful for sites that treat e.g. POWERED_DOWN as routine, not incident.
+ignore_states    = []
+
+# Fire a "multiple nodes unhealthy" rollup signal at the top of the brief
+# when more than this many nodes are currently unhealthy. Set high for
+# large clusters (5-10), low for small (1-2). Set 0 to disable.
+summary_threshold = 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [alerts.node_state] — Realtime dispatch policy for node-state changes.
+# Mirrors [signals.node_state] but controls email/Slack/webhook dispatch.
+# Set enabled=false to skip dispatch entirely (the digest will still surface).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[alerts.node_state]
+enabled = true
+critical_states = ["DOWN", "NOT_RESPONDING", "FAIL", "OFFLINE", "UNREACH"]
+warning_states  = ["DRAIN", "DRNG", "DRAINING", "CLOSED", "UNAVAIL"]
+ignore_states   = []

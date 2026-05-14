@@ -37,7 +37,8 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Iterable, Literal
+from typing import Literal
+from collections.abc import Iterable
 
 
 RuleType = Literal["cpu", "memory"]

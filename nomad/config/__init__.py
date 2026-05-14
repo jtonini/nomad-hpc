@@ -20,6 +20,35 @@ def get_default_config_path() -> Path:
     """Get path to packaged default config."""
     return Path(__file__).parent / 'default.toml'
 
+def load_config(path: Path | None = None) -> dict:
+    """
+    Load NOMAD configuration as a dict.
+
+    Resolution order:
+      1. Explicit path argument
+      2. ~/.config/nomad/nomad.toml
+      3. /etc/nomad/nomad.toml
+      4. packaged default (nomad/config/default.toml)
+
+    Returns an empty dict if no config is found and the packaged default
+    can't be read — never raises, so callers can rely on it as a soft
+    accessor for site policy.
+    """
+    import tomllib  # 3.11+, stdlib
+    candidates: list[Path] = []
+    if path is not None:
+        candidates.append(Path(path))
+    candidates.extend(DEFAULT_CONFIG_PATHS)
+    candidates.append(get_default_config_path())
+
+    for p in candidates:
+        try:
+            if p.exists():
+                with p.open('rb') as f:
+                    return tomllib.load(f)
+        except Exception:
+            continue
+    return {}
 
 def resolve_cluster_name(config: dict) -> str:
     """Resolve cluster name from config, trying all known paths.

@@ -23,8 +23,10 @@ from datetime import datetime, timedelta
 
 from nomad.edu.scoring import (
     JobFingerprint,
+    SessionFingerprint,
     bar,
     score_job,
+    score_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,6 +166,114 @@ def _score_jobs(rows: list[dict]) -> list[JobFingerprint]:
             logger.debug(f"Could not score job {row.get('job_id')}: {e}")
     return fingerprints
 
+
+
+def _load_user_sessions(
+    db_path: str,
+    username: str,
+    days: int = 7,
+) -> list[dict]:
+    """
+    Load a user's workstation sessions with host capacity, for scoring.
+
+    Aggregates workstation_user_snapshot rows by session_epoch into one
+    row per session. Joins to the latest workstation_state per host so
+    each row carries the host's capacity (memory_total_mb, cpu_count) at
+    scoring time.
+
+    Filters uid >= 1000 to exclude system accounts (root, dbus, etc.).
+    Workstation snapshots churn faster than cluster jobs, so the default
+    window is shorter (7 days vs 90).
+    """
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = conn.execute("""
+            WITH latest_state AS (
+              SELECT hostname, memory_total_mb, cpu_count,
+                     ROW_NUMBER() OVER (
+                         PARTITION BY hostname ORDER BY timestamp DESC
+                     ) AS rn
+              FROM workstation_state
+            ),
+            session_agg AS (
+              SELECT hostname, username, uid, session_epoch,
+                     MAX(memory_peak_bytes) AS peak_memory_bytes,
+                     MAX(cpu_usage_usec)    AS cpu_usage_usec,
+                     MIN(timestamp)         AS first_seen,
+                     MAX(timestamp)         AS last_seen,
+                     COUNT(*)               AS samples
+              FROM workstation_user_snapshot
+              WHERE timestamp >= ?
+                AND uid >= 1000
+                AND username = ?
+              GROUP BY hostname, username, uid, session_epoch
+            )
+            SELECT s.hostname, s.username, s.uid, s.session_epoch,
+                   s.peak_memory_bytes, s.cpu_usage_usec,
+                   s.first_seen, s.last_seen, s.samples,
+                   (julianday(s.last_seen) - julianday(s.first_seen)) * 24
+                       AS span_hours,
+                   ls.memory_total_mb AS host_memory_total_mb,
+                   ls.cpu_count       AS host_cpu_count
+            FROM session_agg s
+            LEFT JOIN latest_state ls
+                ON ls.hostname = s.hostname AND ls.rn = 1
+            ORDER BY s.last_seen ASC
+        """, (cutoff, username)).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Error loading sessions for {username}: {e}")
+        return []
+
+
+def _split_session_fields(row: dict) -> tuple[dict, dict]:
+    """Split a joined session+host_state row into session and host_state dicts.
+
+    Parallel to _split_job_fields. The session scorer expects
+    score_session(session, host_state) with host capacity as a separate
+    arg, not nested in the session dict.
+    """
+    session = {
+        "username":          row.get("username"),
+        "hostname":          row.get("hostname"),
+        "session_epoch":     row.get("session_epoch"),
+        "peak_memory_bytes": row.get("peak_memory_bytes"),
+        "cpu_usage_usec":    row.get("cpu_usage_usec"),
+        "samples":           row.get("samples"),
+        "span_hours":        row.get("span_hours"),
+    }
+    host_state = {
+        "hostname":        row.get("hostname"),
+        "memory_total_mb": row.get("host_memory_total_mb"),
+        "cpu_count":       row.get("host_cpu_count"),
+    }
+    return session, host_state
+
+
+def _score_sessions(rows: list[dict]) -> list[SessionFingerprint]:
+    """Score a list of joined session+host_state rows.
+
+    Parallel to _score_jobs: thin wrapper, per-row exception handling so
+    one bad row doesn't kill the batch, attaches _last_seen for
+    trajectory ordering (matches the _end_time pattern on JobFingerprint).
+    """
+    fingerprints = []
+    for row in rows:
+        session, host_state = _split_session_fields(row)
+        try:
+            fp = score_session(session, host_state)
+            fp._last_seen = row.get("last_seen", "")
+            fingerprints.append(fp)
+        except Exception as e:
+            logger.debug(
+                f"Could not score session "
+                f"{row.get('hostname')}/{row.get('username')}/"
+                f"{row.get('session_epoch')}: {e}"
+            )
+    return fingerprints
 
 def user_trajectory(
     db_path: str,
