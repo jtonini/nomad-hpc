@@ -70,3 +70,42 @@ def db_with_alerts(tmp_path) -> str:
             rows,
         )
     return p
+
+
+# --- node_state fixtures (shared across signal-reader tests) ---------------
+
+@pytest.fixture
+def db_with_node_states(db_path) -> str:
+    """
+    DB with a representative mix of node states for signal/alert tests.
+
+    Node names and cluster come from DEMO_CLUSTER (nomad.demo) so test
+    data is consistent with what `nomad demo` generates. State values
+    are uppercase, matching what scontrol produces on real Slurm
+    clusters (see arachne production DB).
+
+    Mix:
+      node01-node02: healthy (IDLE, MIXED)
+      gpu01:        DOWN+NOT_RESPONDING (critical)
+      gpu02:        DOWN                (critical)
+      node07:       MIXED+DRAIN         (warning)
+    """
+    import sqlite3
+    from datetime import datetime
+
+    now = datetime.utcnow().isoformat()
+    rows = [
+        (now, 'node01', 'IDLE',                '',                  'demo-cluster', 'compute', 1),
+        (now, 'node02', 'MIXED',               '',                  'demo-cluster', 'compute', 1),
+        (now, 'gpu01',  'DOWN+NOT_RESPONDING', 'Not responding',    'demo-cluster', 'gpu',     0),
+        (now, 'gpu02',  'DOWN',                'Unexpected reboot', 'demo-cluster', 'gpu',     0),
+        (now, 'node07', 'MIXED+DRAIN',         'Duplicate jobid',   'demo-cluster', 'highmem', 0),
+    ]
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            """INSERT INTO node_state
+               (timestamp, node_name, state, reason, cluster, partitions, is_healthy)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+    return db_path
