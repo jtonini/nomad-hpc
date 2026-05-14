@@ -202,7 +202,7 @@ class DimensionScore:
     score: float                          # 0-100
     level: str                            # Excellent/Good/Developing/Needs Work
     detail: str                           # Human-readable explanation
-    suggestion: Optional[Suggestion] = None
+    suggestion: Suggestion | None = None
     applicable: bool = True               # False if dimension doesn't apply
 
     @property
@@ -436,8 +436,8 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
             current_value=req_mem_mb,
             actual_usage=peak_mem_gb * 1024,
             unit="MB",
-            rationale=(f"memory you don't use is unavailable to other jobs "
-                       f"on the node"),
+            rationale=("memory you don't use is unavailable to other jobs "
+                       "on the node"),
         )
 
     return DimensionScore(
@@ -882,7 +882,7 @@ def select_cluster_target(
     peak_mb: float,
     host_mb: int,
     tiers: tuple[int, ...] = SPYDUR_MEMORY_TIERS_MB,
-) -> Optional[tuple[int, float]]:
+) -> tuple[int, float] | None:
     """
     Pick the smallest cluster memory tier that gives meaningful headroom.
 

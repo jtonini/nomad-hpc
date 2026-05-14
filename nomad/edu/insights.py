@@ -126,7 +126,7 @@ class Issue:
     suggested_display: str = ""       # "4G", "18:00:00", "1"
     current_value_typical: float = 0.0  # modal/median of current requests
     current_display: str = ""         # "200 GB"
-    usage_stats: Optional[UsageStats] = None
+    usage_stats: UsageStats | None = None
     strategy: str = ""                # "mode" / "p95_with_buffer"
     rationale: str = ""               # explanation of how the value was chosen
 
@@ -153,7 +153,7 @@ class UserInsights:
 
 # ── Configuration ────────────────────────────────────────────────────
 
-def _load_thresholds(config: Optional[dict[str, Any]] = None) -> dict[str, float]:
+def _load_thresholds(config: dict[str, Any] | None = None) -> dict[str, float]:
     """Load thresholds from config, falling back to defaults."""
     thresholds = dict(DEFAULT_THRESHOLDS)
     if config and isinstance(config.get("thresholds"), dict):
@@ -225,7 +225,7 @@ def _aggregate_quantile(
     return suggested_value, f"p{pct_label}_with_{buffer_factor:g}x_buffer", rationale
 
 
-def _build_usage_stats(suggestions: list[Suggestion]) -> Optional[UsageStats]:
+def _build_usage_stats(suggestions: list[Suggestion]) -> UsageStats | None:
     """Compute the distribution of actual_usage across suggestions."""
     usages = [s.actual_usage for s in suggestions if s.actual_usage > 0]
     if not usages:
@@ -308,7 +308,7 @@ def _aggregate_dimension(
     dim_key: str,
     fingerprints: list[JobFingerprint],
     threshold: float,
-) -> Optional[Issue]:
+) -> Issue | None:
     """Build an Issue for one dimension, or None if not systemic."""
     dim_name = KEY_TO_DISPLAY.get(dim_key, dim_key)
     affected_scores: list[float] = []
@@ -425,7 +425,7 @@ def user_insights(
     db_path: str,
     username: str,
     days: int = 90,
-    config: Optional[dict[str, Any]] = None,
+    config: dict[str, Any] | None = None,
 ) -> UserInsights:
     """
     Compute systemic insights for a user across recent jobs.
@@ -516,7 +516,7 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
         lines.append("  to flag any single dimension.")
         return "\n".join(lines)
 
-    lines.append(f"  Top issues across your recent jobs:")
+    lines.append("  Top issues across your recent jobs:")
     lines.append(f"  {'─' * 56}")
 
     for issue in insights.issues:
@@ -567,10 +567,10 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     if not detailed:
         lines.append("")
         lines.append(
-            f"  Run with --detailed for per-dimension trajectory and details."
+            "  Run with --detailed for per-dimension trajectory and details."
         )
         lines.append(
-            f"  Run `nomad edu explain <job_id>` for a single-job analysis."
+            "  Run `nomad edu explain <job_id>` for a single-job analysis."
         )
 
     return "\n".join(lines)

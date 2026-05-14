@@ -94,7 +94,7 @@ def can_read_other_users_io() -> bool:
     # actually read it, we have the capability. /proc/1 is init/systemd,
     # owned by root.
     try:
-        with open("/proc/1/io", "r") as f:
+        with open("/proc/1/io") as f:
             f.read(64)
         return True
     except (PermissionError, FileNotFoundError, OSError):
@@ -241,7 +241,7 @@ def read_proc_io(pid: int) -> dict[str, int] | None:
     """
     path = f"/proc/{pid}/io"
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             data = f.read()
     except (PermissionError, FileNotFoundError, OSError):
         return None

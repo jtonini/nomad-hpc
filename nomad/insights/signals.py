@@ -1245,9 +1245,9 @@ class PerUserSignal:
     rule_type: str = ""
     occurrences: int = 1
     last_seen: str = ""
-    command: Optional[str] = None
-    peak_cpu_percent: Optional[float] = None
-    peak_memory_bytes: Optional[int] = None
+    command: str | None = None
+    peak_cpu_percent: float | None = None
+    peak_memory_bytes: int | None = None
     sustained_for_seconds: int = 0
     context: dict = field(default_factory=dict)
 
@@ -1255,7 +1255,7 @@ class PerUserSignal:
 def read_per_user_signals(
     db_path: str,
     lookback_hours: int = 168,
-    hostname: Optional[str] = None,
+    hostname: str | None = None,
 ) -> list:
     """Pull recent per_user_alert rows; aggregate by (host, user, rule, cmd)."""
     cutoff = (datetime.now() - timedelta(hours=lookback_hours)).strftime(
