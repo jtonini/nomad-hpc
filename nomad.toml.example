@@ -239,36 +239,39 @@ monitor_exports = true
 # ============================================
 
 [alerts]
-# Alert dispatch configuration
+# Alert dispatch configuration.
+#
+# Only signals at or above min_severity are dispatched. Cooldown
+# prevents the same alert from being sent repeatedly.
+min_severity = "warning"     # info | warning | critical
+cooldown_minutes = 15
 
-# Email
-email_enabled = true
-email_to = ["hpc-admin@example.edu"]
-email_cc = []
-email_from = "nomade@cluster.example.edu"
-smtp_host = "smtp.example.edu"
-smtp_port = 25
-smtp_use_tls = false
+# ─── Email dispatch ──────────────────────────────────────────────
+# IMPORTANT: the values below are placeholders. To enable email,
+# (1) replace smtp_server / from / recipients with values for your
+# institution, then (2) set enabled = true.
+[alerts.email]
+enabled = false
+smtp_server = "smtp.your-institution.edu"
+smtp_port = 587
+use_tls = true
 # smtp_username = ""
 # smtp_password = ""
+from_address = "nomad@your-institution.edu"
+recipients = ["hpc-admin@your-institution.edu"]
 
-# Slack
-slack_enabled = false
-slack_webhook_url = ""
-slack_channel = "#hpc-alerts"
+# ─── Slack dispatch ──────────────────────────────────────────────
+[alerts.slack]
+enabled = false
+webhook_url = ""             # paste your Slack incoming webhook URL
+channel = "#hpc-alerts"
+username = "NOMAD"
 
-# Generic webhook
-webhook_enabled = false
-webhook_url = ""
-webhook_headers = { Authorization = "Bearer TOKEN" }
-
-# Alert behavior
-# Minimum seconds between repeated alerts for the same issue
-default_cooldown = 3600
-
-# Aggregate multiple alerts into a single digest
-digest_enabled = false
-digest_interval = 3600
+# ─── Generic webhook ─────────────────────────────────────────────
+[alerts.webhook]
+enabled = false
+url = ""
+# auth_token = ""             # passed as Authorization: Bearer <token>
 
 # ============================================
 # ALERT THRESHOLDS
@@ -363,7 +366,9 @@ coverage_warning_percent = 90
 [dashboard]
 # Web dashboard settings
 enabled = true
-host = "0.0.0.0"
+# Bind to loopback by default. Set to "0.0.0.0" to expose to other
+# hosts on the network (e.g. for centralized monitoring servers).
+host = "127.0.0.1"
 port = 8080
 
 # Authentication (optional)
