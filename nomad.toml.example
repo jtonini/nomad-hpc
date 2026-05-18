@@ -26,26 +26,21 @@ pid_file = "/var/run/nomade/nomade.pid"
 # ============================================
 
 [collectors]
-# Enable/disable individual collectors
-disk = true
-slurm = true
-nodes = true
-licenses = true
-jobs = true      # Requires SLURM prolog/epilog hooks
-network = false  # Optional network monitoring
+# Enable/disable specific collectors. Listed names map to the
+# [collectors.<name>] subtables below. Available collectors:
+#   disk, slurm, nodes, licenses, jobs, gpu, nfs,
+#   workstation, storage, network_perf, node_state
+enabled = ["disk", "slurm", "nodes", "licenses", "jobs"]
 
-# Collection intervals (seconds)
-disk_interval = 300      # Every 5 minutes
-slurm_interval = 60      # Every minute
-nodes_interval = 120     # Every 2 minutes
-licenses_interval = 300  # Every 5 minutes
-network_interval = 60    # Every minute
+# Default collection interval in seconds. Each [collectors.<name>]
+# subtable can override this with its own `interval = N`.
 
 # ============================================
 # DISK COLLECTOR
 # ============================================
 
 [collectors.disk]
+interval = 300  # Every 5 minutes
 # Filesystems to monitor
 filesystems = [
     "/",
@@ -77,6 +72,7 @@ scan_for_large_files = false  # Can be slow on large filesystems
 # ============================================
 
 [collectors.slurm]
+interval = 60   # Every minute
 # Path to SLURM commands (if not in PATH)
 # slurm_bin_path = "/usr/bin"
 
@@ -97,6 +93,7 @@ check_zombies = true
 # ============================================
 
 [collectors.nodes]
+interval = 120  # Every 2 minutes
 # How to check node health
 # Options: "slurm" (sinfo only), "ssh" (SSH to each node)
 health_check_method = "slurm"
@@ -125,6 +122,7 @@ check_services = ["slurmd", "munge"]
 # ============================================
 
 [collectors.licenses]
+interval = 300  # Every 5 minutes
 # License servers to monitor
 
 [[collectors.licenses.servers]]
@@ -478,6 +476,76 @@ source = "wire-src"
 dest = "10.0.0.1"        # Private IP on direct cable
 path_type = "direct"
 user = "root"
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [database] — Where NOMAD stores its operational data.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[database]
+# SQLite database filename (relative to [general] data_dir) or absolute path.
+# Default is "nomad.db" inside data_dir.
+#
+# Examples:
+#   path = "nomad.db"               # -> data_dir/nomad.db (default)
+#   path = "mydb.sqlite"            # -> data_dir/mydb.sqlite
+#   path = "/var/lib/nomad/prod.db" # absolute, used as-is
+path = "nomad.db"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [ml] — Machine learning predictions and continuous learning.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[ml]
+# Enable ML-based job failure prediction and resource forecasting.
+enabled = true
+
+# Number of training epochs for the ensemble model.
+epochs = 100
+
+# Where trained models live, relative to [general] data_dir or absolute path.
+models_dir = "models"
+
+[ml.learning]
+# Continuous learning strategy:
+#   "count" -- retrain after N new jobs
+#   "time"  -- retrain every N hours
+#   "drift" -- retrain when data drift is detected
+strategy = "count"
+
+# Retrain after this many new jobs (for "count" strategy).
+job_threshold = 100
+
+# Retrain every N hours (for "time" strategy).
+interval_hours = 6
+
+# Minimum jobs required before training can begin.
+min_jobs = 50
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [slurm] — Optional integration with SLURM's prolog/epilog hooks for
+# real-time job scoring. Only relevant if you want NOMAD to evaluate
+# jobs as they enter the queue.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[slurm]
+# Path to SLURM binaries if not in $PATH. Leave commented to use $PATH.
+# bin_path = "/usr/bin"
+
+[slurm.prolog]
+# Score jobs in real time as they're submitted via slurmctld prolog hook.
+# Requires installing the NOMAD prolog script into SLURM's prolog config.
+enabled = false
+
+# Risk threshold (0.0 - 1.0): jobs scoring above this are logged for review.
+risk_threshold = 0.7
+
+# Where to log high-risk job submissions.
+log_file = "/var/log/nomad/high_risk_jobs.log"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # [signals.*] — Site policy for the insight engine's signal generators.
