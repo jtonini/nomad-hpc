@@ -79,3 +79,63 @@ def test_example_matches_default_top_level_sections():
         f"Sections present in default.toml but not nomad.toml.example: "
         f"{only_in_default}. Update nomad.toml.example."
     )
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11),
+                    reason="tomllib is stdlib only on 3.11+")
+def test_alerts_subtables_match_dispatcher_schema():
+    """The dispatcher reads config['alerts']['email'/'slack'/'webhook'].
+
+    The example must document those subtables, not the legacy flat keys
+    (email_enabled = true under [alerts]) that the dispatcher never reads.
+    Defaults must be enabled=false so admins opt in deliberately rather
+    than getting silent SMTP failures against placeholder values.
+    """
+    import tomllib
+
+    with (REPO_ROOT / "nomad.toml.example").open("rb") as f:
+        cfg = tomllib.load(f)
+
+    alerts = cfg.get("alerts", {})
+
+    # Subtables present
+    for backend in ("email", "slack", "webhook"):
+        assert backend in alerts, f"missing [alerts.{backend}] subtable"
+        assert "enabled" in alerts[backend], (
+            f"[alerts.{backend}] missing 'enabled' key"
+        )
+
+    # Legacy flat keys absent (dispatcher would silently ignore them)
+    for legacy in ("email_enabled", "slack_enabled", "webhook_enabled"):
+        assert legacy not in alerts, (
+            f"[alerts] has legacy flat key '{legacy}' that the dispatcher "
+            f"won't read; use [alerts.{legacy.split('_')[0]}] instead."
+        )
+
+    # Sensible defaults: nothing dispatching by default
+    for backend in ("email", "slack", "webhook"):
+        assert alerts[backend]["enabled"] is False, (
+            f"[alerts.{backend}] should default enabled=false to prevent "
+            f"silent failures on first install with placeholder values."
+        )
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11),
+                    reason="tomllib is stdlib only on 3.11+")
+def test_dashboard_binds_to_loopback_by_default():
+    """The example must not bind the dashboard to all interfaces by default.
+
+    0.0.0.0 exposes the dashboard to anyone on the network. Sites that
+    want centralized monitoring (like mingus) can opt in by setting
+    host = "0.0.0.0", but new installs should be safe by default.
+    """
+    import tomllib
+
+    with (REPO_ROOT / "nomad.toml.example").open("rb") as f:
+        cfg = tomllib.load(f)
+
+    host = cfg.get("dashboard", {}).get("host", "0.0.0.0")
+    assert host in ("127.0.0.1", "localhost", "::1"), (
+        f"dashboard.host = '{host}' exposes the dashboard to all network "
+        f"interfaces. Default to a loopback address; document opt-in."
+    )
