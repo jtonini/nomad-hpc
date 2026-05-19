@@ -1479,73 +1479,107 @@ def report(ctx, db, output):
 
 
 @cli.command('test-alerts')
-@click.option('--email', is_flag=True, help='Test email backend')
-@click.option('--slack', is_flag=True, help='Test Slack backend')
-@click.option('--webhook', is_flag=True, help='Test webhook backend')
+@click.option('--email', is_flag=True, help='Test only the email backend')
+@click.option('--slack', is_flag=True, help='Test only the Slack backend')
+@click.option('--webhook', is_flag=True, help='Test only the webhook backend')
 @click.pass_context
 def test_alerts(ctx, email, slack, webhook):
-    """Test alert notification backends.
-    
+    """Test configured alert notification backends end-to-end.
+
+    Runs a connection check on each configured backend, then dispatches
+    a synthetic warning-severity alert through the full dispatch path
+    (filtering, cooldown, send). Use this to confirm that real alerts
+    will reach their destinations.
+
     Examples:
-        nomad test-alerts --email     # Test email
-        nomad test-alerts --slack     # Test Slack
-        nomad test-alerts             # Test all configured backends
+        nomad test-alerts                  # Test all configured backends
+        nomad test-alerts --email          # Test only email
+        nomad test-alerts --email --slack  # Test email and Slack
     """
     from nomad.alerts import AlertDispatcher
 
     config = ctx.obj.get('config', {})
-
-    # Build test config if flags provided
-    if email or slack or webhook:
-        if email:
-            click.echo("Testing email backend...")
-            # Would need config from file
-        if slack:
-            click.echo("Testing Slack backend...")
-        if webhook:
-            click.echo("Testing webhook backend...")
-
-    # Test with actual config
     dispatcher = AlertDispatcher(config)
 
     if not dispatcher.backends:
         click.echo(click.style("No alert backends configured.", fg="yellow"))
-        click.echo("Add configuration to nomad.toml:")
-        click.echo("""
-[alerts.email]
-enabled = true
-smtp_server = "smtp.example.com"
-recipients = ["admin@example.com"]
-
-[alerts.slack]
-enabled = true
-webhook_url = "https://hooks.slack.com/..."
-""")
+        click.echo("Add configuration to nomad.toml. For example:")
+        click.echo("")
+        click.echo('[alerts.email]')
+        click.echo('enabled = true')
+        click.echo('smtp_server = "smtp.your-institution.edu"   # or "127.0.0.1" for local sendmail')
+        click.echo('smtp_port = 587')
+        click.echo('use_tls = true')
+        click.echo('from_address = "nomad@your-institution.edu"')
+        click.echo('recipients = ["admin@your-institution.edu"]')
+        click.echo("")
+        click.echo('[alerts.slack]')
+        click.echo('enabled = true')
+        click.echo('webhook_url = "https://hooks.slack.com/services/..."')
+        click.echo("")
+        click.echo('[alerts.webhook]')
+        click.echo('enabled = true')
+        click.echo('url = "https://your-monitoring.example.com/webhook"')
         return
 
-    click.echo(f"Testing {len(dispatcher.backends)} backend(s)...")
-    results = dispatcher.test_backends()
+    flag_to_class = {
+        'EmailBackend':   email,
+        'SlackBackend':   slack,
+        'WebhookBackend': webhook,
+    }
+    selected_classes = {cls for cls, flag in flag_to_class.items() if flag}
 
+    if selected_classes:
+        filtered = [b for b in dispatcher.backends
+                    if b.__class__.__name__ in selected_classes]
+        if not filtered:
+            missing = ", ".join(sorted(selected_classes))
+            click.echo(click.style(
+                f"Requested backend(s) not configured: {missing}",
+                fg="yellow",
+            ))
+            configured = ", ".join(
+                b.__class__.__name__ for b in dispatcher.backends
+            )
+            click.echo(f"Configured backends: {configured}")
+            return
+        dispatcher.backends = filtered
+
+    click.echo(f"Testing {len(dispatcher.backends)} backend(s)...")
+
+    results = dispatcher.test_backends()
     for backend, success in results.items():
         if success:
             click.echo(click.style(f"  {backend}: OK", fg="green"))
         else:
             click.echo(click.style(f"  {backend}: FAILED", fg="red"))
 
-    # Send test alert
-    click.echo("\nSending test alert...")
+    click.echo("")
+    click.echo("Sending test alert (severity=warning)...")
     send_results = dispatcher.dispatch({
-        'severity': 'info',
+        'severity': 'warning',
         'source': 'test',
-        'message': 'This is a test alert from NOMAD',
-        'host': 'cli-test'
+        'message': ('NOMAD test alert (nomad test-alerts). '
+                    'If you received this, real alerts will reach you.'),
+        'host': 'cli-test',
     })
+
+    if not send_results:
+        click.echo(click.style(
+            "  No backends dispatched. Possible causes:", fg="yellow",
+        ))
+        click.echo("    - Alert filtered by [alerts] min_severity")
+        click.echo("    - Alert in cooldown window (cooldown_minutes)")
+        click.echo("    - No backends matched the selected flags")
+        return
 
     for backend, success in send_results.items():
         if success:
             click.echo(click.style(f"  {backend}: Sent", fg="green"))
         else:
-            click.echo(click.style(f"  {backend}: Failed", fg="red"))
+            click.echo(click.style(
+                f"  {backend}: Failed (see log for details)", fg="red",
+            ))
 
 
 
