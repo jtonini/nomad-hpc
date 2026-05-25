@@ -167,6 +167,37 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
 
     click.echo(f"Database: {db_path}")
 
+    # Initialize the alert dispatcher so collectors can dispatch alerts.
+    # Without this, send_alert() calls from collectors (e.g. node_state's
+    # _dispatch_state_alerts) silently no-op because the global _dispatcher
+    # remains None. Discovered 2026-05-20 when production drains generated
+    # zero alerts despite the collector observing them every 5 minutes.
+    try:
+        from nomad.alerts import init_dispatcher
+        dispatcher = init_dispatcher(config)
+        if dispatcher.backends:
+            backend_names = [b.__class__.__name__ for b in dispatcher.backends]
+            click.echo(
+                f"Alert dispatcher initialized: {len(dispatcher.backends)} "
+                f"backend(s) ({', '.join(backend_names)})"
+            )
+        else:
+            click.echo(
+                "Alert dispatcher initialized (no backends configured -- "
+                "collectors will record events but won't send notifications)"
+            )
+    except Exception as e:
+        # Dispatcher init must not crash collection. Alerts are a
+        # notification feature, not load-bearing for data collection.
+        click.echo(click.style(
+            f"Warning: could not initialize alert dispatcher: {e}",
+            fg="yellow",
+        ))
+        click.echo(
+            "Collectors will run but alerts will not be dispatched. "
+            "Check [alerts.*] configuration in nomad.toml."
+        )
+
     # Initialize collectors
     collectors = []
 
