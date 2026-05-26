@@ -1,3 +1,10 @@
+<picture>
+  <source srcset="assets/nomad_hero.webp" type="image/webp">
+  <img src="assets/nomad_hero.jpg"
+       alt="NØMAĐ — Node Monitoring And Diagnostics"
+       style="width: 100%; border-radius: 6px; margin-bottom: 1.5rem;">
+</picture>
+
 # NØMAÐ
 
 **NØde Monitoring And Diagnostics** — Lightweight HPC monitoring, visualization, and predictive analytics.
