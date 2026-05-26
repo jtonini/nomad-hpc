@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/nomad-banner.png" alt="NØMAD-HPC" width="900">
+</p>
+
 # NØMAÐ-HPC
 
 **NØde Monitoring And Diagnostics** — Lightweight HPC monitoring, visualization, and predictive analytics.
