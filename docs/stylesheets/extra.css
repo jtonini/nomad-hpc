@@ -27,3 +27,23 @@ h1 {
 code, pre {
   font-family: var(--md-code-font);
 }
+
+/* Override Material primary color to match website navy */
+:root,
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #0d0d1a;
+  --md-primary-fg-color--light: #1a1a2e;
+  --md-primary-fg-color--dark: #08080f;
+  --md-accent-fg-color: #00BACF;
+  --md-accent-fg-color--transparent: rgba(0, 186, 207, 0.1);
+}
+
+/* Header subtle border for separation */
+.md-header {
+  border-bottom: 1px solid rgba(0, 186, 207, 0.2);
+}
+
+/* Tabs in same dark color */
+.md-tabs {
+  background-color: #0d0d1a;
+}
