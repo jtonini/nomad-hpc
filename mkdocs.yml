@@ -8,10 +8,12 @@ repo_name: jtonini/nomad-hpc
 
 theme:
   name: material
+  logo: assets/favicon.svg
+  favicon: assets/favicon.svg
   palette:
     - scheme: slate
       primary: cyan
-      accent: orange
+      accent: light blue
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
