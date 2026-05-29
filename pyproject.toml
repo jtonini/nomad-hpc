@@ -112,7 +112,7 @@ nomad = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-exclude = ["nomad/viz/server.py", "patches/", "integrate_reference.py", "nomad/dynamics/cli_commands.py", "nomad/reference/cli_commands.py", "paper/"]
+exclude = ["nomad/viz/server.py", "patches/", "integrate_reference.py", "nomad/dynamics/cli_commands.py", "nomad/energy/cli_commands.py", "nomad/reference/cli_commands.py", "paper/"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "C4", "UP"]

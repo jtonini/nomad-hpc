@@ -597,3 +597,21 @@ enabled = true
 critical_states = ["DOWN", "NOT_RESPONDING", "FAIL", "OFFLINE", "UNREACH"]
 warning_states  = ["DRAIN", "DRNG", "DRAINING", "CLOSED", "UNAVAIL"]
 ignore_states   = []
+
+[energy]
+# Energy consumption, waste, and carbon-footprint monitoring (nomad energy).
+enabled = true
+
+# Power estimation (used when DCGM power_draw_w is unavailable)
+cpu_tdp_watts    = 150     # per-socket CPU TDP, watts
+cores_per_socket = 32      # cores per socket, for per-core power
+overhead_factor  = 1.3     # PUE-like multiplier (cooling, network, storage)
+
+# Utilization assumptions (CPU energy is estimated, not metered)
+cpu_assumed_util  = 0.4    # fraction of allocated CPU actually used
+cpu_idle_fraction = 0.3    # idle draw of an unused core, as fraction of per-core TDP
+
+# Carbon intensity
+carbon_source = "epa_egrid"   # epa_egrid | iea | manual
+carbon_region = "SRVC"        # eGRID subregion (Virginia); or country code if iea
+# carbon_intensity_g_per_kwh = 380   # manual override; use with carbon_source = "manual"
