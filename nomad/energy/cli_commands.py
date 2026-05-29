@@ -164,3 +164,22 @@ def energy_compare(ctx, db_path, split, cluster_name, region, mode):
     # Large check-window so the cluster-match guard sees the full data span.
     engine = _energy_engine(ctx, db_path, 24 * 90, cluster_name, mode, region)
     click.echo(engine.compare(split=split_dt))
+@energy.command('forecast')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--horizon', type=click.Choice(['30d', 'quarter', 'semester', 'year']),
+              default='semester', show_default=True, help='Projection horizon')
+@click.option('--buckets', type=int, default=8, show_default=True,
+              help='Number of time buckets to fit the trend over')
+@click.option('--cluster', 'cluster_name', default=None, help='Cluster name')
+@click.option('--region', default=None, help='Carbon region override')
+@_mode_option
+@click.pass_context
+def energy_forecast(ctx, db_path, horizon, buckets, cluster_name, region, mode):
+    """Project consumed and recoverable energy forward via trend analysis.
+
+    Aggregate linear extrapolation over the data span -- shows where
+    consumption and waste are heading side by side. This is a trend, not a
+    per-job prediction (see future `nomad energy predict`).
+    """
+    engine = _energy_engine(ctx, db_path, 24 * 365, cluster_name, mode, region)
+    click.echo(engine.forecast_report(horizon=horizon))

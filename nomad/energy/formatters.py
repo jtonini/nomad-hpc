@@ -213,3 +213,45 @@ def format_comparison_cli(pre, post, split, cluster_name, mode):
     else:
         lines.append("  Outcome: no reduction in recoverable energy across the split.")
     return "\n".join(lines)
+
+
+def format_forecast_cli(c_trend, r_trend, horizon_label, horizon_days,
+                        cluster_name, mode):
+    """Side-by-side trend projection for consumed and recoverable energy."""
+    def _arrow(slope):
+        return "rising" if slope > 1e-6 else ("falling" if slope < -1e-6 else "flat")
+
+    c_proj = c_trend.project_total(horizon_days)
+    r_proj = r_trend.project_total(horizon_days)
+    c_growth = c_trend.growth_pct(horizon_days)
+    r_growth = r_trend.growth_pct(horizon_days)
+
+    lines = [f"NØMAD Energy — Forecast — {cluster_name or 'all clusters'}"]
+    lines.append(f"  projecting {horizon_label} ahead   ·   valuation: {mode}")
+    lines.append("")
+    lines.append(f"  {'':14}{'current/day':>14}{'trend':>9}{f'next {horizon_label}':>18}")
+    lines.append(f"  {'consumed':14}{c_trend.current_rate_per_day:>11,.1f} kWh"
+                 f"{_arrow(c_trend.slope_per_day):>9}{c_proj:>13,.0f} kWh")
+    lines.append(f"  {'recoverable':14}{r_trend.current_rate_per_day:>11,.1f} kWh"
+                 f"{_arrow(r_trend.slope_per_day):>9}{r_proj:>13,.0f} kWh")
+    lines.append("")
+    lines.append(f"  Consumption is {_arrow(c_trend.slope_per_day)} "
+                 f"({c_growth:+.0f}% over the {horizon_label}).")
+    if r_trend.slope_per_day < -1e-6:
+        lines.append(f"  Recoverable waste is falling ({r_growth:+.0f}%) — "
+                     "efficiency is improving at the aggregate level.")
+    elif r_trend.slope_per_day > 1e-6:
+        lines.append(f"  Recoverable waste is rising ({r_growth:+.0f}%) — "
+                     "worth a closer look at requests and GPU idling.")
+    else:
+        lines.append("  Recoverable waste is flat.")
+    lines.append("")
+    worst = min(c_trend.r_squared, r_trend.r_squared)
+    lines.append(f"  Fit: consumed R²={c_trend.r_squared:.2f} ({c_trend.fit_quality()}), "
+                 f"recoverable R²={r_trend.r_squared:.2f} ({r_trend.fit_quality()}).")
+    if worst < 0.4:
+        lines.append("  Caution: a linear trend fits this data poorly — the projection "
+                     "is indicative only, not a reliable forecast.")
+    lines.append("")
+    lines.append("  Linear trend extrapolation; not a per-job prediction.")
+    return "\n".join(lines)

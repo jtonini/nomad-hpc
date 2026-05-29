@@ -261,3 +261,30 @@ def test_compare_renders_reduction(db_timeline):
     assert "Outcome" in out and "down" in out
     pre, post, sp = eng.compare_periods()
     assert post.waste.total_wh < pre.waste.total_wh
+
+
+# ── forecast trend fit ────────────────────────────────────────────────
+def test_trend_slope_sign():
+    from nomad.energy.forecast import build_trend
+    rising = build_trend("consumed", [10, 12, 14, 16, 18, 20], bucket_days=7)
+    falling = build_trend("recoverable", [20, 17, 14, 11, 8, 5], bucket_days=7)
+    assert rising.slope_per_day > 0
+    assert falling.slope_per_day < 0
+    assert rising.growth_pct(30) > 0 and falling.growth_pct(30) < 0
+
+
+def test_r_squared_discriminates():
+    from nomad.energy.forecast import build_trend
+    clean = build_trend("consumed", [10, 12, 14, 16, 18, 20, 22, 24], bucket_days=7)
+    noisy = build_trend("recoverable", [10, 2, 14, 3, 12, 1, 13, 4], bucket_days=7)
+    assert clean.r_squared > 0.95 and clean.fit_quality() == "strong"
+    assert noisy.r_squared < 0.4 and noisy.fit_quality() == "weak"
+
+
+def test_forecast_engine_output(db_timeline):
+    path, start, split, end = db_timeline
+    eng = EnergyEngine(path, cluster_name="test", config=CONFIG, mode=MODE_PHYSICAL)
+    out = eng.forecast_report("quarter")
+    assert "Forecast" in out and "R\u00b2" in out
+    c, r, label, hdays = eng.forecast()
+    assert c is not None and 0.0 <= c.r_squared <= 1.0

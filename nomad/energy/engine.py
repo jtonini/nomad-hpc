@@ -180,6 +180,52 @@ class EnergyEngine:
             return "No jobs found to compare."
         return fmt.format_comparison_cli(pre, post, split, self.cluster_name, self.mode)
 
+
+    # ── forecast (derivative trend) ───────────────────────────────────────
+    def forecast(self, horizon: str = "semester", n_buckets: int = 8):
+        """Project consumed + recoverable energy via linear trend.
+
+        Bins the data span into n_buckets, computes both metrics per bucket,
+        fits a line to each, and projects to the horizon. Returns
+        (consumed_trend, recoverable_trend, horizon_label, horizon_days).
+        """
+        from .forecast import build_trend, bucket_windows, HORIZONS
+
+        label, hdays = HORIZONS.get(horizon, (horizon, 120))
+        # full data span
+        clause = "WHERE cluster = ?" if self.cluster_name else ""
+        params = [self.cluster_name] if self.cluster_name else []
+        conn = _sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                f"SELECT MIN(start_time), MAX(end_time) FROM jobs {clause}", params
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row[0]:
+            return None, None, label, hdays
+        span_start, span_end = _parse_dt(row[0]), _parse_dt(row[1])
+        buckets = bucket_windows(span_start, span_end, n_buckets)
+        bucket_days = (span_end - span_start).total_seconds() / 86400.0 / max(1, n_buckets)
+
+        consumed_vals, recoverable_vals = [], []
+        for win in buckets:
+            snap = compute_energy(self.db_path, self.config, cluster_name=self.cluster_name,
+                                  mode=self.mode, region_override=self.region, window=win)
+            consumed_vals.append(snap.consumed_wh / 1000.0)
+            recoverable_vals.append(snap.waste.total_wh / 1000.0)
+
+        c_trend = build_trend("consumed", consumed_vals, bucket_days)
+        r_trend = build_trend("recoverable", recoverable_vals, bucket_days)
+        return c_trend, r_trend, label, hdays
+
+    def forecast_report(self, horizon: str = "semester") -> str:
+        c_trend, r_trend, label, hdays = self.forecast(horizon)
+        if c_trend is None:
+            return "No data to forecast."
+        return fmt.format_forecast_cli(c_trend, r_trend, label, hdays,
+                                       self.cluster_name, self.mode)
+
     # ── output ────────────────────────────────────────────────────────────
     def full_summary(self, explain: bool = False) -> str:
         return fmt.format_summary_cli(
