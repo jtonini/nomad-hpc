@@ -5755,6 +5755,64 @@ def energy_forecast(ctx, db_path, horizon, buckets, cluster_name, region, mode):
     click.echo(engine.forecast_report(horizon=horizon))
 
 
+@energy.command('predict')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--method', type=click.Choice(['tessera', 'baseline']), default='tessera',
+              show_default=True,
+              help='tessera = full topology model (needs nomad-hpc[predict]); '
+                   'baseline = logistic regression, always available.')
+@click.option('--top', type=int, default=15, show_default=True,
+              help='Show the N highest-risk submissions.')
+@click.option('--threshold', type=float, default=0.6, show_default=True,
+              help='Unused-walltime fraction that counts as high-waste (label).')
+@click.option('--cluster', 'cluster_name', default=None, help='Cluster name')
+@click.pass_context
+def energy_predict(ctx, db_path, method, top, threshold, cluster_name):
+    """Predict which job submissions will waste energy, before they run.
+
+    Classifies jobs from request-time features only (requested cores, GPUs,
+    walltime, memory, partition, time-of-day) -- no runtime leakage -- so the
+    risk score is actionable at submission time. Use it to target right-sizing
+    advice at the submissions most likely to over-reserve.
+
+    Output is a risk RANKING, not a calibrated probability.
+    """
+    from nomad.energy.tessera_bridge import predict_energy_waste
+    from nomad.energy import formatters as fmt
+
+    config = ctx.obj.get('config', {})
+    # Resolve db/cluster exactly like the other energy commands:
+    # get_db_path is module-level in cli.py; resolve_cluster_name is in config.
+    if db_path is None:
+        db_path = str(get_db_path(config))
+    if cluster_name is None:
+        from nomad.config import resolve_cluster_name
+        cluster_name = resolve_cluster_name(config)
+
+    def _run(cluster):
+        return predict_energy_waste(
+            db_path, config=config, cluster_name=cluster,
+            method=method, waste_threshold=threshold,
+        )
+
+    try:
+        result = _run(cluster_name)
+        # cluster-match safety net (same as _energy_engine): if the resolved
+        # cluster matches nothing, fall back to all clusters with a notice.
+        if result.n_jobs == 0 and cluster_name:
+            alt = _run(None)
+            if alt.n_jobs > 0:
+                click.echo(f"  (no jobs for cluster '{cluster_name}'; "
+                           "showing all clusters)", err=True)
+                result = alt
+    except ImportError as exc:
+        raise click.ClickException(str(exc))
+
+    if result.n_jobs == 0:
+        click.echo("No completed jobs found to predict on.")
+        return
+    click.echo(fmt.format_prediction_cli(result, top=top))
+
 @cli.group()
 def dyn():
     """System dynamics analysis — ecological and economic metrics.

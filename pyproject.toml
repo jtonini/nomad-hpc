@@ -51,6 +51,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+predict = ["tessera-ml[ml]>=0.3"]
 # ML prediction capabilities
 ml = [
     "scikit-learn>=1.0",

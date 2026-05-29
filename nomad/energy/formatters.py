@@ -255,3 +255,39 @@ def format_forecast_cli(c_trend, r_trend, horizon_label, horizon_days,
     lines.append("")
     lines.append("  Linear trend extrapolation; not a per-job prediction.")
     return "\n".join(lines)
+
+
+def format_prediction_cli(result, top=15):
+    """Per-job energy-waste risk ranking (not calibrated probabilities)."""
+    lines = [f"NØMAD Energy — Waste Prediction   ·   model: {result.method}"]
+    ctx = f"  {result.n_jobs:,} jobs analyzed · {result.label_rate:.0%} historically high-waste"
+    if result.auc is not None:
+        tag = "CV-AUC" if result.method == "baseline" else "in-sample AUC"
+        ctx += f" · {tag} {result.auc:.2f}"
+    lines.append(ctx)
+    if result.component_weights:
+        w = ", ".join(f"{k}={v:.2f}" for k, v in result.component_weights.items())
+        lines.append(f"  topology blend weights: {w}")
+    # honest topology-vs-baseline comparison when both AUCs are available
+    if result.auc is not None and result.baseline_auc is not None:
+        delta = result.auc - result.baseline_auc
+        band = 0.02
+        if delta > band:
+            verdict = f"topology improves on baseline (+{delta:.2f} AUC)"
+        elif delta < -band:
+            verdict = f"topology below baseline ({delta:.2f} AUC)"
+        else:
+            verdict = "no improvement over baseline on these features"
+        lines.append(f"  vs baseline logistic ({result.baseline_auc:.2f} AUC): {verdict}")
+    lines.append("")
+    lines.append(f"  Highest-risk submissions (top {top}):")
+    lines.append(f"  {'job':>8}  {'user':10}  {'partition':10}  {'risk':>6}")
+    for p in result.ranked(top=top):
+        flag = "  *" if p.was_high_waste else ""
+        lines.append(f"  {p.job_id:>8}  {p.user:10.10}  {p.partition:10.10}  "
+                     f"{p.risk:>6.2f}{flag}")
+    lines.append("")
+    lines.append("  Risk is a ranking score, not a calibrated probability. "
+                 "'*' = was high-waste historically.")
+    lines.append("  Target right-sizing guidance at the top of this list.")
+    return "\n".join(lines)
