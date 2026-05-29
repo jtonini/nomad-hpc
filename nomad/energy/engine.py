@@ -22,7 +22,10 @@ import sqlite3
 from . import formatters as fmt
 from .power import (
     EnergySnapshot, aggregate, iter_job_energy, gpu_energy_from_dcgm, _window,
+    compute_energy, _parse_dt,
 )
+import sqlite3 as _sqlite3
+from datetime import datetime as _datetime
 from .waste import JobEnergyRow, MODE_PHYSICAL
 
 
@@ -139,6 +142,43 @@ class EnergyEngine:
                 f"~{w.cpu_underutil_wh/1000:,.1f} kWh."))
         recs.sort(key=lambda t: t[0], reverse=True)
         return [msg for _, msg in recs]
+
+
+    # ── before / after comparison ─────────────────────────────────────────
+    def compare_periods(self, split=None, start=None, end=None):
+        """Compute energy for two periods of one timeline (before vs after).
+
+        The full window defaults to the data span (min start .. max end of
+        jobs); `split` defaults to its midpoint. Returns (pre, post, split).
+        For an intervention dataset, the midpoint split lands on the
+        intervention by construction.
+        """
+        clause = "WHERE cluster = ?" if self.cluster_name else ""
+        params = [self.cluster_name] if self.cluster_name else []
+        conn = _sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                f"SELECT MIN(start_time), MAX(end_time) FROM jobs {clause}", params
+            ).fetchone()
+        finally:
+            conn.close()
+        full_start = start or _parse_dt(row[0]) if row else start
+        full_end = end or _parse_dt(row[1]) if row else end
+        if full_start is None or full_end is None:
+            return None, None, None
+        if split is None:
+            split = full_start + (full_end - full_start) / 2
+
+        def _snap(win):
+            return compute_energy(self.db_path, self.config, cluster_name=self.cluster_name,
+                                  mode=self.mode, region_override=self.region, window=win)
+        return _snap((full_start, split)), _snap((split, full_end)), split
+
+    def compare(self, split=None) -> str:
+        pre, post, split = self.compare_periods(split=split)
+        if pre is None:
+            return "No jobs found to compare."
+        return fmt.format_comparison_cli(pre, post, split, self.cluster_name, self.mode)
 
     # ── output ────────────────────────────────────────────────────────────
     def full_summary(self, explain: bool = False) -> str:

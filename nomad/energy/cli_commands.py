@@ -142,3 +142,25 @@ def energy_carbon(ctx, db_path, hours, cluster_name, region, mode, explain):
     """
     engine = _energy_engine(ctx, db_path, hours, cluster_name, mode, region)
     click.echo(engine.carbon_report(explain=explain))
+@energy.command('compare')
+@click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--split', default=None,
+              help='Split date (YYYY-MM-DD) for before vs after. '
+                   'Default: midpoint of the data span.')
+@click.option('--cluster', 'cluster_name', default=None, help='Cluster name')
+@click.option('--region', default=None, help='Carbon region override')
+@_mode_option
+@click.pass_context
+def energy_compare(ctx, db_path, split, cluster_name, region, mode):
+    """Compare energy efficiency before vs after a point in time.
+
+    Reads two periods out of one timeline. With an intervention dataset,
+    omit --split to split at the data midpoint (the intervention point), or
+    pass --split YYYY-MM-DD explicitly. Reports the change in recoverable
+    energy, the efficiency shift, and the CO2 avoided.
+    """
+    from datetime import datetime
+    split_dt = datetime.fromisoformat(split) if split else None
+    # Large check-window so the cluster-match guard sees the full data span.
+    engine = _energy_engine(ctx, db_path, 24 * 90, cluster_name, mode, region)
+    click.echo(engine.compare(split=split_dt))

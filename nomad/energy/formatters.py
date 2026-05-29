@@ -180,3 +180,36 @@ def format_user_cli(username: str, snap, recommendations: list[str],
 
 def to_json_str(obj: dict) -> str:
     return json.dumps(obj, indent=2)
+
+
+def format_comparison_cli(pre, post, split, cluster_name, mode):
+    """Before/after comparison, framed as achievement (energy avoided)."""
+    def pct_change(a, b):
+        return (b - a) / a * 100 if a else 0.0
+    w_pre, w_post = pre.waste, post.waste
+    rec_change = pct_change(w_pre.total_wh, w_post.total_wh)
+    co2_avoided = (pre.wasted_grams_co2() - post.wasted_grams_co2()) / 1000.0
+    over_pre = w_pre.over_request_seconds / 3600.0
+    over_post = w_post.over_request_seconds / 3600.0
+
+    lines = [f"NØMAD Energy — Before / After — {cluster_name or 'all clusters'}"]
+    lines.append(f"  split at {split:%Y-%m-%d %H:%M}   ·   valuation: {mode}")
+    lines.append("")
+    lines.append(f"  {'':16}{'before':>12}{'after':>12}{'change':>12}")
+    lines.append(f"  {'recoverable':16}{_kwh(w_pre.total_wh):>12}{_kwh(w_post.total_wh):>12}"
+                 f"{rec_change:>11.1f}%")
+    lines.append(f"  {'efficiency':16}{pre.efficiency_pct:>11.1f}%{post.efficiency_pct:>11.1f}%"
+                 f"{post.efficiency_pct - pre.efficiency_pct:>+11.1f}")
+    lines.append(f"  {'gpu idle':16}{_kwh(w_pre.gpu_idle_wh):>12}{_kwh(w_post.gpu_idle_wh):>12}"
+                 f"{pct_change(w_pre.gpu_idle_wh, w_post.gpu_idle_wh):>11.1f}%")
+    lines.append(f"  {'cpu underutil':16}{_kwh(w_pre.cpu_underutil_wh):>12}{_kwh(w_post.cpu_underutil_wh):>12}"
+                 f"{pct_change(w_pre.cpu_underutil_wh, w_post.cpu_underutil_wh):>11.1f}%")
+    lines.append(f"  {'over-request':16}{over_pre:>10,.0f}h{over_post:>11,.0f}h"
+                 f"{pct_change(over_pre, over_post):>11.1f}%")
+    lines.append("")
+    if w_post.total_wh < w_pre.total_wh:
+        lines.append(f"  Outcome: recoverable energy down {abs(rec_change):.1f}% after the split"
+                     f" — ~{co2_avoided:.1f} kg CO2 avoided ({pre.intensity.region}).")
+    else:
+        lines.append("  Outcome: no reduction in recoverable energy across the split.")
+    return "\n".join(lines)

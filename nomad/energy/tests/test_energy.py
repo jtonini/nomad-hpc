@@ -189,3 +189,75 @@ def test_engine_breakdown_and_user(db):
     assert "alice" in profile
     # alice's big time overestimate should surface a wall-time recommendation.
     assert any("wall time" in r for r in eng.recommendations(eng.user_snapshot("alice")))
+
+
+@pytest.fixture
+def db_timeline(tmp_path):
+    """A two-week timeline: loose requests before the midpoint, tight after.
+
+    Self-contained (no demo dependency) -- exercises explicit-window and the
+    before/after compare without asserting the full intervention realism.
+    """
+    path = tmp_path / "timeline.db"
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE jobs (job_id TEXT, cluster TEXT, user_name TEXT, partition TEXT,
+            node_list TEXT, state TEXT, req_cpus INTEGER, req_mem_mb INTEGER, req_gpus INTEGER,
+            req_time_seconds INTEGER, runtime_seconds INTEGER, start_time DATETIME,
+            end_time DATETIME, PRIMARY KEY (job_id, cluster));
+        CREATE TABLE job_accounting (job_id TEXT, cluster TEXT, username TEXT, account TEXT,
+            partition TEXT, state TEXT, elapsed_sec INTEGER, alloc_cpus INTEGER, mem_gb REAL,
+            gpu_count INTEGER, cpu_hours REAL, gpu_hours REAL, PRIMARY KEY (job_id, cluster));
+        CREATE TABLE gpu_stats (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME,
+            node_name TEXT, gpu_index INTEGER, gpu_name TEXT, gpu_util_percent REAL,
+            real_util_pct REAL, power_draw_w REAL, workload_class TEXT, data_source TEXT);
+    """)
+    base = datetime(2026, 4, 1, 0, 0, 0)
+    split = base + timedelta(days=7)
+    jid = 0
+    for day in range(14):
+        loose = day < 7
+        for _ in range(20):
+            jid += 1
+            start = base + timedelta(days=day, hours=jid % 12)
+            runtime = 3600
+            # before: huge over-request + many cores; after: tight + few cores
+            req_time = runtime * (4 if loose else 1)
+            cpus = 16 if loose else 4
+            end = start + timedelta(seconds=runtime)
+            conn.execute(
+                """INSERT INTO jobs (job_id, cluster, user_name, partition, node_list,
+                   state, req_cpus, req_mem_mb, req_gpus, req_time_seconds,
+                   runtime_seconds, start_time, end_time)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (str(jid), "test", "alice", "compute", "node01", "COMPLETED",
+                 cpus, cpus*4000, 0, req_time, runtime, start.isoformat(), end.isoformat()))
+            conn.execute(
+                """INSERT INTO job_accounting (job_id, cluster, username, account,
+                   partition, state, elapsed_sec, alloc_cpus, gpu_count)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (str(jid), "test", "alice", "lab", "compute", "COMPLETED", runtime, cpus, 0))
+    conn.commit(); conn.close()
+    return str(path), base, split, base + timedelta(days=14)
+
+
+def test_explicit_window_isolates_period(db_timeline):
+    path, start, split, end = db_timeline
+    pre = compute_energy(path, CONFIG, cluster_name="test", mode=MODE_PHYSICAL,
+                         window=(start, split))
+    post = compute_energy(path, CONFIG, cluster_name="test", mode=MODE_PHYSICAL,
+                          window=(split, end))
+    assert pre.n_jobs > 0 and post.n_jobs > 0
+    # before half over-requests and over-allocates -> more recoverable energy
+    assert pre.waste.total_wh > post.waste.total_wh
+    assert pre.waste.over_request_seconds > post.waste.over_request_seconds
+
+
+def test_compare_renders_reduction(db_timeline):
+    path, start, split, end = db_timeline
+    eng = EnergyEngine(path, cluster_name="test", config=CONFIG, mode=MODE_PHYSICAL)
+    out = eng.compare()                       # midpoint split == our split by symmetry
+    assert "Before / After" in out
+    assert "Outcome" in out and "down" in out
+    pre, post, sp = eng.compare_periods()
+    assert post.waste.total_wh < pre.waste.total_wh

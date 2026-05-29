@@ -182,7 +182,7 @@ def iter_job_energy(
 
 # ── GPU energy from DCGM samples ──────────────────────────────────────────
 def gpu_energy_from_dcgm(
-    conn: sqlite3.Connection, start: datetime, end: datetime
+    conn: sqlite3.Connection, start: datetime, end: datetime, strict: bool = False
 ) -> tuple[float, float, bool]:
     """Integrate real GPU power over the window.
 
@@ -301,6 +301,7 @@ def compute_energy(
     cluster_name: str | None = None,
     region_override: str | None = None,
     mode: str = MODE_PHYSICAL,
+    window: tuple | None = None,
 ) -> EnergySnapshot:
     """Compute aggregate energy and waste for the window under `mode`.
 
@@ -310,9 +311,10 @@ def compute_energy(
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        window = _window(conn, hours)
+        strict = window is not None
+        window = window or _window(conn, hours)
         rows, cpu_wh = iter_job_energy(conn, *window, config, cluster_name)
-        gpu_total_wh, gpu_idle_wh, dcgm = gpu_energy_from_dcgm(conn, *window)
+        gpu_total_wh, gpu_idle_wh, dcgm = gpu_energy_from_dcgm(conn, *window, strict=strict)
         return aggregate(rows, cpu_wh, gpu_total_wh, gpu_idle_wh, dcgm,
                          config, window, mode=mode, region_override=region_override)
     finally:
