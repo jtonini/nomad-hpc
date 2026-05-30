@@ -138,8 +138,20 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
             ctx.obj['config'] = {}
             ctx.obj['config_path'] = None
     else:
-        ctx.obj['config'] = {}
-        ctx.obj['config_path'] = None
+        # No user/system config: fall back to the packaged default so shipped
+        # defaults (e.g. [energy]) are honored instead of an empty config.
+        try:
+            from nomad.config import get_default_config_path
+            default_path = get_default_config_path()
+            if default_path.exists():
+                ctx.obj['config'] = load_config(default_path)
+                ctx.obj['config_path'] = str(default_path)
+            else:
+                ctx.obj['config'] = {}
+                ctx.obj['config_path'] = None
+        except Exception:
+            ctx.obj['config'] = {}
+            ctx.obj['config_path'] = None
 
 @cli.command()
 @click.option('--collector', '-C', multiple=True, help='Specific collectors to run')
