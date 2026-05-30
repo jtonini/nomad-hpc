@@ -193,10 +193,10 @@ def demo_db(tmp_path):
                     (timestamp, node_name, gpu_index, gpu_name,
                      gpu_util_percent, memory_util_percent, memory_used_mb, memory_total_mb,
                      temperature_c, power_draw_w)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (ts.isoformat(), hostname, gpu_id, "RTX 6000 Ada",
-                     util, int(util * 490), 49152, random.uniform(55, 80),
-                     random.uniform(100, 300)),
+                     util, util * 0.8, int(util * 490), 49152,
+                     random.uniform(55, 80), random.uniform(100, 300)),
                 )
 
     # Queue state

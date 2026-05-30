@@ -489,8 +489,16 @@ class DemoDatabase:
         conn.commit()
         conn.close()
 
-    def write_gpu_stats(self):
-        """Write GPU stats for GPU monitoring including DCGM-style enhanced metrics."""
+    def write_gpu_stats(self, interval_minutes: int = 15):
+        """Write a realistic GPU time series for GPU + energy monitoring.
+
+        Generates DCGM-style samples across the job window (one every
+        `interval_minutes`) for each GPU, alternating between busy sessions
+        and idle gaps. Power is physically tied to utilization
+        (P = idle_floor + (TDP - idle_floor) * util), so idle GPUs draw a
+        realistic ~15% TDP floor rather than nothing -- which is what makes
+        `nomad energy` show real, non-zero GPU idle waste.
+        """
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         now = datetime.now()
@@ -505,39 +513,80 @@ class DemoDatabase:
             except Exception:
                 pass
 
-        # Workload profiles: (name, smi_range, real_ratio, workload_class, temp_range)
-        # real_ratio: Real Util as fraction of nvidia-smi util (DCGM gap effect)
-        workload_profiles = [
+        # GPU TDP by model substring (watts) for the power model.
+        gpu_tdp_table = {"H100": 700, "A100": 400, "A40": 300,
+                         "RTX 6000 ADA": 300, "RTX 6000": 300, "V100": 300, "L40": 300}
+
+        def _tdp(name):
+            n = (name or "").upper()
+            for key, watts in gpu_tdp_table.items():
+                if key in n:
+                    return watts
+            return 350
+
+        # Busy workload profiles: (class, smi_range, real_ratio, temp_range).
+        # real_ratio models the DCGM "real utilization" gap below nvidia-smi.
+        busy_profiles = [
             ("tensor-heavy compute", (70, 98), 0.90, (65, 82)),
             ("tensor compute",       (50, 80), 0.75, (58, 75)),
             ("FP64 / HPC compute",   (60, 90), 0.85, (60, 78)),
             ("compute-active",       (40, 75), 0.65, (50, 70)),
             ("memory-bound",         (30, 60), 0.50, (48, 65)),
-            ("idle",                 (0,  10), 0.20, (35, 45)),
         ]
 
+        # Window from the jobs already written; fall back to the last 7 days.
+        row = c.execute("SELECT MIN(start_time), MAX(end_time) FROM jobs").fetchone()
+        try:
+            win_end = datetime.fromisoformat(str(row[1])) if row and row[1] else now
+            win_start = datetime.fromisoformat(str(row[0])) if row and row[0] else now - timedelta(days=7)
+        except (ValueError, TypeError):
+            win_end, win_start = now, now - timedelta(days=7)
+
         gpu_nodes = [n for n in DEMO_CLUSTER["nodes"] if n["gpus"] > 0]
+        step = timedelta(minutes=interval_minutes)
+        gpu_name = "NVIDIA A100-SXM4-40GB"
+        tdp = _tdp(gpu_name)
+        idle_floor = round(0.15 * tdp)
+
+        samples = []
         for node in gpu_nodes:
             for gpu_idx in range(node["gpus"]):
-                profile_name, smi_range, real_ratio, temp_range = random.choice(workload_profiles)
-                smi_util = round(random.uniform(*smi_range), 1)
-                real_util = round(smi_util * real_ratio + random.gauss(0, 3), 1)
-                real_util = max(0.0, min(100.0, real_util))
-                mem_used = random.randint(8000, 38000) if smi_util > 10 else random.randint(512, 2000)
+                t = win_start
+                busy = random.random() < 0.6
+                block_end = t + timedelta(
+                    hours=random.uniform(1, 5) if busy else random.uniform(0.5, 6))
+                profile = random.choice(busy_profiles)
+                while t < win_end:
+                    if t >= block_end:                      # flip busy <-> idle
+                        busy = not busy
+                        block_end = t + timedelta(
+                            hours=random.uniform(1, 5) if busy else random.uniform(0.5, 6))
+                        if busy:
+                            profile = random.choice(busy_profiles)
+                    if busy:
+                        cls, smi_range, real_ratio, temp_range = profile
+                        smi = round(random.uniform(*smi_range), 1)
+                    else:
+                        cls, real_ratio, temp_range = "idle", 0.2, (35, 45)
+                        smi = round(random.uniform(0, 8), 1)
+                    real = max(0.0, min(100.0, round(smi * real_ratio + random.gauss(0, 2), 1)))
+                    power = idle_floor + (tdp - idle_floor) * (smi / 100.0) + random.gauss(0, tdp * 0.02)
+                    power = round(max(idle_floor * 0.8, min(tdp * 1.02, power)), 1)
+                    mem = random.randint(8000, 38000) if smi > 10 else random.randint(512, 2000)
+                    samples.append(
+                        (t.isoformat(), node["name"], gpu_idx, gpu_name, smi,
+                         round(mem / 40960 * 100, 1), mem, 40960,
+                         random.randint(*temp_range), power, real, cls, "dcgm"))
+                    t += step
 
-                c.execute("""INSERT INTO gpu_stats
-                    (timestamp, node_name, gpu_index, gpu_name, gpu_util_percent,
-                     memory_util_percent, memory_used_mb, memory_total_mb,
-                     temperature_c, power_draw_w,
-                     real_util_pct, workload_class, data_source)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (now.isoformat(), node["name"], gpu_idx, "NVIDIA A100-SXM4-40GB",
-                     smi_util, round(mem_used / 40960 * 100, 1),
-                     mem_used, 40960,
-                     random.randint(*temp_range), round(random.uniform(100, 380), 1),
-                     real_util, profile_name, "dcgm"))
+        c.executemany("""INSERT INTO gpu_stats
+            (timestamp, node_name, gpu_index, gpu_name, gpu_util_percent,
+             memory_util_percent, memory_used_mb, memory_total_mb,
+             temperature_c, power_draw_w,
+             real_util_pct, workload_class, data_source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", samples)
 
-        # Also write gpu_health records
+        # Also write gpu_health records (one per GPU at window end)
         try:
             c.execute("""CREATE TABLE IF NOT EXISTS gpu_health (
                 timestamp DATETIME NOT NULL, node TEXT NOT NULL, gpu_id INTEGER NOT NULL,
@@ -550,11 +599,7 @@ class DemoDatabase:
             )""")
             for node in gpu_nodes:
                 for gpu_idx in range(node["gpus"]):
-                    # Mostly OK, occasional WARN for realism
-                    health = random.choices(
-                        ["OK", "WARN", "HOT"],
-                        weights=[85, 10, 5]
-                    )[0]
+                    health = random.choices(["OK", "WARN", "HOT"], weights=[85, 10, 5])[0]
                     pcie_rate = round(random.uniform(0.01, 0.5), 3) if health == "WARN" else 0.0
                     c.execute("""INSERT OR REPLACE INTO gpu_health
                         (timestamp, node, gpu_id, pcie_replay_rate_per_sec, health_status)
@@ -565,7 +610,6 @@ class DemoDatabase:
 
         conn.commit()
         conn.close()
-
 
     def write_alerts(self):
         """Write synthetic alert data for demo."""
@@ -1472,3 +1516,175 @@ def run_demo(
         serve_dashboard(host="localhost", port=port, db_path=str(db_path))
 
     return str(db_path)
+# ── Intervention before/after scenario ───────────────────────────────────
+# Append to nomad/demo.py. Produces a longitudinal dataset (one continuous
+# timeline with a behavioural shift partway through) so `nomad energy compare`
+# can show that targeted interventions measurably reduce energy waste --
+# the core result for the energy paper.
+
+def get_intervention_db_path() -> Path:
+    """Path for the intervention-scenario database."""
+    return Path.home() / "nomad_intervention.db"
+
+
+# Per-user account/group for the scenario (primary group from group_membership).
+_INTERVENTION_ACCOUNTS = {
+    "alice": "research", "bob": "cs101", "charlie": "physics-lab",
+    "diana": "bio301", "eve": "research", "frank": "cs101",
+}
+
+_INTERVENTION_BUSY_PROFILES = [
+    ("tensor compute",     (50, 80), 0.75, (58, 75)),
+    ("FP64 / HPC compute", (60, 90), 0.85, (60, 78)),
+    ("compute-active",     (40, 75), 0.65, (50, 70)),
+]
+
+
+def build_intervention_db(
+    db_path: str | None = None,
+    weeks: int = 8,
+    intervention_week: int = 4,
+    responder_fraction: float = 0.6,
+    jobs_per_week: int = 150,
+    busy_pre: float = 0.55,
+    busy_post: float = 0.64,
+    interval_minutes: int = 30,
+    seed: int | None = 42,
+) -> dict:
+    """Build a longitudinal intervention scenario.
+
+    One continuous timeline of `weeks`, with an intervention at
+    `intervention_week`. After it, a `responder_fraction` of users adopt
+    better habits: they request wall time closer to actual runtime, request
+    fewer cores, and leave GPUs idle less. The remainder are unchanged. The
+    aggregate effect is a realistic (~20-25%) reduction in recoverable energy,
+    driven by a responding subpopulation rather than universal uptake.
+
+    Returns a dict with span_start / intervention / span_end (datetimes) and
+    row counts, so callers and `nomad energy compare` can window the two
+    periods.
+    """
+    if db_path is None:
+        db_path = str(get_intervention_db_path())
+    if seed is not None:
+        random.seed(seed)
+
+    # Schema (reuse the standard demo schema), then start clean.
+    DemoDatabase(db_path)
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    for col, ctype in [("real_util_pct", "REAL"), ("workload_class", "TEXT"),
+                       ("data_source", "TEXT"), ("node_name", "TEXT")]:
+        try:
+            c.execute(f"ALTER TABLE gpu_stats ADD COLUMN {col} {ctype}")
+        except Exception:
+            pass
+    for tbl in ("jobs", "job_accounting", "gpu_stats"):
+        c.execute(f"DELETE FROM {tbl}")
+
+    users = DEMO_CLUSTER["users"]
+    gpu_nodes = [n for n in DEMO_CLUSTER["nodes"] if n["gpus"] > 0]
+    compute_nodes = [n["name"] for n in DEMO_CLUSTER["nodes"]
+                     if n["partition"] == "compute"]
+    responders = set(users[:max(1, round(len(users) * responder_fraction))])
+
+    now = datetime.now()
+    span_start = now - timedelta(weeks=weeks)
+    intervention = span_start + timedelta(weeks=intervention_week)
+
+    # ---- jobs + accounting ----
+    jobs, accts = [], []
+    jid = 0
+    for w in range(weeks):
+        wk_start = span_start + timedelta(weeks=w)
+        for _ in range(jobs_per_week):
+            jid += 1
+            user = random.choice(users)
+            is_gpu = random.random() < 0.35
+            submit = wk_start + timedelta(seconds=random.uniform(0, 7 * 24 * 3600))
+            improved = submit >= intervention and user in responders
+
+            true_runtime = random.choice([1800, 3600, 7200, 14400, 28800, 57600])
+            if improved:                       # tight request, right-sized cores
+                req_time = int(true_runtime / random.uniform(0.70, 0.95))
+                req_cpus = random.choice([2, 4, 8, 16])
+                req_gpus = random.choice([1, 1, 2]) if is_gpu else 0
+            else:                              # loose request, over-provisioned
+                req_time = int(true_runtime / random.uniform(0.30, 0.70))
+                req_cpus = random.choice([8, 16, 16, 32])
+                req_gpus = random.choice([1, 2, 4]) if is_gpu else 0
+
+            runtime = true_runtime
+            partition = "gpu" if is_gpu else "compute"
+            node = (random.choice(gpu_nodes)["name"] if is_gpu
+                    else random.choice(compute_nodes))
+            start = submit + timedelta(seconds=random.expovariate(1 / 300))
+            end = start + timedelta(seconds=runtime)
+            jobs.append((str(jid), "demo-cluster", user, partition, node, "COMPLETED",
+                         req_cpus, req_cpus * 4000, req_gpus, req_time, runtime,
+                         start.isoformat(), end.isoformat()))
+            accts.append((str(jid), "demo-cluster", user,
+                          _INTERVENTION_ACCOUNTS.get(user, "general"), partition,
+                          "COMPLETED", runtime, req_cpus, req_cpus * 4.0, req_gpus,
+                          req_cpus * runtime / 3600, req_gpus * runtime / 3600))
+    c.executemany(
+        """INSERT INTO jobs (job_id, cluster, user_name, partition, node_list,
+              state, req_cpus, req_mem_mb, req_gpus, req_time_seconds,
+              runtime_seconds, start_time, end_time)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", jobs)
+    c.executemany(
+        """INSERT INTO job_accounting (job_id, cluster, username, account,
+              partition, state, elapsed_sec, alloc_cpus, mem_gb, gpu_count,
+              cpu_hours, gpu_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", accts)
+
+    # ---- GPU time series with reduced idle after the intervention ----
+    tdp, idle_floor = 400, 60
+    step = timedelta(minutes=interval_minutes)
+    samples = []
+    for node in gpu_nodes:
+        for gi in range(node["gpus"]):
+            t = span_start
+            busy = random.random() < busy_pre
+            block_end = t + timedelta(
+                hours=random.uniform(1, 5) if busy else random.uniform(0.5, 6))
+            prof = random.choice(_INTERVENTION_BUSY_PROFILES)
+            while t < now:
+                busy_prob = busy_post if t >= intervention else busy_pre
+                if t >= block_end:
+                    busy = random.random() < busy_prob
+                    block_end = t + timedelta(
+                        hours=random.uniform(1, 5) if busy else random.uniform(0.5, 6))
+                    if busy:
+                        prof = random.choice(_INTERVENTION_BUSY_PROFILES)
+                if busy:
+                    cls, smi_rng, rr, temp = prof
+                    smi = round(random.uniform(*smi_rng), 1)
+                else:
+                    cls, rr, temp = "idle", 0.2, (35, 45)
+                    smi = round(random.uniform(0, 8), 1)
+                real = max(0.0, min(100.0, round(smi * rr + random.gauss(0, 2), 1)))
+                power = round(max(idle_floor * 0.8, min(tdp * 1.02,
+                          idle_floor + (tdp - idle_floor) * (smi / 100) + random.gauss(0, tdp * 0.02))), 1)
+                mem = random.randint(8000, 38000) if smi > 10 else random.randint(512, 2000)
+                samples.append(
+                    (t.isoformat(), node["name"], gi, "NVIDIA A100-SXM4-40GB", smi,
+                     round(mem / 40960 * 100, 1), mem, 40960, random.randint(*temp),
+                     power, real, cls, "dcgm"))
+                t += step
+    c.executemany("""INSERT INTO gpu_stats
+        (timestamp, node_name, gpu_index, gpu_name, gpu_util_percent,
+         memory_util_percent, memory_used_mb, memory_total_mb, temperature_c,
+         power_draw_w, real_util_pct, workload_class, data_source)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""", samples)
+
+    conn.commit()
+    conn.close()
+    return {
+        "db_path": db_path,
+        "span_start": span_start,
+        "intervention": intervention,
+        "span_end": now,
+        "n_jobs": len(jobs),
+        "n_gpu_samples": len(samples),
+        "responders": sorted(responders),
+    }

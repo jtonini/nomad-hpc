@@ -1,0 +1,293 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 João Tonini
+"""
+Output formatting for the NØMAD energy module.
+
+Two design rules, both deliberate:
+
+1. Non-punitive framing. Waste is presented as a recoverable *opportunity*,
+   never as a personal failure. We say "matching requested time to actual
+   runtime could save ~X kWh", not "you wasted X kWh". Improvements are
+   framed as achievements. This mirrors the education module's principle and
+   is what makes per-user energy feedback land as help rather than blame.
+
+2. Provenance is visible. Real (measured) and estimated figures are labeled
+   so a reader always knows which numbers are observations and which are
+   models -- the CLI surface of Idea 15.
+
+Real-world equivalences use US-average household electricity:
+    ~30 kWh/day, ~10,500 kWh/year.
+"""
+from __future__ import annotations
+
+import json
+
+HOUSEHOLD_KWH_PER_DAY = 30.0
+HOUSEHOLD_KWH_PER_YEAR = 10_500.0
+
+
+# ── small helpers ──────────────────────────────────────────────────────
+def _kwh(wh: float) -> str:
+    return f"{wh / 1000:,.1f} kWh"
+
+
+def _co2(grams: float) -> str:
+    kg = grams / 1000.0
+    if kg >= 1000:
+        return f"{kg / 1000:,.2f} t CO2"
+    return f"{kg:,.1f} kg CO2"
+
+
+def equivalence(kwh: float) -> str:
+    """A relatable comparison for an energy quantity."""
+    if kwh <= 0:
+        return "negligible"
+    if kwh >= HOUSEHOLD_KWH_PER_YEAR:
+        return f"~{kwh / HOUSEHOLD_KWH_PER_YEAR:.1f} years of a typical home's electricity"
+    days = kwh / HOUSEHOLD_KWH_PER_DAY
+    if days >= 1:
+        return f"~{days:.0f} days of powering a typical home"
+    return f"~{days * 24:.0f} hours of powering a typical home"
+
+
+def _quality_tag(prov) -> str:
+    return f"[{prov.quality}]" if prov else ""
+
+
+# ── cluster summary ──────────────────────────────────────────────────────
+def format_summary_cli(snap, cluster_name: str, mode: str, explain: bool = False) -> str:
+    w = snap.waste
+    intensity = snap.intensity
+    lines = []
+    lines.append(f"NØMAD Energy — {cluster_name or 'all clusters'}")
+    lines.append(
+        f"  window {snap.window_start:%Y-%m-%d} .. {snap.window_end:%Y-%m-%d}"
+        f"   ·   valuation: {mode}"
+    )
+    lines.append("")
+    lines.append(f"  Consumed        {_kwh(snap.consumed_wh):>14}"
+                 f"   ({_co2(snap.grams_co2())})")
+    lines.append(f"    GPU (real)    {_kwh(snap.gpu_consumed_wh):>14}")
+    lines.append(f"    CPU (est.)    {_kwh(snap.cpu_consumed_wh):>14}")
+    lines.append(f"    overhead      {_kwh(snap.overhead_wh):>14}   (PUE factor)")
+    lines.append("")
+    lines.append(f"  Efficiency      {snap.efficiency_pct:>12.1f}%"
+                 "   (productive share of recoverable energy)")
+    lines.append("")
+    lines.append(f"  Opportunity     {_kwh(w.total_wh):>14}"
+                 f"   ({_co2(snap.wasted_grams_co2())}) recoverable")
+    lines.append(f"    GPU idle      {_kwh(w.gpu_idle_wh):>14}   "
+                 f"{_quality_tag(w.provenance.get('gpu_idle'))}")
+    lines.append(f"    CPU underutil {_kwh(w.cpu_underutil_wh):>14}   "
+                 f"{_quality_tag(w.provenance.get('cpu_underutil'))}")
+    lines.append(f"    time overest. {_kwh(w.time_overestimation_wh):>14}   "
+                 f"{_quality_tag(w.provenance.get('time_overestimation'))}")
+    lines.append(f"      ≈ {equivalence(w.total_wh / 1000)}")
+    lines.append("")
+    over_h = w.over_request_seconds / 3600.0
+    lines.append(f"  Largest lever: {over_h:,.0f} hours of wall time were requested "
+                 "beyond what jobs used.")
+    lines.append("  Matching requested time to actual runtime is the simplest, "
+                 "highest-impact change.")
+
+    if explain and intensity is not None:
+        lines.append("")
+        lines.append("  Provenance:")
+        lines.append(f"    {intensity.explain()}")
+        lines.append("    energy chain: watts × hours → Wh → kWh → kWh × gCO2/kWh")
+        for name, prov in w.provenance.items():
+            lines.append(f"    {name}: {prov.quality} — {prov.detail}")
+    return "\n".join(lines)
+
+
+def format_summary_json(snap, cluster_name: str, mode: str) -> dict:
+    w = snap.waste
+    return {
+        "cluster": cluster_name,
+        "mode": mode,
+        "window": {"start": snap.window_start.isoformat(),
+                   "end": snap.window_end.isoformat()},
+        "consumed_kwh": round(snap.consumed_kwh, 3),
+        "consumed_breakdown_kwh": {
+            "gpu": round(snap.gpu_consumed_wh / 1000, 3),
+            "cpu": round(snap.cpu_consumed_wh / 1000, 3),
+            "overhead": round(snap.overhead_wh / 1000, 3),
+        },
+        "efficiency_pct": round(snap.efficiency_pct, 1),
+        "recoverable_kwh": round(w.total_wh / 1000, 3),
+        "recoverable_breakdown_kwh": {
+            "gpu_idle": round(w.gpu_idle_wh / 1000, 3),
+            "cpu_underutil": round(w.cpu_underutil_wh / 1000, 3),
+            "time_overestimation": round(w.time_overestimation_wh / 1000, 3),
+        },
+        "over_request_hours": round(w.over_request_seconds / 3600, 1),
+        "carbon": {
+            "consumed_kg": round(snap.grams_co2() / 1000, 2),
+            "recoverable_kg": round(snap.wasted_grams_co2() / 1000, 2),
+            "source": snap.intensity.source if snap.intensity else None,
+            "region": snap.intensity.region if snap.intensity else None,
+            "g_per_kwh": snap.intensity.g_per_kwh if snap.intensity else None,
+        },
+        "provenance": {k: {"quality": v.quality, "detail": v.detail}
+                       for k, v in w.provenance.items()},
+    }
+
+
+# ── breakdown report ──────────────────────────────────────────────────────
+def format_report_cli(breakdown: dict, group_by: str, mode: str) -> str:
+    """`breakdown` maps group key -> EnergySnapshot. Ranked by recoverable."""
+    lines = [f"Energy by {group_by}   (valuation: {mode})", ""]
+    lines.append(f"  {'':16} {'consumed':>12} {'recoverable':>13} {'efficiency':>11}")
+    items = sorted(breakdown.items(),
+                   key=lambda kv: kv[1].waste.total_wh, reverse=True)
+    for key, snap in items:
+        label = (key or "(unset)")[:16]
+        lines.append(
+            f"  {label:16} {_kwh(snap.consumed_wh):>12} "
+            f"{_kwh(snap.waste.total_wh):>13} {snap.efficiency_pct:>10.1f}%"
+        )
+    if items:
+        top_key, top = items[0]
+        lines.append("")
+        lines.append(f"  Biggest opportunity: {top_key or '(unset)'} — "
+                     f"{_kwh(top.waste.total_wh)} recoverable "
+                     f"(≈ {equivalence(top.waste.total_wh / 1000)}).")
+    return "\n".join(lines)
+
+
+# ── per-user profile ──────────────────────────────────────────────────────
+def format_user_cli(username: str, snap, recommendations: list[str],
+                    mode: str, explain: bool = False) -> str:
+    w = snap.waste
+    score = max(0, min(100, round(snap.efficiency_pct)))
+    lines = [f"Energy profile — {username}   (valuation: {mode})", ""]
+    lines.append(f"  Consumed        {_kwh(snap.consumed_wh):>14}"
+                 f"   ({_co2(snap.grams_co2())})")
+    lines.append(f"  Efficiency score {score:>11}/100")
+    lines.append(f"  Recoverable     {_kwh(w.total_wh):>14}"
+                 f"   (≈ {equivalence(w.total_wh / 1000)})")
+    if recommendations:
+        lines.append("")
+        lines.append("  Ways to improve:")
+        for rec in recommendations:
+            lines.append(f"    • {rec}")
+    if explain:
+        lines.append("")
+        for name, prov in w.provenance.items():
+            lines.append(f"    {name}: {prov.quality} — {prov.detail}")
+    return "\n".join(lines)
+
+
+def to_json_str(obj: dict) -> str:
+    return json.dumps(obj, indent=2)
+
+
+def format_comparison_cli(pre, post, split, cluster_name, mode):
+    """Before/after comparison, framed as achievement (energy avoided)."""
+    def pct_change(a, b):
+        return (b - a) / a * 100 if a else 0.0
+    w_pre, w_post = pre.waste, post.waste
+    rec_change = pct_change(w_pre.total_wh, w_post.total_wh)
+    co2_avoided = (pre.wasted_grams_co2() - post.wasted_grams_co2()) / 1000.0
+    over_pre = w_pre.over_request_seconds / 3600.0
+    over_post = w_post.over_request_seconds / 3600.0
+
+    lines = [f"NØMAD Energy — Before / After — {cluster_name or 'all clusters'}"]
+    lines.append(f"  split at {split:%Y-%m-%d %H:%M}   ·   valuation: {mode}")
+    lines.append("")
+    lines.append(f"  {'':16}{'before':>12}{'after':>12}{'change':>12}")
+    lines.append(f"  {'recoverable':16}{_kwh(w_pre.total_wh):>12}{_kwh(w_post.total_wh):>12}"
+                 f"{rec_change:>11.1f}%")
+    lines.append(f"  {'efficiency':16}{pre.efficiency_pct:>11.1f}%{post.efficiency_pct:>11.1f}%"
+                 f"{post.efficiency_pct - pre.efficiency_pct:>+11.1f}")
+    lines.append(f"  {'gpu idle':16}{_kwh(w_pre.gpu_idle_wh):>12}{_kwh(w_post.gpu_idle_wh):>12}"
+                 f"{pct_change(w_pre.gpu_idle_wh, w_post.gpu_idle_wh):>11.1f}%")
+    lines.append(f"  {'cpu underutil':16}{_kwh(w_pre.cpu_underutil_wh):>12}{_kwh(w_post.cpu_underutil_wh):>12}"
+                 f"{pct_change(w_pre.cpu_underutil_wh, w_post.cpu_underutil_wh):>11.1f}%")
+    lines.append(f"  {'over-request':16}{over_pre:>10,.0f}h{over_post:>11,.0f}h"
+                 f"{pct_change(over_pre, over_post):>11.1f}%")
+    lines.append("")
+    if w_post.total_wh < w_pre.total_wh:
+        lines.append(f"  Outcome: recoverable energy down {abs(rec_change):.1f}% after the split"
+                     f" — ~{co2_avoided:.1f} kg CO2 avoided ({pre.intensity.region}).")
+    else:
+        lines.append("  Outcome: no reduction in recoverable energy across the split.")
+    return "\n".join(lines)
+
+
+def format_forecast_cli(c_trend, r_trend, horizon_label, horizon_days,
+                        cluster_name, mode):
+    """Side-by-side trend projection for consumed and recoverable energy."""
+    def _arrow(slope):
+        return "rising" if slope > 1e-6 else ("falling" if slope < -1e-6 else "flat")
+
+    c_proj = c_trend.project_total(horizon_days)
+    r_proj = r_trend.project_total(horizon_days)
+    c_growth = c_trend.growth_pct(horizon_days)
+    r_growth = r_trend.growth_pct(horizon_days)
+
+    lines = [f"NØMAD Energy — Forecast — {cluster_name or 'all clusters'}"]
+    lines.append(f"  projecting {horizon_label} ahead   ·   valuation: {mode}")
+    lines.append("")
+    lines.append(f"  {'':14}{'current/day':>14}{'trend':>9}{f'next {horizon_label}':>18}")
+    lines.append(f"  {'consumed':14}{c_trend.current_rate_per_day:>11,.1f} kWh"
+                 f"{_arrow(c_trend.slope_per_day):>9}{c_proj:>13,.0f} kWh")
+    lines.append(f"  {'recoverable':14}{r_trend.current_rate_per_day:>11,.1f} kWh"
+                 f"{_arrow(r_trend.slope_per_day):>9}{r_proj:>13,.0f} kWh")
+    lines.append("")
+    lines.append(f"  Consumption is {_arrow(c_trend.slope_per_day)} "
+                 f"({c_growth:+.0f}% over the {horizon_label}).")
+    if r_trend.slope_per_day < -1e-6:
+        lines.append(f"  Recoverable waste is falling ({r_growth:+.0f}%) — "
+                     "efficiency is improving at the aggregate level.")
+    elif r_trend.slope_per_day > 1e-6:
+        lines.append(f"  Recoverable waste is rising ({r_growth:+.0f}%) — "
+                     "worth a closer look at requests and GPU idling.")
+    else:
+        lines.append("  Recoverable waste is flat.")
+    lines.append("")
+    worst = min(c_trend.r_squared, r_trend.r_squared)
+    lines.append(f"  Fit: consumed R²={c_trend.r_squared:.2f} ({c_trend.fit_quality()}), "
+                 f"recoverable R²={r_trend.r_squared:.2f} ({r_trend.fit_quality()}).")
+    if worst < 0.4:
+        lines.append("  Caution: a linear trend fits this data poorly — the projection "
+                     "is indicative only, not a reliable forecast.")
+    lines.append("")
+    lines.append("  Linear trend extrapolation; not a per-job prediction.")
+    return "\n".join(lines)
+
+
+def format_prediction_cli(result, top=15):
+    """Per-job energy-waste risk ranking (not calibrated probabilities)."""
+    lines = [f"NØMAD Energy — Waste Prediction   ·   model: {result.method}"]
+    ctx = f"  {result.n_jobs:,} jobs analyzed · {result.label_rate:.0%} historically high-waste"
+    if result.auc is not None:
+        tag = "CV-AUC" if result.method == "baseline" else "in-sample AUC"
+        ctx += f" · {tag} {result.auc:.2f}"
+    lines.append(ctx)
+    if result.component_weights:
+        w = ", ".join(f"{k}={v:.2f}" for k, v in result.component_weights.items())
+        lines.append(f"  topology blend weights: {w}")
+    # honest topology-vs-baseline comparison when both AUCs are available
+    if result.auc is not None and result.baseline_auc is not None:
+        delta = result.auc - result.baseline_auc
+        band = 0.02
+        if delta > band:
+            verdict = f"topology improves on baseline (+{delta:.2f} AUC)"
+        elif delta < -band:
+            verdict = f"topology below baseline ({delta:.2f} AUC)"
+        else:
+            verdict = "no improvement over baseline on these features"
+        lines.append(f"  vs baseline logistic ({result.baseline_auc:.2f} AUC): {verdict}")
+    lines.append("")
+    lines.append(f"  Highest-risk submissions (top {top}):")
+    lines.append(f"  {'job':>8}  {'user':10}  {'partition':10}  {'risk':>6}")
+    for p in result.ranked(top=top):
+        flag = "  *" if p.was_high_waste else ""
+        lines.append(f"  {p.job_id:>8}  {p.user:10.10}  {p.partition:10.10}  "
+                     f"{p.risk:>6.2f}{flag}")
+    lines.append("")
+    lines.append("  Risk is a ranking score, not a calibrated probability. "
+                 "'*' = was high-waste historically.")
+    lines.append("  Target right-sizing guidance at the top of this list.")
+    return "\n".join(lines)
