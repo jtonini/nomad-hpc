@@ -174,6 +174,40 @@ def test_score_session_benign(host_boyi):
     assert fp.needs_work == []
 
 
+# ── Raw payload (verdict-builder reads these without parsing strings) ─
+
+def test_memory_pressure_raw_populated_when_applicable(host_thais):
+    """raw must carry peak_bytes, host_total_bytes, pressure_ratio so the verdict builder can read structured values rather than parsing detail strings."""
+    session = make_session(peak_gb=60, span_hours=5, hostname=host_thais["hostname"])
+    dim = score_memory_pressure(session, host_thais)
+    assert dim.applicable
+    assert dim.raw is not None
+    assert dim.raw["peak_bytes"] == int(60 * 1024 * 1024 * 1024)
+    assert dim.raw["host_total_bytes"] == host_thais["memory_total_mb"] * 1024 * 1024
+    # 60 GB peak on 62.15 GB host_thais → pressure_ratio ~ 0.97
+    assert 0.95 <= dim.raw["pressure_ratio"] <= 0.99
+
+
+def test_memory_pressure_raw_populated_when_not_applicable():
+    """Even when the dimension cannot be scored (missing/zero data), raw must still be a dict — never None — so downstream code can read dim.raw[key] guarded only by dim.applicable."""
+    bad_host = {"hostname": "h", "memory_total_mb": 0, "cpu_count": 1}
+    session = make_session(peak_gb=0, span_hours=1)
+    dim = score_memory_pressure(session, bad_host)
+    assert not dim.applicable
+    assert dim.raw is not None
+    assert dim.raw["pressure_ratio"] == 0.0
+
+
+def test_duration_fit_raw_carries_seconds_and_hours():
+    """raw must carry both span_hours (canonical input) and span_seconds (derived) so consumers can pick whichever unit they need."""
+    session = make_session(peak_gb=10, span_hours=34.0)
+    dim = score_duration_fit(session, {"memory_total_mb": 256_000})
+    assert dim.applicable
+    assert dim.raw is not None
+    assert dim.raw["span_hours"] == 34.0
+    assert dim.raw["span_seconds"] == 34.0 * 3600
+
+
 # ── Cluster target selection ─────────────────────────────────────────
 
 def test_select_target_kbui():

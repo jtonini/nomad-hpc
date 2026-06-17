@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,7 @@ class Suggestion:
     actual_usage: float        # what the job actually used (peak or avg)
     unit: str                  # "cores", "MB", "seconds", "MB/s"
     rationale: str = ""        # one-line context: "1 of 6 cores active"
+    context: Optional[dict[str, Any]] = None  # structured payload for verdict-kind suggestions (cluster targets, headroom, sbatch snippets)
 
     @property
     def utilization_pct(self) -> float:
@@ -204,6 +205,7 @@ class DimensionScore:
     detail: str                           # Human-readable explanation
     suggestion: Suggestion | None = None
     applicable: bool = True               # False if dimension doesn't apply
+    raw: Optional[dict[str, Any]] = None  # structured payload of input values used to compute this score
 
     @property
     def bar(self) -> str:
@@ -757,6 +759,11 @@ def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
             level="Unknown",
             detail="No memory snapshot data available for this session.",
             applicable=False,
+            raw={
+                "peak_bytes": peak_bytes,
+                "host_total_bytes": host_mb * 1024 * 1024,
+                "pressure_ratio": 0.0,
+            },
         )
 
     peak_mb = peak_bytes / 1024 / 1024
@@ -796,6 +803,11 @@ def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
         level=proficiency_level(score),
         detail=detail,
         suggestion=None,
+        raw={
+            "peak_bytes": peak_bytes,
+            "host_total_bytes": host_mb * 1024 * 1024,
+            "pressure_ratio": pressure,
+        },
     )
 
 
@@ -821,6 +833,10 @@ def score_duration_fit(session: dict, host_state: dict) -> DimensionScore:
             level="Unknown",
             detail="No session duration data available.",
             applicable=False,
+            raw={
+                "span_hours": span_hours if span_hours is not None else 0.0,
+                "span_seconds": (span_hours * 3600) if (span_hours is not None and span_hours >= 0) else 0.0,
+            },
         )
 
     if span_hours <= 2:
@@ -855,6 +871,10 @@ def score_duration_fit(session: dict, host_state: dict) -> DimensionScore:
         level=proficiency_level(score),
         detail=detail,
         suggestion=None,
+        raw={
+            "span_hours": span_hours,
+            "span_seconds": span_hours * 3600,
+        },
     )
 
 
