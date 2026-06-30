@@ -217,6 +217,8 @@ class JobFingerprint:
     """Complete proficiency fingerprint for a single job."""
     job_id: str
     user: str
+    cluster: str | None = None
+    partition: str | None = None
     dimensions: dict[str, DimensionScore] = field(default_factory=dict)
 
     @property
@@ -927,6 +929,8 @@ def score_job(job: dict, summary: dict) -> JobFingerprint:
     fp = JobFingerprint(
         job_id=job.get("job_id", "unknown"),
         user=job.get("user_name", "unknown"),
+        cluster=job.get("cluster"),
+        partition=job.get("partition"),
     )
     fp.dimensions["cpu"] = score_cpu(job, summary)
     fp.dimensions["memory"] = score_memory(job, summary)

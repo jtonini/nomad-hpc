@@ -28,6 +28,7 @@ import logging
 import sqlite3
 import statistics
 from collections import Counter
+from itertools import groupby
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -145,6 +146,8 @@ class Issue:
     rationale: str = ""               # explanation of how the value was chosen
     kind: str = "dimension"           # "dimension" (per-dim aggregate) or "verdict" (cross-cutting)
     context: dict[str, Any] | None = None  # structured payload for verdict-kind issues (target cluster, sbatch snippet, ...)
+    cluster: str | None = None        # scope: which cluster this dimension issue came from (None = unscoped/verdict)
+    partition: str | None = None      # scope: which partition within that cluster
 
     @property
     def affected_ratio(self) -> float:
@@ -756,21 +759,37 @@ def user_insights(
         )
         insights.overall_trajectory = _classify_overall_trajectory(fingerprints)
 
-        for dim_key in KEY_TO_DISPLAY:
-            # Workstation dimensions live in session fingerprints, not job
-            # fingerprints — skip them here; their signal surfaces via the
-            # verdict. Only aggregate the cluster-job dimensions.
-            if dim_key in ("memory_pressure", "duration_fit"):
-                continue
-            issue = _aggregate_dimension(
-                dim_key, fingerprints,
-                threshold=thresholds[dim_key],
-            )
-            if issue is not None:
-                issues.append(issue)
+        # Group job fingerprints by (cluster, partition) so each dimension
+        # issue is scoped to where it actually occurs. Blending clusters
+        # would hide which one is the problem (e.g. a user wasteful on
+        # hpc1/compute but fine on hpc2/gpu would show one muddied issue).
+        def _group_key(fp: JobFingerprint) -> tuple[str, str]:
+            return (fp.cluster or "", fp.partition or "")
+        for (grp_cluster, grp_partition), group_iter in groupby(
+            sorted(fingerprints, key=_group_key), key=_group_key
+        ):
+            group = list(group_iter)
+            for dim_key in KEY_TO_DISPLAY:
+                # Workstation dimensions live in session fingerprints, not
+                # job fingerprints — skip them; signal surfaces via verdict.
+                if dim_key in ("memory_pressure", "duration_fit"):
+                    continue
+                issue = _aggregate_dimension(
+                    dim_key, group,
+                    threshold=thresholds[dim_key],
+                )
+                if issue is not None:
+                    issue.cluster = grp_cluster or None
+                    issue.partition = grp_partition or None
+                    issues.append(issue)
 
         severity_rank = {"critical": 0, "high": 1, "medium": 2}
-        issues.sort(key=lambda i: (severity_rank[i.severity], i.avg_score))
+        # Location first (cluster, partition), then severity within — reads
+        # as "what's wrong on hpc1/compute, then hpc2/gpu".
+        issues.sort(key=lambda i: (
+            i.cluster or "", i.partition or "",
+            severity_rank[i.severity], i.avg_score,
+        ))
 
     # Option 1: verdict always leads when present.
     if verdict is not None:

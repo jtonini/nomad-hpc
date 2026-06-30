@@ -213,3 +213,140 @@ def test_cluster_capacities_override_is_used(tmp_path):
     assert ui.issues[0].kind == "verdict"
     assert ui.issues[0].context["verdict"] == "promote"
     assert ui.issues[0].context["target_memory_gb"] == 250.0
+
+
+# ── Per-(cluster, partition) dimension scoping ───────────────────────
+
+def _build_scoped_db(path):
+    """Synthetic DB where one user runs wasteful jobs across two distinct
+    (cluster, partition) groups, to exercise per-(cluster,partition)
+    dimension aggregation. Includes the cluster column the production
+    schema has (the older _build_db fixture predates it)."""
+    con = sqlite3.connect(path)
+    c = con.cursor()
+    c.execute("""
+        CREATE TABLE jobs (
+            job_id TEXT PRIMARY KEY,
+            cluster TEXT,
+            user_name TEXT,
+            partition TEXT,
+            node_list TEXT,
+            job_name TEXT,
+            state TEXT,
+            exit_code INTEGER,
+            exit_signal INTEGER,
+            failure_reason TEXT,
+            submit_time TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            req_cpus INTEGER,
+            req_mem_mb INTEGER,
+            req_gpus INTEGER,
+            req_time_seconds INTEGER,
+            runtime_seconds INTEGER,
+            wait_time_seconds INTEGER
+        )
+    """)
+    c.execute("""
+        CREATE TABLE job_summary (
+            job_id TEXT PRIMARY KEY,
+            cluster TEXT,
+            peak_cpu_percent REAL,
+            peak_memory_gb REAL,
+            avg_cpu_percent REAL,
+            avg_memory_gb REAL,
+            avg_io_wait_percent REAL,
+            total_nfs_read_gb REAL,
+            total_nfs_write_gb REAL,
+            total_local_read_gb REAL,
+            total_local_write_gb REAL,
+            nfs_ratio REAL,
+            used_gpu INTEGER,
+            health_score REAL
+        )
+    """)
+    # Workstation tables must exist (user_insights loads sessions unconditionally).
+    c.execute("CREATE TABLE workstation_state (id INTEGER PRIMARY KEY, timestamp DATETIME, "
+              "hostname TEXT, memory_total_mb INTEGER, cpu_count INTEGER)")
+    c.execute("CREATE TABLE workstation_user_snapshot (id INTEGER PRIMARY KEY, timestamp DATETIME, "
+              "hostname TEXT, username TEXT, uid INTEGER, session_epoch INTEGER, "
+              "memory_peak_bytes INTEGER, cpu_usage_usec INTEGER)")
+
+    def add_job(jid, cluster, partition, avg_cpu):
+        c.execute(
+            "INSERT INTO jobs (job_id, cluster, user_name, partition, state, end_time, "
+            "req_cpus, req_mem_mb, req_gpus, req_time_seconds, runtime_seconds, wait_time_seconds) "
+            "VALUES (?, ?, 'bob', ?, 'COMPLETED', datetime('now','-1 day'), "
+            "32, 8000, 0, 36000, 3600, 60)",
+            (jid, cluster, partition),
+        )
+        c.execute(
+            "INSERT INTO job_summary (job_id, cluster, peak_cpu_percent, avg_cpu_percent, "
+            "peak_memory_gb, avg_memory_gb, avg_io_wait_percent, nfs_ratio, used_gpu, health_score) "
+            "VALUES (?, ?, ?, ?, 2.0, 1.5, 1.0, 0.1, 0, 40.0)",
+            (jid, cluster, avg_cpu + 2, avg_cpu),
+        )
+
+    # Group 1: clusterA/compute — 5 jobs, catastrophic CPU (3% of 32 cores).
+    for i in range(5):
+        add_job(f"a{i}", "clusterA", "compute", 3.0)
+    # Group 2: clusterB/gpu — 4 jobs, milder CPU waste (28%).
+    for i in range(4):
+        add_job(f"b{i}", "clusterB", "gpu", 28.0)
+
+    con.commit()
+    con.close()
+
+
+def test_dimension_issues_scoped_per_cluster_partition(tmp_path):
+    """A user spanning two (cluster, partition) groups gets SEPARATE scoped
+    CPU issues, not one blended issue — and severity is not diluted across
+    groups."""
+    db = str(tmp_path / "scoped.db")
+    _build_scoped_db(db)
+    ui = user_insights(db, "bob", cluster_capacities=CLUSTER_TIERS)
+
+    cpu_issues = [i for i in ui.issues if i.kind == "dimension" and i.dimension_key == "cpu"]
+    # Two distinct CPU issues, one per (cluster, partition) — not one blended.
+    assert len(cpu_issues) == 2, f"expected 2 scoped CPU issues, got {len(cpu_issues)}"
+
+    by_scope = {(i.cluster, i.partition): i for i in cpu_issues}
+    assert ("clusterA", "compute") in by_scope
+    assert ("clusterB", "gpu") in by_scope
+
+    # The clusterA/compute group is the disaster: critical, all 5 jobs, not
+    # diluted by the milder clusterB jobs.
+    a = by_scope[("clusterA", "compute")]
+    assert a.severity == "critical"
+    assert a.affected_jobs == 5
+    assert a.total_applicable == 5
+
+    # The clusterB/gpu group is scoped separately with its own job count.
+    b = by_scope[("clusterB", "gpu")]
+    assert b.affected_jobs == 4
+    assert b.total_applicable == 4
+
+    # Anti-regression: no dimension issue falls back to unscoped for a
+    # multi-cluster user.
+    for i in ui.issues:
+        if i.kind == "dimension":
+            assert i.cluster is not None and i.partition is not None
+
+
+def test_single_cluster_user_scoped_to_one_group(tmp_path):
+    """A single-(cluster, partition) user still produces correctly-scoped
+    issues — one group, stamped, not None."""
+    db = str(tmp_path / "single.db")
+    con = sqlite3.connect(db)
+    _build_scoped_db(db)  # reuse schema; then narrow to one group
+    con = sqlite3.connect(db)
+    con.execute("DELETE FROM jobs WHERE cluster = 'clusterB'")
+    con.execute("DELETE FROM job_summary WHERE cluster = 'clusterB'")
+    con.commit()
+    con.close()
+    ui = user_insights(db, "bob", cluster_capacities=CLUSTER_TIERS)
+    cpu_issues = [i for i in ui.issues if i.kind == "dimension" and i.dimension_key == "cpu"]
+    assert len(cpu_issues) == 1
+    assert cpu_issues[0].cluster == "clusterA"
+    assert cpu_issues[0].partition == "compute"
+    assert cpu_issues[0].severity == "critical"

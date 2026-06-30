@@ -142,7 +142,7 @@ def _load_user_jobs(
 def _split_job_fields(row: dict) -> tuple[dict, dict]:
     """Split a joined row into job fields and summary fields."""
     job_fields = {
-        "job_id", "user_name", "partition", "node_list", "job_name",
+        "job_id", "user_name", "cluster", "partition", "node_list", "job_name",
         "state", "exit_code", "exit_signal", "failure_reason",
         "submit_time", "start_time", "end_time", "req_cpus",
         "req_mem_mb", "req_gpus", "req_time_seconds",
