@@ -874,8 +874,11 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
             "medium":   "[MEDIUM]  ",
         }.get(issue.severity, "[?]       ")
 
+        scope = ""
+        if issue.cluster and issue.partition:
+            scope = f" ({issue.cluster}/{issue.partition})"
         lines.append("")
-        lines.append(f"  {sev_marker} {issue.dimension} — {traj_arrow}")
+        lines.append(f"  {sev_marker} {issue.dimension}{scope} — {traj_arrow}")
         lines.append(
             f"    {issue.affected_jobs}/{issue.total_applicable} jobs "
             f"scored below threshold (avg score: {issue.avg_score:.1f})"
