@@ -240,6 +240,9 @@ MIGRATIONS: list[tuple[int, str, str]] = [
         CREATE INDEX IF NOT EXISTS idx_pufd_session_bucket
             ON per_user_fd_sample(process_session_id, fs_bucket);
     """),
+    (9, "Add avg_gpu_util to job_summary (per-job DCGM real utilization)", """
+        ALTER TABLE job_summary ADD COLUMN avg_gpu_util REAL;
+    """),
 ]
 
 

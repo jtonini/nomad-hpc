@@ -71,6 +71,7 @@ class JobMetrics:
     memory_efficiency: float | None = None
     nfs_ratio: float | None = None
     used_gpu: bool = False
+    node_list: str | None = None
     had_swap: bool = False
 
     # Health and clustering
@@ -106,6 +107,7 @@ class JobMetrics:
             'memory_efficiency': self.memory_efficiency,
             'nfs_ratio': self.nfs_ratio,
             'used_gpu': self.used_gpu,
+            'node_list': self.node_list,
             'had_swap': self.had_swap,
             'health_score': self.health_score,
             'feature_vector': json.dumps(self.feature_vector),
@@ -144,7 +146,8 @@ class JobMetricsCollector(BaseCollector):
         "Submit,Start,End,Elapsed,Timelimit,"
         "ReqCPUS,ReqMem,ReqTRES,"
         "AveCPU,MaxRSS,AveRSS,MaxVMSize,"
-        "MaxDiskRead,MaxDiskWrite,AveDiskRead,AveDiskWrite"
+        "MaxDiskRead,MaxDiskWrite,AveDiskRead,AveDiskWrite,"
+        "NodeList"
     )
 
     def __init__(self, config: dict[str, Any], db_path: str):
@@ -302,7 +305,7 @@ class JobMetricsCollector(BaseCollector):
         """Parse a sacct output line."""
         try:
             parts = line.split('|')
-            if len(parts) < 23:
+            if len(parts) < 24:
                 return None
 
             job_id = parts[0].split('.')[0]  # Remove step suffix
@@ -331,6 +334,7 @@ class JobMetricsCollector(BaseCollector):
                 max_disk_write_mb=self._parse_memory(parts[20]),
                 avg_disk_read_mb=self._parse_memory(parts[21]),
                 avg_disk_write_mb=self._parse_memory(parts[22]),
+                node_list=(parts[23] or None) if len(parts) > 23 else None,
             )
         except Exception as e:
             logger.debug(f"Failed to parse sacct line: {e}")
@@ -624,6 +628,39 @@ class JobMetricsCollector(BaseCollector):
         except ValueError:
             return 0
 
+    def _compute_avg_gpu_util(self, conn, node_list, start_time, end_time):
+        """Mean DCGM real utilization for a GPU job, over its node(s) + window.
+
+        Uses gpu_stats.real_util_pct (DCGM-derived honest utilization), NOT
+        gpu_util_percent (nvidia-smi's misleading "a kernel ran" number).
+        Gated on data_source='dcgm' — where DCGM isn't deployed there is no
+        real measurement, so we return None (scored N/A downstream) rather
+        than fabricate a number.
+
+        Coarse join: averages across all GPUs on the job's node during the
+        window. Jobs record GPU count (req_gpus), not specific indices, so
+        per-GPU attribution isn't possible; this blends when jobs share a
+        node's GPUs but is directionally correct for an education tool.
+        """
+        if not node_list or not start_time or not end_time:
+            return None
+        nodes = [n.strip() for n in str(node_list).split(",") if n.strip()]
+        if not nodes:
+            return None
+        placeholders = ",".join("?" * len(nodes))
+        row = conn.execute(
+            f"""
+            SELECT AVG(real_util_pct)
+            FROM gpu_stats
+            WHERE node_name IN ({placeholders})
+              AND data_source = 'dcgm'
+              AND real_util_pct IS NOT NULL
+              AND timestamp BETWEEN ? AND ?
+            """,
+            (*nodes, start_time, end_time),
+        ).fetchone()
+        return row[0] if row and row[0] is not None else None
+
     def store(self, data: list[dict[str, Any]]) -> None:
         """Store job metrics in database."""
 
@@ -638,8 +675,9 @@ class JobMetricsCollector(BaseCollector):
                     INSERT INTO jobs
                     (job_id, user_name, group_name, partition, job_name, state,
                      submit_time, start_time, end_time, exit_code,
-                     req_cpus, req_mem_mb, req_gpus, req_time_seconds, runtime_seconds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     req_cpus, req_mem_mb, req_gpus, req_time_seconds, runtime_seconds,
+                     node_list)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         state = excluded.state,
                         end_time = excluded.end_time,
@@ -662,6 +700,7 @@ class JobMetricsCollector(BaseCollector):
                         record['req_gpus'],
                         record['timelimit_seconds'],
                         record['elapsed_seconds'],
+                        record.get('node_list'),
                     )
                 )
 
@@ -670,12 +709,13 @@ class JobMetricsCollector(BaseCollector):
                     """
                     INSERT INTO job_summary
                     (job_id, peak_cpu_percent, peak_memory_gb, avg_cpu_percent, avg_memory_gb,
-                     total_local_write_gb, nfs_ratio, used_gpu, had_swap,
+                     total_local_write_gb, nfs_ratio, used_gpu, avg_gpu_util, had_swap,
                      health_score, feature_vector)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         peak_cpu_percent = excluded.peak_cpu_percent,
                         peak_memory_gb = excluded.peak_memory_gb,
+                        avg_gpu_util = excluded.avg_gpu_util,
                         health_score = excluded.health_score,
                         feature_vector = excluded.feature_vector
                     """,
@@ -688,6 +728,10 @@ class JobMetricsCollector(BaseCollector):
                         (record['max_disk_write_mb'] or 0) / 1024,
                         record['nfs_ratio'],
                         record['used_gpu'],
+                        (self._compute_avg_gpu_util(
+                            conn, record.get('node_list'),
+                            record.get('start_time'), record.get('end_time'),
+                        ) if record.get('used_gpu') else None),
                         record['had_swap'],
                         record['health_score'],
                         record['feature_vector'],

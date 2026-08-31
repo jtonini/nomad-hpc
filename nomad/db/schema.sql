@@ -367,6 +367,7 @@ CREATE TABLE IF NOT EXISTS job_summary (
     -- Derived metrics
     nfs_ratio REAL,  -- nfs_write / (nfs_write + local_write)
     used_gpu BOOLEAN,
+    avg_gpu_util REAL,  -- mean DCGM real_util_pct over job's node+window; NULL when no DCGM data
     had_swap BOOLEAN,
     
     -- Health and prediction

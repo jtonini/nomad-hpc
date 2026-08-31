@@ -668,12 +668,79 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
             ),
         )
 
+    # Graded scoring from real DCGM utilization (avg_gpu_util = mean
+    # real_util_pct over the job's node+window). None means no DCGM data was
+    # available for this job's node/window — we can't grade honestly, so fall
+    # back to the binary "activity detected" signal rather than inventing a
+    # number.
+    avg_util = summary.get("avg_gpu_util")
+    if avg_util is None:
+        return DimensionScore(
+            name="GPU Utilization",
+            score=70,
+            level="Good",
+            detail=(f"GPU activity detected on {req_gpus} requested GPU(s). "
+                    f"(No DCGM utilization data for this job's node/window, "
+                    f"so efficiency can't be graded.)"),
+            suggestion=None,
+        )
+
+    # Grade against the DCGM real utilization. Thresholds per the dimension's
+    # design: >=70 Excellent, >=40 Good, >=15 Developing, <15 Needs Work.
+    if avg_util >= 70:
+        return DimensionScore(
+            name="GPU Utilization",
+            score=95,
+            level="Excellent",
+            detail=(f"Strong GPU utilization: {avg_util:.0f}% average real "
+                    f"activity across {req_gpus} GPU(s)."),
+            suggestion=None,
+        )
+    if avg_util >= 40:
+        return DimensionScore(
+            name="GPU Utilization",
+            score=70,
+            level="Good",
+            detail=(f"Reasonable GPU utilization: {avg_util:.0f}% average real "
+                    f"activity across {req_gpus} GPU(s)."),
+            suggestion=None,
+        )
+    if avg_util >= 15:
+        return DimensionScore(
+            name="GPU Utilization",
+            score=45,
+            level="Developing",
+            detail=(f"Low GPU utilization: {avg_util:.0f}% average real "
+                    f"activity across {req_gpus} GPU(s). The GPUs are only "
+                    f"partly used — consider whether fewer GPUs or a larger "
+                    f"batch/model would use them more fully."),
+            suggestion=Suggestion(
+                directive="gres",
+                suggested_value=max(1, req_gpus - 1),
+                current_value=req_gpus,
+                actual_usage=round(avg_util, 1),
+                unit="GPUs",
+                rationale=(f"GPUs averaged {avg_util:.0f}% real activity; "
+                           f"fewer GPUs or more work per GPU improves efficiency"),
+            ),
+        )
     return DimensionScore(
         name="GPU Utilization",
-        score=70,
-        level="Good",
-        detail=f"GPU activity detected on {req_gpus} requested GPU(s).",
-        suggestion=None,
+        score=15,
+        level="Needs Work",
+        detail=(f"Very low GPU utilization: {avg_util:.0f}% average real "
+                f"activity across {req_gpus} requested GPU(s). GPU nodes are a "
+                f"scarce, expensive resource; near-idle GPUs block other users."),
+        suggestion=Suggestion(
+            directive="gres",
+            suggested_value=0,
+            current_value=req_gpus,
+            actual_usage=round(avg_util, 1),
+            unit="GPUs",
+            rationale=(f"GPUs averaged only {avg_util:.0f}% real activity; "
+                       f"consider running on a CPU partition or debugging why "
+                       f"the GPUs sit idle"),
+        ),
     )
 
 

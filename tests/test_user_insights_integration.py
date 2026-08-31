@@ -96,6 +96,7 @@ def _build_db(path, *, with_jobs=False, with_sessions=False):
             total_local_write_gb REAL,
             nfs_ratio REAL,
             used_gpu INTEGER,
+            avg_gpu_util REAL,
             health_score REAL
         )
     """)
@@ -262,6 +263,7 @@ def _build_scoped_db(path):
             total_local_write_gb REAL,
             nfs_ratio REAL,
             used_gpu INTEGER,
+            avg_gpu_util REAL,
             health_score REAL
         )
     """)

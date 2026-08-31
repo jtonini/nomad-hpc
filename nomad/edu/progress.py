@@ -124,7 +124,7 @@ def _load_user_jobs(
                    js.avg_io_wait_percent,
                    js.total_nfs_read_gb, js.total_nfs_write_gb,
                    js.total_local_read_gb, js.total_local_write_gb,
-                   js.nfs_ratio, js.used_gpu, js.health_score
+                   js.nfs_ratio, js.used_gpu, js.avg_gpu_util, js.health_score
             FROM jobs j
             LEFT JOIN job_summary js ON j.job_id = js.job_id
             WHERE j.user_name = ?
