@@ -245,6 +245,233 @@ def _load_cluster_capacities(db_path: str) -> list[dict[str, Any]]:
     return capacities
 
 
+def _load_partition_wait(db_path: str) -> dict[tuple[str, str], float]:
+    """
+    Historical queue wait per (cluster, partition), in SECONDS, from
+    jobs.wait_time_seconds. Used by the queue-aware promotion verdict to weigh
+    "how long would I wait if I moved to the cluster?".
+
+    Uses the MEDIAN (robust to outliers) over recent completed jobs.
+
+    Returns {} when there is no jobs table, no wait data, or any error — a
+    common case for smaller institutions that register only workstations and
+    no HPC cluster. An empty result means "no queue signal": the verdict then
+    falls back to the memory-only recommendation and makes NO queue claims.
+    Never crashes, never fabricates.
+    """
+    waits: dict[tuple[str, str], list[float]] = {}
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                """
+                SELECT cluster, partition, wait_time_seconds
+                FROM jobs
+                WHERE wait_time_seconds IS NOT NULL
+                  AND wait_time_seconds >= 0
+                  AND cluster IS NOT NULL
+                  AND partition IS NOT NULL
+                """
+            ).fetchall()
+            for cluster, partition, wait in rows:
+                waits.setdefault((cluster, partition), []).append(float(wait))
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        logger.warning(f"_load_partition_wait: DB error: {e}")
+        return {}
+    return {
+        key: statistics.median(vals)
+        for key, vals in waits.items()
+        if vals
+    }
+
+
+# Thresholds for detecting workstation memory-thrashing (tunable constants,
+# portable across deployments — describe a pattern, not a site).
+THRASH_SWAP_MB_MIN    = 2048.0   # active swap well above idle baseline
+THRASH_IOWAIT_PCT_MIN = 15.0     # CPU stalled on I/O (paging) this fraction
+
+
+def _assess_thrashing(db_path: str, hostname: str) -> dict[str, Any] | None:
+    """
+    Assess whether a workstation host is memory-THRASHING — i.e. slow *because*
+    of memory pressure (paging to disk), not merely at the RAM ceiling.
+
+    This is the evidence that distinguishes "the cluster is genuinely faster
+    even with a queue" (thrashing: the workstation wastes time swapping) from
+    "at the ceiling but fine" (no thrashing: an honest tradeoff).
+
+    Reads the latest workstation_state row for the host: swap_used_mb and
+    cpu_iowait_pct. Thrashing = active swap AND elevated iowait.
+
+    Returns None when there is no host state at all (can't assess — the
+    verdict then makes NO thrashing claim and uses tradeoff wording). Never
+    fabricates: absence of evidence is reported as absence, not as "fine".
+    """
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = con.execute(
+                """
+                SELECT swap_used_mb, cpu_iowait_pct
+                FROM workstation_state
+                WHERE hostname = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (hostname,),
+            ).fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        logger.warning(f"_assess_thrashing: DB error: {e}")
+        return None
+
+    if row is None:
+        return None  # no host state — cannot assess, make no claim
+
+    swap_mb = float(row[0] or 0.0)
+    iowait_pct = float(row[1] or 0.0)
+    thrashing = (swap_mb >= THRASH_SWAP_MB_MIN
+                 and iowait_pct >= THRASH_IOWAIT_PCT_MIN)
+    return {
+        "thrashing": thrashing,
+        "swap_used_mb": swap_mb,
+        "iowait_pct": iowait_pct,
+        # Fraction of CPU time lost to I/O stall — used to estimate recovered
+        # time on the cluster. Only meaningful when thrashing.
+        "iowait_fraction": iowait_pct / 100.0 if thrashing else 0.0,
+    }
+
+
+# Queue-wait decision zones (SECONDS). Fixed at HEALTHY-SYSTEM ideals — NOT
+# recalibrated to any deployment's reality. A partition whose real wait sits
+# far above these is a capacity-constraint signal the verdict surfaces
+# honestly, rather than normalizing a long queue as "fine".
+QUEUE_ZONE_CLEAN_S  = 1 * 3600     # < 1h  — promote cleanly
+QUEUE_ZONE_NOTE_S   = 4 * 3600     # 1-4h  — promote, note the wait
+QUEUE_ZONE_CAVEAT_S = 24 * 3600    # 4-24h — promote, prominent caveat
+# > 24h — HEDGE: promote only if thrashing recovery clearly beats the wait.
+
+
+def _time_to_results(
+    queue_wait_s: float | None,
+    thrash: dict[str, Any] | None,
+    compute_hours: float | None = None,
+) -> dict[str, Any]:
+    """
+    Decide how queue wait modulates a promotion recommendation, weighted by
+    thrashing evidence. Returns a structured verdict-modulation dict — NEVER a
+    fabricated speedup number.
+
+    Inputs (all optional; the function degrades honestly on missing data):
+      queue_wait_s  — median queue wait for the target partition, or None if
+                      no wait history (then no modulation: 'unknown' zone).
+      thrash        — result of _assess_thrashing, or None if host state
+                      couldn't be assessed (then no thrashing claim).
+      compute_hours — measured actual compute time, if available. Used ONLY to
+                      strengthen a confident message; never required, never the
+                      sole basis (its production reliability is unverified).
+
+    Returns {zone, thrashing, wait_hours, recommend, confidence, ...} where:
+      zone       — 'unknown'|'clean'|'note'|'caveat'|'hedge'
+      recommend  — 'promote' | 'promote_hedged'
+      confidence — 'high' (thrashing proven, cluster clearly wins)
+                   'moderate' (short/no queue)
+                   'tradeoff' (long queue, no thrashing — honest tradeoff)
+    """
+    thrashing = bool(thrash and thrash.get("thrashing"))
+    iowait_frac = float(thrash.get("iowait_fraction", 0.0)) if thrash else 0.0
+
+    # No wait history -> no queue modulation. Memory-only verdict stands.
+    if queue_wait_s is None:
+        return {
+            "zone": "unknown", "thrashing": thrashing,
+            "wait_hours": None, "recommend": "promote",
+            "confidence": "moderate",
+        }
+
+    wait_h = queue_wait_s / 3600.0
+
+    # Zone from the fixed healthy-system thresholds.
+    if queue_wait_s < QUEUE_ZONE_CLEAN_S:
+        zone = "clean"
+    elif queue_wait_s < QUEUE_ZONE_NOTE_S:
+        zone = "note"
+    elif queue_wait_s < QUEUE_ZONE_CAVEAT_S:
+        zone = "caveat"
+    else:
+        zone = "hedge"
+
+    # Short queues: promote (the memory case wins easily).
+    if zone in ("clean", "note", "caveat"):
+        return {
+            "zone": zone, "thrashing": thrashing, "wait_hours": wait_h,
+            "recommend": "promote",
+            "confidence": "high" if thrashing else "moderate",
+        }
+
+    # HEDGE zone (>24h): promotion only clearly wins if the workstation is
+    # thrashing badly enough that recovered compute time exceeds the wait.
+    # We do NOT fabricate a runtime; we compare only when compute_hours is
+    # available AND thrashing is proven. Otherwise: honest tradeoff.
+    if thrashing and compute_hours and iowait_frac > 0:
+        ws_effective_h = compute_hours / max(1e-6, (1.0 - iowait_frac))
+        recovered_h = ws_effective_h - compute_hours  # time lost to paging
+        # Cluster wins if the paging penalty (per the SAME work, and it
+        # recurs every run) outweighs the one-time queue wait.
+        if recovered_h >= wait_h:
+            return {
+                "zone": "hedge", "thrashing": True, "wait_hours": wait_h,
+                "recommend": "promote",
+                "confidence": "high",
+                "recovered_hours": round(recovered_h, 1),
+            }
+
+    # Long queue, and we cannot show the cluster clearly wins -> hedge.
+    return {
+        "zone": "hedge", "thrashing": thrashing, "wait_hours": wait_h,
+        "recommend": "promote_hedged",
+        "confidence": "tradeoff",
+    }
+
+
+def _user_compute_hours(db_path: str, username: str) -> float | None:
+    """
+    Total ACTUAL compute time (hours) for a user's recent workstation sessions,
+    from the cpu_usage_usec delta (MAX-MIN) per session_epoch. This is measured
+    compute time, distinct from wall-clock session span.
+
+    Returns None when there is no usable cpu_usage data (so the time-to-results
+    comparison degrades to evidence-only wording rather than fabricating a
+    number). Production reliability of cpu_usage under load is unverified, so a
+    None here is expected and handled honestly downstream.
+    """
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            rows = con.execute(
+                """
+                SELECT MAX(cpu_usage_usec) - MIN(cpu_usage_usec)
+                FROM workstation_user_snapshot
+                WHERE username = ?
+                GROUP BY session_epoch
+                """,
+                (username,),
+            ).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as e:
+        logger.warning(f"_user_compute_hours: DB error: {e}")
+        return None
+    deltas = [float(r[0]) for r in rows if r[0] is not None and r[0] > 0]
+    if not deltas:
+        return None
+    total_usec = sum(deltas)
+    return total_usec / 1_000_000 / 3600.0
+
+
 # ── Aggregation strategies ───────────────────────────────────────────
 
 def _quantile(values: list[float], q: float) -> float:
@@ -568,9 +795,20 @@ def _select_verdict_kind(
     return ("workload_fits_tool", None)
 
 
+def _format_wait(hours: float) -> str:
+    """Human-readable queue wait: '45 minutes', '5 hours', '2.5 days'."""
+    if hours < 1:
+        mins = max(1, int(round(hours * 60)))
+        return f"{mins} minutes"
+    if hours < 48:
+        return f"{hours:.0f} hours" if hours >= 2 else "1 hour"
+    return f"{hours / 24:.0f} days"
+
+
 def _verdict_promote_message(
     peak_gb: float, host_gb: float, span_hours: float,
     target: dict[str, Any], session_count: int, reason: str = "acute",
+    queue_mod: dict[str, Any] | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """Verdict A: cluster has meaningful headroom; recommend promotion."""
     headroom = target["memory_gb"] / peak_gb
@@ -606,6 +844,53 @@ def _verdict_promote_message(
             f"{headroom:.1f}x headroom and would let your work complete without "
             f"competing for your workstation's RAM."
         )
+    # Queue-aware wording (plain language — never name-drops "thrashing").
+    # Appends a sentence reflecting the target partition's queue and whether
+    # the workstation is genuinely memory-bound. Skipped when no queue signal.
+    if queue_mod and queue_mod.get("zone") not in (None, "unknown"):
+        zone = queue_mod["zone"]
+        wh = queue_mod.get("wait_hours")
+        wait_str = _format_wait(wh) if wh is not None else "an unknown time"
+        if queue_mod.get("recommend") == "promote_hedged":
+            if queue_mod.get("thrashing"):
+                # Memory-bound, but the queue is so long even the recovered
+                # time can't beat it. Honest: acknowledge the bottleneck AND
+                # that the queue defeats the move for now.
+                detail += (
+                    f" One caveat: although your sessions are running out of "
+                    f"memory and losing time moving data to and from disk, "
+                    f"this partition's queue is currently so long (typically "
+                    f"~{wait_str}) that even that recovered time wouldn't beat "
+                    f"the wait. For quick turnaround the workstation stays "
+                    f"pragmatic right now — but a queue this long, on top of "
+                    f"your memory pressure, is worth raising with your research "
+                    f"computing team."
+                )
+            else:
+                detail += (
+                    f" One caveat: this partition's queue is currently very "
+                    f"long (typically ~{wait_str}). Your sessions aren't "
+                    f"memory-starved enough for the cluster to clearly beat "
+                    f"that wait, so the workstation stays the pragmatic choice "
+                    f"for quick turnaround right now — but a queue this long is "
+                    f"worth raising with your research computing team."
+                )
+        elif zone == "hedge" and queue_mod.get("confidence") == "high":
+            detail += (
+                f" Even though this partition's queue is long (~{wait_str}), "
+                f"your sessions are running out of memory and spending much of "
+                f"their time moving data to and from disk instead of computing. "
+                f"The cluster's headroom recovers that lost time, so you'd "
+                f"likely finish sooner there despite the wait."
+            )
+        elif zone == "caveat":
+            detail += (
+                f" Note: this partition's queue typically runs ~{wait_str}, so "
+                f"factor that into when you'll get results."
+            )
+        else:  # clean / note
+            detail += f" The queue here is short (typically ~{wait_str})."
+
     sbatch_snippet = (
         f"#SBATCH --mem={sbatch_mem_gb}G\n"
         f"#SBATCH --time={time_str}\n"
@@ -626,6 +911,7 @@ def _verdict_promote_message(
         "headroom_ratio": round(headroom, 2),
         "sbatch_snippet": sbatch_snippet,
         "reason": reason,
+        "queue": queue_mod,  # structured queue-modulation (or None)
     }
     return ("Cluster Promotion Recommended", detail, context)
 
@@ -686,6 +972,7 @@ def _verdict_exhausted_message(
 def _build_cluster_promotion_verdict(
     fingerprints: list[SessionFingerprint],
     cluster_capacities: list[dict[str, Any]],
+    db_path: str | None = None,
 ) -> Issue | None:
     """
     Build a cluster-promotion verdict if the user shows a pattern of
@@ -753,9 +1040,28 @@ def _build_cluster_promotion_verdict(
 
     kind, target = _select_verdict_kind(peak_gb, host_gb, cluster_capacities)
 
+    # Queue-aware modulation: how long is the target partition's queue, and is
+    # the workstation actually memory-bound (worth the wait)? Computed only
+    # when we have a DB to read; degrades to plain promote otherwise (e.g.
+    # workstation-only institutions with no cluster job history).
+    queue_mod = None
+    if db_path is not None and kind == "promote" and target is not None:
+        headline_fp = headline[0]
+        _hostname = getattr(headline_fp, "hostname", None)
+        _username = getattr(headline_fp, "username", None)
+        _parts = (target.get("partitions") or "").split(",")
+        _tpart = next((p for p in _parts if p and p != "all"),
+                      _parts[0] if _parts else "")
+        _waits = _load_partition_wait(db_path)
+        _wait_s = _waits.get((target.get("cluster"), _tpart))
+        _thrash = _assess_thrashing(db_path, _hostname) if _hostname else None
+        _comp_h = _user_compute_hours(db_path, _username) if _username else None
+        queue_mod = _time_to_results(_wait_s, _thrash, _comp_h)
+
     if kind == "promote":
         title, detail, context = _verdict_promote_message(
-            peak_gb, host_gb, span_hours, target, session_count, reason
+            peak_gb, host_gb, span_hours, target, session_count, reason,
+            queue_mod,
         )
         severity = "high"
     elif kind == "exhausted_everywhere":
@@ -825,7 +1131,7 @@ def user_insights(
     if cluster_capacities is None:
         cluster_capacities = _load_cluster_capacities(db_path)
     verdict = _build_cluster_promotion_verdict(
-        session_fingerprints, cluster_capacities
+        session_fingerprints, cluster_capacities, db_path=db_path
     )
 
     # Short-circuit only when there's nothing at all to report.
@@ -930,7 +1236,7 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     """Render UserInsights as text suitable for terminal output."""
     lines: list[str] = []
 
-    if insights.job_count == 0:
+    if insights.job_count == 0 and not insights.issues:
         return (f"No recent jobs found for {insights.username} "
                 f"in the last {insights.window_days} days.\n"
                 f"If you've run jobs recently, ensure the cluster's "
@@ -938,9 +1244,12 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
 
     lines.append(f"  Your NØMAD Profile — {insights.username}")
     lines.append(f"  {'─' * 56}")
-    lines.append(f"  {insights.job_count} jobs in the last {insights.window_days} days")
-    lines.append(f"  Overall score: {insights.overall_score:.1f} / 100  "
-                 f"({insights.overall_trajectory})")
+    if insights.job_count > 0:
+        lines.append(f"  {insights.job_count} jobs in the last {insights.window_days} days")
+        lines.append(f"  Overall score: {insights.overall_score:.1f} / 100  "
+                     f"({insights.overall_trajectory})")
+    else:
+        lines.append("  Based on your recent workstation sessions")
     lines.append("")
 
     if not insights.issues:
@@ -953,10 +1262,28 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     lines.append(f"  {'─' * 56}")
 
     for issue in insights.issues:
+        # Verdicts (cluster-promotion) carry full guidance in the rationale —
+        # including the queue-aware caveat. Render directly, not through the
+        # per-dimension job template.
+        if issue.kind == "verdict":
+            import textwrap
+            lines.append("")
+            lines.append(f"  [RECOMMENDATION] {issue.dimension}")
+            if issue.rationale:
+                for para in textwrap.wrap(issue.rationale, width=72):
+                    lines.append(f"    {para}")
+            ctx = issue.context or {}
+            snippet = ctx.get("sbatch_snippet")
+            if snippet:
+                lines.append("")
+                lines.append("    Suggested batch script header:")
+                for sl in snippet.split("\n"):
+                    lines.append(f"      {sl}")
+            continue
         traj_arrow = {
             "improving": "↑ improving",
-            "stable":    "→ stable",
-            "worsening": "↓ worsening",
+            "stable":    "→ not improving",
+            "worsening": "↓ getting worse",
         }.get(issue.trajectory, issue.trajectory)
         sev_marker = {
             "critical": "[CRITICAL]",
