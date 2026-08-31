@@ -76,7 +76,7 @@ KEY_TO_DISPLAY = {
     "cpu":             "CPU Efficiency",
     "memory":          "Memory Efficiency",
     "time":            "Time Estimation",
-    "io":              "I/O Awareness",
+    "io":              "Filesystem I/O",
     "gpu":             "GPU Utilization",
     "memory_pressure": "Workstation Memory Pressure",
     "duration_fit":    "Workstation Session Duration",
