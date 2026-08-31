@@ -82,6 +82,15 @@ KEY_TO_DISPLAY = {
     "duration_fit":    "Workstation Session Duration",
 }
 
+# Human-readable labels for directives (NØMAD is for non-specialists too):
+# directive -> (SLURM flag shown to the user, singular unit, plural unit).
+DIRECTIVE_LABEL = {
+    "ntasks": ("--ntasks", "core", "cores"),
+    "gres":   ("--gres=gpu", "GPU", "GPUs"),
+    "mem":    ("--mem", "", ""),      # value already carries a unit (e.g. 32G)
+    "time":   ("--time", "", ""),     # value is HH:MM:SS
+}
+
 # Aggregation strategy per directive type.
 #   "mode"          -> pick the most common suggested_value (integers)
 #   "quantile"      -> p95 of actual_usage × buffer factor (continuous)
@@ -97,6 +106,7 @@ DIRECTIVE_STRATEGY = {
 VERDICT_MEMORY_PRESSURE_MAX = 20.0   # score <= 20 means peak >= 80% of host RAM
 VERDICT_DURATION_FIT_MAX    = 30.0   # score <= 30 means span >= 12h
 VERDICT_MIN_SESSIONS        = 2      # pattern, not a one-off
+VERDICT_CHRONIC_MIN_SESSIONS = 10   # many pressured sessions (any duration) = chronic
 VERDICT_HEADROOM_MIN        = 2.0    # cluster tier must be >= 2x peak to fire Verdict A
 
 
@@ -139,11 +149,13 @@ class Issue:
     directive: str = ""               # "mem", "time", "ntasks", "gres"
     suggested_value: float = 0.0      # final recommendation in canonical units
     suggested_display: str = ""       # "4G", "18:00:00", "1"
+    directive_label: str = ""         # human phrase: "--ntasks from 8 to 1 core"
     current_value_typical: float = 0.0  # modal/median of current requests
     current_display: str = ""         # "200 GB"
     usage_stats: UsageStats | None = None
     strategy: str = ""                # "mode" / "p95_with_buffer"
-    rationale: str = ""               # explanation of how the value was chosen
+    rationale: str = ""               # why the problem matters (educational framing)
+    suggestion_rationale: str = ""    # how the suggested value was chosen
     kind: str = "dimension"           # "dimension" (per-dim aggregate) or "verdict" (cross-cutting)
     context: dict[str, Any] | None = None  # structured payload for verdict-kind issues (target cluster, sbatch snippet, ...)
     cluster: str | None = None        # scope: which cluster this dimension issue came from (None = unscoped/verdict)
@@ -261,8 +273,12 @@ def _aggregate_mode(suggestions: list[Suggestion]) -> tuple[float, str, str]:
     values = [s.suggested_value for s in suggestions]
     counter = Counter(values)
     modal_value, modal_count = counter.most_common(1)[0]
-    rationale = (f"most common across affected jobs "
-                 f"({modal_count} of {len(suggestions)})")
+    # Plain-language: describe WHY this value without a raw fraction that
+    # collides with the card's "N of M jobs flagged" count.
+    if modal_count == len(suggestions):
+        rationale = "every flagged job requested the same, so this fits them all"
+    else:
+        rationale = "the most common request across your flagged jobs"
     return modal_value, "mode", rationale
 
 
@@ -401,6 +417,14 @@ def _aggregate_dimension(
     severity = _classify_severity(avg_score, affected_ratio)
     trajectory = _compute_dimension_trajectory(fingerprints, dim_key)
 
+    # Rationale = why it matters (DIMENSION_FRAMING) + what to do
+    # (DIMENSION_REMEDY, for dimensions with no single SLURM directive).
+    # Portable across deployments; no site-specific paths.
+    rationale = DIMENSION_FRAMING.get(dim_key, "")
+    remedy = DIMENSION_REMEDY.get(dim_key, "")
+    if remedy:
+        rationale = f"{rationale} {remedy}".strip() if rationale else remedy
+
     issue = Issue(
         dimension=dim_name,
         dimension_key=dim_key,
@@ -409,6 +433,7 @@ def _aggregate_dimension(
         avg_score=avg_score,
         severity=severity,
         trajectory=trajectory,
+        rationale=rationale,
     )
 
     # If we have no structured suggestions to aggregate, return the issue
@@ -461,7 +486,25 @@ def _aggregate_dimension(
         primary_directive, value
     )
     issue.strategy = strategy_label
-    issue.rationale = rationale
+    issue.suggestion_rationale = rationale
+
+    # Human phrase for the card (NØMAD serves non-specialists): name the flag
+    # and the unit, not a bare number. e.g. "--ntasks from 8 to 1 core".
+    flag, unit_s, unit_p = DIRECTIVE_LABEL.get(primary_directive, ("", "", ""))
+    def _u(display, canonical):
+        # Append a unit word for count-style directives (ntasks/gres).
+        if unit_s and unit_p:
+            try:
+                n = int(float(canonical))
+            except (TypeError, ValueError):
+                n = None
+            word = unit_s if n == 1 else unit_p
+            return f"{display} {word}"
+        return display
+    cur = _u(issue.current_display, issue.current_value_typical)
+    sug = _u(issue.suggested_display, issue.suggested_value)
+    if flag:
+        issue.directive_label = f"{flag} from {cur} to {sug}"
 
     return issue
 
@@ -527,7 +570,7 @@ def _select_verdict_kind(
 
 def _verdict_promote_message(
     peak_gb: float, host_gb: float, span_hours: float,
-    target: dict[str, Any], session_count: int,
+    target: dict[str, Any], session_count: int, reason: str = "acute",
 ) -> tuple[str, str, dict[str, Any]]:
     """Verdict A: cluster has meaningful headroom; recommend promotion."""
     headroom = target["memory_gb"] / peak_gb
@@ -541,14 +584,28 @@ def _verdict_promote_message(
     partitions = (target.get("partitions") or "").split(",")
     partition = next((p for p in partitions if p and p not in ("all",)), partitions[0] if partitions else "")
 
-    detail = (
-        f"Across {session_count} recent sessions, your workload peaked at "
-        f"{peak_gb:.0f} GB on a {host_gb:.0f} GB host ({(peak_gb/host_gb)*100:.0f}% saturation) "
-        f"with spans averaging {span_hours:.1f}h. "
-        f"{target['cluster']}'s {target['memory_gb']:.0f} GB tier offers "
-        f"{headroom:.1f}x headroom and would let your work complete without "
-        f"competing for your workstation's RAM."
-    )
+    if reason == "chronic":
+        # Chronic: many short sessions repeatedly at the ceiling. Duration is
+        # not the story — the recurring pressure is. Don't lean on span length.
+        detail = (
+            f"Across {session_count} recent sessions your work repeatedly ran "
+            f"near this workstation's memory ceiling — peaking at "
+            f"{peak_gb:.0f} GB on a {host_gb:.0f} GB host "
+            f"({(peak_gb/host_gb)*100:.0f}% saturation). Each session is short, "
+            f"but the pattern is consistent: your workflow has outgrown the box. "
+            f"{target['cluster']}'s {target['memory_gb']:.0f} GB tier offers "
+            f"{headroom:.1f}x headroom, so the same work would run without "
+            f"crowding your workstation's RAM."
+        )
+    else:
+        detail = (
+            f"Across {session_count} recent sessions, your workload peaked at "
+            f"{peak_gb:.0f} GB on a {host_gb:.0f} GB host ({(peak_gb/host_gb)*100:.0f}% saturation) "
+            f"with spans averaging {span_hours:.1f}h. "
+            f"{target['cluster']}'s {target['memory_gb']:.0f} GB tier offers "
+            f"{headroom:.1f}x headroom and would let your work complete without "
+            f"competing for your workstation's RAM."
+        )
     sbatch_snippet = (
         f"#SBATCH --mem={sbatch_mem_gb}G\n"
         f"#SBATCH --time={time_str}\n"
@@ -568,6 +625,7 @@ def _verdict_promote_message(
         "target_partition": partition,
         "headroom_ratio": round(headroom, 2),
         "sbatch_snippet": sbatch_snippet,
+        "reason": reason,
     }
     return ("Cluster Promotion Recommended", detail, context)
 
@@ -662,8 +720,31 @@ def _build_cluster_promotion_verdict(
         host_gb = host_b / 1024 / 1024 / 1024
         qualifying.append((fp, peak_gb, host_gb, span_h))
 
+    # Acute path: >= VERDICT_MIN_SESSIONS sessions each pressured AND long.
+    # If that doesn't fire, fall back to the CHRONIC path: many pressured
+    # sessions regardless of duration. A user whose workflow repeatedly sits
+    # near the RAM ceiling has outgrown the workstation even when no single
+    # session is long (each is "fine" alone; the pattern is not).
+    reason = "acute"
     if len(qualifying) < VERDICT_MIN_SESSIONS:
-        return None
+        chronic: list[tuple[SessionFingerprint, float, float, float]] = []
+        for fp in fingerprints:
+            mp = fp.dimensions.get("memory_pressure")
+            df = fp.dimensions.get("duration_fit")
+            if mp is None or not mp.applicable:
+                continue
+            if mp.score > VERDICT_MEMORY_PRESSURE_MAX:
+                continue  # not pressured — duration is NOT required here
+            peak_b = (mp.raw or {}).get("peak_bytes", 0)
+            host_b = (mp.raw or {}).get("host_total_bytes", 0)
+            span_h = (df.raw or {}).get("span_hours", 0.0) if df is not None else 0.0
+            if peak_b <= 0 or host_b <= 0:
+                continue
+            chronic.append((fp, peak_b / 1024**3, host_b / 1024**3, span_h))
+        if len(chronic) < VERDICT_CHRONIC_MIN_SESSIONS:
+            return None
+        qualifying = chronic
+        reason = "chronic"
 
     # Take the peak case as the headline (max peak_gb across qualifying)
     headline = max(qualifying, key=lambda q: q[1])
@@ -674,7 +755,7 @@ def _build_cluster_promotion_verdict(
 
     if kind == "promote":
         title, detail, context = _verdict_promote_message(
-            peak_gb, host_gb, span_hours, target, session_count
+            peak_gb, host_gb, span_hours, target, session_count, reason
         )
         severity = "high"
     elif kind == "exhausted_everywhere":
@@ -821,6 +902,15 @@ DIMENSION_FRAMING = {
             "scheduling fairness of cluster jobs."),
 }
 
+# Actionable remedies for dimensions that have no single SLURM directive to
+# suggest (cpu/time/memory/gpu already emit concrete #SBATCH changes). Kept
+# portable across deployments — describes the pattern, not a site path.
+DIMENSION_REMEDY = {
+    "io": ("Stage inputs to node-local scratch at the start of the job and "
+           "write results there, copying back at the end — this keeps heavy "
+           "I/O off the shared filesystem and usually runs faster too."),
+}
+
 
 def _format_usage_line(stats: UsageStats, directive: str) -> str:
     """Render usage distribution as a human-readable line."""
@@ -907,8 +997,10 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
             lines.append("")
             lines.append(f"    Try:          "
                          f"#SBATCH --{issue.directive}={issue.suggested_display}")
-            if issue.rationale:
-                lines.append(f"                  {issue.rationale}")
+            if issue.directive_label:
+                lines.append(f"                  change {issue.directive_label}")
+            if issue.suggestion_rationale:
+                lines.append(f"                  ({issue.suggestion_rationale})")
 
     if not detailed:
         lines.append("")
