@@ -32,7 +32,7 @@ from itertools import groupby
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from nomad.edu.progress import _load_user_jobs, _load_user_sessions, _score_jobs, _score_sessions
+from nomad.edu.progress import _count_user_jobs, _load_user_jobs, _load_user_sessions, _score_jobs, _score_sessions
 from nomad.edu.scoring import (
     JobFingerprint,
     SessionFingerprint,
@@ -171,10 +171,12 @@ class Issue:
 class UserInsights:
     """Aggregate insight summary for a user across recent jobs and sessions."""
     username: str
-    job_count: int
+    job_count: int              # jobs the engine analyzed (finished states)
     window_days: int
     session_count: int = 0
     session_window_days: int = 7
+    total_job_count: int = 0    # all of the user's jobs (any state) — the
+                                # count shown to users, matching the dashboard
     issues: list[Issue] = field(default_factory=list)
     overall_trajectory: str = "stable"
     overall_score: float = 0.0
@@ -1119,9 +1121,11 @@ def user_insights(
     session_rows = _load_user_sessions(db_path, username, days=session_days)
     session_fingerprints = _score_sessions(session_rows)
 
+    total_jobs = _count_user_jobs(db_path, username, days=days)
     insights = UserInsights(
         username=username,
         job_count=len(fingerprints),
+        total_job_count=total_jobs,
         window_days=days,
         session_count=len(session_fingerprints),
         session_window_days=session_days,
@@ -1244,8 +1248,8 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
 
     lines.append(f"  Your NØMAD Profile — {insights.username}")
     lines.append(f"  {'─' * 56}")
-    if insights.job_count > 0:
-        lines.append(f"  {insights.job_count} jobs in the last {insights.window_days} days")
+    if insights.total_job_count > 0:
+        lines.append(f"  {insights.total_job_count} jobs in the last {insights.window_days} days")
         lines.append(f"  Overall score: {insights.overall_score:.1f} / 100  "
                      f"({insights.overall_trajectory})")
     else:

@@ -108,6 +108,29 @@ class GroupSummary:
 
 # ── Core functions ───────────────────────────────────────────────────
 
+def _count_user_jobs(db_path: str, username: str, days: int = 90) -> int:
+    """Count ALL of a user's jobs in the window, regardless of state — the
+    honest total shown to users (matches the dashboard's per-user count).
+    Distinct from _load_user_jobs, which filters to finished states because
+    only those can be scored. Returns 0 on any error (never crashes)."""
+    from datetime import datetime, timedelta
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            row = conn.execute(
+                "SELECT COUNT(*) FROM jobs "
+                "WHERE user_name = ? AND end_time >= ?",
+                (username, cutoff),
+            ).fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"Error counting jobs for {username}: {e}")
+        return 0
+
+
 def _load_user_jobs(
     db_path: str,
     username: str,
