@@ -54,6 +54,9 @@ class UserTrajectory:
     current_scores: dict[str, float]
     improvement: dict[str, float]  # dimension -> delta (first window vs last)
     overall_improvement: float
+    total_all_jobs: int = 0  # all of the user's jobs (any state) — honest
+                             # total shown to users; total_jobs stays the
+                             # analyzed count that gates the trajectory.
 
     @property
     def is_improving(self) -> bool:
@@ -97,6 +100,8 @@ class GroupSummary:
     # Common issues across the group
     weakest_dimension: str
     strongest_dimension: str
+    total_all_jobs: int = 0  # honest total (all states) shown to users;
+                             # total_jobs stays the analyzed sum.
 
     @property
     def improvement_rate(self) -> str:
@@ -377,6 +382,7 @@ def user_trajectory(
             return UserTrajectory(
                 username=username,
                 total_jobs=len(fingerprints),
+                total_all_jobs=_count_user_jobs(db_path, username, days),
                 date_range=(rows[0].get("end_time", ""), rows[-1].get("end_time", "")),
                 windows=windows,
                 current_scores=current,
@@ -399,6 +405,7 @@ def user_trajectory(
     return UserTrajectory(
         username=username,
         total_jobs=len(fingerprints),
+        total_all_jobs=_count_user_jobs(db_path, username, days),
         date_range=(rows[0].get("end_time", ""), rows[-1].get("end_time", "")),
         windows=windows,
         current_scores=last.scores,
@@ -447,6 +454,7 @@ def group_summary(
     # Compute trajectory for each user
     trajectories = []
     total_jobs = 0
+    total_all_jobs = 0
     earliest = None
     latest = None
 
@@ -455,6 +463,7 @@ def group_summary(
         if traj:
             trajectories.append(traj)
             total_jobs += traj.total_jobs
+            total_all_jobs += traj.total_all_jobs
             if traj.date_range[0]:
                 if earliest is None or traj.date_range[0] < earliest:
                     earliest = traj.date_range[0]
@@ -505,6 +514,7 @@ def group_summary(
         group_name=group_name,
         member_count=len(usernames),
         total_jobs=total_jobs,
+        total_all_jobs=total_all_jobs,
         date_range=(earliest or "", latest or ""),
         users=trajectories,
         avg_overall=round(avg_overall, 1),
