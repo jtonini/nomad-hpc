@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 # CHECK RESULTS
 # =============================================================================
 
+# Modules in collectors/ that are intentionally NOT registry collectors, so the
+# checks below must not flag them:
+#   slurm_legacy — legacy variant of the 'slurm' collector (shares name="slurm";
+#     importing it would double-register that name)
+#   pacct / cgroup_probe / mount_probe — standalone probe scripts
+#     (def probe()/main(), run directly), not BaseCollector subclasses
+NOT_REGISTRY_COLLECTORS = {
+    "slurm_legacy", "pacct", "cgroup_probe", "mount_probe",
+}
+
+
 @dataclass
 class CheckItem:
     """Single check result."""
@@ -133,6 +144,7 @@ class HealthChecker:
             py_files = [
                 f.stem for f in collector_dir.glob("*.py")
                 if f.stem not in ("__init__", "base", "registry")
+                and f.stem not in NOT_REGISTRY_COLLECTORS
                 and not f.stem.startswith("_")
             ]
 
@@ -351,7 +363,9 @@ class HealthChecker:
         collector_dir = self.nomad_dir / "collectors"
         if collector_dir.exists():
             for py_file in collector_dir.glob("*.py"):
-                if py_file.stem in ("__init__", "base", "registry") or py_file.stem.startswith("_"):
+                if (py_file.stem in ("__init__", "base", "registry")
+                        or py_file.stem in NOT_REGISTRY_COLLECTORS
+                        or py_file.stem.startswith("_")):
                     continue
                 content = py_file.read_text()
                 if "BaseCollector" not in content and "class " in content:

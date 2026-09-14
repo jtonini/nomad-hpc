@@ -15,6 +15,7 @@ from .base import (
 )
 from .disk import DiskCollector
 from .gpu import GPUCollector
+from .interactive import InteractiveCollector
 from .groups import GroupCollector
 from .iostat import IOStatCollector
 from .job_metrics import JobMetricsCollector
