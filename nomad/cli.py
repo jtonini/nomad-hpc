@@ -4363,6 +4363,49 @@ def sync(ctx, config_file, output, dry_run):
             except Exception:
                 pass
 
+    # Index the freshly-merged DB before swapping it in. Without these, queries
+    # against a combined DB of any size full-scan millions of rows: on a real
+    # 7.6GB combined.db (3.2M node_state rows, 4.6M interactive_sessions rows)
+    # the Console's dashboard query measured 83s unindexed vs 0.07s indexed,
+    # for ~12s of index build. A missing table is not an error — sites differ
+    # in which collectors they run — so each index is attempted independently.
+    if total_records > 0:
+        _INDEXES = [
+            ("node_state", "cluster, timestamp"),
+            ("node_state", "timestamp"),
+            ("interactive_sessions", "timestamp"),
+            ("interactive_summary", "timestamp"),
+            ("jobs", "source_site"),
+            ("jobs", "user_name"),
+            ("jobs", "state"),
+            ("job_summary", "job_id"),
+            ("gpu_stats", "timestamp"),
+            ("workstation_state", "timestamp"),
+        ]
+        click.echo(f"  Indexing... ", nl=False)
+        _built = 0
+        try:
+            _idx_conn = sqlite3.connect(combined_tmp_path)
+            for _table, _cols in _INDEXES:
+                _name = "idx_{}_{}".format(
+                    _table, _cols.replace(", ", "_").replace(" ", ""))
+                try:
+                    _idx_conn.execute(
+                        f"CREATE INDEX IF NOT EXISTS {_name} "
+                        f"ON {_table}({_cols})")
+                    _built += 1
+                except Exception:
+                    pass  # table absent at this site
+            try:
+                _idx_conn.execute("ANALYZE")
+            except Exception:
+                pass
+            _idx_conn.commit()
+            _idx_conn.close()
+            click.echo(click.style(f"OK ({_built} indexes)", fg="green"))
+        except Exception as _idx_err:
+            click.echo(click.style(f"skipped ({_idx_err})", fg="yellow"))
+
     # Atomic swap: replace the real combined.db with the freshly-built
     # temp DB. If anything earlier failed badly enough to leave total_records
     # at 0, preserve the previous combined.db instead of clobbering it.
