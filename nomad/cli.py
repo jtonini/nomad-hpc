@@ -3763,6 +3763,7 @@ def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None):
     """
     import os
     import subprocess as sp
+    import time as _t
     import logging
     logger = logging.getLogger("nomad.sync")
 
@@ -3797,8 +3798,23 @@ def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None):
             # Use .backup to make atomic snapshot
             backup_cmd = (f"sqlite3 {remote_db} \".backup {remote_snap}\" "
                           f"&& chmod 600 {remote_snap}")
-            backup_result = _ssh(backup_cmd, timeout=120)
-            if backup_result.returncode == 0:
+            # .backup fails while that site's collector is mid-write
+            # ("database is locked"). The write window is seconds, so retry
+            # rather than giving up — the alternative path (scp of the live
+            # database) is known to produce a corrupt copy.
+            backup_result = None
+            for _attempt in range(3):
+                backup_result = _ssh(backup_cmd, timeout=180)
+                if backup_result.returncode == 0:
+                    break
+                if "locked" not in (backup_result.stderr or "").lower():
+                    break
+                logger.info(
+                    f".backup on {host} hit a lock, retrying in 15s "
+                    f"(attempt {_attempt + 1}/3)")
+                _ssh(f"rm -f {remote_snap}", timeout=10)
+                _t.sleep(15)
+            if backup_result is not None and backup_result.returncode == 0:
                 # scp the snapshot
                 scp_result = _scp(remote_snap, local_copy)
                 # Always cleanup remote snapshot
@@ -3820,9 +3836,18 @@ def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None):
     except Exception as e:
         logger.warning(f"backup attempt failed: {e}")
 
-    # Fallback: direct scp of live DB (risk of corruption if mid-WAL-write)
-    if not backup_used:
-        logger.info(f"Falling back to direct scp for {host}")
+    # Direct scp of the live database is only safe when the remote has no
+    # sqlite3 at all. Using it after a FAILED .backup means copying a database
+    # that is actively being written — which produces a file that looks
+    # complete and is malformed. Fail cleanly instead; the caller can fall back
+    # to a verified cached copy.
+    if backup_used:
+        logger.warning(
+            f"snapshot unavailable on {host} — refusing to scp a live "
+            f"database (that would risk a corrupt copy)")
+        return False
+
+    logger.info(f"Falling back to direct scp for {host}")
     try:
         scp_result = _scp(remote_db, local_copy)
         if scp_result.returncode == 0:
@@ -4097,13 +4122,18 @@ def sync(ctx, config_file, output, dry_run):
     click.echo()
 
     def _fall_back_to_cache(name, local_copy, pulled):
-        """Use the previous cached copy when a live pull fails.
+        """Use the previous cached copy when a live pull fails — if it is sound.
 
-        A pull can fail for transient reasons — most commonly ".backup failed:
-        database is locked" while that site's own collector is mid-write. The
-        cached copy from the last successful pull is still a complete, valid
-        database for that site, so merging it keeps the site present (a little
-        stale) instead of silently dropping it from the combined DB entirely.
+        A pull can fail for transient reasons, most commonly ".backup failed:
+        database is locked" while that site's own collector is mid-write. Using
+        the last cached copy keeps the site present (a little stale) instead of
+        dropping it from the combined DB entirely.
+
+        But a cached copy is NOT automatically trustworthy: a failed .backup can
+        leave behind a partial file that looks complete by size and is in fact a
+        malformed database. Merging one of those corrupts the run — worse than
+        losing the site for a cycle — so the copy is integrity-checked first, and
+        a corrupt one is deleted rather than left to poison the next attempt.
         """
         if not local_copy.exists():
             return False
@@ -4112,6 +4142,24 @@ def sync(ctx, config_file, output, dry_run):
             size_mb = local_copy.stat().st_size / (1024 * 1024)
         except OSError:
             return False
+
+        try:
+            _chk = sqlite3.connect(f"file:{local_copy}?mode=ro", uri=True)
+            _sound = _chk.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+            _chk.close()
+        except Exception:
+            _sound = False
+
+        if not _sound:
+            click.echo(click.style(
+                "pull failed and the cached copy is corrupt — discarding it",
+                fg="red"))
+            try:
+                local_copy.unlink()
+            except OSError:
+                pass
+            return False
+
         click.echo(click.style(
             f"pull failed — using cached copy "
             f"({size_mb:.1f} MB, {age_min:.0f} min old)", fg="yellow"))
@@ -4253,6 +4301,12 @@ def sync(ctx, config_file, output, dry_run):
     _init.close()
 
     total_records = 0
+    # Per-site merge OUTCOMES. A site that was pulled is not necessarily a site
+    # whose data made it in: a malformed source makes the merge raise, and
+    # reporting len(pulled) as "sites merged" then states the opposite of what
+    # happened. Everything downstream — the summary line, sync_sites, and the
+    # completeness guard — reads this instead.
+    merge_results = {}
 
     for site_name, db_path in pulled:
         click.echo(f"  Merging {site_name}... ", nl=False)
@@ -4353,10 +4407,14 @@ def sync(ctx, config_file, output, dry_run):
 
             combined.commit()
             total_records += site_records
+            merge_results[site_name] = {
+                "merged": 1, "records": site_records, "error": None}
             click.echo(click.style(
                 f"OK ({site_records:,} records)", fg="green"))
 
         except Exception as e:
+            merge_results[site_name] = {
+                "merged": 0, "records": 0, "error": str(e)[:200]}
             click.echo(click.style(f"ERROR: {e}", fg="red"))
             try:
                 combined.rollback()
@@ -4389,21 +4447,48 @@ def sync(ctx, config_file, output, dry_run):
                 '  partitions TEXT,'
                 '  filesystems TEXT,'
                 '  cluster_type TEXT,'
-                '  synced_at TEXT'
+                '  synced_at TEXT,'
+                '  merged INTEGER,'
+                '  records INTEGER,'
+                '  error TEXT,'
+                '  last_success TEXT'
                 ')'
             )
-            combined.execute('DELETE FROM sync_sites')
             from datetime import datetime
             now = datetime.now().isoformat()
+
+            # Carry last_success forward from the PREVIOUS combined DB. This
+            # table is rewritten every build, so without this a site's success
+            # history resets the moment it fails once — losing exactly the
+            # information needed to notice a source has gone quiet.
+            _prior_success = {}
+            if combined_path.exists():
+                try:
+                    _p = sqlite3.connect(
+                        f"file:{combined_path}?mode=ro", uri=True)
+                    for _n, _ls in _p.execute(
+                            'SELECT name, last_success FROM sync_sites'):
+                        _prior_success[_n] = _ls
+                    _p.close()
+                except Exception:
+                    pass  # no prior table (first build after upgrade)
+
+            combined.execute('DELETE FROM sync_sites')
             for sname, smeta in site_configs.items():
+                _res = merge_results.get(sname, {})
+                _merged = int(_res.get("merged", 0))
                 combined.execute(
                     'INSERT OR REPLACE INTO sync_sites '
-                    '(name, partitions, filesystems, '
-                    ' cluster_type, synced_at) '
-                    'VALUES (?, ?, ?, ?, ?)',
+                    '(name, partitions, filesystems, cluster_type, '
+                    ' synced_at, merged, records, error, last_success) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     (sname, smeta['partitions'],
                      smeta['filesystems'],
-                     smeta['cluster_type'], now)
+                     smeta['cluster_type'], now,
+                     _merged,
+                     _res.get("records", 0),
+                     _res.get("error"),
+                     now if _merged else _prior_success.get(sname))
                 )
             combined.commit()
         except Exception:
@@ -4460,7 +4545,42 @@ def sync(ctx, config_file, output, dry_run):
     # Atomic swap: replace the real combined.db with the freshly-built
     # temp DB. If anything earlier failed badly enough to leave total_records
     # at 0, preserve the previous combined.db instead of clobbering it.
-    if total_records == 0:
+    # Completeness guard. A build that merged fewer sites than the existing
+    # combined.db contains must not replace it: publishing it would silently
+    # drop whole sites from every consumer, and the existing DB — merely a
+    # cycle stale — is strictly better than one missing a site outright.
+    _prev_merged = 0
+    if combined_path.exists():
+        try:
+            _pc = sqlite3.connect(f"file:{combined_path}?mode=ro", uri=True)
+            _prev_merged = _pc.execute(
+                'SELECT COUNT(*) FROM sync_sites WHERE merged = 1').fetchone()[0]
+            _pc.close()
+        except Exception:
+            # No sync_sites, or no merged column (a build from before this
+            # version). Nothing to compare against, so allow the swap —
+            # otherwise the first run after upgrading could never publish.
+            _prev_merged = 0
+
+    _now_merged = sum(1 for r in merge_results.values() if r["merged"])
+
+    if _prev_merged and _now_merged < _prev_merged:
+        click.echo()
+        click.echo(click.style(
+            f"  Merged {_now_merged} site(s) but the existing combined.db has "
+            f"{_prev_merged} — not replacing it.", fg="yellow", bold=True))
+        for _s, _r in merge_results.items():
+            if not _r["merged"]:
+                click.echo(click.style(
+                    f"    {_s} FAILED: {_r['error']}", fg="red"))
+        click.echo(click.style(
+            "  The current combined.db is left intact; fix the failing "
+            "site(s) and re-run.", fg="yellow"))
+        try:
+            combined_tmp_path.unlink()
+        except Exception:
+            pass
+    elif total_records == 0:
         click.echo()
         click.echo(click.style(
             "  Sync produced 0 records — not replacing existing combined.db",
@@ -4485,9 +4605,17 @@ def sync(ctx, config_file, output, dry_run):
     click.echo()
     click.echo(click.style(
         "  ══════════════════════════════════════", fg="cyan"))
-    click.echo(click.style(
-        f"  Done: {len(pulled)} site(s) merged", fg="green",
-        bold=True))
+    _ok = [s for s, r in merge_results.items() if r["merged"]]
+    _bad = [(s, r["error"]) for s, r in merge_results.items() if not r["merged"]]
+    if _bad:
+        click.echo(click.style(
+            f"  Done: {len(_ok)} of {len(pulled)} site(s) merged",
+            fg="yellow", bold=True))
+        for _s, _err in _bad:
+            click.echo(click.style(f"    {_s} FAILED: {_err}", fg="red"))
+    else:
+        click.echo(click.style(
+            f"  Done: {len(_ok)} site(s) merged", fg="green", bold=True))
     click.echo()
     size_mb = combined_path.stat().st_size / (1024 * 1024)
     click.echo(f"  Combined DB: {combined_path} ({size_mb:.1f} MB)")
