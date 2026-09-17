@@ -16,6 +16,7 @@ Commands:
 
 import json
 import logging
+import fcntl
 import sqlite3
 import sys
 import time
@@ -4066,10 +4067,56 @@ def sync(ctx, config_file, output, dry_run):
         click.echo(f"  Would merge into: {combined_path}")
         return
 
+    # Only one sync may run at a time. A full sync can take many minutes (7m23s
+    # measured on a four-site hub pulling ~12GB of remote databases), so any
+    # cron interval shorter than the runtime makes runs overlap. That matters
+    # because the merge only aborts when it produces ZERO records — an
+    # overlapping run can therefore swap in a PARTIAL combined.db with no error
+    # at all, silently dropping whole sites. An exclusive advisory lock makes
+    # that impossible, and the kernel releases it if this process dies.
+    _lock_path = combined_path.with_suffix(combined_path.suffix + ".lock")
+    try:
+        _lock_fh = open(_lock_path, "w")
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        click.echo(click.style(
+            "  Another sync is already running — skipping this run.",
+            fg="yellow"))
+        click.echo()
+        return
+    except OSError as _lock_err:
+        # Never let a lock problem stop a sync that would otherwise work.
+        click.echo(click.style(
+            f"  Could not take sync lock ({_lock_err}) — continuing anyway.",
+            fg="yellow"))
+        _lock_fh = None
+
     # Phase 1: Pull remote databases
     click.echo(click.style(
         "  Phase 1: Pulling remote databases", bold=True))
     click.echo()
+
+    def _fall_back_to_cache(name, local_copy, pulled):
+        """Use the previous cached copy when a live pull fails.
+
+        A pull can fail for transient reasons — most commonly ".backup failed:
+        database is locked" while that site's own collector is mid-write. The
+        cached copy from the last successful pull is still a complete, valid
+        database for that site, so merging it keeps the site present (a little
+        stale) instead of silently dropping it from the combined DB entirely.
+        """
+        if not local_copy.exists():
+            return False
+        try:
+            age_min = (time.time() - local_copy.stat().st_mtime) / 60.0
+            size_mb = local_copy.stat().st_size / (1024 * 1024)
+        except OSError:
+            return False
+        click.echo(click.style(
+            f"pull failed — using cached copy "
+            f"({size_mb:.1f} MB, {age_min:.0f} min old)", fg="yellow"))
+        pulled.append((name, local_copy))
+        return True
 
     pulled = []
     for site in sites:
@@ -4096,10 +4143,14 @@ def sync(ctx, config_file, output, dry_run):
                     f"OK ({size_mb:.1f} MB)", fg="green"))
                 pulled.append((name, local_copy))
             else:
-                click.echo(click.style(
-                    "FAILED (see log)", fg="red"))
+                _used_cache = _fall_back_to_cache(name, local_copy, pulled)
+                if not _used_cache:
+                    click.echo(click.style(
+                        "FAILED (see log)", fg="red"))
         except Exception as e:
-            click.echo(click.style(f"ERROR: {e}", fg="red"))
+            _used_cache = _fall_back_to_cache(name, local_copy, pulled)
+            if not _used_cache:
+                click.echo(click.style(f"ERROR: {e}", fg="red"))
 
     if not pulled:
         click.echo()
