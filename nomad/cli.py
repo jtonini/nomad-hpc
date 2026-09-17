@@ -4164,9 +4164,14 @@ def sync(ctx, config_file, output, dry_run):
             f"pull failed — using cached copy "
             f"({size_mb:.1f} MB, {age_min:.0f} min old)", fg="yellow"))
         pulled.append((name, local_copy))
+        from_cache.add(name)
         return True
 
     pulled = []
+    # Sites whose data came from a cached copy rather than a live pull. Their
+    # data IS present (so the completeness guard is satisfied), but it is
+    # ageing — which is exactly what a quiet-source check needs to know.
+    from_cache = set()
     for site in sites:
         name = site.get('name', 'unknown')
         host = site.get('host')
@@ -4438,7 +4443,11 @@ def sync(ctx, config_file, output, dry_run):
 
     # Write sync_sites metadata table (fresh connection, matching the
     # per-site pattern above).
-    if site_configs:
+    # Write the table whenever there is anything to record. Gating on
+    # site_configs alone means a build where no headnode was reachable
+    # writes no metadata at all — losing the record of what happened
+    # exactly when it matters most.
+    if site_configs or merge_results:
         combined = sqlite3.connect(combined_tmp_path)
         try:
             combined.execute(
@@ -4451,6 +4460,7 @@ def sync(ctx, config_file, output, dry_run):
                 '  merged INTEGER,'
                 '  records INTEGER,'
                 '  error TEXT,'
+                '  source TEXT,'
                 '  last_success TEXT'
                 ')'
             )
@@ -4474,20 +4484,29 @@ def sync(ctx, config_file, output, dry_run):
                     pass  # no prior table (first build after upgrade)
 
             combined.execute('DELETE FROM sync_sites')
-            for sname, smeta in site_configs.items():
+            # Every site we ATTEMPTED gets a row. Iterating site_configs alone
+            # silently omitted any site whose config could not be fetched —
+            # e.g. a cluster whose headnode is down for maintenance — even when
+            # that site merged fine from its cached copy. That both hid the
+            # site and mis-based the completeness guard on it.
+            _all_sites = sorted(set(site_configs) | set(merge_results))
+            for sname in _all_sites:
+                smeta = site_configs.get(sname) or {}
                 _res = merge_results.get(sname, {})
                 _merged = int(_res.get("merged", 0))
                 combined.execute(
                     'INSERT OR REPLACE INTO sync_sites '
                     '(name, partitions, filesystems, cluster_type, '
-                    ' synced_at, merged, records, error, last_success) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    (sname, smeta['partitions'],
-                     smeta['filesystems'],
-                     smeta['cluster_type'], now,
+                    ' synced_at, merged, records, error, source, '
+                    ' last_success) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    (sname, smeta.get('partitions'),
+                     smeta.get('filesystems'),
+                     smeta.get('cluster_type'), now,
                      _merged,
                      _res.get("records", 0),
                      _res.get("error"),
+                     'cache' if sname in from_cache else 'live',
                      now if _merged else _prior_success.get(sname))
                 )
             combined.commit()
