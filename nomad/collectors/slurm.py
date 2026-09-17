@@ -326,6 +326,7 @@ class SlurmCollector(BaseCollector):
             failure_reason = compute_failure_reason(state, exit_code, exit_signal)
 
             # Compute wait time
+            start_time = self._sane_start(start_time, submit_time)
             wait_time = None
             if submit_time and start_time:
                 wait_time = int((start_time - submit_time).total_seconds())
@@ -505,6 +506,7 @@ class SlurmCollector(BaseCollector):
             start_time = self._parse_datetime(parts[13])
 
             # Compute wait time for running jobs
+            start_time = self._sane_start(start_time, submit_time)
             wait_time = None
             if submit_time and start_time:
                 wait_time = int((start_time - submit_time).total_seconds())
@@ -630,6 +632,23 @@ class SlurmCollector(BaseCollector):
 
         except (ValueError, AttributeError):
             return None
+
+    @staticmethod
+    def _sane_start(start, submit):
+        """Return start only if it can be a real start time.
+
+        squeue reports Slurm's ESTIMATED start for jobs that have not run yet.
+        For a throttled job array that estimate can be a year into the future,
+        and storing it as history fabricates a year-long queue wait. A start
+        that is in the future, or precedes submission, is not a start.
+        """
+        if start is None:
+            return None
+        if start > datetime.now():
+            return None
+        if submit is not None and start < submit:
+            return None
+        return start
 
     def _parse_datetime(self, value: str) -> datetime | None:
         """Parse SLURM datetime format."""
