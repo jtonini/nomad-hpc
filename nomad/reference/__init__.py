@@ -1,6 +1,6 @@
-"""NØMAD Reference — Built-in documentation and code navigation.
+"""NØMAÐ Reference — Built-in documentation and code navigation.
 
-Provides rich, structured reference content for all NØMAD commands,
+Provides rich, structured reference content for all NØMAÐ commands,
 modules, configuration options, and concepts. Goes beyond --help
 with examples, source file locations, mathematical foundations,
 and cross-references.

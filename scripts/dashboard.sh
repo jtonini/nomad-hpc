@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# NØMAD Dashboard Quick Start
+# NØMAÐ Dashboard Quick Start
 # 
 # Run this on badenpowell, then from your laptop:
 #   ssh -L 8050:localhost:8050 badenpowell
@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "==========================================================="
-echo "            NOMADE Dashboard Quick Start                   "
+echo "            NØMAÐ Dashboard Quick Start                   "
 echo "==========================================================="
 echo
 

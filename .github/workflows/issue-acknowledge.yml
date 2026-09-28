@@ -28,7 +28,7 @@ jobs:
             const body = [
               'Thanks for reporting this! We typically triage new issues within 5 business days.',
               '',
-              'If this is urgent and your institution has a NØMAD Console license,',
+              'If this is urgent and your institution has a NØMAÐ Console license,',
               'you can reach us directly via the Console\'s "Contact Support" feature.',
               refHint,
             ].join('\n');

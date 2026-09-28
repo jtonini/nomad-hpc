@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Job Monitor Daemon
+NØMAÐ Job Monitor Daemon
 
 Monitors running jobs to collect real-time I/O metrics.
 Distinguishes NFS vs local storage writes by tracking file descriptors.
@@ -526,7 +526,7 @@ def main():
     """CLI entry point for standalone execution."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='NØMAD Job Monitor Daemon')
+    parser = argparse.ArgumentParser(description='NØMAÐ Job Monitor Daemon')
     parser.add_argument('--db', default='/var/lib/nomad/nomad.db', help='Database path')
     parser.add_argument('--interval', type=int, default=30, help='Sample interval (seconds)')
     parser.add_argument('--once', action='store_true', help='Run once and exit')

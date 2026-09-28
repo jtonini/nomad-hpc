@@ -1,6 +1,6 @@
 # Insight Engine
 
-The NØMAD Insight Engine translates analytical output into actionable, human-readable narratives. Instead of presenting raw numbers, charts, and threshold alerts, the engine explains **what is happening**, **why it matters**, and **what to do about it**.
+The NØMAÐ Insight Engine translates analytical output into actionable, human-readable narratives. Instead of presenting raw numbers, charts, and threshold alerts, the engine explains **what is happening**, **why it matters**, and **what to do about it**.
 
 ## The Distinction
 
@@ -111,7 +111,7 @@ The binding constraint signal identifies which resource (CPU, memory, GPU, I/O) 
 
 ### Cluster type considerations
 
-NØMAD monitors three cluster types: HPC clusters (SLURM), workstation groups (per-user processes), and interactive servers (RStudio/Jupyter sessions). Some signals only fire for specific types — for example, SLURM-related signals only run when there are jobs in the database, and workstation pressure signals only run when `workstation_state` has data.
+NØMAÐ monitors three cluster types: HPC clusters (SLURM), workstation groups (per-user processes), and interactive servers (RStudio/Jupyter sessions). Some signals only fire for specific types — for example, SLURM-related signals only run when there are jobs in the database, and workstation pressure signals only run when `workstation_state` has data.
 
 ## CLI Reference
 

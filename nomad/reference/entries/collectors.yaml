@@ -3,7 +3,7 @@ entries:
     title: "Data Collectors"
     summary: "Modular data collection system for cluster metrics."
     description: >
-      NOMAD's collectors gather metrics from various sources — SLURM,
+      NØMAÐ's collectors gather metrics from various sources — SLURM,
       filesystems, GPU devices, I/O statistics, network, and cloud
       providers. Each collector is a Python module that implements a
       common interface defined in base.py. Collectors are configured
@@ -32,7 +32,7 @@ entries:
       Interfaces with SLURM's sacct, squeue, and sinfo commands to
       gather job completion records, current queue state, and node
       availability. Handles SLURM's various output formats and
-      normalizes data into the NOMAD schema. Supports both modern
+      normalizes data into the NØMAÐ schema. Supports both modern
       SLURM (20+) and legacy versions via slurm_legacy.py.
     source_files:
       - nomad/collectors/slurm.py

@@ -369,7 +369,7 @@ def diagnose_workstation(
     Generate comprehensive diagnostics for a workstation.
     
     Args:
-        db_path: Path to NØMAD database
+        db_path: Path to NØMAÐ database
         hostname: Workstation hostname
         hours: Hours of history to analyze
     
@@ -467,7 +467,7 @@ def format_diagnostic(diag: WorkstationDiagnostic) -> str:
 
     # Header
     dept_str = f" ({diag.department})" if diag.department else ""
-    lines.append(f"\n  {c.BOLD}NØMAD Workstation Diagnostic{c.RESET} — {c.CYAN}{diag.hostname}{dept_str}{c.RESET}")
+    lines.append(f"\n  {c.BOLD}NØMAÐ Workstation Diagnostic{c.RESET} — {c.CYAN}{diag.hostname}{dept_str}{c.RESET}")
     lines.append(f"  {'─' * 56}")
 
     # Collection prerequisites (if checked)

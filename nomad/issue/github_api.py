@@ -275,7 +275,7 @@ class GitHubClient:
         Returns (subject, body) tuple for use with mailto: or
         SMTP-based sending.
         """
-        subject = f"[NØMAD {category.title() or 'Report'}] {title}"
+        subject = f"[NØMAÐ {category.title() or 'Report'}] {title}"
         email_body = (
             f"Issue Report: {title}\n"
             f"Category: {category or 'general'}\n"

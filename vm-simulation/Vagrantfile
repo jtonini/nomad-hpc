@@ -1,9 +1,9 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-# NOMADE Test Cluster VM
+# NØMAÐ Test Cluster VM
 # 
-# Creates a single VM with SLURM for testing NOMADE.
+# Creates a single VM with SLURM for testing NØMAÐ.
 # Uses minimal config with one node (nomade-test).
 #
 # Usage:
@@ -45,7 +45,7 @@ Vagrant.configure("2") do |config|
     lv.storage_pool_name = "vm-pool"
   end
   
-  # Synced folder for NOMADE development
+  # Synced folder for NØMAÐ development
   # Use rsync instead of NFS (more compatible)
   config.vm.synced_folder "..", "/home/vagrant/nomade", type: "rsync",
     rsync__exclude: [".git/", "*.tar.gz", "__pycache__/", "*.pyc", ".vagrant/"]
@@ -55,7 +55,7 @@ Vagrant.configure("2") do |config|
     set -e
     
     echo "=========================================="
-    echo "NOMADE Test Cluster Setup"
+    echo "NØMAÐ Test Cluster Setup"
     echo "=========================================="
     
     # Update system
@@ -141,11 +141,11 @@ Vagrant.configure("2") do |config|
     echo "Setting up Python environment"
     echo "=========================================="
     
-    # Create venv for NOMADE
+    # Create venv for NØMAÐ
     python3 -m venv /home/vagrant/nomade-venv
     chown -R vagrant:vagrant /home/vagrant/nomade-venv
     
-    # Install NOMADE
+    # Install NØMAÐ
     sudo -u vagrant /home/vagrant/nomade-venv/bin/pip install --upgrade pip
     sudo -u vagrant /home/vagrant/nomade-venv/bin/pip install -e /home/vagrant/nomade
     
@@ -188,7 +188,7 @@ Vagrant.configure("2") do |config|
   config.vm.post_up_message = <<-MESSAGE
   
   ======================================================================
-                    NOMADE Test Cluster Ready!                       
+                    NØMAÐ Test Cluster Ready!                       
   ======================================================================
                                                                 
     SSH:        vagrant ssh                                     

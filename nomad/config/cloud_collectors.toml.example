@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────────────
-# NØMAD Cloud Collector Configuration
+# NØMAÐ Cloud Collector Configuration
 # Add this section to your nomad.toml to enable cloud metric collection.
 # ──────────────────────────────────────────────────────────────────────
 
@@ -32,7 +32,7 @@ region = "us-east-1"
 #   NOMAD_AWS_PROFILE
 #   NOMAD_AWS_ROLE_ARN
 
-# Friendly name for this AWS account (appears as "cluster" in NØMAD)
+# Friendly name for this AWS account (appears as "cluster" in NØMAÐ)
 account_alias = "research-aws"
 
 # How far back to look on each collection cycle (minutes)

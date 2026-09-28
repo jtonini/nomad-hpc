@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu Insights — User-Facing Recommendation Aggregator
+NØMAÐ Edu Insights — User-Facing Recommendation Aggregator
 
 Aggregates per-job recommendations (already computed in scoring.py) into a
 structured summary across a user's recent jobs. Powers `nomad edu me` for
@@ -82,7 +82,7 @@ KEY_TO_DISPLAY = {
     "duration_fit":    "Workstation Session Duration",
 }
 
-# Human-readable labels for directives (NØMAD is for non-specialists too):
+# Human-readable labels for directives (NØMAÐ is for non-specialists too):
 # directive -> (SLURM flag shown to the user, singular unit, plural unit).
 DIRECTIVE_LABEL = {
     "ntasks": ("--ntasks", "core", "cores"),
@@ -717,7 +717,7 @@ def _aggregate_dimension(
     issue.strategy = strategy_label
     issue.suggestion_rationale = rationale
 
-    # Human phrase for the card (NØMAD serves non-specialists): name the flag
+    # Human phrase for the card (NØMAÐ serves non-specialists): name the flag
     # and the unit, not a bare number. e.g. "--ntasks from 8 to 1 core".
     flag, unit_s, unit_p = DIRECTIVE_LABEL.get(primary_directive, ("", "", ""))
     def _u(display, canonical):
@@ -1246,7 +1246,7 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
                 f"If you've run jobs recently, ensure the cluster's "
                 f"job_metrics collector is current (>= v1.5.6).")
 
-    lines.append(f"  Your NØMAD Profile — {insights.username}")
+    lines.append(f"  Your NØMAÐ Profile — {insights.username}")
     lines.append(f"  {'─' * 56}")
     if insights.total_job_count > 0:
         lines.append(f"  {insights.total_job_count} jobs in the last {insights.window_days} days")

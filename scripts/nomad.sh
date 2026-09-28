@@ -1,5 +1,5 @@
 #!/bin/bash
-# NØMAD Bash Helper Functions
+# NØMAÐ Bash Helper Functions
 # Source this file: source /etc/nomad/nomad.sh
 # Or add to ~/.bashrc: source /path/to/nomad.sh
 
@@ -13,7 +13,7 @@ _YELLOW='\033[0;33m'
 # Quick status overview
 nstatus() {
     if [[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]]; then
-        echo -e "${_BOLD}nstatus${_NC} - Show NØMAD status overview"
+        echo -e "${_BOLD}nstatus${_NC} - Show NØMAÐ status overview"
         echo ""
         echo "Usage: nstatus"
         echo ""
@@ -92,7 +92,7 @@ ncollect() {
 # Watch mode - live updates
 nwatch() {
     if [[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]]; then
-        echo -e "${_BOLD}nwatch${_NC} - Watch NØMAD status (live updates)"
+        echo -e "${_BOLD}nwatch${_NC} - Watch NØMAÐ status (live updates)"
         echo ""
         echo "Usage: nwatch [seconds]"
         echo ""
@@ -170,7 +170,7 @@ nsimilarity() {
 # Tail collection log
 nlog() {
     if [[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]]; then
-        echo -e "${_BOLD}nlog${_NC} - Tail NØMAD collection log"
+        echo -e "${_BOLD}nlog${_NC} - Tail NØMAÐ collection log"
         echo ""
         echo "Usage: nlog [logfile]"
         echo ""
@@ -242,12 +242,12 @@ njobs() {
     eval "$cmd"
 }
 
-# Show NØMAD help
+# Show NØMAÐ help
 nhelp() {
-    echo -e "${_BOLD}${_CYAN}NØMAD Helper Functions${_NC}"
+    echo -e "${_BOLD}${_CYAN}NØMAÐ Helper Functions${_NC}"
     echo ""
     echo -e "${_GREEN}Status & Monitoring:${_NC}"
-    echo "  nstatus     - Show NØMAD status overview"
+    echo "  nstatus     - Show NØMAÐ status overview"
     echo "  nwatch [s]  - Watch status (live updates every s seconds)"
     echo "  nmonitor    - Monitor running jobs for I/O patterns"
     echo "  nlog        - Tail collection log"
@@ -268,4 +268,4 @@ nhelp() {
 }
 
 # Print load message
-echo -e "${_CYAN}NØMAD helpers loaded. Type 'nhelp' for commands.${_NC}"
+echo -e "${_CYAN}NØMAÐ helpers loaded. Type 'nhelp' for commands.${_NC}"

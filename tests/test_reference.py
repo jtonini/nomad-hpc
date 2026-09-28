@@ -1,4 +1,4 @@
-"""Tests for NOMAD reference system.
+"""Tests for NØMAÐ reference system.
 
 Tests the knowledge base, formatter, search engine, and CLI commands.
 """
@@ -262,7 +262,7 @@ class TestReferenceFormatter:
                 categories[cat] = []
             categories[cat].append(entry)
         output = fmt.format_index(categories)
-        assert "NOMAD Reference" in output
+        assert "NØMAÐ Reference" in output
         assert "Commands" in output
         assert "Concepts" in output
 

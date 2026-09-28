@@ -1,6 +1,6 @@
 # Alerts
 
-NØMAD supports both threshold-based and predictive alerts.
+NØMAÐ supports both threshold-based and predictive alerts.
 
 ## Alert Types
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Narrative templates for the NØMAD Insight Engine.
+Narrative templates for the NØMAÐ Insight Engine.
 
 Each template is a callable that receives a Signal and returns a
 human-readable narrative string. Templates are selected based on

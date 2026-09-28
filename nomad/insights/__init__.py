@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Insight Engine — translates analytical output into actionable narratives.
+NØMAÐ Insight Engine — translates analytical output into actionable narratives.
 
 Levels:
   1. Template-based narratives (signal → sentence)

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD per-user collector (Idea 18 Component 1).
+NØMAÐ per-user collector (Idea 18 Component 1).
 
 Inherits from BaseCollector. Lifecycle:
   - The framework calls run(), which calls collect() then store(data).

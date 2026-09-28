@@ -1,4 +1,4 @@
-# NØMADE Development Dependencies
+# NØMAÐ Development Dependencies
 
 # Testing
 pytest>=7.0

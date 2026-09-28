@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""NOMAD database layer."""
+"""NØMAÐ database layer."""
 
 from .migrations import MigrationManager, ensure_database
 from .queries import QueryManager, TimeSeriesQuery

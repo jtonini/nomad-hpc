@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Similarity Analysis
+NØMAÐ Similarity Analysis
 
 Computes similarity matrices between jobs using cosine similarity
 on enriched feature vectors combining sacct data and I/O patterns.
@@ -506,7 +506,7 @@ class SimilarityAnalyzer:
         profiles = self.get_cluster_profiles(features, clusters)
 
         lines = [
-            "═══ NØMAD Similarity Analysis ═══",
+            "═══ NØMAÐ Similarity Analysis ═══",
             "",
             f"Jobs analyzed: {len(features)}",
             f"Clusters found: {len(profiles)}",
@@ -535,7 +535,7 @@ def main():
     """CLI for similarity analysis."""
     import argparse
 
-    parser = argparse.ArgumentParser(description='NØMAD Similarity Analysis')
+    parser = argparse.ArgumentParser(description='NØMAÐ Similarity Analysis')
     parser.add_argument('--db', default='/var/lib/nomad/nomad.db', help='Database path')
     parser.add_argument('--min-samples', type=int, default=3, help='Min I/O samples per job')
     parser.add_argument('--export', type=str, help='Export JSON for visualization')

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NOMADE Derivative Analysis
+NØMAÐ Derivative Analysis
 
 Analyzes time series using first and second derivatives to detect:
 - Trends (increasing, decreasing, stable)

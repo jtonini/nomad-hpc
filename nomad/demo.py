@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Demo Mode
+NØMAÐ Demo Mode
 
 Generates synthetic HPC job data for testing and demonstration.
-Allows reviewers and users to test NØMAD without a real HPC cluster.
+Allows reviewers and users to test NØMAÐ without a real HPC cluster.
 
 Usage:
     nomad demo              # Generate data and launch dashboard
@@ -24,7 +24,7 @@ from pathlib import Path
 
 DEMO_CLUSTER = {
     "name": "demo-cluster",
-    "description": "NØMAD demo cluster with 10 nodes",
+    "description": "NØMAÐ demo cluster with 10 nodes",
     "nodes": [
         {"name": "node01", "cores": 32, "memory_gb": 128, "gpus": 0, "partition": "compute"},
         {"name": "node02", "cores": 32, "memory_gb": 128, "gpus": 0, "partition": "compute"},
@@ -1458,7 +1458,7 @@ def run_demo(
     port: int = 5000,
 ) -> str:
     """
-    Run NØMAD demo mode.
+    Run NØMAÐ demo mode.
 
     Generates synthetic data and optionally launches the dashboard.
     """

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
-Workstation mount probe for NOMAD.
+Workstation mount probe for NØMAÐ.
 
 Reads /proc/mounts, filters to NFS mounts + non-system local mounts, and
 for each one runs an independent stat() with a strict wall-clock timeout.

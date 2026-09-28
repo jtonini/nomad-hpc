@@ -1,14 +1,14 @@
 # Network Methodology
 
-NØMAD's prediction engine uses similarity networks to identify job failure patterns. This approach draws inspiration from biogeographical network analysis.
+NØMAÐ's prediction engine uses similarity networks to identify job failure patterns. This approach draws inspiration from biogeographical network analysis.
 
 ## Theoretical Foundation
 
 ### From Biogeography to HPC
 
-The methodology is inspired by Vilhena & Antonelli (2015), who used network analysis to identify biogeographical regions from species distribution data. Just as biogeographical regions emerge from species patterns rather than being predefined, NØMAD allows job behavior patterns to emerge from metric data.
+The methodology is inspired by Vilhena & Antonelli (2015), who used network analysis to identify biogeographical regions from species distribution data. Just as biogeographical regions emerge from species patterns rather than being predefined, NØMAÐ allows job behavior patterns to emerge from metric data.
 
-| Biogeography Concept | NØMAD Analog |
+| Biogeography Concept | NØMAÐ Analog |
 |---------------------|---------------|
 | Species | Jobs |
 | Geographic regions | Compute resources (nodes, partitions) |
@@ -18,7 +18,7 @@ The methodology is inspired by Vilhena & Antonelli (2015), who used network anal
 
 ### Why Cosine Similarity?
 
-NØMAD uses **cosine similarity on continuous feature vectors** rather than Simpson similarity on categorical presence/absence data:
+NØMAÐ uses **cosine similarity on continuous feature vectors** rather than Simpson similarity on categorical presence/absence data:
 
 - **Magnitude matters**: CPU efficiency of 80% vs 20% is significant, not just "used CPU"
 - **Multi-dimensional**: Jobs have 17+ continuous metrics
@@ -94,7 +94,7 @@ Connected components and modularity-based clustering identify job communities—
 
 ## Bipartite Network Approach
 
-For advanced analysis, NØMAD implements Vilhena & Antonelli's bipartite approach:
+For advanced analysis, NØMAÐ implements Vilhena & Antonelli's bipartite approach:
 ```
 ┌──────────────┐          ┌──────────────┐
 │    Jobs      │──────────│ Resource Bins│
@@ -140,7 +140,7 @@ High clustering = consistent failure patterns.
 
 ### Statistical Significance
 
-NØMAD tests whether observed patterns exceed random chance using permutation tests:
+NØMAÐ tests whether observed patterns exceed random chance using permutation tests:
 
 1. Shuffle failure labels 1000 times
 2. Compute metric for each shuffle

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Tests for the NØMAD energy module.
+Tests for the NØMAÐ energy module.
 
 Self-contained: builds a small SQLite fixture with the real schema (jobs,
 job_accounting, gpu_stats) so the suite does not depend on the demo
@@ -172,7 +172,7 @@ def test_dcgm_idle_detected(db):
 def test_engine_summary_and_json(db):
     eng = EnergyEngine(db, hours=24, cluster_name="test", config=CONFIG)
     summary = eng.full_summary(explain=True)
-    assert "NØMAD Energy" in summary and "Opportunity" in summary
+    assert "NØMAÐ Energy" in summary and "Opportunity" in summary
     data = json.loads(eng.to_json())
     assert data["cluster"] == "test"
     assert data["consumed_kwh"] > 0

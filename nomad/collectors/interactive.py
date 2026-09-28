@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NOMADE Interactive Session Collector
+NØMAÐ Interactive Session Collector
 Monitors RStudio and Jupyter sessions via process inspection.
 No root or API tokens required.
 
-Works standalone on Python 3.6+ or integrates with NOMADE framework.
+Works standalone on Python 3.6+ or integrates with NØMAÐ framework.
 """
 
 import logging

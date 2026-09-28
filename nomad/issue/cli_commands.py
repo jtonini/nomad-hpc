@@ -21,7 +21,7 @@ from .github_api import GitHubClient
 
 
 def _load_issue_config(ctx: click.Context) -> dict:
-    """Load issue_reporting config from the NØMAD config."""
+    """Load issue_reporting config from the NØMAÐ config."""
     try:
         config = ctx.obj.get("config", {}) if ctx.obj else {}
         return config.get("issue_reporting", {})
@@ -82,7 +82,7 @@ def _display_duplicates(duplicates: list, client: GitHubClient) -> int | None:
 def issue():
     """Report issues, request features, and ask questions.
 
-    Submit directly to the NØMAD GitHub repository with
+    Submit directly to the NØMAÐ GitHub repository with
     auto-populated system information. When a GitHub token
     is configured in nomad.toml, issues are submitted via API.
     Otherwise, opens a pre-filled GitHub issue form in your browser.
@@ -152,7 +152,7 @@ def report(ctx, category, component, title, db_path, no_duplicate_check, email, 
         db_path = _get_db_path(ctx)
 
     click.echo()
-    click.secho("  NØMAD Issue Reporter", fg="cyan", bold=True)
+    click.secho("  NØMAÐ Issue Reporter", fg="cyan", bold=True)
     click.secho("  ═══════════════════", fg="cyan")
     click.echo()
 
@@ -462,7 +462,7 @@ def info(ctx, db_path, output_json):
             bold=True,
         )
         click.echo()
-        click.echo(f"  NØMAD version:    {sys_info.nomad_version}")
+        click.echo(f"  NØMAÐ version:    {sys_info.nomad_version}")
         click.echo(f"  Python:           {sys_info.python_version}")
         click.echo(f"  OS:               {sys_info.os_info}")
         if sys_info.active_collectors:

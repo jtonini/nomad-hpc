@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-NOMADE Synthetic Job Generator
+NØMAÐ Synthetic Job Generator
 
-Generates realistic HPC job submissions for testing NOMADE.
+Generates realistic HPC job submissions for testing NØMAÐ.
 Jobs are created based on profiles that mimic real cluster workloads.
 
 Supports multiple cluster configurations:
@@ -242,7 +242,7 @@ PROFILES_SMALL = [
         description="ML inference",
     ),
     
-    # Bad I/O patterns (what NOMADE should catch!)
+    # Bad I/O patterns (what NØMAÐ should catch!)
     JobProfile(
         name="bad_io_nfs_heavy",
         weight=0.08,
@@ -566,7 +566,7 @@ class JobGenerator:
         
         script_lines.extend([
             "",
-            "# Job metadata (for NOMADE tracking)",
+            "# Job metadata (for NØMAÐ tracking)",
             f"echo \"NOMADE_PROFILE={job['profile']}\"",
             f"echo \"NOMADE_PARTITION={job['partition']}\"",
             f"echo \"NOMADE_CPUS={job['cpus']}\"",
@@ -731,7 +731,7 @@ class JobGenerator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate synthetic HPC jobs for NOMADE testing"
+        description="Generate synthetic HPC jobs for NØMAÐ testing"
     )
     
     parser.add_argument(

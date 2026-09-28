@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 """
-NØMAD AWS Cloud Collector
+NØMAÐ AWS Cloud Collector
 
 Collects metrics from AWS CloudWatch and (optionally) Cost Explorer,
-normalizing them into the NØMAD schema for downstream analysis.
+normalizing them into the NØMAÐ schema for downstream analysis.
 
 Supported resources:
     - EC2 instances (CPU, network, disk, status checks)
@@ -58,10 +58,10 @@ except ImportError:
     HAS_BOTO3 = False
 
 
-# ── AWS metric → NØMAD canonical metric mapping ────────────────────
+# ── AWS metric → NØMAÐ canonical metric mapping ────────────────────
 
 AWS_METRIC_MAP: dict[str, tuple[str, str]] = {
-    # (CloudWatch MetricName) → (NØMAD canonical name, unit)
+    # (CloudWatch MetricName) → (NØMAÐ canonical name, unit)
     # EC2
     "CPUUtilization":       ("cpu_util",         "percent"),
     "NetworkIn":            ("net_recv_bytes",    "bytes"),
@@ -108,7 +108,7 @@ CW_AGENT_METRICS = [
 class AWSCollector(CloudBaseCollector):
     """
     Collect EC2 / EBS / GPU metrics from AWS CloudWatch and normalize
-    them into the NØMAD schema.
+    them into the NØMAÐ schema.
 
     All metrics land in the ``cloud_metrics`` table with
     ``source = 'aws'``, where they are indistinguishable from on-prem
@@ -442,7 +442,7 @@ class AWSCollector(CloudBaseCollector):
     ) -> CloudMetric:
         """
         Convert a CloudWatch datapoint + instance metadata into a
-        CloudMetric aligned with the NØMAD schema.
+        CloudMetric aligned with the NØMAÐ schema.
         """
         cw_name = raw_metric["metric_name"]
         canonical_name, unit = AWS_METRIC_MAP.get(

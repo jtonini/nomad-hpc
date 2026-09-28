@@ -1,4 +1,4 @@
-"""Search engine for NØMAD reference knowledge base.
+"""Search engine for NØMAÐ reference knowledge base.
 
 Provides full-text search with token matching and relevance scoring.
 This is the Level 1 implementation — simple but effective. Level 2
@@ -12,7 +12,7 @@ from nomad.reference.knowledge_base import KnowledgeBase, ReferenceEntry
 
 
 class SearchEngine:
-    """Full-text search over the NØMAD knowledge base.
+    """Full-text search over the NØMAÐ knowledge base.
 
     Implements token-based search with TF-IDF-like scoring:
     - Exact key match: highest boost

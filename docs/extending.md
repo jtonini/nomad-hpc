@@ -1,11 +1,11 @@
-# Extending NØMAD-HPC
+# Extending NØMAÐ-HPC
 
-This guide explains how to add new modules to NØMAD-HPC, including collectors, diagnostics, and alert backends.
+This guide explains how to add new modules to NØMAÐ-HPC, including collectors, diagnostics, and alert backends.
 
 ## Architecture Overview
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           NØMAD-HPC Architecture                        │
+│                           NØMAÐ-HPC Architecture                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │   Collectors          Analysis           Alerts          Visualization │

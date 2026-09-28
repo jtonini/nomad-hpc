@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu — Proficiency Scoring Engine
+NØMAÐ Edu — Proficiency Scoring Engine
 
 Scores each job across five dimensions of computational proficiency:
     1. CPU Efficiency      — how well CPU resources were utilized

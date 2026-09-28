@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD VMStat Collector
+NØMAÐ VMStat Collector
 
 Collects memory pressure, swap activity, and context switches from vmstat.
 Key indicators for system stress and memory-bound jobs.

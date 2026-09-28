@@ -1,10 +1,10 @@
 entries:
   issue:
-    title: "NØMAD Issue — Integrated Issue Reporting"
-    summary: "Submit bug reports, feature requests, and questions from any NØMAD interface."
+    title: "NØMAÐ Issue — Integrated Issue Reporting"
+    summary: "Submit bug reports, feature requests, and questions from any NØMAÐ interface."
     description: >
       The issue reporting system provides structured issue submission
-      directly to the NØMAD GitHub repository. Available across all
+      directly to the NØMAÐ GitHub repository. Available across all
       interfaces (CLI, dashboard, Console) with auto-populated system
       information. When a GitHub token is configured in nomad.toml,
       issues are submitted directly via API with auto-labeling.
@@ -77,7 +77,7 @@ entries:
     title: "nomad issue search"
     summary: "Search existing GitHub issues for a topic."
     description: >
-      Searches open issues in the NØMAD repository using keyword
+      Searches open issues in the NØMAÐ repository using keyword
       matching via the GitHub search API. Useful for checking if
       a problem has already been reported before creating a new issue.
     source_files:

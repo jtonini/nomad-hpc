@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu — Proficiency Trajectory Tracking
+NØMAÐ Edu — Proficiency Trajectory Tracking
 
 Measures the development of computational proficiency over time.
-This is the core educational insight that distinguishes NØMAD from
+This is the core educational insight that distinguishes NØMAÐ from
 traditional HPC monitoring: not just "what did they use" but
 "are they getting better at using it?"
 
@@ -316,7 +316,7 @@ def user_trajectory(
     per window, showing how proficiency develops over time.
 
     Args:
-        db_path:      Path to NOMADE database
+        db_path:      Path to NØMAÐ database
         username:      User to analyze
         days:          Lookback period in days
         window_size:   Days per window for averaging
@@ -426,7 +426,7 @@ def group_summary(
     efficiency over the semester."
 
     Args:
-        db_path:     Path to NOMADE database
+        db_path:     Path to NØMAÐ database
         group_name:  Linux group name (maps to course/lab)
         days:        Lookback period in days
 
@@ -537,7 +537,7 @@ def format_trajectory(traj: UserTrajectory) -> str:
 
     lines = []
     lines.append("")
-    lines.append(f"  {C.BOLD}NØMAD Proficiency Trajectory{C.RESET} — {C.CYAN}{traj.username}{C.RESET}")
+    lines.append(f"  {C.BOLD}NØMAÐ Proficiency Trajectory{C.RESET} — {C.CYAN}{traj.username}{C.RESET}")
     lines.append(f"  {'─' * 56}")
     lines.append(f"  Jobs analyzed: {traj.total_jobs}    Period: {traj.date_range[0][:10]} → {traj.date_range[1][:10]}")
     lines.append(f"  {traj.summary}")
@@ -588,7 +588,7 @@ def format_group_summary(gs: GroupSummary) -> str:
 
     lines = []
     lines.append("")
-    lines.append(f"  {C.BOLD}NØMAD Group Report{C.RESET} — {C.CYAN}{gs.group_name}{C.RESET}")
+    lines.append(f"  {C.BOLD}NØMAÐ Group Report{C.RESET} — {C.CYAN}{gs.group_name}{C.RESET}")
     lines.append(f"  {'─' * 56}")
     lines.append(f"  Members: {gs.member_count}    Jobs: {gs.total_jobs}")
     lines.append(f"  Period: {gs.date_range[0][:10]} → {gs.date_range[1][:10]}")

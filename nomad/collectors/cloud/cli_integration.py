@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Cloud CLI Integration
+NØMAÐ Cloud CLI Integration
 
-Adds cloud-related subcommands to the NØMAD CLI:
+Adds cloud-related subcommands to the NØMAÐ CLI:
 
     nomad collect cloud          Run all enabled cloud collectors once
     nomad collect cloud aws      Run only the AWS collector
@@ -29,7 +29,7 @@ def cloud_collect(config: dict[str, Any], provider: str | None = None) -> int:
     Run cloud collectors and store results.
 
     Args:
-        config: Full NØMAD config dict (from nomad.toml).
+        config: Full NØMAÐ config dict (from nomad.toml).
         provider: Specific provider to run ("aws", "azure", "gcp"),
                   or None to run all enabled providers.
 

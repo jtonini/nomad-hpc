@@ -1,4 +1,4 @@
-"""CLI output formatter for NØMAD reference entries.
+"""CLI output formatter for NØMAÐ reference entries.
 
 Renders ReferenceEntry objects as rich terminal output with
 sections, indentation, and visual structure.
@@ -168,7 +168,7 @@ class ReferenceFormatter:
         lines: list[str] = []
 
         lines.append("")
-        lines.append(self._bold("NOMAD Reference"))
+        lines.append(self._bold("NØMAÐ Reference"))
         lines.append("=" * 15)
         lines.append(
             "Built-in documentation for commands, modules, configuration, and concepts."

@@ -32,7 +32,7 @@ CLUSTER_TIERS = [
 
 
 def _build_db(path, *, with_jobs=False, with_sessions=False):
-    """Create a synthetic NØMAD DB with optional job and session data."""
+    """Create a synthetic NØMAÐ DB with optional job and session data."""
     con = sqlite3.connect(path)
     c = con.cursor()
 

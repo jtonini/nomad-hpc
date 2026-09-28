@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Developer Toolchain — CLI Commands
+NØMAÐ Developer Toolchain — CLI Commands
 
 Click command definitions for the `nomad dev` command family.
 These get patched into cli.py by the integration script.
@@ -22,7 +22,7 @@ from .checker import HealthChecker, CheckReport
 
 
 def _get_repo_root() -> Path:
-    """Find the NØMAD repository root."""
+    """Find the NØMAÐ repository root."""
     # Walk up from CWD looking for pyproject.toml with nomad-hpc
     cwd = Path.cwd()
     for parent in [cwd] + list(cwd.parents):
@@ -104,9 +104,9 @@ def _format_check_report(report: CheckReport, verbose: bool = False) -> None:
 
 @click.group()
 def dev():
-    """NOMAD Developer Toolchain.
+    """NØMAÐ Developer Toolchain.
 
-    Scaffolding, validation, and contribution pipeline for NOMAD
+    Scaffolding, validation, and contribution pipeline for NØMAÐ
     module development.
     """
     pass
@@ -119,10 +119,10 @@ def dev():
 def guide(ctx):
     """Interactive contribution wizard.
 
-    Walks through the entire process of creating a new NOMAD module:
+    Walks through the entire process of creating a new NØMAÐ module:
     what to build, gathers parameters, scaffolds, provides next steps.
     """
-    click.echo("\nWelcome to the NOMAD developer guide.\n")
+    click.echo("\nWelcome to the NØMAÐ developer guide.\n")
     click.echo("What would you like to build?")
 
     types_list = list(MODULE_TYPES.values())
@@ -718,9 +718,9 @@ def setup(ctx):
     if hooks_dir.exists():
         pre_commit = hooks_dir / "pre-commit"
         hook_content = """#!/bin/bash
-# NØMAD pre-commit hook (installed by nomad dev setup)
+# NØMAÐ pre-commit hook (installed by nomad dev setup)
 
-echo "Running NØMAD pre-commit checks..."
+echo "Running NØMAÐ pre-commit checks..."
 
 # Ruff linting
 if command -v ruff &> /dev/null; then
@@ -786,7 +786,7 @@ def _setup_github_token(config_dir: Path, config_path: Path) -> None:
     token = click.prompt("  Paste your token (input hidden)", hide_input=True)
 
     config_dir.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(f'# NØMAD Developer Configuration\ngithub_token = "{token}"\n')
+    config_path.write_text(f'# NØMAÐ Developer Configuration\ngithub_token = "{token}"\n')
     config_path.chmod(0o600)
     click.echo(f"\n  \u2713 Saved to {config_path}")
 

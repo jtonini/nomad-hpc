@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analyze a NOMAD validation probe DB.
+Analyze a NØMAÐ validation probe DB.
 
 Produces:
   - Per-user CPU percentile distribution
@@ -23,7 +23,7 @@ from statistics import median
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Analyze NOMAD validation probe DB")
+    p = argparse.ArgumentParser(description="Analyze NØMAÐ validation probe DB")
     p.add_argument("db", type=Path)
     p.add_argument("--cpu-threshold", type=float, default=10.0,
                    help="CPU%% threshold to flag. Default: 10")

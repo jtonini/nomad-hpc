@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NOMAD validation probe — passive baseline collector.
+NØMAÐ validation probe — passive baseline collector.
 
 Purpose: characterize per-user process activity on a machine before
 deploying alerting thresholds. Collect, don't alert. Write to a
@@ -66,7 +66,7 @@ def parse_duration(s: str) -> int:
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="NOMAD validation probe")
+    p = argparse.ArgumentParser(description="NØMAÐ validation probe")
     p.add_argument("--machine", required=True,
                    help="Machine identifier (e.g. 'spydur', 'arachne-head', 'arachne-node05')")
     p.add_argument("--duration", type=parse_duration, default=parse_duration("168h"),

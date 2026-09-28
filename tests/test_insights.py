@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Tests for the NØMAD Insight Engine."""
+"""Tests for the NØMAÐ Insight Engine."""
 import json
 import sqlite3
 import tempfile
@@ -294,7 +294,7 @@ def test_format_cli_brief(demo_db):
     narratives = [(s, narrate(s)) for s in signals]
     insights = correlate(signals)
     output = format_cli_brief(narratives, insights)
-    assert "NOMAD Insight Brief" in output
+    assert "NØMAÐ Insight Brief" in output
     assert "Cluster health:" in output
 
 
@@ -303,7 +303,7 @@ def test_format_cli_detail(demo_db):
     narratives = [(s, narrate(s)) for s in signals]
     insights = correlate(signals)
     output = format_cli_detail(narratives, insights)
-    assert "NOMAD Insight Report" in output
+    assert "NØMAÐ Insight Report" in output
     assert "ALL SIGNALS" in output
 
 
@@ -324,7 +324,7 @@ def test_format_slack(demo_db):
     narratives = [(s, narrate(s)) for s in signals]
     insights = correlate(signals)
     output = format_slack(narratives, insights)
-    assert "NOMAD" in output
+    assert "NØMAÐ" in output
 
 
 # ── Engine integration test ──────────────────────────────────────────────
@@ -350,7 +350,7 @@ def test_engine_full_pipeline(demo_db):
 
     subject, body = engine.to_email()
     assert "test-cluster" in subject
-    assert "NOMAD" in body
+    assert "NØMAÐ" in body
 
 
 def test_engine_empty_db(tmp_path):

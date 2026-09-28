@@ -1,5 +1,5 @@
 """
-NØMAD Diagnostics Module
+NØMAÐ Diagnostics Module
 
 Provides unified diagnostics for HPC infrastructure:
 - Nodes (HPC compute nodes)

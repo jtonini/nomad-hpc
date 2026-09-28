@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD per-user collector — in-memory state.
+NØMAÐ per-user collector — in-memory state.
 
 Owns the live ProcessTrack objects between collection ticks. The collector
 calls observe() once per (pid, sample) and gc() at the end of each tick.

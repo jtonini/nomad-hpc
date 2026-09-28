@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu — Educational Analytics for HPC
+NØMAÐ Edu — Educational Analytics for HPC
 
 Bridges the gap between infrastructure monitoring and educational outcomes
 by capturing per-job behavioral fingerprints that enable administrators and

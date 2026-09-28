@@ -48,7 +48,7 @@ nomad ref search "SLURM collector"
 
 ## Console Integration
 
-In the NOMAD Console (paid product), the Reference page provides a graphical interface with category filters, live search, and clickable cross-references.
+In the NØMAÐ Console (paid product), the Reference page provides a graphical interface with category filters, live search, and clickable cross-references.
 
 ## Adding Entries
 

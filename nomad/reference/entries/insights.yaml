@@ -533,9 +533,9 @@ entries:
 
   community:
     title: "Community Dataset"
-    summary: "Export anonymized cluster data for the NOMAD community dataset."
+    summary: "Export anonymized cluster data for the NØMAÐ community dataset."
     description: >
-      The community command group handles data export for NOMAD's
+      The community command group handles data export for NØMAÐ's
       federated community dataset initiative. Exports are anonymized
       (salted hashes for usernames, normalized metrics) and can be
       contributed to a shared dataset that enables cross-institutional
@@ -627,7 +627,7 @@ entries:
     description: >
       Computes pairwise similarity between entities (users, jobs, nodes)
       using multiple measures. Shared infrastructure between TESSERA's
-      regime detection and NOMAD's niche overlap analysis. Supports
+      regime detection and NØMAÐ's niche overlap analysis. Supports
       sparse computation for large datasets.
     source_files:
       - nomad/analysis/similarity.py

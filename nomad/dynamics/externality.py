@@ -102,7 +102,7 @@ def compute_externalities(
 
     Parameters
     ----------
-    db_path : path to NØMAD database
+    db_path : path to NØMAÐ database
     hours : how far back to analyze
     min_jobs : minimum jobs per group to include
     correlation_threshold : minimum |correlation| to report an edge

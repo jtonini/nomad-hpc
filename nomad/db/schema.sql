@@ -1,4 +1,4 @@
--- NOMADE Database Schema
+-- NØMAÐ Database Schema
 -- SQLite 3.35+
 
 -- ============================================

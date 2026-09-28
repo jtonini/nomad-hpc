@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Continuous Learning Pipeline for NØMAD.
+Continuous Learning Pipeline for NØMAÐ.
 
 Monitors database for new jobs and triggers retraining when needed.
 

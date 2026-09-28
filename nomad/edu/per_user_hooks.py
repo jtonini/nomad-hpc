@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD edu hooks for per-user alerts.
+NØMAÐ edu hooks for per-user alerts.
 
 Reads recent per_user_alert rows for a given user and renders them as
 educational guidance. Designed to be called from `nomad edu me`'s existing

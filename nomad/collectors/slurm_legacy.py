@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NOMADE SLURM Collector
+NØMAÐ SLURM Collector
 
 Collects job and queue data from SLURM.
 Uses squeue, sinfo, and sacct commands to gather:

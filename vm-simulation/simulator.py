@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-NØMAD Job Simulator
+NØMAÐ Job Simulator
 
 Generates realistic HPC job data based on cluster configuration.
-Outputs to SQLite database compatible with NØMAD dashboard.
+Outputs to SQLite database compatible with NØMAÐ dashboard.
 
 Usage:
     python simulator.py --config clusters/small.toml --jobs 1000 --output test.db
@@ -864,7 +864,7 @@ def print_statistics(jobs: list[Job], cluster: ClusterConfig):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='NØMAD Job Simulator - Generate realistic HPC job data',
+        description='NØMAÐ Job Simulator - Generate realistic HPC job data',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -24,7 +24,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: NØMAD Version
+      label: NØMAÐ Version
       description: "Run `nomad --version` or `pip show nomad-hpc`"
       placeholder: "e.g., 1.3.0"
     validations:

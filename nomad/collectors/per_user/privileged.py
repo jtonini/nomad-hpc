@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD per-user collector — privileged operations.
+NØMAÐ per-user collector — privileged operations.
 
 This module contains every operation that REQUIRES elevated privilege
 (typically root, or CAP_DAC_READ_SEARCH). Everything else in the per_user

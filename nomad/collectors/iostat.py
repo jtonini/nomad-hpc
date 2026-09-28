@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD IOStat Collector
+NØMAÐ IOStat Collector
 
 Collects system-level I/O metrics from iostat.
 Captures device utilization, wait times, and throughput.

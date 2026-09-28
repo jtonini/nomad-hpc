@@ -411,7 +411,7 @@ def diagnose_network(
     Generate comprehensive diagnostics for a network path.
     
     Args:
-        db_path: Path to NØMAD database
+        db_path: Path to NØMAÐ database
         source: Source hostname (optional)
         dest: Destination hostname (optional)
         hours: Hours of history to analyze
@@ -506,7 +506,7 @@ def format_diagnostic(diag: NetworkDiagnostic) -> str:
 
     # Header
     path_str = f"{diag.source_host} → {diag.dest_host}"
-    lines.append(f"\n  {c.BOLD}NØMAD Network Diagnostic{c.RESET} — {c.CYAN}{path_str}{c.RESET}")
+    lines.append(f"\n  {c.BOLD}NØMAÐ Network Diagnostic{c.RESET} — {c.CYAN}{path_str}{c.RESET}")
     lines.append(f"  Path type: {diag.path_type}")
     lines.append(f"  {'─' * 56}")
 

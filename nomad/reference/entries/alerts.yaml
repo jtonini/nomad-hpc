@@ -3,7 +3,7 @@ entries:
     title: "Alert System"
     summary: "Threshold-based alerting with multi-backend delivery and insight enrichment."
     description: >
-      NOMAD's alert system monitors cluster metrics against configurable
+      NØMAÐ's alert system monitors cluster metrics against configurable
       thresholds and dispatches notifications through multiple backends.
       Alerts are enriched by the Insight Engine, which adds narrative
       context explaining why an alert fired and what it means. The
@@ -77,7 +77,7 @@ entries:
     title: "Alert Delivery Backends"
     summary: "Configure where alerts are sent: email, Slack, webhooks."
     description: >
-      Alert backends handle the delivery of notifications. NOMAD supports
+      Alert backends handle the delivery of notifications. NØMAÐ supports
       email (SMTP), Slack (webhook or API), and generic webhooks (for
       PagerDuty, Teams, custom integrations). Each backend can be
       configured independently with its own severity filter — e.g.,

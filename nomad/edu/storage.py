@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu — Proficiency Score Storage
+NØMAÐ Edu — Proficiency Score Storage
 
 Stores proficiency scores in the database for historical tracking.
 This enables:

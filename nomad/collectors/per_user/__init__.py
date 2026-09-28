@@ -1,4 +1,4 @@
-"""NØMAD per-user process collector (Idea 18 Component 1)."""
+"""NØMAÐ per-user process collector (Idea 18 Component 1)."""
 from .collector import (
     COLLECTOR_VERSION,
     PerUserCollector,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Integrate nomad ref into the NOMAD codebase.
+"""Integrate nomad ref into the NØMAÐ codebase.
 
-Run from the NOMAD repo root (~/nomad/):
+Run from the NØMAÐ repo root (~/nomad/):
     python integrate_reference.py
 
 This script:
@@ -23,7 +23,7 @@ TEST_DIR = REPO_ROOT / "tests"
 def main():
     # ── Step 1: Verify we're in the right directory ──────────────────
     if not CLI_PATH.exists():
-        print(f"ERROR: {CLI_PATH} not found. Run from the NOMAD repo root.")
+        print(f"ERROR: {CLI_PATH} not found. Run from the NØMAÐ repo root.")
         sys.exit(1)
 
     print(f"Working in: {REPO_ROOT}")

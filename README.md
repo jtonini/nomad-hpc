@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/nomad-banner.png" alt="NØMAD-HPC" width="900">
+  <img src="docs/images/nomad-banner.png" alt="NØMAÐ-HPC" width="900">
 </p>
 
 # NØMAÐ-HPC

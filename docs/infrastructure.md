@@ -1,6 +1,6 @@
 # Infrastructure Monitoring
 
-NOMAD extends beyond compute nodes to monitor research workstations and storage systems, providing a holistic view of your computing environment.
+NØMAÐ extends beyond compute nodes to monitor research workstations and storage systems, providing a holistic view of your computing environment.
 
 ## Dashboard Views
 

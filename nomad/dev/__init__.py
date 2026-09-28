@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Developer Toolchain — Scaffolding, validation, and contribution pipeline.
+NØMAÐ Developer Toolchain — Scaffolding, validation, and contribution pipeline.
 
-Codifies NØMAD's architectural patterns into CLI tools so contributors
+Codifies NØMAÐ's architectural patterns into CLI tools so contributors
 focus on logic, not plumbing. Every scaffolded module meets quality
 standards by construction.
 

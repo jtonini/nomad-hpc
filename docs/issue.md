@@ -1,6 +1,6 @@
 # Issue Reporting
 
-NØMAD includes an integrated issue reporting system that lets you submit bug reports,
+NØMAÐ includes an integrated issue reporting system that lets you submit bug reports,
 feature requests, and questions directly from the CLI, dashboard, or Console without
 leaving your workflow.
 
@@ -12,7 +12,7 @@ The issue system operates in three tiers:
 - **Dashboard**: "Report Issue" tab with structured fields
 - **Console** (paid): Direct API submission + private support channel
 
-All tiers auto-populate system information (NØMAD version, Python version, OS,
+All tiers auto-populate system information (NØMAÐ version, Python version, OS,
 active collectors, active alerts, cluster count) for better diagnostics.
 
 ## CLI Commands

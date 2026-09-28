@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Network Performance Collector
+NØMAÐ Network Performance Collector
 
 Collects network throughput and latency metrics between hosts:
 - Ping latency (min, avg, max, jitter)

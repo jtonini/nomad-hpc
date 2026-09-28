@@ -4,7 +4,7 @@ Monitor RStudio and Jupyter sessions across your cluster.
 
 ## Overview
 
-NØMAD tracks interactive computing sessions to identify:
+NØMAÐ tracks interactive computing sessions to identify:
 - Idle sessions consuming resources
 - Memory-heavy notebooks
 - Stale sessions (no activity for days)
@@ -43,7 +43,7 @@ Recommendations:
 
 ## JupyterHub Integration
 
-NØMAD can integrate with JupyterHub's idle-culler:
+NØMAÐ can integrate with JupyterHub's idle-culler:
 ```toml
 [interactive.jupyter]
 hub_api_url = "http://jupyterhub:8081/hub/api"

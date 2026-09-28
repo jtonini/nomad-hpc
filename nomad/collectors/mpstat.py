@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD MPStat Collector
+NØMAÐ MPStat Collector
 
 Collects per-core CPU utilization from mpstat.
 Detects core imbalance, NUMA effects, and affinity issues.

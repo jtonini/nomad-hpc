@@ -4,7 +4,7 @@ import pytest
 # --- Idea 18 Component 1 fixtures ------------------------------------------
 
 def _bootstrap_db_with_migrations(db_path: str) -> None:
-    """Apply all NOMAD migrations to a fresh DB. Used by per_user tests."""
+    """Apply all NØMAÐ migrations to a fresh DB. Used by per_user tests."""
     import sqlite3
     from nomad.db.migrations import MIGRATIONS
     with sqlite3.connect(db_path) as conn:
@@ -20,7 +20,7 @@ def _bootstrap_db_with_migrations(db_path: str) -> None:
 
 @pytest.fixture
 def db_path(tmp_path) -> str:
-    """Fresh SQLite DB with the full NOMAD schema applied."""
+    """Fresh SQLite DB with the full NØMAÐ schema applied."""
     p = str(tmp_path / "test.db")
     _bootstrap_db_with_migrations(p)
     return p

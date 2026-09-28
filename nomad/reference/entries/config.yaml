@@ -1,9 +1,9 @@
 entries:
   config:
-    title: "NOMAD Configuration (nomad.toml)"
+    title: "NØMAÐ Configuration (nomad.toml)"
     summary: "Complete configuration reference for nomad.toml."
     description: >
-      NOMAD is configured via a TOML file (nomad.toml) in the working
+      NØMAÐ is configured via a TOML file (nomad.toml) in the working
       directory or at a path specified by the NOMAD_CONFIG environment
       variable. The configuration file controls database location,
       collector settings, alert thresholds, delivery backends,
@@ -31,7 +31,7 @@ entries:
     summary: "Top-level settings: database path, cluster name, logging."
     description: >
       The [general] section of nomad.toml controls core settings that
-      affect all NOMAD operations.
+      affect all NØMAÐ operations.
     config_section: "general"
     config_keys:
       - "db_path — Path to the SQLite database file"
@@ -95,7 +95,7 @@ entries:
     title: "Alert Configuration"
     summary: "Configure alert thresholds, delivery backends, and policies."
     description: >
-      The [alerts] section controls when and how NOMAD sends
+      The [alerts] section controls when and how NØMAÐ sends
       notifications. Thresholds define conditions, backends define
       delivery channels, and policies control escalation and
       deduplication.

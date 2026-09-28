@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD per-user collector — rule engine.
+NØMAÐ per-user collector — rule engine.
 
 Pure-logic module. No I/O, no psutil, no DB. Takes sample observations in,
 emits alert decisions out. Fully testable with synthetic input.

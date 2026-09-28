@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-DynamicsEngine — orchestrator for the NØMAD System Dynamics module.
+DynamicsEngine — orchestrator for the NØMAÐ System Dynamics module.
 
 Runs all dynamics analyses (diversity, niche overlap, carrying capacity,
 resilience, externality) and provides unified output methods. Integrates
@@ -42,7 +42,7 @@ from .formatters import (
 
 class DynamicsEngine:
     """
-    Main entry point for the NØMAD System Dynamics module.
+    Main entry point for the NØMAÐ System Dynamics module.
 
     Orchestrates all dynamics analyses and provides unified output
     for CLI, JSON (Console API), and integration with the Insight Engine.

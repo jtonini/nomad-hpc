@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NOMADE Disk Collector
+NØMAÐ Disk Collector
 
 Monitors filesystem usage, quotas, and fill rates.
 Integrates with derivative analysis for early warning.

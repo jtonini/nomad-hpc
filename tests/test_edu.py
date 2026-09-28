@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Tests for NØMAD Edu module using MockCluster.
+Tests for NØMAÐ Edu module using MockCluster.
 
 Run with: pytest tests/test_edu.py -v
 """

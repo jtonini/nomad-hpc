@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Output formatting for the NØMAD energy module.
+Output formatting for the NØMAÐ energy module.
 
 Two design rules, both deliberate:
 
@@ -59,7 +59,7 @@ def format_summary_cli(snap, cluster_name: str, mode: str, explain: bool = False
     w = snap.waste
     intensity = snap.intensity
     lines = []
-    lines.append(f"NØMAD Energy — {cluster_name or 'all clusters'}")
+    lines.append(f"NØMAÐ Energy — {cluster_name or 'all clusters'}")
     lines.append(
         f"  window {snap.window_start:%Y-%m-%d} .. {snap.window_end:%Y-%m-%d}"
         f"   ·   valuation: {mode}"
@@ -192,7 +192,7 @@ def format_comparison_cli(pre, post, split, cluster_name, mode):
     over_pre = w_pre.over_request_seconds / 3600.0
     over_post = w_post.over_request_seconds / 3600.0
 
-    lines = [f"NØMAD Energy — Before / After — {cluster_name or 'all clusters'}"]
+    lines = [f"NØMAÐ Energy — Before / After — {cluster_name or 'all clusters'}"]
     lines.append(f"  split at {split:%Y-%m-%d %H:%M}   ·   valuation: {mode}")
     lines.append("")
     lines.append(f"  {'':16}{'before':>12}{'after':>12}{'change':>12}")
@@ -226,7 +226,7 @@ def format_forecast_cli(c_trend, r_trend, horizon_label, horizon_days,
     c_growth = c_trend.growth_pct(horizon_days)
     r_growth = r_trend.growth_pct(horizon_days)
 
-    lines = [f"NØMAD Energy — Forecast — {cluster_name or 'all clusters'}"]
+    lines = [f"NØMAÐ Energy — Forecast — {cluster_name or 'all clusters'}"]
     lines.append(f"  projecting {horizon_label} ahead   ·   valuation: {mode}")
     lines.append("")
     lines.append(f"  {'':14}{'current/day':>14}{'trend':>9}{f'next {horizon_label}':>18}")
@@ -259,7 +259,7 @@ def format_forecast_cli(c_trend, r_trend, horizon_label, horizon_days,
 
 def format_prediction_cli(result, top=15):
     """Per-job energy-waste risk ranking (not calibrated probabilities)."""
-    lines = [f"NØMAD Energy — Waste Prediction   ·   model: {result.method}"]
+    lines = [f"NØMAÐ Energy — Waste Prediction   ·   model: {result.method}"]
     ctx = f"  {result.n_jobs:,} jobs analyzed · {result.label_rate:.0%} historically high-waste"
     if result.auc is not None:
         tag = "CV-AUC" if result.method == "baseline" else "in-sample AUC"

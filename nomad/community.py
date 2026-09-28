@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Community Export Module
+NØMAÐ Community Export Module
 
-Provides anonymized data export for the NØMAD Community Dataset.
+Provides anonymized data export for the NØMAÐ Community Dataset.
 Ensures privacy through pseudonymization while preserving analytical value.
 """
 
@@ -194,7 +194,7 @@ def compute_user_stats(jobs: list[dict]) -> dict[str, dict]:
 
 
 def load_jobs_from_db(db_path: Path, start_date: str | None = None, end_date: str | None = None) -> list[dict]:
-    """Load jobs from NØMAD database."""
+    """Load jobs from NØMAÐ database."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
@@ -229,7 +229,7 @@ def export_community_data(
     Export anonymized community dataset.
     
     Args:
-        db_path: Path to NØMAD database
+        db_path: Path to NØMAÐ database
         output_path: Output file path (.parquet or .json)
         salt: Institution-specific salt for pseudonymization
         institution_type: academic, government, industry, nonprofit

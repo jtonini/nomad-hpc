@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Output formatters for NØMAD System Dynamics.
+Output formatters for NØMAÐ System Dynamics.
 
 Provides CLI text and JSON formatting for all dynamics subcommands.
 """
@@ -392,7 +392,7 @@ def format_full_summary_cli(
     """Format the full dynamics summary combining all metrics."""
     lines = []
     lines.append(f"\n{'#' * 60}")
-    lines.append(f"  NOMAD System Dynamics Report — {cluster_name}")
+    lines.append(f"  NØMAÐ System Dynamics Report — {cluster_name}")
     lines.append(f"  {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(f"{'#' * 60}")
 

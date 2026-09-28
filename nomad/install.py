@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NOMAD System Installation
+NØMAÐ System Installation
 
 Handles system-wide installation for HPC environments:
 - Create nomad user/group
@@ -93,7 +93,7 @@ def create_bin_symlink(force: bool = False) -> Path | None:
 
 
 SYSTEMD_SERVICE = """[Unit]
-Description=NOMAD HPC Monitoring Daemon
+Description=NØMAÐ HPC Monitoring Daemon
 Documentation=https://github.com/jtonini/nomad
 After=network.target slurmd.service
 
@@ -123,7 +123,7 @@ WantedBy=multi-user.target
 """
 
 SYSTEMD_LEARNING_SERVICE = """[Unit]
-Description=NOMAD Continuous Learning Daemon
+Description=NØMAÐ Continuous Learning Daemon
 Documentation=https://github.com/jtonini/nomad
 After=network.target nomad.service
 
@@ -152,7 +152,7 @@ WantedBy=multi-user.target
 """
 
 SYSTEMD_TIMER = """[Unit]
-Description=NOMAD ML Training Timer
+Description=NØMAÐ ML Training Timer
 Documentation=https://github.com/jtonini/nomad
 
 [Timer]
@@ -165,7 +165,7 @@ WantedBy=timers.target
 """
 
 SYSTEMD_TRAIN_SERVICE = """[Unit]
-Description=NOMAD ML Training (triggered by timer)
+Description=NØMAÐ ML Training (triggered by timer)
 Documentation=https://github.com/jtonini/nomad
 
 [Service]
@@ -194,7 +194,7 @@ LOGROTATE_CONFIG = """/var/log/nomad/*.log {
 """
 
 SLURM_PROLOG_WRAPPER = """#!/bin/bash
-# NOMAD SLURM Prolog Hook
+# NØMAÐ SLURM Prolog Hook
 # Scores jobs at submission time for risk assessment
 
 # Only run if nomad is installed
@@ -479,7 +479,7 @@ def print_post_install_instructions():
     nomad_bin = get_nomad_bin_path()
     print(f"""
 ╔══════════════════════════════════════════════════════════════════╗
-║                    NOMAD System Installation                     ║
+║                    NØMAÐ System Installation                     ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Binary:        {nomad_bin:<47} ║
 ║  Configuration: /etc/nomad/nomad.toml                          ║

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""NOMADE Alert System - Detection, Storage, and Dispatch."""
+"""NØMAÐ Alert System - Detection, Storage, and Dispatch."""
 
 from .backends import EmailBackend, SlackBackend, WebhookBackend
 from .dispatcher import AlertDispatcher, get_dispatcher, init_dispatcher, send_alert

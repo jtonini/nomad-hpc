@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Job Metrics Collector
+NØMAÐ Job Metrics Collector
 
 Collects detailed job metrics from SLURM sacct for similarity analysis.
 Computes feature vectors and health scores for completed jobs.

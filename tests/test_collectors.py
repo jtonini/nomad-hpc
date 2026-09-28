@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Tests for all NØMAD collectors.
+"""Tests for all NØMAÐ collectors.
 
 Each collector is tested with mocked system commands so tests run
 anywhere without real HPC infrastructure. Tests verify:

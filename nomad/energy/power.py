@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Energy consumption computation for the NØMAD energy module.
+Energy consumption computation for the NØMAÐ energy module.
 
 Computes per-job and cluster-level electrical energy and converts it to CO2
 equivalent. Energy is real where the data is real (DCGM power_draw_w from

@@ -101,7 +101,7 @@ def compute_niche_overlap(
 
     Parameters
     ----------
-    db_path : path to NØMAD database
+    db_path : path to NØMAÐ database
     hours : how far back to look
     overlap_threshold : pairs above this value are flagged as high-overlap
     min_jobs : minimum jobs to include a group in analysis

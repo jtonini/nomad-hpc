@@ -36,7 +36,7 @@ entries:
     description: >
       Creates a SQLite database populated with synthetic but realistic
       cluster data — jobs, node states, storage metrics, I/O statistics,
-      and more. Useful for testing NOMAD features without access to a
+      and more. Useful for testing NØMAÐ features without access to a
       real cluster. The generated data includes temporal patterns like
       semester cycles, diurnal usage, and storage fill trends.
     source_files:

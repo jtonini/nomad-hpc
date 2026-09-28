@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Workstation Collector
+NØMAÐ Workstation Collector
 
 Collects system metrics from departmental workstations:
 - CPU and memory utilization
@@ -694,7 +694,7 @@ class WorkstationCollector(BaseCollector):
 
         Running the parser locally (not on the workstation) means:
           - No Python stdlib version parity issues across hosts.
-          - The parser lives in one place (the NOMAD repo), not scattered
+          - The parser lives in one place (the NØMAÐ repo), not scattered
             across every workstation.
           - Binary format is validated against the same test suite.
         """

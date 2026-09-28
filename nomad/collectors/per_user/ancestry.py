@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD per-user collector — process ancestry and whitelist matching.
+NØMAÐ per-user collector — process ancestry and whitelist matching.
 
 Pure logic over a tree abstraction. The collector provides a
 `get_process_info(pid) -> ProcessInfo | None` callable; this module

@@ -1,6 +1,6 @@
-# NOMADE Sample Data
+# NØMAÐ Sample Data
 
-Pre-collected metrics for testing NOMADE without running a VM.
+Pre-collected metrics for testing NØMAÐ without running a VM.
 
 ## Files
 
@@ -36,7 +36,7 @@ for point in data:
         print(f"High velocity at {ts}: {vel:.2f}%/s")
 ```
 
-### Replay through NOMADE
+### Replay through NØMAÐ
 
 ```bash
 # Future: nomad --replay sample-data/overnight-metrics.json

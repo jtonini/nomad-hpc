@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# NØMAD Test Cluster - Manual Setup Script
+# NØMAÐ Test Cluster - Manual Setup Script
 #
 # Sets up SLURM on an existing Ubuntu 22.04/24.04 VM.
 # Run as root or with sudo.
@@ -20,7 +20,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "=========================================="
-echo "NØMAD Test Cluster Setup"
+echo "NØMAÐ Test Cluster Setup"
 echo "=========================================="
 echo ""
 

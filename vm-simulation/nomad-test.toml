@@ -1,4 +1,4 @@
-# NOMADE Configuration for Test VM
+# NØMAÐ Configuration for Test VM
 [general]
 cluster_name = "nomad-test"
 data_dir = "/var/lib/nomad"

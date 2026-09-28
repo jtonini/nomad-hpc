@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 """
-NØMAD Cloud Base Collector
+NØMAÐ Cloud Base Collector
 
 Abstract base class for cloud provider collectors. Extends BaseCollector
 with cloud-specific functionality:
 
     - Credential management (API keys, IAM roles, service accounts)
     - API pagination and rate-limit handling
-    - Metric normalization: cloud-native metrics → NØMAD schema
+    - Metric normalization: cloud-native metrics → NØMAÐ schema
     - Cost data integration (separate from monitoring metrics)
     - Instance-to-node mapping
 
 Subclasses implement provider-specific API calls; the base class handles
-schema normalization so that all downstream NØMAD components (derivatives,
+schema normalization so that all downstream NØMAÐ components (derivatives,
 TESSERA, alerting, dashboards) work unchanged.
 """
 
@@ -79,7 +79,7 @@ class CloudCredential:
 @dataclass
 class CloudMetric:
     """
-    A single normalized metric reading, ready for the NØMAD schema.
+    A single normalized metric reading, ready for the NØMAÐ schema.
 
     This is the contract between cloud collectors and the rest of the
     pipeline. Every provider-specific metric must be transformed into
@@ -128,7 +128,7 @@ class CloudMetric:
 
 # ── Metric name normalization map ───────────────────────────────────────
 
-# Provider-native metric names → NØMAD canonical names.
+# Provider-native metric names → NØMAÐ canonical names.
 # Each provider subclass extends this with its own mappings.
 CANONICAL_METRICS = {
     # CPU
@@ -367,7 +367,7 @@ class CloudBaseCollector(BaseCollector):
 
     def _canonicalize(self, metric_name: str) -> str:
         """
-        Map a provider-native metric name to the NØMAD canonical name.
+        Map a provider-native metric name to the NØMAÐ canonical name.
 
         Falls through to the original name if no mapping exists, so that
         provider-specific metrics are still collected (just not normalized).
@@ -411,7 +411,7 @@ class CloudBaseCollector(BaseCollector):
 
     def store(self, data: list[dict[str, Any]]) -> None:
         """
-        Store normalized cloud metrics in the NØMAD database.
+        Store normalized cloud metrics in the NØMAÐ database.
 
         Uses the same ``cloud_metrics`` table for all providers, with a
         ``source`` column to distinguish AWS / Azure / GCP.

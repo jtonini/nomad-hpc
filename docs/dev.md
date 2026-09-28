@@ -1,7 +1,7 @@
 # Developer Toolchain
 
 The `nomad dev` command family provides scaffolding, validation, and contribution tools
-for NØMAD module development. It codifies architectural patterns into CLI tools so
+for NØMAÐ module development. It codifies architectural patterns into CLI tools so
 contributors focus on logic, not plumbing.
 
 ## Philosophy
@@ -154,7 +154,7 @@ nomad dev deps collector disk
 
 ## Scaffolding Templates
 
-Each module type has a template that embodies NØMAD's architectural patterns.
+Each module type has a template that embodies NØMAÐ's architectural patterns.
 
 ### Collector Template
 
@@ -193,7 +193,7 @@ Use `nomad dev check --strict` in your CI pipeline to enforce quality:
 
 ```yaml
 # GitHub Actions example
-- name: NØMAD codebase validation
+- name: NØMAÐ codebase validation
   run: |
     nomad dev check --strict
     nomad dev test all --coverage

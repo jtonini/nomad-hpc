@@ -1,8 +1,8 @@
 # GPU Monitoring
 
-NØMAD collects GPU metrics from NVIDIA GPUs using `nvidia-smi` as the standard
+NØMAÐ collects GPU metrics from NVIDIA GPUs using `nvidia-smi` as the standard
 source, with optional enhanced metrics via DCGM (NVIDIA Data Center GPU Manager)
-when available. The two sources are transparent to the user — NØMAD detects DCGM
+when available. The two sources are transparent to the user — NØMAÐ detects DCGM
 automatically and falls back to `nvidia-smi` silently.
 
 ---
@@ -113,7 +113,7 @@ most actionable signal:
 
 ## Hardware Health Monitoring
 
-When DCGM is active, NØMAD collects hardware health signals that precede
+When DCGM is active, NØMAÐ collects hardware health signals that precede
 visible performance degradation:
 
 | Signal | Meaning |
@@ -148,7 +148,7 @@ ssh_user = "zeus"
 gpu_nodes = ["node51", "node52", "node53"]
 ```
 
-NØMAD SSHes to each node and runs `nvidia-smi` (and `dcgmi` if available)
+NØMAÐ SSHes to each node and runs `nvidia-smi` (and `dcgmi` if available)
 remotely. The same fallback logic applies per node.
 
 ---
@@ -216,7 +216,7 @@ dcgmi discovery -l
 dcgmi dmon -e 1001 -c 1
 ```
 
-NØMAD detects `dcgmi` in PATH automatically on the next collection cycle.
+NØMAÐ detects `dcgmi` in PATH automatically on the next collection cycle.
 No configuration change is required.
 
 ### Supported GPUs
@@ -241,7 +241,7 @@ collector detects this automatically and falls back to nvidia-smi data with
 no DCGM enrichment fields populated. Real Utilization and workload
 classification are unavailable for these GPUs.
 
-NØMAD has been verified with DCGM on:
+NØMAÐ has been verified with DCGM on:
 - **NVIDIA RTX 6000 Ada Generation** with DCGM 3.3.9 (full profiling support)
 - **NVIDIA A100, A40, H100** (full profiling support — datacenter GPUs)
 - **NVIDIA RTX 4090** (DCGM 4.5+ — management only, no profiling)

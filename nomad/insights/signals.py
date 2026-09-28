@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Signal readers for the NØMAD Insight Engine.
+Signal readers for the NØMAÐ Insight Engine.
 
 Each reader queries a specific data source (jobs, disk, GPU, network,
 TESSERA, derivatives, alerts) and returns typed Signal objects that
@@ -48,7 +48,7 @@ class Severity(Enum):
 
 @dataclass
 class Signal:
-    """A single operational signal extracted from NØMAD data."""
+    """A single operational signal extracted from NØMAÐ data."""
     signal_type: SignalType
     severity: Severity
     title: str

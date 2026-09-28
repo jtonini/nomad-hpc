@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-EnergyEngine — orchestrator for the NØMAD energy module.
+EnergyEngine — orchestrator for the NØMAÐ energy module.
 
 Loads job-energy rows and DCGM GPU energy once, then serves the cluster
 summary, per-group/per-user breakdowns, and carbon view from that single
@@ -30,7 +30,7 @@ from .waste import JobEnergyRow, MODE_PHYSICAL
 
 
 class EnergyEngine:
-    """Main entry point for the NØMAD energy module."""
+    """Main entry point for the NØMAÐ energy module."""
 
     def __init__(
         self,

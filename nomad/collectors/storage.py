@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Storage/NAS Collector
+NØMAÐ Storage/NAS Collector
 
 Collects metrics from storage devices and NAS systems:
 - ZFS pool health, scrub status, ARC stats

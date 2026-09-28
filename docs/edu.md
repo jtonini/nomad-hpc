@@ -1,10 +1,10 @@
 # Educational Analytics
 
-NØMAD Edu bridges the gap between infrastructure monitoring and educational outcomes, helping instructors, mentors, and users track the development of computational proficiency.
+NØMAÐ Edu bridges the gap between infrastructure monitoring and educational outcomes, helping instructors, mentors, and users track the development of computational proficiency.
 
 ## Overview
 
-Traditional HPC metrics tell you *what* happened. NØMAD Edu tells you *how well* users are learning to use HPC effectively.
+Traditional HPC metrics tell you *what* happened. NØMAÐ Edu tells you *how well* users are learning to use HPC effectively.
 
 **Use cases**:
 
@@ -44,7 +44,7 @@ nomad edu explain <job_id> [options]
 
 **Example output**:
 ```
-  NØMAD Job Analysis — 1104
+  NØMAÐ Job Analysis — 1104
   ────────────────────────────────────────────────────────
   User: alice    Partition: compute    Node: node03
   State: COMPLETED    Runtime: 33h 38m / 48h 00m requested
@@ -92,7 +92,7 @@ nomad edu trajectory <username> [options]
 
 **Example output**:
 ```
-  NØMAD Proficiency Trajectory — alice
+  NØMAÐ Proficiency Trajectory — alice
   ────────────────────────────────────────────────────────
   Jobs analyzed: 173    Period: 2026-02-04 → 2026-02-15
   Stable proficiency
@@ -128,7 +128,7 @@ nomad edu report <group_name> [options]
 
 **Example output**:
 ```
-  NØMAD Group Report — cs101
+  NØMAÐ Group Report — cs101
   ────────────────────────────────────────────────────────
   Members: 4     Jobs: 602
   Period: 2026-02-04 → 2026-02-16
@@ -164,7 +164,7 @@ nomad edu report <group_name> [options]
 
 ## Setting Up Groups
 
-NØMAD uses Linux groups for course/lab membership. To track a class:
+NØMAÐ uses Linux groups for course/lab membership. To track a class:
 
 ### Option 1: Use existing Linux groups
 

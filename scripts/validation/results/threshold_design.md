@@ -6,7 +6,7 @@
 **Source data:** `scripts/validation/results/{spydur,arachne_head,arachne_node02}_summary.txt` plus the three SQLite databases they were derived from
 
 This document hands off the validation findings to the chat that will implement
-NOMAD Idea 18 Component 1 (per-user process tracking on head nodes and
+NØMAÐ Idea 18 Component 1 (per-user process tracking on head nodes and
 monitoring servers). It is self-contained — the implementer does not need to
 read the validation chat that produced it.
 
@@ -421,7 +421,7 @@ collector. How exactly is for the implementation to decide.
 
 ### Privilege requirements
 
-Spydur's NOMAD account (`installer`) does not have sudo. The probe ran as
+Spydur's NØMAÐ account (`installer`) does not have sudo. The probe ran as
 installer and saw what it could see — process metadata across all users,
 but `/proc/<pid>/io` was AccessDenied for non-installer processes (320 of
 391 sample rows in the smoke test). For Component 1's CPU rules this
@@ -431,7 +431,7 @@ it absolutely matters; sudo (or `CAP_DAC_READ_SEARCH`) is required.
 This is a real deployment question, not just a technical one. The current
 options are:
 
-1. Run NOMAD's collector as root via systemd
+1. Run NØMAÐ's collector as root via systemd
 2. Get a privileged service account on spydur (talk to George)
 3. Use file capabilities on the collector binary (`setcap CAP_DAC_READ_SEARCH+ep`)
 4. Run a separate root-privileged collector for the bits that need it,

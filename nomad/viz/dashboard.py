@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NOMADE Dashboard Server - Integrated Version
-Connects to TOML config, NOMADE database, and falls back to demo data.
+NØMAÐ Dashboard Server - Integrated Version
+Connects to TOML config, NØMAÐ database, and falls back to demo data.
 """
 
 import http.server
@@ -91,7 +91,7 @@ def load_config(config_path: Path | None = None) -> dict:
 # ============================================================================
 
 def find_database() -> Path | None:
-    """Search for NOMADE database.
+    """Search for NØMAÐ database.
 
     Checks standard locations plus the demo database.
     Skips empty files (0 bytes) to avoid returning an
@@ -139,7 +139,7 @@ def load_clusters_from_db(db_path: Path, config: dict = None) -> dict:
     try:
         conn = get_db_connection(db_path)
 
-        # Try NOMADE's node_state table first
+        # Try NØMAÐ's node_state table first
         try:
             rows = conn.execute("""
                 SELECT DISTINCT node_name, partitions, gres
@@ -221,7 +221,7 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
     try:
         conn = get_db_connection(db_path)
 
-        # Try NOMADE's node_state table
+        # Try NØMAÐ's node_state table
         try:
             rows = conn.execute("""
                 SELECT 
@@ -1946,7 +1946,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NOMADE - HPC Monitor</title>
+    <title>NØMAÐ - HPC Monitor</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -2542,7 +2542,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                         gap: '16px'
                     }}>
                         <div className="logo-icon" style={{ width: 48, height: 48, fontSize: 24 }}>◈</div>
-                        <div style={{ color: 'var(--text-muted)' }}>Loading NOMADE...</div>
+                        <div style={{ color: 'var(--text-muted)' }}>Loading NØMAÐ...</div>
                     </div>
                 );
             }
@@ -2552,7 +2552,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
                     <header className="header">
                         <div className="logo">
                             <div className="logo-icon">◈</div>
-                            <span>NØMAD</span>
+                            <span>NØMAÐ</span>
                         </div>
                         
                         <nav className="tabs">
@@ -4857,7 +4857,7 @@ def serve_dashboard(host='localhost', port=8050, config_path=None):
     stats = data_manager.get_stats()
 
     print("=" * 60)
-    print("              NØMAD Dashboard")
+    print("              NØMAÐ Dashboard")
     print("=" * 60)
     print(f"  Server:      http://{host}:{port}")
     print(f"  Data Source: {stats['data_source']}")

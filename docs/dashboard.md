@@ -1,6 +1,6 @@
 # Dashboard
 
-The NØMAD dashboard provides real-time monitoring of your HPC cluster(s).
+The NØMAÐ dashboard provides real-time monitoring of your HPC cluster(s).
 
 ## Launching
 ```bash

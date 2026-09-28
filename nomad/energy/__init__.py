@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD energy module — energy consumption, waste, and carbon-footprint
+NØMAÐ energy module — energy consumption, waste, and carbon-footprint
 monitoring for research computing.
 
 Public entry points:

@@ -93,7 +93,7 @@ def compute_capacity(
 
     Parameters
     ----------
-    db_path : path to NØMAD database
+    db_path : path to NØMAÐ database
     hours : how far back to analyze
     n_samples : number of time samples for trend computation
     """

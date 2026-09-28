@@ -55,7 +55,7 @@ def load_cli_block() -> str:
 
 @cli.group()
 def edu():
-    """NØMAD Edu — Educational analytics for HPC.
+    """NØMAÐ Edu — Educational analytics for HPC.
 
     Measures the development of computational proficiency over time
     by analyzing per-job behavioral fingerprints.
@@ -195,7 +195,7 @@ def main():
         print(f"ERROR: {path} not found")
         sys.exit(1)
 
-    print("\nWiring NØMAD Edu CLI")
+    print("\nWiring NØMAÐ Edu CLI")
     print("=" * 30)
     wire_cli(path)
     print("\nDone! Test with:")

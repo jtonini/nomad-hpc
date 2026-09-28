@@ -52,7 +52,7 @@ Stale data (>30 days old only) triggers a warning.
 ## Output Example
 ```
 ======================================================================
-                       NOMAD Data Readiness
+                       NØMAÐ Data Readiness
 ======================================================================
   Overall Score: 72% (Recommended)
 ======================================================================

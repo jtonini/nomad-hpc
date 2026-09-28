@@ -1,5 +1,5 @@
 """
-Tests for NOMADE disk collector and derivative analysis.
+Tests for NØMAÐ disk collector and derivative analysis.
 
 Run with: pytest tests/test_disk_and_derivatives.py -v
 """

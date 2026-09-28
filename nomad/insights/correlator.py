@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Level 2 correlator for the NØMAD Insight Engine.
+Level 2 correlator for the NØMAÐ Insight Engine.
 
 Examines multiple signals together to find causal or co-occurring
 patterns, then produces integrated insights that link related issues

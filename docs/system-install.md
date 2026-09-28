@@ -1,6 +1,6 @@
 # System Install
 
-This guide covers deploying NØMAD system-wide for production HPC environments.
+This guide covers deploying NØMAÐ system-wide for production HPC environments.
 
 ## Overview
 
@@ -125,7 +125,7 @@ sudo chmod 660 /var/lib/nomad/nomad.db
 ```bash
 sudo cat > /etc/systemd/system/nomad-collector.service << 'UNIT'
 [Unit]
-Description=NØMAD HPC Monitoring Collector
+Description=NØMAÐ HPC Monitoring Collector
 After=network.target slurmd.service
 
 [Service]
@@ -160,7 +160,7 @@ sudo systemctl status nomad-collector
 ```bash
 sudo cat > /etc/systemd/system/nomad-dashboard.service << 'UNIT'
 [Unit]
-Description=NØMAD Dashboard
+Description=NØMAÐ Dashboard
 After=network.target nomad-collector.service
 
 [Service]
@@ -206,7 +206,7 @@ Using Apache:
         
         # Require authentication
         AuthType Basic
-        AuthName "NØMAD Dashboard"
+        AuthName "NØMAÐ Dashboard"
         AuthUserFile /etc/httpd/.htpasswd
         Require valid-user
     </Location>
@@ -234,7 +234,7 @@ server {
         proxy_set_header Connection "upgrade";
         
         # Authentication
-        auth_basic "NØMAD Dashboard";
+        auth_basic "NØMAÐ Dashboard";
         auth_basic_user_file /etc/nginx/.htpasswd;
     }
 }

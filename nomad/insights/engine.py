@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Insight Engine — main orchestrator.
+NØMAÐ Insight Engine — main orchestrator.
 
 Combines signal readers, narrative templates, the Level 2 correlator,
 and output formatters into a unified pipeline:
@@ -34,7 +34,7 @@ from .formatters import (
 
 class InsightEngine:
     """
-    Main entry point for the NØMAD Insight Engine.
+    Main entry point for the NØMAÐ Insight Engine.
 
     Reads signals from the database, narrates them using templates,
     correlates related signals into multi-signal insights, and

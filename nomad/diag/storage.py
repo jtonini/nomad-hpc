@@ -359,7 +359,7 @@ def diagnose_storage(
     Generate comprehensive diagnostics for a storage device.
     
     Args:
-        db_path: Path to NØMAD database
+        db_path: Path to NØMAÐ database
         hostname: Storage device hostname
         hours: Hours of history to analyze
     
@@ -458,7 +458,7 @@ def format_diagnostic(diag: StorageDiagnostic) -> str:
     lines = []
 
     # Header
-    lines.append(f"\n  {c.BOLD}NØMAD Storage Diagnostic{c.RESET} — {c.CYAN}{diag.hostname}{c.RESET} ({diag.storage_type})")
+    lines.append(f"\n  {c.BOLD}NØMAÐ Storage Diagnostic{c.RESET} — {c.CYAN}{diag.hostname}{c.RESET} ({diag.storage_type})")
     lines.append(f"  {'─' * 56}")
 
     # Current State

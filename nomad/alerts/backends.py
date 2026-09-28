@@ -104,11 +104,11 @@ class EmailBackend(NotificationBackend):
 
     def _format_subject(self, alert: dict) -> str:
         severity = alert.get('severity', 'INFO').upper()
-        source = alert.get('source', 'NOMADE')
-        return f"[{severity}] NOMADE Alert: {source}"
+        source = alert.get('source', 'NØMAÐ')
+        return f"[{severity}] NØMAÐ Alert: {source}"
 
     def _format_text(self, alert: dict) -> str:
-        return f"""NOMADE Alert
+        return f"""NØMAÐ Alert
 ============
 Severity: {alert.get('severity', 'INFO')}
 Source: {alert.get('source', 'unknown')}
@@ -130,7 +130,7 @@ Details:
 <html>
 <body style="font-family: Arial, sans-serif; padding: 20px;">
     <div style="background: {color}; color: white; padding: 10px 20px; border-radius: 4px;">
-        <h2 style="margin: 0;">NOMADE Alert: {severity}</h2>
+        <h2 style="margin: 0;">NØMAÐ Alert: {severity}</h2>
     </div>
     <div style="padding: 20px; background: #f9f9f9; border-radius: 4px; margin-top: 10px;">
         <p><strong>Source:</strong> {alert.get('source', 'unknown')}</p>
@@ -152,7 +152,7 @@ class SlackBackend(NotificationBackend):
         super().__init__(config)
         self.webhook_url = config.get('webhook_url')
         self.channel = config.get('channel')
-        self.username = config.get('username', 'NOMADE')
+        self.username = config.get('username', 'NØMAÐ')
         self.icon_emoji = config.get('icon_emoji', ':warning:')
 
     def send(self, alert: dict) -> bool:
@@ -168,14 +168,14 @@ class SlackBackend(NotificationBackend):
                 'icon_emoji': self.icon_emoji,
                 'attachments': [{
                     'color': color,
-                    'title': f"NOMADE Alert: {severity}",
+                    'title': f"NØMAÐ Alert: {severity}",
                     'text': alert.get('message', 'No message'),
                     'fields': [
                         {'title': 'Source', 'value': alert.get('source', 'unknown'), 'short': True},
                         {'title': 'Host', 'value': alert.get('host', 'unknown'), 'short': True},
                         {'title': 'Time', 'value': alert.get('timestamp', 'unknown'), 'short': True},
                     ],
-                    'footer': 'NOMADE HPC Monitor'
+                    'footer': 'NØMAÐ HPC Monitor'
                 }]
             }
 
@@ -203,7 +203,7 @@ class SlackBackend(NotificationBackend):
         if not self.webhook_url:
             return False
         try:
-            payload = {'text': 'NOMADE test message - configuration working!'}
+            payload = {'text': 'NØMAÐ test message - configuration working!'}
             req = Request(
                 self.webhook_url,
                 data=json.dumps(payload).encode('utf-8'),

@@ -182,7 +182,7 @@ def compute_resilience(
 
     Parameters
     ----------
-    db_path : path to NØMAD database
+    db_path : path to NØMAÐ database
     hours : how far back to look for disturbances (default 30 days)
     """
     db_path = Path(db_path)

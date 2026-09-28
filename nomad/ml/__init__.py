@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Machine Learning Module
+NØMAÐ Machine Learning Module
 
 - GNN: What fails (network structure)
 - LSTM: When it fails (temporal patterns)

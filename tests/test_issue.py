@@ -1,4 +1,4 @@
-"""Tests for the NØMAD issue reporting module."""
+"""Tests for the NØMAÐ issue reporting module."""
 
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ class TestIssueFormatter:
         body = self.formatter.format_bug(
             title="Crash on startup",
             component="cli",
-            description="NØMAD crashes when run without config",
+            description="NØMAÐ crashes when run without config",
             steps="1. Remove nomad.toml\n2. Run nomad status",
             expected="Graceful error message",
             actual="Traceback with KeyError",
@@ -268,7 +268,7 @@ class TestGitHubClient:
         subject, body = client.generate_email_body(
             "Test issue", "Description here", "bug"
         )
-        assert "[NØMAD Bug]" in subject
+        assert "[NØMAÐ Bug]" in subject
         assert "Test issue" in subject
         assert "Description here" in body
         assert "nomad issue --email" in body

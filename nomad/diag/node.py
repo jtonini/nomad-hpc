@@ -275,7 +275,7 @@ def diagnose_node(
     Generate comprehensive diagnostics for an HPC node.
     
     Args:
-        db_path: Path to NØMAD database
+        db_path: Path to NØMAÐ database
         cluster: Cluster name
         node_name: Node hostname
         hours: Hours of history to analyze
@@ -350,7 +350,7 @@ def format_diagnostic(diag: NodeDiagnostic) -> str:
     lines = []
 
     # Header
-    lines.append(f"\n  {c.BOLD}NØMAD Node Diagnostic{c.RESET} — {c.CYAN}{diag.cluster}/{diag.node_name}{c.RESET}")
+    lines.append(f"\n  {c.BOLD}NØMAÐ Node Diagnostic{c.RESET} — {c.CYAN}{diag.cluster}/{diag.node_name}{c.RESET}")
     lines.append(f"  {'─' * 56}")
 
     # Current State

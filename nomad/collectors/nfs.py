@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD NFS I/O Collector
+NØMAÐ NFS I/O Collector
 
 Collects NFS-specific I/O statistics from nfsiostat.
 Critical for detecting NFS bottlenecks in HPC environments.

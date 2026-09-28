@@ -1,4 +1,4 @@
-# NØMADE Core Dependencies
+# NØMAÐ Core Dependencies
 
 # CLI and configuration
 click>=8.0

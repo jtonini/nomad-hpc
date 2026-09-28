@@ -1,6 +1,6 @@
 # Cloud Monitoring
 
-NOMAD supports hybrid cloud monitoring alongside on-premises HPC clusters.
+NØMAÐ supports hybrid cloud monitoring alongside on-premises HPC clusters.
 
 ## Supported Providers
 
@@ -33,7 +33,7 @@ enabled = false
 
 ## Console Integration
 
-The NOMAD Console provides three cloud views:
+The NØMAÐ Console provides three cloud views:
 
 - **Monitoring** — real-time instance metrics
 - **Analytics** — cost and utilization analysis

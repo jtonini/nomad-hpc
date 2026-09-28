@@ -1,6 +1,6 @@
 # ML Framework
 
-NØMAD's machine learning framework combines multiple models for robust job failure prediction.
+NØMAÐ's machine learning framework combines multiple models for robust job failure prediction.
 
 ## Architecture Overview
 ```
@@ -212,7 +212,7 @@ For running jobs:
 
 ### Actionable Recommendations
 
-When risk is elevated, NØMAD provides specific recommendations based on which features contribute most:
+When risk is elevated, NØMAÐ provides specific recommendations based on which features contribute most:
 ```
 ⚠️ Job 12345 has elevated failure risk (0.72)
 

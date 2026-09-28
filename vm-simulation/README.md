@@ -1,6 +1,6 @@
-# NOMAD VM Simulation Environment
+# NØMAÐ VM Simulation Environment
 
-Test and develop NOMAD without access to a real HPC cluster.
+Test and develop NØMAÐ without access to a real HPC cluster.
 
 **Author:** Joao Tonini (jtonini@richmond.edu)
 
@@ -149,7 +149,7 @@ Available configs:
 vm-simulation/
 |-- Vagrantfile              # VM definition
 |-- README.md                # This file
-|-- nomad-test.toml         # NOMAD config for testing
+|-- nomad-test.toml         # NØMAÐ config for testing
 |
 |-- slurm/                   # SLURM configurations
 |   |-- slurm-minimal.conf   # 1 node
@@ -170,7 +170,7 @@ vm-simulation/
     +-- *.json               # Generated samples
 ```
 
-## Testing NOMAD
+## Testing NØMAÐ
 
 ### Collect Metrics (in VM)
 

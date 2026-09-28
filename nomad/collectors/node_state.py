@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD Node State Collector
+NØMAÐ Node State Collector
 
 Collects SLURM node state, allocation, and health from scontrol.
 Detects drained nodes, allocation patterns, and node issues.

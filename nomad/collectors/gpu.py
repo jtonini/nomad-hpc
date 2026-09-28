@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD GPU Collector
+NØMAÐ GPU Collector
 
 Collects NVIDIA GPU metrics from nvidia-smi (standard) or DCGM (enhanced).
 DCGM is used opportunistically when available; nvidia-smi is the fallback.

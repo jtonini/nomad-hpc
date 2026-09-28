@@ -101,7 +101,7 @@ def compute_diversity(
 
     Parameters
     ----------
-    db_path : path to NØMAD database
+    db_path : path to NØMAÐ database
     dimension : what to measure diversity over ("group", "partition", "user")
     hours : how far back to look for the current snapshot
     window_hours : size of each trend window in hours

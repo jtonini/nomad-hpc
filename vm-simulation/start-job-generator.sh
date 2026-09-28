@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Start the NØMAD synthetic job generator
+# Start the NØMAÐ synthetic job generator
 #
 # Usage:
 #   ./start-job-generator.sh              # Default: 10 jobs/hour

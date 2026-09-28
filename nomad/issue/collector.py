@@ -1,6 +1,6 @@
 """Collect system information for issue reports.
 
-Gathers NØMAD version, Python version, OS details, active collectors,
+Gathers NØMAÐ version, Python version, OS details, active collectors,
 active alerts, cluster count, and database statistics to auto-populate
 issue reports with diagnostic context.
 """
@@ -46,7 +46,7 @@ class SystemInfo:
             "",
             "| Field | Value |",
             "|-------|-------|",
-            f"| NØMAD version | {self.nomad_version} |",
+            f"| NØMAÐ version | {self.nomad_version} |",
         ]
         if self.console_version:
             lines.append(f"| Console version | {self.console_version} |")
@@ -133,7 +133,7 @@ class IssueCollector:
             timestamp=datetime.now().isoformat(timespec="seconds"),
         )
 
-        # NØMAD version
+        # NØMAÐ version
         info.nomad_version = self._get_nomad_version()
 
         # Config-based fields
@@ -148,7 +148,7 @@ class IssueCollector:
         return info
 
     def _get_nomad_version(self) -> str:
-        """Get installed NØMAD version."""
+        """Get installed NØMAÐ version."""
         try:
             from importlib.metadata import version
             return version("nomad-hpc")
@@ -161,7 +161,7 @@ class IssueCollector:
             return "unknown"
 
     def _collect_from_db(self, info: SystemInfo) -> None:
-        """Extract information from the NØMAD database."""
+        """Extract information from the NØMAÐ database."""
         try:
             db = Path(self.db_path)
             info.db_path = str(db)

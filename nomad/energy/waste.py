@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Energy-waste decomposition for the NØMAD energy module.
+Energy-waste decomposition for the NØMAÐ energy module.
 
 Waste is split into three sources and valued under one of two modes. The
 mode determines what "wasted energy" means, and the choice is consequential:

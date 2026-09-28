@@ -8,12 +8,12 @@ entries:
       information that direct classifiers miss. The workflow constructs
       entity similarity networks from cross-sectional data, extracts
       topological features via community detection, and identifies regime
-      boundaries as a continuous divergence landscape. In NOMAD, TESSERA
+      boundaries as a continuous divergence landscape. In NØMAÐ, TESSERA
       powers predictive analytics — detecting emerging regime shifts in
       cluster behavior before they manifest as failures.
     source_files:
       - "External: github.com/jtonini/tessera"
-      - "NOMAD bridge: nomad/analysis/similarity.py"
+      - "NØMAÐ bridge: nomad/analysis/similarity.py"
     related:
       - nomad dyn
       - nomad insights

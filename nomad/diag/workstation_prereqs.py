@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Workstation Prerequisites Diagnostic
+NØMAÐ Workstation Prerequisites Diagnostic
 
 Checks the configuration prerequisites that the workstation collector needs
 in order to gather complete data. Distinct from `diagnose_workstation` in the
@@ -188,7 +188,7 @@ def check_cgroup_v2_mounted(hostname: str, ssh_user: str | None) -> DiagCheck:
         status="FAIL",
         detail=f"unexpected fs type: {out!r}",
         fix_hint=(
-            "NØMAD requires cgroup v2 (unified hierarchy). Check kernel "
+            "NØMAÐ requires cgroup v2 (unified hierarchy). Check kernel "
             "boot params for systemd.unified_cgroup_hierarchy=1, or "
             "upgrade to a distribution with cgroup v2 by default "
             "(RHEL/Rocky 9+, Ubuntu 22.04+, recent Fedora)."

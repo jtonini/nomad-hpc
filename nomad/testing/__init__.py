@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Mock Cluster for Testing
+NØMAÐ Mock Cluster for Testing
 
 Provides a simulated HPC environment for unit testing collectors,
 the patching framework, and edu module without requiring a real cluster.
@@ -151,7 +151,7 @@ class MockCluster:
 
     @property
     def config(self) -> dict[str, Any]:
-        """Return a config dict suitable for NOMADE components."""
+        """Return a config dict suitable for NØMAÐ components."""
         return {
             "general": {
                 "data_dir": self._temp_dir.name,
@@ -165,7 +165,7 @@ class MockCluster:
         }
 
     def _setup_database(self):
-        """Create database with NOMADE schema."""
+        """Create database with NØMAÐ schema."""
         conn = sqlite3.connect(self._db_path)
         c = conn.cursor()
 

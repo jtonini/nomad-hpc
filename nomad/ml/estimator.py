@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Joao Tonini
 """
-Data Readiness Estimator for NOMAD-HPC
+Data Readiness Estimator for NØMAÐ-HPC
 
 Estimates how much data is needed for reliable ML predictions based on:
 - Sample size requirements for statistical power
@@ -423,7 +423,7 @@ def format_readiness_report(report: ReadinessReport, verbose: bool = False) -> s
 
     lines = []
     lines.append("")
-    lines.append(f"  {BOLD}NOMAD-HPC Data Readiness{RESET}")
+    lines.append(f"  {BOLD}NØMAÐ-HPC Data Readiness{RESET}")
     lines.append("  " + chr(9472) * 56)
     oc = score_color(report.overall_score)
     lines.append(f"  Status: {oc}{bar(report.overall_score)}  {report.overall_score}%   {report.status.upper()}{RESET}")

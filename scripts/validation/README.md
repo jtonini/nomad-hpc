@@ -1,4 +1,4 @@
-# NOMAD Validation Probe
+# NØMAÐ Validation Probe
 
 Two scripts for characterizing per-user process activity on a machine before
 deploying Idea 18 alerting thresholds. Passive: collects, doesn't alert.
@@ -14,7 +14,7 @@ deploying Idea 18 alerting thresholds. Passive: collects, doesn't alert.
 
 ## Setup
 
-On each target machine, as the user that NOMAD runs as (cazuza on badenpowell,
+On each target machine, as the user that NØMAÐ runs as (cazuza on badenpowell,
 jtonini on arachne):
 
     python3 -c "import psutil; print(psutil.__version__)"

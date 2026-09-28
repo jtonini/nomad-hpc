@@ -1,4 +1,4 @@
-"""Knowledge base loader and data model for NØMAD reference system.
+"""Knowledge base loader and data model for NØMAÐ reference system.
 
 Loads structured YAML entries from the entries/ directory and provides
 lookup by topic path (e.g., "dyn.diversity", "collectors.disk").
@@ -71,7 +71,7 @@ class ReferenceEntry:
 
 
 class KnowledgeBase:
-    """Loads and queries the NØMAD reference knowledge base.
+    """Loads and queries the NØMAÐ reference knowledge base.
 
     The knowledge base is a collection of YAML files in the entries/
     directory. Each file contains a mapping of entry keys to their
@@ -139,11 +139,11 @@ class KnowledgeBase:
         # Provides basic reference even without YAML files
         self._entries["ref"] = ReferenceEntry(
             key="ref",
-            title="NOMAD Reference System",
-            summary="Built-in documentation and code navigation for NOMAD.",
+            title="NØMAÐ Reference System",
+            summary="Built-in documentation and code navigation for NØMAÐ.",
             description=(
                 "The reference system provides rich documentation for all "
-                "NOMAD commands, modules, configuration options, and concepts. "
+                "NØMAÐ commands, modules, configuration options, and concepts. "
                 "Use 'nomad ref <topic>' to look up any topic, or "
                 "'nomad ref search <query>' to search across all documentation."
             ),

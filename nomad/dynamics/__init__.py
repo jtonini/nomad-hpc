@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD System Dynamics — ``nomad dyn``
+NØMAÐ System Dynamics — ``nomad dyn``
 
 Quantitative frameworks from community ecology, economics, and
 governance theory applied to research computing environments.

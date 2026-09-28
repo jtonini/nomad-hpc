@@ -27,7 +27,7 @@ Usage:
 def ref(topic_parts):
     """Built-in reference and documentation.
 
-    Look up any NOMAD command, module, configuration option, or concept.
+    Look up any NØMAÐ command, module, configuration option, or concept.
 
     \b
     Examples:

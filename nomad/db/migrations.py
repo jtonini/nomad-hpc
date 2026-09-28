@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Database migration system for NOMAD."""
+"""Database migration system for NØMAÐ."""
 
 import logging
 import sqlite3

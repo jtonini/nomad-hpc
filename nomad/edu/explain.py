@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Edu — Job Explanation Engine
+NØMAÐ Edu — Job Explanation Engine
 
 Translates raw HPC job data into plain-language educational feedback.
 This is the atomic unit of the edu module — every other feature
@@ -260,7 +260,7 @@ def format_terminal(
     req_time = fmt_time(job.get("req_time_seconds", 0))
 
     lines.append("")
-    lines.append(f"  {c.BOLD}NØMAD Job Analysis{c.RESET} — {c.CYAN}{fingerprint.job_id}{c.RESET}")
+    lines.append(f"  {c.BOLD}NØMAÐ Job Analysis{c.RESET} — {c.CYAN}{fingerprint.job_id}{c.RESET}")
     lines.append(f"  {'─' * 56}")
     lines.append(f"  User: {c.BOLD}{fingerprint.user}{c.RESET}"
                  f"    Partition: {partition}"
@@ -397,7 +397,7 @@ def explain_job(
 
     Args:
         job_id:         SLURM job ID
-        db_path:        Path to NØMAD database
+        db_path:        Path to NØMAÐ database
         cluster:        Cluster name (optional, required if multiple clusters)
         show_progress:  Include progress comparison with recent jobs
         output_format:  "terminal" (colored text) or "json"

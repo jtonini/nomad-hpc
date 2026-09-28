@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NØMAD pacct binary parser (module form)
+NØMAÐ pacct binary parser (module form)
 
 Parses Linux BSD process accounting files (/var/account/pacct) without
 external dependencies. Supports acct_v3 only (CONFIG_BSD_PROCESS_ACCT_V3),

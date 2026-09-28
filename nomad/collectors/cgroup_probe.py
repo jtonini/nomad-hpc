@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD cgroup v2 per-user probe
+NØMAÐ cgroup v2 per-user probe
 
 Reads live per-user resource data from systemd's user slices:
   /sys/fs/cgroup/user.slice/user-<UID>.slice/

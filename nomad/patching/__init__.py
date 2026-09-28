@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Patching Framework
+NØMAÐ Patching Framework
 
 A structured approach to code patching that addresses:
 - Maintainability: Patch content in separate files with proper syntax highlighting

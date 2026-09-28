@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-NOMADE Metrics Simulator
+NØMAÐ Metrics Simulator
 
 Generates realistic disk and storage metrics for simulated clusters.
-Allows testing NOMADE's analysis on large clusters without running 300 VMs.
+Allows testing NØMAÐ's analysis on large clusters without running 300 VMs.
 
 Simulates:
 - Per-node /localscratch usage (based on running jobs)
@@ -360,7 +360,7 @@ class MetricsGenerator:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate simulated metrics for NOMADE testing"
+        description="Generate simulated metrics for NØMAÐ testing"
     )
     
     parser.add_argument(

@@ -1,6 +1,6 @@
 # Setup Wizard
 
-The `nomad init` wizard configures NØMAD for your environment. It detects available tools, asks about your infrastructure, and generates a configuration file at `~/.config/nomad/nomad.toml`.
+The `nomad init` wizard configures NØMAÐ for your environment. It detects available tools, asks about your infrastructure, and generates a configuration file at `~/.config/nomad/nomad.toml`.
 
 ```bash
 nomad init
@@ -13,14 +13,14 @@ This guide walks through each step of the wizard with explanations and recommend
 ## Step 1: Connection Mode
 
 ```
-Where is NØMAD running?
+Where is NØMAÐ running?
   1) On the cluster headnode
   2) On a separate machine (laptop, desktop, etc.)
 ```
 
-**Option 1 — On the headnode** is the most common choice. NØMAD runs directly on the machine that has access to SLURM commands (`sinfo`, `squeue`, `sacct`) and local filesystems. This is the simplest setup with no SSH configuration needed for the local cluster.
+**Option 1 — On the headnode** is the most common choice. NØMAÐ runs directly on the machine that has access to SLURM commands (`sinfo`, `squeue`, `sacct`) and local filesystems. This is the simplest setup with no SSH configuration needed for the local cluster.
 
-**Option 2 — Remote machine** is for cases where you want to run NØMAD from a laptop or desktop that connects to the cluster via SSH. NØMAD will SSH into the cluster to run commands. You will need to provide SSH credentials (hostname, user, key path).
+**Option 2 — Remote machine** is for cases where you want to run NØMAÐ from a laptop or desktop that connects to the cluster via SSH. NØMAÐ will SSH into the cluster to run commands. You will need to provide SSH credentials (hostname, user, key path).
 
 !!! tip "Recommendation"
     Choose **Option 1** whenever possible. Running on the headnode gives direct access to SLURM, filesystems, and system tools without SSH overhead.
@@ -35,7 +35,7 @@ want to monitor? Most sites have 1-3 clusters.
 Number of clusters [1]:
 ```
 
-A single NØMAD instance can monitor multiple clusters and workstation groups. Each becomes a separate section in the dashboard.
+A single NØMAÐ instance can monitor multiple clusters and workstation groups. Each becomes a separate section in the dashboard.
 
 Common configurations:
 
@@ -44,7 +44,7 @@ Common configurations:
 - **3+ clusters** — Multiple HPC clusters, interactive servers, and departmental workstations
 
 !!! note
-    For multi-site monitoring across different machines, install NØMAD on each site and use `nomad sync` to merge databases into a combined view. The wizard configures one site at a time.
+    For multi-site monitoring across different machines, install NØMAÐ on each site and use `nomad sync` to merge databases into a combined view. The wizard configures one site at a time.
 
 ---
 
@@ -124,11 +124,11 @@ The WorkstationCollector will SSH to each machine and collect CPU, memory, disk,
 ## Step 4: Filesystem Monitoring
 
 ```
-Which filesystems should NØMAD monitor for disk usage?
+Which filesystems should NØMAÐ monitor for disk usage?
 Filesystems (comma-separated) [/, /home]: /, /home, /scratch
 ```
 
-These are the local filesystems on the machine running NØMAD. The DiskCollector monitors these paths, computes fill rates using derivative analysis, and fires alerts when usage exceeds thresholds.
+These are the local filesystems on the machine running NØMAÐ. The DiskCollector monitors these paths, computes fill rates using derivative analysis, and fires alerts when usage exceeds thresholds.
 
 Common paths:
 
@@ -138,7 +138,7 @@ Common paths:
 - `/localscratch` — Node-local scratch
 
 !!! note "Workstation filesystems"
-    For workstation groups, this setting applies to the machine running NØMAD (not the workstations). The WorkstationCollector independently collects disk usage from each remote workstation via SSH.
+    For workstation groups, this setting applies to the machine running NØMAÐ (not the workstations). The WorkstationCollector independently collects disk usage from each remote workstation via SSH.
 
 ---
 
@@ -178,17 +178,17 @@ Detects running JupyterHub or RStudio Server processes. When enabled, the Intera
 ## Step 6: Alerts
 
 ```
-NØMAD can send you email alerts when something needs
+NØMAÐ can send you email alerts when something needs
 attention (disk filling up, nodes going down, etc.).
 Your email address (press Enter to skip): admin@example.com
 ```
 
 Providing an email address enables the alert pipeline. Alerts are always stored in the database and visible in the dashboard regardless of email configuration.
 
-For email delivery, NØMAD uses the system `mail` command if available. No SMTP server configuration is required. You can set up a daily report via cron:
+For email delivery, NØMAÐ uses the system `mail` command if available. No SMTP server configuration is required. You can set up a daily report via cron:
 
 ```bash
-0 8 * * * /path/to/nomad insights brief | mail -s "NØMAD Daily Report" admin@example.com
+0 8 * * * /path/to/nomad insights brief | mail -s "NØMAÐ Daily Report" admin@example.com
 ```
 
 !!! tip "Advanced alert configuration"
@@ -199,7 +199,7 @@ For email delivery, NØMAD uses the system `mail` command if available. No SMTP 
 ## Step 7: Dashboard Port
 
 ```
-The NØMAD dashboard is a web page you open in your
+The NØMAÐ dashboard is a web page you open in your
 browser to view cluster status, node health, and alerts.
 Dashboard port [8050]:
 ```
@@ -221,7 +221,7 @@ Then open `http://localhost:8050` in your browser.
 After completing the wizard, you will see a summary:
 
 ```
-✓ NØMAD configured!
+✓ NØMAÐ configured!
 
 Config:  ~/.config/nomad/nomad.toml
 Data:    ~/.local/share/nomad
@@ -276,7 +276,7 @@ Open `http://localhost:8050` in your browser.
 
 To monitor multiple sites from a single dashboard:
 
-1. Install and configure NØMAD on each site using `nomad init`
+1. Install and configure NØMAÐ on each site using `nomad init`
 2. On a central machine, create `~/.config/nomad/sync.toml`:
 
 ```toml

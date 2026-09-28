@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""NOMADE configuration handling."""
+"""NØMAÐ configuration handling."""
 
 from pathlib import Path
 
@@ -22,7 +22,7 @@ def get_default_config_path() -> Path:
 
 def load_config(path: Path | None = None) -> dict:
     """
-    Load NOMAD configuration as a dict.
+    Load NØMAÐ configuration as a dict.
 
     Resolution order:
       1. Explicit path argument

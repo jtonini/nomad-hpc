@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 """
-NOMAD CLI
+NØMAÐ CLI
 
-Command-line interface for NOMAD monitoring and analysis.
+Command-line interface for NØMAÐ monitoring and analysis.
 
 Commands:
     collect     Run collectors once or continuously
@@ -118,7 +118,7 @@ def _get_version():
 @click.option('-v', '--verbose', is_flag=True, help='Enable debug logging')
 @click.pass_context
 def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
-    """NØMAD - NØde Monitoring And Diagnostics
+    """NØMAÐ - NØde Monitoring And Diagnostics
     
     Lightweight HPC monitoring and prediction tool.
     """
@@ -489,7 +489,7 @@ def status(ctx: click.Context, db: str) -> None:
     conn.row_factory = sqlite3.Row
 
     click.echo()
-    click.echo(click.style("═══ NØMAD Status ═══", bold=True))
+    click.echo(click.style("═══ NØMAÐ Status ═══", bold=True))
     click.echo()
 
     # Filesystem status
@@ -828,7 +828,7 @@ def alerts(ctx: click.Context, db: str, unresolved: bool, severity: str) -> None
     ).fetchone()
     if not table_check:
         click.echo()
-        click.echo("  No alerts table found. Use NØMAD Console for real-time alerts.")
+        click.echo("  No alerts table found. Use NØMAÐ Console for real-time alerts.")
         click.echo()
         conn.close()
         return
@@ -1006,7 +1006,7 @@ def syscheck(ctx: click.Context) -> None:
     import subprocess
 
     click.echo()
-    click.echo(click.style("NØMAD System Check", bold=True))
+    click.echo(click.style("NØMAÐ System Check", bold=True))
     click.echo("═" * 40)
     click.echo()
 
@@ -1226,7 +1226,7 @@ def syscheck(ctx: click.Context) -> None:
 @click.pass_context
 def version(ctx: click.Context) -> None:
     """Show version information."""
-    click.echo("NØMAD v0.2.0")
+    click.echo("NØMAÐ v0.2.0")
     click.echo("NØde Monitoring And Diagnostics")
 
 
@@ -1280,7 +1280,7 @@ def dashboard(ctx, host, port, db):
 
     click.echo(click.style("===========================================", fg='cyan'))
     click.echo(click.style("           ", fg='cyan') +
-               click.style("NOMAD Dashboard", fg='white', bold=True))
+               click.style("NØMAÐ Dashboard", fg='white', bold=True))
     click.echo(click.style("===========================================", fg='cyan'))
     click.echo()
 
@@ -1356,7 +1356,7 @@ def train(ctx, db, epochs, verbose):
         return
 
     click.echo(click.style("=" * 60, fg="cyan"))
-    click.echo(click.style("  NOMAD ML Training", fg="white", bold=True))
+    click.echo(click.style("  NØMAÐ ML Training", fg="white", bold=True))
     click.echo(click.style("=" * 60, fg="cyan"))
     click.echo(f"  Database: {db_path}")
     click.echo(f"  Epochs: {epochs}")
@@ -1409,7 +1409,7 @@ def predict(ctx, db, top):
         return
 
     click.echo(click.style("=" * 60, fg="cyan"))
-    click.echo(click.style("  NOMAD ML Predictions", fg="white", bold=True))
+    click.echo(click.style("  NØMAÐ ML Predictions", fg="white", bold=True))
     click.echo(click.style("=" * 60, fg="cyan"))
     click.echo(f"  Status: {predictions.get('status', 'unknown')}")
     click.echo(f"  Jobs analyzed: {predictions.get('n_jobs', 0)}")
@@ -1463,7 +1463,7 @@ def report(ctx, db, output):
 
     lines = []
     lines.append("=" * 60)
-    lines.append("  NOMAD Analysis Report")
+    lines.append("  NØMAÐ Analysis Report")
     lines.append("=" * 60)
     lines.append(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"  Database: {db_path}")
@@ -1603,7 +1603,7 @@ def test_alerts(ctx, email, slack, webhook):
     send_results = dispatcher.dispatch({
         'severity': 'warning',
         'source': 'test',
-        'message': ('NOMAD test alert (nomad test-alerts). '
+        'message': ('NØMAÐ test alert (nomad test-alerts). '
                     'If you received this, real alerts will reach you.'),
         'host': 'cli-test',
     })
@@ -1693,7 +1693,7 @@ def learn(ctx, db, strategy, threshold, interval, epochs, force, daemon,
     if show_status:
         status = learner.get_training_status()
         click.echo(click.style("=" * 50, fg="cyan"))
-        click.echo(click.style("  NOMAD Learning Status", fg="white", bold=True))
+        click.echo(click.style("  NØMAÐ Learning Status", fg="white", bold=True))
         click.echo(click.style("=" * 50, fg="cyan"))
         click.echo(f"  Strategy: {status['strategy']}")
         click.echo(f"  Total jobs: {status['total_jobs']}")
@@ -1771,10 +1771,10 @@ def learn(ctx, db, strategy, threshold, interval, epochs, force, daemon,
 @click.option('--show', is_flag=True, help='Display current config and exit')
 @click.pass_context
 def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
-    """Initialize NOMAD with an interactive setup wizard.
+    """Initialize NØMAÐ with an interactive setup wizard.
 
     \b
-    The wizard walks you through configuring NØMAD for your
+    The wizard walks you through configuring NØMAÐ for your
     HPC cluster(s). It will ask about your clusters, partitions,
     storage, and monitoring preferences.
 
@@ -2009,7 +2009,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     "could not auto-detect", fg="yellow"))
                 click.echo()
                 click.echo(
-                    "  NØMAD could not detect partitions automatically.")
+                    "  NØMAÐ could not detect partitions automatically.")
                 click.echo(
                     "  This usually means SLURM is not installed here,")
                 click.echo(
@@ -2148,7 +2148,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
         click.echo(click.style("  Storage", fg="green", bold=True))
         click.echo()
         click.echo(
-            "  Which filesystems should NØMAD monitor for disk")
+            "  Which filesystems should NØMAÐ monitor for disk")
         click.echo(
             "  usage? Common HPC paths: /, /home, /scratch,")
         click.echo("  /localscratch, /project")
@@ -2266,7 +2266,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     click.echo("\033[2J\033[H", nl=False)  # Clear screen
     click.echo()
     click.echo(click.style(
-        "  ◈ NØMAD Setup Wizard", fg="cyan", bold=True))
+        "  ◈ NØMAÐ Setup Wizard", fg="cyan", bold=True))
     click.echo(click.style(
         "  ══════════════════════════════════════", fg="cyan"))
     click.echo()
@@ -2314,7 +2314,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
 
     if not saved or not resume:
         click.echo(
-            "  This wizard will help you configure NØMAD for your")
+            "  This wizard will help you configure NØMAÐ for your")
         click.echo(
             "  HPC environment. Press Enter to accept the default")
         click.echo("  value shown in [brackets].")
@@ -2392,18 +2392,18 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                 "  ━━ Step 1: Connection Mode ━━",
                 fg="cyan", bold=True))
             click.echo()
-            click.echo("  Where is NØMAD running?")
+            click.echo("  Where is NØMAÐ running?")
             click.echo()
             click.echo("    1) On the cluster headnode")
             click.echo(
-                "       NØMAD has direct access to SLURM commands")
+                "       NØMAÐ has direct access to SLURM commands")
             click.echo("       like sinfo, squeue, and sacct.")
             click.echo()
             click.echo(
                 "    2) On a separate machine"
                 " (laptop, desktop, etc.)")
             click.echo(
-                "       NØMAD will connect to your cluster(s)"
+                "       NØMAÐ will connect to your cluster(s)"
                 " via SSH")
             click.echo(
                 "       to run commands and collect data remotely.")
@@ -2426,7 +2426,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     "  Remote mode requires SSH key authentication"
                     " so")
                 click.echo(
-                    "  NØMAD can connect to your cluster(s) without")
+                    "  NØMAÐ can connect to your cluster(s) without")
                 click.echo(
                     "  asking for a password every time.")
                 click.echo()
@@ -2464,7 +2464,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     click.echo()
 
                     if click.confirm(
-                            "  Would you like NØMAD to create one"
+                            "  Would you like NØMAÐ to create one"
                             " for you?", default=True):
                         click.echo()
                         ssh_dir.mkdir(mode=0o700, exist_ok=True)
@@ -2524,7 +2524,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     click.echo(
                         "  key needs to be copied to each cluster.")
                     click.echo(
-                        "  NØMAD can do this for you now.")
+                        "  NØMAÐ can do this for you now.")
                     click.echo()
                     click.echo(
                         "  (This will ask for your cluster password"
@@ -2595,13 +2595,13 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                 fg="cyan", bold=True))
             click.echo()
             click.echo(
-                "  NØMAD supports two deployment strategies:")
+                "  NØMAÐ supports two deployment strategies:")
             click.echo()
             click.echo(click.style(
-                "  Strategy A — One NØMAD per machine + sync",
+                "  Strategy A — One NØMAÐ per machine + sync",
                 fg="green", bold=True))
             click.echo(
-                "    Install NØMAD on each machine independently.")
+                "    Install NØMAÐ on each machine independently.")
             click.echo(
                 "    Each instance monitors its own environment.")
             click.echo(
@@ -2617,7 +2617,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                 "    or are on different networks.")
             click.echo()
             click.echo(click.style(
-                "  Strategy B — One NØMAD monitors everything",
+                "  Strategy B — One NØMAÐ monitors everything",
                 fg="green", bold=True))
             click.echo(
                 "    A single instance monitors multiple systems")
@@ -2638,7 +2638,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             click.echo(
                 "  How many HPC clusters or workstation groups")
             click.echo(
-                "  will THIS NØMAD instance monitor?")
+                "  will THIS NØMAÐ instance monitor?")
             click.echo()
             click.echo(
                 "  - Strategy A: enter 1 (this machine only)")
@@ -2705,18 +2705,18 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     # HPC: need a headnode to SSH into
                     click.echo("  SSH connection details:")
                     click.echo(
-                        "  (NØMAD will use SSH to reach"
+                        "  (NØMAÐ will use SSH to reach"
                         " this cluster)")
                     click.echo()
                     host = click.prompt(
                         "  Headnode hostname"
                         " (e.g., cluster.university.edu)")
                 else:
-                    # Workstations: no headnode, NØMAD connects
+                    # Workstations: no headnode, NØMAÐ connects
                     # directly to each machine
                     click.echo("  SSH connection details:")
                     click.echo(
-                        "  For workstation groups, NØMAD connects")
+                        "  For workstation groups, NØMAÐ connects")
                     click.echo(
                         "  directly to each machine via SSH. Just")
                     click.echo(
@@ -3119,7 +3119,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             "  ━━ Step 3: Alerts ━━", fg="cyan", bold=True))
         click.echo()
         click.echo(
-            "  NØMAD can send you email alerts when something"
+            "  NØMAÐ can send you email alerts when something"
             " needs")
         click.echo(
             "  attention (disk filling up, nodes going down,"
@@ -3143,7 +3143,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             "  ━━ Step 4: Dashboard ━━", fg="cyan", bold=True))
         click.echo()
         click.echo(
-            "  The NØMAD dashboard is a web page you open in"
+            "  The NØMAÐ dashboard is a web page you open in"
             " your")
         click.echo(
             "  browser to view cluster status, node health, and")
@@ -3158,7 +3158,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     # Generate TOML config file
     # ══════════════════════════════════════════════════════════════════
     lines = []
-    lines.append("# NØMAD Configuration File")
+    lines.append("# NØMAÐ Configuration File")
     lines.append("# Generated by: nomad init")
     lines.append(
         f"# Date:"
@@ -3459,7 +3459,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
         "  ── Hub role ──", fg="cyan", bold=True))
     click.echo()
     click.echo(
-        "  A hub machine pulls NOMAD databases from one or more other")
+        "  A hub machine pulls NØMAÐ databases from one or more other")
     click.echo(
         "  sites and merges them into a single combined database for")
     click.echo(
@@ -3693,7 +3693,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     click.echo(click.style(
         "  ══════════════════════════════════════", fg="cyan"))
     click.echo(click.style(
-        "  ✓ NØMAD configured!", fg="green", bold=True))
+        "  ✓ NØMAÐ configured!", fg="green", bold=True))
     click.echo()
     click.echo(f"  Config:  {config_file}")
     click.echo(f"  Data:    {data_dir}")
@@ -3986,7 +3986,7 @@ def _load_hub_config(config_file_override=None):
 @click.option('--dry-run', is_flag=True, help='Show what would be synced')
 @click.pass_context
 def sync(ctx, config_file, output, dry_run):
-    """Sync remote NOMAD databases into a combined local database.
+    """Sync remote NØMAÐ databases into a combined local database.
 
     \b
     Pulls nomad.db from each configured remote site via SCP,
@@ -4070,7 +4070,7 @@ def sync(ctx, config_file, output, dry_run):
 
     click.echo()
     click.echo(click.style(
-        "  NOMAD Sync", fg="cyan", bold=True))
+        "  NØMAÐ Sync", fg="cyan", bold=True))
     click.echo(click.style(
         "  ══════════════════════════════════════", fg="cyan"))
     click.echo()
@@ -4656,7 +4656,7 @@ def demo(jobs, days, seed, port, no_launch):
     """Run demo mode with synthetic data.
 
     Generates realistic HPC job data and launches the dashboard.
-    Perfect for testing NØMAD without a real HPC cluster.
+    Perfect for testing NØMAÐ without a real HPC cluster.
 
     Examples:
         nomad demo                  # Generate 1000 jobs, launch dashboard
@@ -4682,7 +4682,7 @@ def demo(jobs, days, seed, port, no_launch):
 
 @cli.group()
 def edu():
-    """NØMAD Edu — Educational analytics for HPC.
+    """NØMAÐ Edu — Educational analytics for HPC.
 
     Measures the development of computational proficiency over time
     by analyzing per-job behavioral fingerprints.
@@ -5001,7 +5001,7 @@ def edu_cloud(ctx, db_path, instance_name, days, output_json):
         return
     hline = chr(9472) * 56
     click.echo()
-    click.echo(click.style("  NOMAD Cloud Proficiency Report", bold=True))
+    click.echo(click.style("  NØMAÐ Cloud Proficiency Report", bold=True))
     click.echo(f"  Analysis period: {days} days")
     click.echo("  " + hline)
     click.echo()
@@ -5036,7 +5036,7 @@ def edu_cloud(ctx, db_path, instance_name, days, output_json):
 
 @cli.group()
 def diag():
-    """NØMAD Diagnostics — Infrastructure troubleshooting.
+    """NØMAÐ Diagnostics — Infrastructure troubleshooting.
 
     Analyze nodes, workstations, and storage devices to identify
     issues and get actionable recommendations.
@@ -5474,7 +5474,7 @@ def diag_gpu(ctx, node, health, hours, db_path):
 
 @cli.group()
 def insights():
-    """NØMAD Insight Engine — operational narratives and analysis."""
+    """NØMAÐ Insight Engine — operational narratives and analysis."""
     pass
 
 
@@ -6302,7 +6302,7 @@ def dyn_externality(ctx, db_path, hours, threshold, output_json):
 def ref(topic_parts):
     """Built-in reference and documentation.
 
-    Look up any NOMAD command, module, configuration option, or concept.
+    Look up any NØMAÐ command, module, configuration option, or concept.
 
     \b
     Examples:
@@ -6411,7 +6411,7 @@ cli.add_command(dev)
 
 @cli.group()
 def community():
-    """NØMAD Community Dataset commands."""
+    """NØMAÐ Community Dataset commands."""
     pass
 
 
@@ -6604,7 +6604,7 @@ def diag_cloud(ctx, instance_name, db_path, days, output_json):
         import json; click.echo(json.dumps({'instance':instance_name,'type':itype,'zone':az,'days':days,'metrics':{k:{kk:round(vv,2) for kk,vv in v.items()} for k,v in metrics.items()},'total_cost':round(total_cost,2),'daily_avg':round(daily_avg,2)},indent=2)); return
     hl = chr(9472)*56
     click.echo()
-    click.echo(click.style(f'  NOMAD Cloud Diagnostic -- {instance_name}', bold=True))
+    click.echo(click.style(f'  NØMAÐ Cloud Diagnostic -- {instance_name}', bold=True))
     click.echo(f'  Instance type: {itype}')
     click.echo(f'  Availability zone: {az}')
     click.echo('  '+hl); click.echo()

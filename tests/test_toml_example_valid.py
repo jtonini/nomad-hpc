@@ -3,7 +3,7 @@
 """Validate that the example and default TOML configs actually parse.
 
 These files are what users copy as a starting point; if either is
-malformed, the user's first NOMAD experience is a stack trace. This
+malformed, the user's first NØMAÐ experience is a stack trace. This
 test locks in the invariant that they parse cleanly.
 """
 

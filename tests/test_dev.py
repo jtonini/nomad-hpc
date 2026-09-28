@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Tests for the NØMAD Developer Toolchain."""
+"""Tests for the NØMAÐ Developer Toolchain."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from nomad.dev.cli_commands import dev
 
 @pytest.fixture
 def temp_repo(tmp_path):
-    """Create a minimal NØMAD repo structure for testing."""
+    """Create a minimal NØMAÐ repo structure for testing."""
     # Create minimal directory structure
     (tmp_path / "nomad").mkdir()
     (tmp_path / "nomad" / "__init__.py").write_text('__version__ = "1.2.5"\n')

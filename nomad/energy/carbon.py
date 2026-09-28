@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Carbon-intensity lookup for the NØMAD energy module.
+Carbon-intensity lookup for the NØMAÐ energy module.
 
 Converts electrical energy (kWh) into CO2-equivalent emissions (grams)
 using regional grid carbon-intensity factors. Two sources are supported:

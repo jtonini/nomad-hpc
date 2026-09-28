@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Tests for the NØMAD System Dynamics module.
+Tests for the NØMAÐ System Dynamics module.
 
 Creates a temporary demo database with realistic synthetic data
 and validates all dynamics computations.
@@ -464,7 +464,7 @@ class TestEngine:
         from nomad.dynamics.engine import DynamicsEngine
         engine = DynamicsEngine(demo_db, cluster_name="test-cluster")
         output = engine.full_summary()
-        assert "NOMAD System Dynamics Report" in output
+        assert "NØMAÐ System Dynamics Report" in output
         assert "test-cluster" in output
         assert "Diversity" in output
         assert "Capacity" in output

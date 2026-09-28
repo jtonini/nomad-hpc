@@ -1,10 +1,10 @@
-# NØMAD Architecture Summary
+# NØMAÐ Architecture Summary
 
 ## Data Collection Overview
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                         NØMAD Data Collection v0.2.0                         │
+│                         NØMAÐ Data Collection v0.2.0                         │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  SYSTEM COLLECTORS (every 60s):                                              │

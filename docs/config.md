@@ -1,6 +1,6 @@
 # Configuration
 
-NØMAD uses TOML configuration files.
+NØMAÐ uses TOML configuration files.
 
 ## Configuration Locations
 

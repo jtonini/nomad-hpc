@@ -1,5 +1,5 @@
 """
-NØMAD Diagnostics Base Module
+NØMAÐ Diagnostics Base Module
 
 Provides shared utilities and base classes for the diagnostic system.
 

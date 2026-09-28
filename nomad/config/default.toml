@@ -1,4 +1,4 @@
-# NØMAD Configuration File
+# NØMAÐ Configuration File
 # Copy to ~/.config/nomad/nomad.toml or /etc/nomad/nomad.toml
 
 [general]
@@ -113,7 +113,7 @@ recipients = ["admin@example.com"]
 enabled = false
 webhook_url = ""
 channel = "#hpc-alerts"
-username = "NOMADE"
+username = "NØMAÐ"
 
 # Generic webhook (optional)
 [alerts.webhook]

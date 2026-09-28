@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-Derivative trend projection for the NØMAD energy module.
+Derivative trend projection for the NØMAÐ energy module.
 
 Aggregate extrapolation only -- deliberately NOT per-entity prediction
 (that is `nomad energy predict`, via TESSERA). This bins a metric into

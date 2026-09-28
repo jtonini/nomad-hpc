@@ -47,7 +47,7 @@ htmlcov/
 docs/_build/
 site/
 
-# NØMADE specific
+# NØMAÐ specific
 *.db
 *.sqlite
 nomade.toml

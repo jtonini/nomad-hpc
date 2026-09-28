@@ -1,6 +1,6 @@
-# Contributing to NOMAD
+# Contributing to NØMAÐ
 
-Thank you for your interest in contributing to NOMAD! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to NØMAÐ! This document provides guidelines and information for contributors.
 
 ## Code of Conduct
 
@@ -15,7 +15,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 - **Questions**: Use the "question" label or start a discussion
 
 When reporting a bug, please include:
-- NOMAD version
+- NØMAÐ version
 - Python version
 - Operating system
 - SLURM version (if relevant)
@@ -251,4 +251,4 @@ Contributors will be recognized in:
 - Release notes
 - The AUTHORS file
 
-Thank you for contributing to NOMAD! 🎉
+Thank you for contributing to NØMAÐ! 🎉

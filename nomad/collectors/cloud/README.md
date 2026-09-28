@@ -1,4 +1,4 @@
-# NØMAD Cloud Collector Modules
+# NØMAÐ Cloud Collector Modules
 
 Cloud collector modules that ingest metrics from cloud provider APIs and
 normalize them into the same schema that on-prem collectors use. Everything
@@ -8,7 +8,7 @@ works unchanged.
 ## Architecture
 
 ```
-Cloud Provider APIs                    NØMAD Pipeline (unchanged)
+Cloud Provider APIs                    NØMAÐ Pipeline (unchanged)
 ─────────────────                      ─────────────────────────
                                        
 AWS CloudWatch ──┐                     ┌── derivatives
@@ -83,7 +83,7 @@ nomad collect cloud aws      # AWS only
 nomad cloud instances
 ```
 
-## What NØMAD Adds Over Native Cloud Monitoring
+## What NØMAÐ Adds Over Native Cloud Monitoring
 
 - **Research workload awareness** — job communities, user groups, TESSERA
   regime detection applied to cloud workloads
@@ -95,7 +95,7 @@ nomad cloud instances
   behavior ("spending is accelerating because user X's jobs are scaling
   inefficiently")
 
-## What NØMAD Does NOT Try To Do
+## What NØMAÐ Does NOT Try To Do
 
 - Replace cloud-native metric collection (CloudWatch does this better on
   its own platform)
@@ -158,7 +158,7 @@ CREATE TABLE cloud_metrics (
     timestamp TEXT NOT NULL,
     node_name TEXT NOT NULL,       -- instance name or ID
     cluster TEXT NOT NULL,         -- account alias / subscription / project
-    metric_name TEXT NOT NULL,     -- NØMAD canonical name (cpu_util, etc.)
+    metric_name TEXT NOT NULL,     -- NØMAÐ canonical name (cpu_util, etc.)
     value REAL NOT NULL,
     unit TEXT NOT NULL,
     source TEXT NOT NULL,          -- "aws", "azure", "gcp"
@@ -170,4 +170,4 @@ CREATE TABLE cloud_metrics (
 ```
 
 The `source` column distinguishes providers. The `metric_name` column uses
-NØMAD canonical names (same as on-prem), enabling cross-environment queries.
+NØMAÐ canonical names (same as on-prem), enabling cross-environment queries.

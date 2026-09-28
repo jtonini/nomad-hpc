@@ -1,12 +1,12 @@
 # Proficiency Scoring
 
-NØMAD's Educational Analytics module tracks computational proficiency development through per-job behavioral fingerprints.
+NØMAÐ's Educational Analytics module tracks computational proficiency development through per-job behavioral fingerprints.
 
 ## Philosophy
 
 Traditional HPC monitoring answers: *"Did the job run?"*
 
-NØMAD Edu answers: *"Did the user learn to use HPC effectively?"*
+NØMAÐ Edu answers: *"Did the user learn to use HPC effectively?"*
 
 This shift enables:
 
@@ -210,7 +210,7 @@ $$\text{Overall} = \frac{\sum_{d \in \text{applicable}} w_d \times s_d}{\sum_{d 
 
 ## Trajectory Tracking
 
-Beyond single jobs, NØMAD tracks proficiency development over time:
+Beyond single jobs, NØMAÐ tracks proficiency development over time:
 ```
 ┌────────────────────────────────────────────────────────────┐
 │           Proficiency Trajectory — alice                   │
@@ -249,7 +249,7 @@ nomad edu report cs301
 ```
 ```
 ┌────────────────────────────────────────────────────────────┐
-│           NØMAD Group Report — cs301                      │
+│           NØMAÐ Group Report — cs301                      │
 ├────────────────────────────────────────────────────────────┤
 │ Members: 24    Jobs: 1,847    Period: 2026-01-15 → 02-15  │
 ├────────────────────────────────────────────────────────────┤

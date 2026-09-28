@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Cloud Collector Modules
+NØMAÐ Cloud Collector Modules
 
 Ingest metrics from cloud provider APIs and normalize them into the
 same schema that on-prem collectors use. Everything downstream —

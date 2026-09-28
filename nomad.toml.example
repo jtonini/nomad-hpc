@@ -1,4 +1,4 @@
-# NØMADE Configuration File
+# NØMAÐ Configuration File
 # Copy this file to nomade.toml and customize for your environment
 
 # ============================================
@@ -9,7 +9,7 @@
 # Name of this cluster (used in alerts and reports)
 cluster_name = "my-cluster"
 
-# Directory for NØMADE data (database, logs)
+# Directory for NØMAÐ data (database, logs)
 data_dir = "/var/lib/nomade"
 
 # Log level: DEBUG, INFO, WARNING, ERROR
@@ -265,7 +265,7 @@ recipients = ["hpc-admin@your-institution.edu"]
 enabled = false
 webhook_url = ""             # paste your Slack incoming webhook URL
 channel = "#hpc-alerts"
-username = "NOMAD"
+username = "NØMAÐ"
 
 # ─── Generic webhook ─────────────────────────────────────────────
 [alerts.webhook]
@@ -485,7 +485,7 @@ user = "root"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# [database] — Where NOMAD stores its operational data.
+# [database] — Where NØMAÐ stores its operational data.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [database]
@@ -532,7 +532,7 @@ min_jobs = 50
 
 # ─────────────────────────────────────────────────────────────────────────────
 # [slurm] — Optional integration with SLURM's prolog/epilog hooks for
-# real-time job scoring. Only relevant if you want NOMAD to evaluate
+# real-time job scoring. Only relevant if you want NØMAÐ to evaluate
 # jobs as they enter the queue.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -542,7 +542,7 @@ min_jobs = 50
 
 [slurm.prolog]
 # Score jobs in real time as they're submitted via slurmctld prolog hook.
-# Requires installing the NOMAD prolog script into SLURM's prolog config.
+# Requires installing the NØMAÐ prolog script into SLURM's prolog config.
 enabled = false
 
 # Risk threshold (0.0 - 1.0): jobs scoring above this are logged for review.

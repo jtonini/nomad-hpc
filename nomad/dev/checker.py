@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAD Codebase Health Checker
+NØMAÐ Codebase Health Checker
 
 Scans the entire codebase and verifies structural integrity:
 - Module registration (all modules imported/registered)
@@ -91,7 +91,7 @@ class CheckReport:
 # =============================================================================
 
 class HealthChecker:
-    """Scans NØMAD codebase for structural issues."""
+    """Scans NØMAÐ codebase for structural issues."""
 
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root

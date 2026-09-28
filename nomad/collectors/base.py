@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 """
-NOMADE Base Collector Framework
+NØMAÐ Base Collector Framework
 
 All collectors inherit from BaseCollector and implement the collect() method.
 The framework handles scheduling, error handling, logging, and database storage.
@@ -50,7 +50,7 @@ class CollectionResult:
 
 class BaseCollector(ABC):
     """
-    Abstract base class for all NOMADE collectors.
+    Abstract base class for all NØMAÐ collectors.
     
     Subclasses must implement:
         - collect() -> list[dict]: Gather data from the source
