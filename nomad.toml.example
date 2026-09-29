@@ -235,6 +235,50 @@ monitor_clients = true
 monitor_exports = true
 
 # ============================================
+# MAIL, SUPPORT AND ISSUE REPORTING
+# ============================================
+# These differ from one institution to the next. The CLI, the dashboard and
+# the NØMAÐ Console all read them from here.
+
+# ─── Mail ────────────────────────────────────────────────────────
+# How NØMAÐ hands mail to your institution's mail server: alert email,
+# and support messages sent from the Console.
+[mail]
+host = "smtp.your-institution.edu"
+port = 587                   # often 25 for an on-campus relay, 587 otherwise
+starttls = "required"        # required | if-offered | off. "off" is meant
+                             # for a mail server on this machine.
+from = "hpc@your-institution.edu"   # must be an address the server accepts;
+                                    # some refuse senders not in the directory
+# tls_name = ""              # the name on the server's certificate, when it
+                             # differs from host (a pool presenting the pool's
+                             # certificate)
+# extra_ca = ""              # an intermediate certificate the server fails
+                             # to send; the chain must still reach a trusted root
+# ca_bundle = ""             # trusted roots; default: the operating system's
+# username = ""              # only if the server needs a login
+# password_file = ""         # a file holding that password, readable only by
+                             # you -- never the password itself
+
+# ─── Support ─────────────────────────────────────────────────────
+# Where people's questions go, e.g. the Console's "Contact support".
+[support]
+email = "hpc-support@your-institution.edu"
+institution = "Your Institution"     # shown in reports and system information
+# user_email_domain = "your-institution.edu"   # replies go to
+                                               # <username>@<this domain>
+
+# ─── Issue reporting ─────────────────────────────────────────────
+# Bug reports and feature requests to the NØMAÐ project on GitHub
+# (`nomad issue`, and the Console's Report Issue page for administrators).
+[issue_reporting]
+enabled = true
+# github_token_file = ""     # a file holding a fine-grained token that can
+                             # only create issues; without one, NØMAÐ opens
+                             # a pre-filled page in the browser instead
+# contact_email = ""         # who the NØMAÐ maintainers may reply to
+
+# ============================================
 # ALERTS
 # ============================================
 
@@ -247,18 +291,13 @@ min_severity = "warning"     # info | warning | critical
 cooldown_minutes = 15
 
 # ─── Email dispatch ──────────────────────────────────────────────
-# IMPORTANT: the values below are placeholders. To enable email,
-# (1) replace smtp_server / from / recipients with values for your
-# institution, then (2) set enabled = true.
+# Sent through [mail] above. To enable: fill in [mail], put your
+# address in recipients, then set enabled = true.
 [alerts.email]
 enabled = false
-smtp_server = "smtp.your-institution.edu"
-smtp_port = 587
-use_tls = true
-# smtp_username = ""
-# smtp_password = ""
-from_address = "nomad@your-institution.edu"
 recipients = ["hpc-admin@your-institution.edu"]
+# Only if alerts must go through a different server than [mail]: any of
+# [mail]'s keys here (host, port, starttls, from, ...) override it.
 
 # ─── Slack dispatch ──────────────────────────────────────────────
 [alerts.slack]

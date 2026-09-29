@@ -77,7 +77,7 @@ class AlertDispatcher:
         self.backends = []
 
         if self.config.get('email', {}).get('enabled'):
-            self.backends.append(EmailBackend(self.config['email']))
+            self.backends.append(EmailBackend(self.config['email'], config.get('mail', {})))
             logger.info("Email backend enabled")
 
         if self.config.get('slack', {}).get('enabled'):

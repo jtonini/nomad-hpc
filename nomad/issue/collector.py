@@ -137,8 +137,9 @@ class IssueCollector:
         info.nomad_version = self._get_nomad_version()
 
         # Config-based fields
+        from nomad.config import support_settings
         issue_cfg = self.config.get("issue_reporting", {})
-        info.institution = issue_cfg.get("institution_name", "")
+        info.institution = support_settings(self.config)["institution"] or ""
         info.submitted_by = issue_cfg.get("contact_email", "")
 
         # Database-derived fields

@@ -11,8 +11,6 @@ Each backend handles a specific notification channel:
 
 import json
 import logging
-import smtplib
-import ssl
 from abc import ABC, abstractmethod
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -40,20 +38,36 @@ class NotificationBackend(ABC):
 
 
 class EmailBackend(NotificationBackend):
-    """Send alerts via SMTP email."""
+    """Send alerts by email, through nomad.mail.
 
-    def __init__(self, config: dict):
+    `config` is [alerts.email]: `enabled` and `recipients`, and optionally its
+    own server settings. `mail` is the shared [mail] section, used for anything
+    [alerts.email] does not set itself.
+    """
+
+    def __init__(self, config: dict, mail: dict | None = None):
         super().__init__(config)
-        self.smtp_server = config.get('smtp_server', 'localhost')
-        self.smtp_port = config.get('smtp_port', 587)
-        self.use_tls = config.get('use_tls', True)
-        self.username = config.get('username')
-        self.password = config.get('password')
-        self.from_addr = config.get('from_address', 'nomad@localhost')
-        self.recipients = config.get('recipients', [])
+        from nomad import mail as _mail
+        self._mail = _mail
+        # `to_addrs` is how the documentation spelled it until 1.7.5.
+        self.recipients = config.get('recipients') or config.get('to_addrs') or []
+        self.settings_error = None
+        own = dict(config)
+        if ('smtp_server' in own and not own.get('smtp_port') and not own.get('port')
+                and not (mail or {}).get('port')):
+            own['port'] = 587   # what [alerts.email] has always defaulted to
+        try:
+            self.mail_settings = _mail.settings({'mail': mail or {}}, own)
+        except ValueError as exc:
+            self.mail_settings = None
+            self.settings_error = str(exc)
+        self.from_addr = (self.mail_settings or {}).get('from') or 'nomad@localhost'
 
     def send(self, alert: dict) -> bool:
         if not self.enabled or not self.recipients:
+            return False
+        if self.mail_settings is None:
+            logger.error(f"Email not sent: {self.settings_error}")
             return False
 
         try:
@@ -68,38 +82,23 @@ class EmailBackend(NotificationBackend):
             html_body = self._format_html(alert)
             msg.attach(MIMEText(html_body, 'html'))
 
-            if self.use_tls:
-                context = ssl.create_default_context()
-                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                    server.starttls(context=context)
-                    if self.username and self.password:
-                        server.login(self.username, self.password)
-                    server.sendmail(self.from_addr, self.recipients, msg.as_string())
-            else:
-                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                    if self.username and self.password:
-                        server.login(self.username, self.password)
-                    server.sendmail(self.from_addr, self.recipients, msg.as_string())
-
+            self._mail.send(msg, self.mail_settings)
             logger.info(f"Email sent to {self.recipients}")
             return True
 
         except Exception as e:
-            logger.error(f"Email send failed: {e}")
+            logger.error(f"Email send failed: {self._mail.failure_label(e)}: {e}")
             return False
 
     def test(self) -> bool:
+        if self.mail_settings is None:
+            logger.error(f"SMTP test failed: {self.settings_error}")
+            return False
         try:
-            if self.use_tls:
-                context = ssl.create_default_context()
-                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                    server.starttls(context=context)
-                    return True
-            else:
-                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                    return True
+            self._mail.check(self.mail_settings)
+            return True
         except Exception as e:
-            logger.error(f"SMTP test failed: {e}")
+            logger.error(f"SMTP test failed: {self._mail.failure_label(e)}: {e}")
             return False
 
     def _format_subject(self, alert: dict) -> str:

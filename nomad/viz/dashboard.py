@@ -47,34 +47,40 @@ DEFAULT_CONFIG = {
 }
 
 def find_config_file() -> Path | None:
-    """Search for TOML config in standard locations."""
-    search_paths = [
-        Path("/etc/nomad/nomad.toml"),
-        Path.home() / "nomad" / "nomad.toml",
-        Path.home() / ".config" / "nomad" / "nomad.toml",
-        Path("nomad.toml"),
-    ]
-    for path in search_paths:
+    """The config nomad itself would use (nomad.config.find_config), then the
+    older places this dashboard also looked: ~/nomad/nomad.toml, ./nomad.toml."""
+    from nomad.config import find_config
+    found = find_config()
+    if found:
+        return found
+    for path in (Path.home() / "nomad" / "nomad.toml", Path("nomad.toml")):
         if path.exists():
             return path
     return None
 
 
 def load_config(config_path: Path | None = None) -> dict:
-    """Load configuration from TOML file."""
-    config = DEFAULT_CONFIG.copy()
+    """Load configuration from TOML file, over this dashboard's defaults."""
+    import copy
+    from nomad.config import read_toml
+    config = copy.deepcopy(DEFAULT_CONFIG)
 
     if config_path is None:
         config_path = find_config_file()
+    if config_path is not None:
+        config_path = Path(config_path)
+    # Skip if path is a directory (not a config file)
+    if config_path is not None and config_path.is_dir():
+        logger.debug(f"Skipping directory: {config_path}")
+        return config
 
-    if config_path and config_path.exists() and tomllib:
+    if config_path is not None and config_path.exists():
         logger.info(f"Loading config from {config_path}")
         try:
-            with open(config_path, 'rb') as f:
-                user_config = tomllib.load(f)
+            user_config = read_toml(config_path)
             # Merge with defaults
             for key, value in user_config.items():
-                if isinstance(value, dict) and key in config:
+                if isinstance(value, dict) and isinstance(config.get(key), dict):
                     config[key].update(value)
                 else:
                     config[key] = value

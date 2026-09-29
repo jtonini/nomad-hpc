@@ -62,23 +62,18 @@ logger = logging.getLogger('nomad')
 
 
 def load_config(config_path: Path) -> dict[str, Any]:
-    """Load TOML configuration file."""
+    """Load TOML configuration file (parsed by nomad.config.read_toml)."""
+    from nomad.config import read_toml
     if not config_path.exists():
         raise click.ClickException(f"Config file not found: {config_path}")
-
-    with open(config_path) as f:
-        return toml.load(f)
+    return read_toml(config_path)
 
 
 def resolve_config_path() -> str:
-    """Find config file: user path first, then system path."""
-    user_config = Path.home() / '.config' / 'nomad' / 'nomad.toml'
-    system_config = Path('/etc/nomad/nomad.toml')
-    if user_config.exists():
-        return str(user_config)
-    if system_config.exists():
-        return str(system_config)
-    return str(user_config)  # Default to user path even if missing
+    """Find config file: user path first, then system path (nomad.config)."""
+    from nomad.config import DEFAULT_CONFIG_PATHS, find_config
+    found = find_config()
+    return str(found or DEFAULT_CONFIG_PATHS[0])  # user path even if missing
 
 
 def get_db_path(config: dict[str, Any]) -> Path:
@@ -1284,7 +1279,7 @@ def dashboard(ctx, host, port, db):
     click.echo(click.style("===========================================", fg='cyan'))
     click.echo()
 
-    serve_dashboard(host, port, db_path=data_source)
+    serve_dashboard(host, port, config_path=ctx.obj.get('config_path'), db_path=data_source)
 
 
 @cli.command()
@@ -1549,12 +1544,14 @@ def test_alerts(ctx, email, slack, webhook):
         click.echo(click.style("No alert backends configured.", fg="yellow"))
         click.echo("Add configuration to nomad.toml. For example:")
         click.echo("")
+        click.echo('[mail]')
+        click.echo('host = "smtp.your-institution.edu"   # or "localhost" for local sendmail')
+        click.echo('port = 587')
+        click.echo('starttls = "required"')
+        click.echo('from = "hpc@your-institution.edu"      # a sender your mail server accepts')
+        click.echo("")
         click.echo('[alerts.email]')
         click.echo('enabled = true')
-        click.echo('smtp_server = "smtp.your-institution.edu"   # or "127.0.0.1" for local sendmail')
-        click.echo('smtp_port = 587')
-        click.echo('use_tls = true')
-        click.echo('from_address = "nomad@your-institution.edu"')
         click.echo('recipients = ["admin@your-institution.edu"]')
         click.echo("")
         click.echo('[alerts.slack]')
@@ -3420,13 +3417,17 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
         lines.append("")
 
     if admin_email:
+        lines.append("[mail]")
+        lines.append(
+            "# Update these with your mail server's details"
+            " (every option: nomad.toml.example):")
+        lines.append('host = "smtp.example.com"')
+        lines.append("port = 587")
+        lines.append('starttls = "required"')
+        lines.append('from = "nomad@example.com"')
+        lines.append("")
         lines.append("[alerts.email]")
         lines.append("enabled = true")
-        lines.append(
-            "# Update these with your SMTP server details:")
-        lines.append('smtp_server = "smtp.example.com"')
-        lines.append("smtp_port = 587")
-        lines.append('from_address = "nomad@example.com"')
         lines.append(f'recipients = ["{admin_email}"]')
         lines.append("")
 

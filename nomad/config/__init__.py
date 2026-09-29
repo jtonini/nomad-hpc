@@ -1,8 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""NØMAÐ configuration handling."""
+"""NØMAÐ configuration handling.
 
+Every part of NØMAÐ that reads nomad.toml finds and parses it here, so the
+CLI, the dashboard and the Console always read the same file the same way.
+"""
+
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATHS = [
     Path.home() / '.config' / 'nomad' / 'nomad.toml',
@@ -20,6 +27,43 @@ def get_default_config_path() -> Path:
     """Get path to packaged default config."""
     return Path(__file__).parent / 'default.toml'
 
+def read_toml(path: Path | str) -> dict:
+    """Parse one TOML file. Raises if it is missing or cannot be parsed.
+
+    The parser is tomllib (standard library from Python 3.11). On Python 3.10,
+    or for a file that only the older `toml` package accepts, `toml` is used
+    instead, so a config that worked before keeps working; the second case is
+    logged, since the file should be fixed.
+    """
+    path = Path(path)
+    text = path.read_text(encoding='utf-8')
+    try:
+        import tomllib
+    except ModuleNotFoundError:          # Python 3.10
+        tomllib = None
+    first_error = None
+    if tomllib is not None:
+        try:
+            return tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            first_error = exc
+    try:
+        import toml
+    except ModuleNotFoundError:
+        if first_error is not None:
+            raise first_error
+        raise
+    try:
+        data = toml.loads(text)
+    except Exception:
+        if first_error is not None:
+            raise first_error
+        raise
+    if first_error is not None:
+        logger.warning("%s is not valid TOML (%s); read it with the older toml "
+                       "parser instead. Please correct the file.", path, first_error)
+    return data
+
 def load_config(path: Path | None = None) -> dict:
     """
     Load NØMAÐ configuration as a dict.
@@ -32,9 +76,9 @@ def load_config(path: Path | None = None) -> dict:
 
     Returns an empty dict if no config is found and the packaged default
     can't be read — never raises, so callers can rely on it as a soft
-    accessor for site policy.
+    accessor for site policy. A file that exists but cannot be read is
+    logged and skipped.
     """
-    import tomllib  # 3.11+, stdlib
     candidates: list[Path] = []
     if path is not None:
         candidates.append(Path(path))
@@ -44,11 +88,42 @@ def load_config(path: Path | None = None) -> dict:
     for p in candidates:
         try:
             if p.exists():
-                with p.open('rb') as f:
-                    return tomllib.load(f)
-        except Exception:
+                return read_toml(p)
+        except Exception as exc:
+            logger.warning("Skipping config %s: %s", p, exc)
             continue
     return {}
+
+def support_settings(config: dict) -> dict:
+    """Where people's questions go: [support], with the older names in
+    [issue_reporting] (support_email, institution_name) as fallbacks.
+
+    Nothing has a built-in default: a default address would send every other
+    site's questions to whoever wrote it.
+    """
+    support = (config or {}).get('support') or {}
+    legacy = (config or {}).get('issue_reporting') or {}
+    return {
+        'email': support.get('email') or legacy.get('support_email') or None,
+        'institution': support.get('institution') or legacy.get('institution_name') or None,
+        'user_email_domain': support.get('user_email_domain') or None,
+    }
+
+def read_secret(section: dict, key: str) -> str:
+    """A secret from a config section, e.g. read_secret(cfg, 'github_token').
+
+    `<key>_file` -- a file holding the secret, readable only by its owner --
+    wins over `<key>` written into the TOML itself. Returns "" when neither is
+    set or the file cannot be read (which is logged).
+    """
+    file_setting = (section or {}).get(f'{key}_file')
+    if file_setting:
+        try:
+            return Path(file_setting).expanduser().read_text(encoding='utf-8').strip()
+        except OSError as exc:
+            logger.warning("Cannot read %s_file %s: %s", key, file_setting, exc)
+            return ''
+    return str((section or {}).get(key) or '')
 
 def resolve_cluster_name(config: dict) -> str:
     """Resolve cluster name from config, trying all known paths.

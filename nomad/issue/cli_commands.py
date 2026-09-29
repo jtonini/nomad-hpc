@@ -18,6 +18,7 @@ import click
 from .collector import IssueCollector
 from .formatter import CATEGORIES, COMPONENTS, IssueFormatter
 from .github_api import GitHubClient
+from nomad.config import read_secret, support_settings
 
 
 def _load_issue_config(ctx: click.Context) -> dict:
@@ -254,7 +255,7 @@ def report(ctx, category, component, title, db_path, no_duplicate_check, email, 
         return
 
     # 7. Duplicate check
-    token = issue_cfg.get("github_token", "")
+    token = read_secret(issue_cfg, "github_token")
     client = GitHubClient(token=token)
 
     if not no_duplicate_check:
@@ -285,7 +286,8 @@ def report(ctx, category, component, title, db_path, no_duplicate_check, email, 
 
     # 8. Submit
     if email:
-        _submit_email(client, formatted_title, body, category, issue_cfg)
+        _submit_email(client, formatted_title, body, category,
+                      support_settings(config)["email"])
     else:
         _submit_github(
             client, formatted_title, body, category, component,
@@ -344,12 +346,14 @@ def _submit_email(
     title: str,
     body: str,
     category: str,
-    issue_cfg: dict,
+    support_email: str | None,
 ) -> None:
     """Submit issue via email."""
-    support_email = issue_cfg.get(
-        "support_email", "nomad-support@richmond.edu"
-    )
+    if not support_email:
+        click.secho(
+            "  No support address is configured. Set [support] email in "
+            "nomad.toml, or submit without --email.", fg="yellow")
+        return
     subject, email_body = client.generate_email_body(title, body, category)
 
     click.echo()
@@ -390,7 +394,7 @@ def search(ctx, keywords, max_results):
     """
     config = ctx.obj.get("config", {}) if ctx.obj else {}
     issue_cfg = config.get("issue_reporting", {})
-    token = issue_cfg.get("github_token", "")
+    token = read_secret(issue_cfg, "github_token")
 
     client = GitHubClient(token=token)
     query = " ".join(keywords)

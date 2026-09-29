@@ -39,11 +39,17 @@ port = 8050
 [alerts]
 enabled = true
 
+[mail]
+host = "smtp.example.edu"
+from = "hpc@example.edu"
+
+[support]
+email = "hpc-support@example.edu"
+institution = "Example University"
+
 [alerts.email]
 enabled = true
-smtp_host = "smtp.example.edu"
-from_addr = "nomad@example.edu"
-to_addrs = ["admin@example.edu"]
+recipients = ["admin@example.edu"]
 
 [alerts.slack]
 enabled = true

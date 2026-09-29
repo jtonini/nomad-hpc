@@ -68,11 +68,18 @@ Configure direct API submission in `nomad.toml`:
 ```toml
 [issue_reporting]
 enabled = true
-github_token = "ghp_xxxxxxxxxxxx"    # Fine-grained PAT, issue-creation only
-institution_name = "University of Richmond"
-contact_email = "hpc-team@richmond.edu"
-support_email = "nomad-support@richmond.edu"
+github_token_file = "~/.config/nomad/github_token"   # a file holding the token (chmod 600)
+contact_email = "hpc-team@your-institution.edu"
+
+[support]
+email = "hpc-support@your-institution.edu"   # where `nomad issue report --email` goes
+institution = "Your Institution"
 ```
+
+`github_token = "..."` written into the TOML still works, but a file keeps the
+token out of a config that is often copied and shared. The older
+`institution_name` and `support_email` keys in `[issue_reporting]` are still
+read when `[support]` doesn't set them.
 
 The GitHub token should be a [fine-grained Personal Access Token](https://github.com/settings/tokens?type=beta)
 scoped only to issue creation on the `jtonini/nomad-hpc` repository.

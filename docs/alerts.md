@@ -22,13 +22,21 @@ Trigger when trends indicate future problems:
 
 ### Email
 ```toml
+[mail]                       # shared by everything that sends mail
+host = "smtp.example.edu"
+port = 587
+starttls = "required"        # required | if-offered | off
+from = "hpc@example.edu"     # a sender your mail server accepts
+
 [alerts.email]
 enabled = true
-smtp_host = "smtp.example.edu"
-smtp_port = 587
-from_addr = "nomad@example.edu"
-to_addrs = ["admin@example.edu", "hpc-team@example.edu"]
+recipients = ["admin@example.edu", "hpc-team@example.edu"]
 ```
+
+Alert email goes through `[mail]`; see `nomad.toml.example` for its other
+options (a certificate name, a missing intermediate, a login). Any of `[mail]`'s
+keys set in `[alerts.email]` itself override it, for alerts that must use a
+different server. `nomad test-alerts --email` checks the connection.
 
 ### Slack
 ```toml
