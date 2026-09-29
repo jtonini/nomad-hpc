@@ -192,3 +192,48 @@ def test_cli_group_report(db):
     assert "Group Report" in out.output and "No jobs in this period: 1 member" in out.output
     data = json.loads(runner.invoke(cli, ["edu", "report", "lab$", "--db", db, "--json"]).output)
     assert data["members_with_jobs"] == 2 and data["without_jobs"] == ["carol"]
+
+
+# ── One person: nomad edu me and the Console's My Activity ─────────────
+
+
+def test_me_scores_only_measured_jobs_and_agrees_with_the_list(db):
+    from nomad.edu.insights import user_insights
+    alice = popmod.population(db).people["alice"]
+    ui = user_insights(db, "alice", cluster_capacities=[])
+    assert ui.finished_job_count == 5           # every finished job counted
+    assert ui.job_count == 4 == alice.scored_jobs   # 104 was never measured
+    assert ui.total_job_count == 6              # any state, incl. the running one
+    # The same overall, dimensions and change as alice's line in a list.
+    assert ui.overall_score == alice.overall
+    assert ui.dimensions == alice.dimensions
+    assert ui.overall_change == alice.change
+    assert ui.overall_trajectory == popmod.trend(alice.change)
+    for issue in ui.issues:
+        if issue.kind == "dimension":
+            assert issue.total_applicable <= 4
+
+
+def test_me_with_nothing_measured_has_no_score(db):
+    from nomad.edu.insights import format_user_insights, user_insights
+    c = sqlite3.connect(db)
+    _job(c, "500", "erin", "spydur", _ago(2))
+    _job(c, "501", "erin", "spydur", _ago(9))
+    c.commit(); c.close()
+    ui = user_insights(db, "erin", cluster_capacities=[])
+    assert ui.finished_job_count == 2 and ui.job_count == 0
+    assert ui.overall_score is None and ui.dimensions == {} and ui.issues == []
+    assert ui.overall_trajectory == "too_few_weeks"
+    text = format_user_insights(ui)
+    assert "2 jobs" in text and "none of them measured" in text
+    assert "0 / 100" not in text and "0.0" not in text
+
+
+def test_me_text_says_what_was_scored(db):
+    from nomad.edu.insights import format_user_insights, user_insights
+    ui = user_insights(db, "alice", cluster_capacities=[])
+    text = format_user_insights(ui)
+    assert "6 jobs in the last 90 days, 4 measured and scored" in text
+    assert f"Overall score: {ui.overall_score:.0f} / 100" in text
+    detailed = format_user_insights(ui, detailed=True)
+    assert "By dimension (average over measured jobs): CPU" in detailed

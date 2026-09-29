@@ -4790,7 +4790,7 @@ def edu_trajectory(ctx, username, db_path, days, output_json):
 @click.option('--user', 'username', default=None,
               help='User to analyze (default: $USER). Admins can specify any user.')
 @click.option('--detailed', is_flag=True,
-              help='Show per-dimension trajectory and detail blurbs.')
+              help='Also show your score in each dimension.')
 @click.option('--json', 'output_json', is_flag=True, help='Output as JSON')
 @click.pass_context
 def edu_me(ctx, db_path, days, username, detailed, output_json):

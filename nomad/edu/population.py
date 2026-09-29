@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from nomad.edu.progress import _split_job_fields, summary_columns, summary_join
-from nomad.edu.scoring import score_job
+from nomad.edu.scoring import JobFingerprint, score_job
 
 FINISHED = ("COMPLETED", "FAILED", "TIMEOUT")
 DIMENSIONS = ("cpu", "memory", "time", "io", "gpu")
@@ -172,7 +172,6 @@ def _compute(db_path: str, days: int, window_size: int) -> Population:
     start = now - timedelta(days=days)
     since = start.isoformat(timespec="seconds")
     acc: dict[str, _Acc] = defaultdict(_Acc)
-    sites: set[str] = set()
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -190,52 +189,100 @@ def _compute(db_path: str, days: int, window_size: int) -> Population:
             user = row.get("user_name")
             if not user:
                 continue
-            a = acc[user]
-            a.jobs += 1
-            end = row.get("end_time") or ""
-            site = row.get("source_site") or row.get("cluster")
-            if site:
-                a.sites.add(site)
-                sites.add(site)
-            if end:
-                a.first = end if a.first is None or end < a.first else a.first
-                a.last = end if a.last is None or end > a.last else a.last
-            if row.pop("_summary_id") is None:
-                continue                         # counted, not measured
-            job, summary = _split_job_fields(row)
-            try:
-                fp = score_job(job, summary)
-            except Exception:
-                continue
-            a.scored += 1
-            window = _window_index(end, start, window_size)
-            for name, dim in fp.dimensions.items():
-                if dim.applicable:
-                    a.dim_sum[name] += dim.score
-                    a.dim_n[name] += 1
-                    if window is not None:
-                        a.win_sum[window][name] += dim.score
-                        a.win_n[window][name] += 1
+            _add(acc[user], row, start, window_size)
     finally:
         conn.close()
 
-    people = {}
-    for user, a in acc.items():
-        dims, overall = _mean_of_dims(a.dim_sum, a.dim_n)
-        change = None
-        windows = sorted(a.win_sum)
-        if len(windows) >= MIN_TREND_WINDOWS:
-            _, first = _mean_of_dims(a.win_sum[windows[0]], a.win_n[windows[0]])
-            _, last = _mean_of_dims(a.win_sum[windows[-1]], a.win_n[windows[-1]])
-            if first is not None and last is not None:
-                change = round(last - first, 1)
-        people[user] = PersonSummary(
-            username=user, jobs=a.jobs, scored_jobs=a.scored,
-            sites=sorted(a.sites), overall=overall, dimensions=dims,
-            change=change, first_job=a.first, last_job=a.last,
-        )
+    people = {user: _summary(user, a) for user, a in acc.items()}
+    sites = {s for p in people.values() for s in p.sites}
     return Population(days=days, since=since, until=now.isoformat(timespec="seconds"),
                       people=people, sites=sorted(sites))
+
+
+def _add(a: _Acc, row: dict, start: datetime, window_size: int) -> JobFingerprint | None:
+    """Count one finished job for its person; score it if it was measured.
+
+    Returns the job's fingerprint when it was scored, else None.
+    """
+    a.jobs += 1
+    end = row.get("end_time") or ""
+    site = row.get("source_site") or row.get("cluster")
+    if site:
+        a.sites.add(site)
+    if end:
+        a.first = end if a.first is None or end < a.first else a.first
+        a.last = end if a.last is None or end > a.last else a.last
+    if row.get("_summary_id") is None:
+        return None                              # counted, not measured
+    job, summary = _split_job_fields(row)
+    try:
+        fp = score_job(job, summary)
+    except Exception:
+        return None
+    fp._end_time = end
+    a.scored += 1
+    window = _window_index(end, start, window_size)
+    for name, dim in fp.dimensions.items():
+        if dim.applicable:
+            a.dim_sum[name] += dim.score
+            a.dim_n[name] += 1
+            if window is not None:
+                a.win_sum[window][name] += dim.score
+                a.win_n[window][name] += 1
+    return fp
+
+
+def _summary(user: str, a: _Acc) -> PersonSummary:
+    dims, overall = _mean_of_dims(a.dim_sum, a.dim_n)
+    change = None
+    windows = sorted(a.win_sum)
+    if len(windows) >= MIN_TREND_WINDOWS:
+        _, first = _mean_of_dims(a.win_sum[windows[0]], a.win_n[windows[0]])
+        _, last = _mean_of_dims(a.win_sum[windows[-1]], a.win_n[windows[-1]])
+        if first is not None and last is not None:
+            change = round(last - first, 1)
+    return PersonSummary(
+        username=user, jobs=a.jobs, scored_jobs=a.scored,
+        sites=sorted(a.sites), overall=overall, dimensions=dims,
+        change=change, first_job=a.first, last_job=a.last,
+    )
+
+
+def score_person(username: str, rows: list[dict], days: int = 90,
+                 window_size: int = 7) -> tuple[PersonSummary, list[JobFingerprint]]:
+    """One person's finished jobs, by the same rules as population().
+
+    `rows` are the person's finished jobs in the window, each joined to its
+    job_summary with `_summary_id` (as progress._load_user_jobs returns them).
+    Every row is counted; only measured ones are scored. Returns the summary
+    and the fingerprints of the scored jobs, in row order -- so a caller
+    looking at one person (nomad edu me, My Activity) gets the same overall,
+    dimensions and change as that person's line in a list, without scoring
+    everyone else.
+    """
+    start = datetime.now() - timedelta(days=days)
+    a = _Acc()
+    scored = []
+    for row in rows:
+        fp = _add(a, row, start, window_size)
+        if fp is not None:
+            scored.append(fp)
+    return _summary(username, a), scored
+
+
+def trend(change: float | None) -> str:
+    """'improving', 'steady' or 'declining' -- 'too_few_weeks' with no change to read.
+
+    A change is the overall score in the last week with measured jobs minus
+    the first; more than TREND_POINTS either way is a direction.
+    """
+    if change is None:
+        return "too_few_weeks"
+    if change > TREND_POINTS:
+        return "improving"
+    if change < -TREND_POINTS:
+        return "declining"
+    return "steady"
 
 
 def _window_index(end_time: str, start: datetime, window_size: int) -> int | None:
@@ -344,20 +391,13 @@ def group_report(db_path: str, group_name: str, days: int = 90,
         for d in p.needs_work:
             issues[d] += 1
 
-    trend = {"improving": 0, "steady": 0, "declining": 0, "too_few_weeks": 0}
+    directions = {"improving": 0, "steady": 0, "declining": 0, "too_few_weeks": 0}
     for p in scored:
-        if p.change is None:
-            trend["too_few_weeks"] += 1
-        elif p.change > TREND_POINTS:
-            trend["improving"] += 1
-        elif p.change < -TREND_POINTS:
-            trend["declining"] += 1
-        else:
-            trend["steady"] += 1
+        directions[trend(p.change)] += 1
 
     people.sort(key=lambda p: (p.overall is None, p.overall if p.overall is not None else 0, p.username))
     return GroupReport(
-        trend=trend,
+        trend=directions,
         group=group_name, members=len(members), people=people,
         without_jobs=without, overall=_spread([p.overall for p in scored]),
         dimensions=dims,

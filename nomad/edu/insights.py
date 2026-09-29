@@ -32,7 +32,8 @@ from itertools import groupby
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from nomad.edu.progress import _count_user_jobs, _load_user_jobs, _load_user_sessions, _score_jobs, _score_sessions
+from nomad.edu.population import score_person, trend
+from nomad.edu.progress import _count_user_jobs, _load_user_jobs, _load_user_sessions, _score_sessions
 from nomad.edu.scoring import (
     JobFingerprint,
     SessionFingerprint,
@@ -169,17 +170,29 @@ class Issue:
 
 @dataclass
 class UserInsights:
-    """Aggregate insight summary for a user across recent jobs and sessions."""
+    """Aggregate insight summary for a user across recent jobs and sessions.
+
+    Only jobs NØMAÐ measured are scored -- the rule Trajectory and Group
+    Reports follow -- and the overall score, dimensions and change are
+    computed exactly as there (nomad.edu.population), so a person's own
+    page and their line in a list agree.
+    """
     username: str
-    job_count: int              # jobs the engine analyzed (finished states)
+    job_count: int              # jobs scored: finished in the window AND measured
     window_days: int
     session_count: int = 0
     session_window_days: int = 7
-    total_job_count: int = 0    # all of the user's jobs (any state) — the
-                                # count shown to users, matching the dashboard
+    total_job_count: int = 0    # all of the user's jobs ending in the window,
+                                # any state -- matching the dashboard
     issues: list[Issue] = field(default_factory=list)
-    overall_trajectory: str = "stable"
-    overall_score: float = 0.0
+    # improving / steady / declining over the window's weeks, or
+    # too_few_weeks when there aren't two weeks with measured jobs
+    overall_trajectory: str = "too_few_weeks"
+    overall_score: float | None = None    # None: nothing measured to score
+    finished_job_count: int = 0           # COMPLETED/FAILED/TIMEOUT in the window;
+                                          # job_count of these were measured
+    overall_change: float | None = None   # last week with jobs minus the first
+    dimensions: dict[str, float] = field(default_factory=dict)  # average per dimension
 
     @property
     def has_issues(self) -> bool:
@@ -738,24 +751,6 @@ def _aggregate_dimension(
     return issue
 
 
-# ── Top-level overall trajectory ─────────────────────────────────────
-
-def _classify_overall_trajectory(fingerprints: list[JobFingerprint]) -> str:
-    """First-half vs second-half on overall score."""
-    if len(fingerprints) < 4:
-        return "stable"
-    overall = [fp.overall for fp in fingerprints]
-    midpoint = len(overall) // 2
-    first_half = sum(overall[:midpoint]) / midpoint
-    second_half = sum(overall[midpoint:]) / (len(overall) - midpoint)
-    delta = second_half - first_half
-    if delta > 5:
-        return "improving"
-    if delta < -5:
-        return "declining"
-    return "stable"
-
-
 # ── Public API ───────────────────────────────────────────────────────
 
 
@@ -1115,7 +1110,10 @@ def user_insights(
     """
     thresholds = _load_thresholds(config)
     rows = _load_user_jobs(db_path, username, days=days)
-    fingerprints = _score_jobs(rows)
+    # Every finished job is counted; only the ones NØMAÐ measured are scored.
+    # A job without measurements would be judged on its walltime alone and
+    # pull the score toward whatever that says.
+    person, fingerprints = score_person(username, rows, days=days)
 
     # Workstation sessions — loaded regardless of whether the user has jobs.
     session_rows = _load_user_sessions(db_path, username, days=session_days)
@@ -1126,6 +1124,7 @@ def user_insights(
         username=username,
         job_count=len(fingerprints),
         total_job_count=total_jobs,
+        finished_job_count=len(rows),
         window_days=days,
         session_count=len(session_fingerprints),
         session_window_days=session_days,
@@ -1145,10 +1144,10 @@ def user_insights(
     issues: list[Issue] = []
 
     if fingerprints:
-        insights.overall_score = (
-            sum(fp.overall for fp in fingerprints) / len(fingerprints)
-        )
-        insights.overall_trajectory = _classify_overall_trajectory(fingerprints)
+        insights.overall_score = person.overall
+        insights.overall_change = person.change
+        insights.dimensions = person.dimensions
+        insights.overall_trajectory = trend(person.change)
 
         # Group job fingerprints by (cluster, partition) so each dimension
         # issue is scoped to where it actually occurs. Blending clusters
@@ -1236,11 +1235,28 @@ def _format_usage_line(stats: UsageStats, directive: str) -> str:
             f"(range {stats.min:.1f}–{stats.max:.1f} {stats.unit})")
 
 
+_DIMENSION_SHORT = {"cpu": "CPU", "memory": "memory", "time": "time", "io": "I/O", "gpu": "GPU"}
+
+
+def _trend_words(insights: UserInsights) -> str:
+    change = insights.overall_change
+    return {
+        "improving": f"improving, {change:+.0f} since your first week" if change is not None else "improving",
+        "declining": f"declining, {change:+.0f} since your first week" if change is not None else "declining",
+        "steady": "steady",
+    }.get(insights.overall_trajectory, "not enough weeks to compare yet")
+
+
 def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     """Render UserInsights as text suitable for terminal output."""
     lines: list[str] = []
 
     if insights.job_count == 0 and not insights.issues:
+        if insights.total_job_count:
+            return (f"{insights.username}: {insights.total_job_count} jobs in the last "
+                    f"{insights.window_days} days, none of them measured by NØMAÐ,\n"
+                    f"so there is nothing to score yet. If that is unexpected, check "
+                    f"that the cluster's job_metrics collector is running.")
         return (f"No recent jobs found for {insights.username} "
                 f"in the last {insights.window_days} days.\n"
                 f"If you've run jobs recently, ensure the cluster's "
@@ -1248,10 +1264,17 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
 
     lines.append(f"  Your NØMAÐ Profile — {insights.username}")
     lines.append(f"  {'─' * 56}")
-    if insights.total_job_count > 0:
-        lines.append(f"  {insights.total_job_count} jobs in the last {insights.window_days} days")
-        lines.append(f"  Overall score: {insights.overall_score:.1f} / 100  "
-                     f"({insights.overall_trajectory})")
+    jobs = insights.total_job_count or insights.job_count
+    if jobs:
+        lines.append(f"  {jobs} jobs in the last {insights.window_days} days, "
+                     f"{insights.job_count} measured and scored")
+        if insights.overall_score is not None:
+            lines.append(f"  Overall score: {insights.overall_score:.0f} / 100  "
+                         f"({_trend_words(insights)})")
+        if detailed and insights.dimensions:
+            dims = ", ".join(f"{_DIMENSION_SHORT.get(d, d)} {s:.0f}"
+                             for d, s in insights.dimensions.items())
+            lines.append(f"  By dimension (average over measured jobs): {dims}")
     else:
         lines.append("  Based on your recent workstation sessions")
     lines.append("")
@@ -1262,7 +1285,7 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
         lines.append("  to flag any single dimension.")
         return "\n".join(lines)
 
-    lines.append("  Top issues across your recent jobs:")
+    lines.append("  Top issues across your measured jobs:")
     lines.append(f"  {'─' * 56}")
 
     for issue in insights.issues:
@@ -1336,7 +1359,7 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     if not detailed:
         lines.append("")
         lines.append(
-            "  Run with --detailed for per-dimension trajectory and details."
+            "  Run with --detailed for your score in each dimension."
         )
         lines.append(
             "  Run `nomad edu explain <job_id>` for a single-job analysis."

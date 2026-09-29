@@ -23,6 +23,9 @@ nomad edu trajectory alice
 
 # Generate a report for a course or research group
 nomad edu report cs301
+
+# Your own jobs: score, trend and what to change
+nomad edu me
 ```
 
 ## Commands
@@ -158,6 +161,41 @@ no jobs are listed apart, never averaged in as zero. Figures over people are
 medians. "Change" compares a member's first and last week with measured jobs,
 and needs two such weeks. The Console's Group Reports page shows the same
 numbers.
+
+### `nomad edu me`
+
+Your own jobs over the last 90 days (`--days N`), scored by the same rules as
+`nomad edu report`: every finished job is counted, only jobs NØMAÐ measured
+are scored, the overall score is the mean of your dimension averages, and the
+trend compares your first and last week with measured jobs. Your line in a
+group report and this page therefore show the same numbers, and so do the
+Console's Trajectory and My Activity pages. With `--detailed`:
+
+```
+  Your NØMAÐ Profile — alice
+  ────────────────────────────────────────────────────────
+  25 jobs in the last 90 days, 15 measured and scored
+  Overall score: 52 / 100  (improving, +6 since your first week)
+  By dimension (average over measured jobs): CPU 43, memory 62, time 50
+
+  Top issues across your measured jobs:
+  ────────────────────────────────────────────────────────
+
+  [HIGH]     CPU Efficiency (spydur/basic) — ↑ improving
+    5/7 jobs scored below threshold (avg score: 21.8)
+
+    Your jobs:    request 8 (typical)
+                  use 2.0 median (range 1.0–3.0 cores)
+                  that's 25.0% utilization
+
+    Try:          #SBATCH --ntasks=2
+```
+
+An issue is listed when most of your measured jobs on a cluster and partition
+fall below the threshold for that dimension. `--detailed` adds the line with
+your score in each dimension; `--json` gives everything as JSON; admins can
+pass `--user`. With jobs but none measured, it says so instead of showing a
+score.
 
 ## Setting Up Groups
 

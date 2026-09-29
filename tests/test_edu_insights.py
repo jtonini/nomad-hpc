@@ -4,7 +4,7 @@
 import pytest
 from nomad.edu.insights import (
     DEFAULT_THRESHOLDS, KEY_TO_DISPLAY, Issue, UserInsights,
-    _aggregate_dimension, _classify_overall_trajectory,
+    _aggregate_dimension,
     _classify_severity, _compute_dimension_trajectory,
     _load_thresholds, format_user_insights,
 )
@@ -208,17 +208,14 @@ class TestTrajectory:
         fps = [make_fp(f"j{i}", {"memory": (50.0, "", "")}) for i in range(2)]
         assert _compute_dimension_trajectory(fps, "memory") == "stable"
 
-    def test_overall_trajectory_uses_overall_property(self):
-        # Since JobFingerprint.overall is computed from dimensions, build
-        # fingerprints with declining overall scores
-        fps = [
-            make_fp(f"e_{i}", {"cpu": (90.0, "", ""), "memory": (90.0, "", "")})
-            for i in range(4)
-        ] + [
-            make_fp(f"l_{i}", {"cpu": (10.0, "x", ""), "memory": (10.0, "y", "")})
-            for i in range(4)
-        ]
-        assert _classify_overall_trajectory(fps) == "declining"
+    def test_overall_trend_is_the_population_rule(self):
+        # The overall direction is read from the change between the first and
+        # last week with measured jobs, as on Trajectory and Group Reports.
+        from nomad.edu.population import trend
+        assert trend(None) == "too_few_weeks"
+        assert trend(12.0) == "improving"
+        assert trend(-6.0) == "declining"
+        assert trend(5.0) == "steady" and trend(-5.0) == "steady"
 
 
 class TestFormatting:
