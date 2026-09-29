@@ -250,15 +250,35 @@ def generate_recommendations(causes: list, state: dict, failures: dict) -> list:
             recommendations.append('Check for runaway processes: top -bn1')
             recommendations.append('Review CPU-bound jobs for inefficiencies')
 
+        elif cause['cause'] == 'Admin Drain':
+            recommendations.append('See who drained it, when and why: scontrol show node <node> (the Reason line)')
+            recommendations.append("Check the node's slurmd log and dmesg before resuming it")
+
+        elif cause['cause'] == 'Job OOM Kills':
+            recommendations.append('Check dmesg for OOM killer messages: dmesg | grep -i oom')
+            recommendations.append('List the jobs killed: sacct -N <node> -s OUT_OF_MEMORY,FAILED -S now-1days')
+
+        elif cause['cause'] == 'High Job Failure Rate':
+            recommendations.append('List recent failures: sacct -N <node> -s FAILED,NODE_FAIL -S now-1days -o JobID,User,State,ExitCode')
+            recommendations.append('Failures across many users point at the node rather than the jobs')
+
         elif cause['cause'] == 'Node not reporting':
             recommendations.append('Ping node: ping <node>')
             recommendations.append('Check SSH access: ssh <node> hostname')
             recommendations.append('Check SLURM daemon: systemctl status slurmd')
             recommendations.append('Check power/IPMI if available')
 
-    # Only add resume if there are actual issues
+    # "Healthy" only when the node can take jobs and nothing was found. A
+    # drained or down node with no cause in NØMAÐ's data is not healthy --
+    # the cause just isn't here.
+    from nomad.collectors.node_state import node_is_available
+    available = bool(state) and node_is_available(state.get('state'))
     if recommendations:
-        recommendations.append('Resume node after fixing: scontrol update nodename=<node> state=resume')
+        if not available:
+            recommendations.append('Resume node after fixing: scontrol update nodename=<node> state=resume')
+    elif not available:
+        recommendations.append("NØMAÐ's data shows no cause; check the node directly: "
+                               "scontrol show node <node>, the slurmd log, dmesg")
     else:
         recommendations.append('Node appears healthy - no action required')
 

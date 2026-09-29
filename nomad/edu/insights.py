@@ -727,6 +727,9 @@ def _aggregate_dimension(
     issue.suggested_display = _format_value_for_directive(
         primary_directive, value
     )
+    if dim_key in DIMENSION_FRAMING_UNDER and typical_current and value > typical_current:
+        # Raising the request: say why in those terms, not "you asked too much".
+        issue.rationale = DIMENSION_FRAMING_UNDER[dim_key]
     issue.strategy = strategy_label
     issue.suggestion_rationale = rationale
 
@@ -1211,6 +1214,17 @@ DIMENSION_FRAMING = {
             "scheduling fairness of cluster jobs."),
 }
 
+# When the jobs asked for too LITTLE -- they ran out of walltime or memory,
+# or came close -- the suggestion raises the request, and the framing above
+# (written for asking too much) would contradict it. Chosen by the direction
+# of the aggregated suggestion.
+DIMENSION_FRAMING_UNDER = {
+    "time": ("Your jobs ran out of walltime or came close to it; a job "
+             "stopped at its limit loses the work since its last checkpoint."),
+    "memory": ("Your jobs ran out of memory or came close to it; a job "
+               "killed for memory loses its work."),
+}
+
 # Actionable remedies for dimensions that have no single SLURM directive to
 # suggest (cpu/time/memory/gpu already emit concrete #SBATCH changes). Kept
 # portable across deployments — describes the pattern, not a site path.
@@ -1340,11 +1354,13 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
                         issue.current_value_typical * 100)
                 lines.append(f"                  that's {util:.1f}% utilization")
 
-        # Educational framing
-        framing = DIMENSION_FRAMING.get(issue.dimension_key)
+        # Educational framing -- the issue's own, which follows the direction
+        # of the suggestion (asked too much vs ran out)
+        framing = issue.rationale or DIMENSION_FRAMING.get(issue.dimension_key)
         if framing:
+            import textwrap
             lines.append("")
-            lines.append(f"    {framing}")
+            lines.extend(f"    {line}" for line in textwrap.wrap(framing, width=72))
 
         # Recommendation
         if issue.suggested_display:

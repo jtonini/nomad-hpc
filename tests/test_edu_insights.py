@@ -189,6 +189,43 @@ class TestAggregation:
         assert issue.affected_jobs == 5
 
 
+class TestFramingFollowsTheSuggestion:
+    """The line explaining an issue must not contradict its suggestion."""
+
+    def _issue(self, key, directive, current, actual):
+        fps = [make_fp(f"j{i}", {key: (15.0, (directive, 0, current, actual), "")})
+               for i in range(4)]
+        return _aggregate_dimension(key, fps, threshold=40.0)
+
+    def test_walltime_too_short_says_so(self):
+        # 2 h requested, jobs ran ~2 h (timed out or nearly): raise the limit
+        issue = self._issue("time", "time", 7200, 7100)
+        assert issue.suggested_value > issue.current_value_typical
+        assert "ran out of walltime" in issue.rationale
+        assert "Over-requesting" not in issue.rationale
+
+    def test_walltime_too_long_says_so(self):
+        issue = self._issue("time", "time", 36000, 600)
+        assert issue.suggested_value < issue.current_value_typical
+        assert issue.rationale.startswith("Over-requesting walltime")
+
+    def test_memory_too_little_says_so(self):
+        issue = self._issue("memory", "mem", 8192, 8000)
+        assert issue.suggested_value > issue.current_value_typical
+        assert "ran out of memory" in issue.rationale
+
+    def test_memory_too_much_says_so(self):
+        issue = self._issue("memory", "mem", 65536, 1024)
+        assert "unavailable to other jobs" in issue.rationale
+
+    def test_text_output_uses_the_issue_framing(self):
+        ui = UserInsights(username="u", job_count=4, window_days=90, total_job_count=4,
+                          overall_score=30.0)
+        ui.issues = [self._issue("time", "time", 7200, 7100)]
+        text = format_user_insights(ui)
+        assert "ran out of walltime" in text and "Over-requesting" not in text
+
+
 class TestTrajectory:
     def test_worsening_detected(self):
         fps = (

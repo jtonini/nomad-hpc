@@ -23,6 +23,26 @@ from nomad.alerts import send_alert
 logger = logging.getLogger(__name__)
 
 
+# What a Slurm node state says about whether the node can run jobs.
+# Slurm composes states ("IDLE+DRAIN", "DOWN+NOT_RESPONDING",
+# "IDLE+CLOUD+POWERED_DOWN") and marks a node that stopped responding with
+# "*" ("IDLE*", "DOWN*+DRAIN"). States are read as whole tokens: matching
+# substrings made "POWERED_DOWN" look DOWN, and "IDLE*" -- not responding --
+# look fine.
+_UNAVAILABLE = {"DOWN", "DRAIN", "DRAINED", "DRAINING", "DRNG", "FAIL", "FAILING",
+                "FAILG", "ERROR", "NOT_RESPONDING", "NO_RESPOND", "UNKNOWN", "UNK",
+                "INVALID", "INVALID_REG", "INVAL"}
+
+
+def node_is_available(state: str | None) -> bool:
+    """True if nothing in a Slurm node state says the node can't take jobs."""
+    s = (state or "").strip().upper()
+    if not s or "*" in s:
+        return False
+    tokens = {t.strip("~#%$@^!-") for t in s.split("+")}
+    return not (tokens & _UNAVAILABLE)
+
+
 @dataclass
 class NodeState:
     """SLURM node state and allocation."""
@@ -77,9 +97,8 @@ class NodeState:
 
     @property
     def is_healthy(self) -> bool:
-        """Node is healthy if not drained, down, or in error state."""
-        unhealthy_states = ['DOWN', 'DRAIN', 'DRAINING', 'ERROR', 'FAIL', 'FAILING']
-        return not any(s in self.state.upper() for s in unhealthy_states)
+        """Node can take jobs: not drained, down, failing or not responding."""
+        return node_is_available(self.state)
 
 
 @registry.register
@@ -150,6 +169,8 @@ class NodeStateCollector(BaseCollector):
             ignore_states   = ["POWERED_DOWN", ...]
         """
         s = (state or '').upper()
+        if '*' in s and 'NOT_RESPONDING' not in s:
+            s += '+NOT_RESPONDING'          # "IDLE*" is Slurm's not-responding mark
         cfg = self._alert_config
 
         ignore = [x.upper() for x in cfg.get('ignore_states', [])]

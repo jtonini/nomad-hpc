@@ -1221,7 +1221,8 @@ def syscheck(ctx: click.Context) -> None:
 @click.pass_context
 def version(ctx: click.Context) -> None:
     """Show version information."""
-    click.echo("NØMAÐ v0.2.0")
+    # The installed package's version -- the same one `nomad --version` prints.
+    click.echo(f"NØMAÐ v{_get_version()}")
     click.echo("NØde Monitoring And Diagnostics")
 
 
