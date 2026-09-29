@@ -38,6 +38,14 @@ options (a certificate name, a missing intermediate, a login). Any of `[mail]`'s
 keys set in `[alerts.email]` itself override it, for alerts that must use a
 different server. `nomad test-alerts --email` checks the connection.
 
+Each message names its cluster -- the name `[clusters]` gives, else the host
+name -- in the subject with the problem itself, so an inbox shared by several
+sites reads at a glance:
+
+```
+[WARNING] NØMAÐ spydur: Disk /scratch at 85.0% (threshold: 80%)
+```
+
 ### Slack
 ```toml
 [alerts.slack]

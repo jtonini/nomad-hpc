@@ -60,6 +60,13 @@ class AlertDispatcher:
             url = "https://api.example.com/alerts"
         """
         self.config = config.get('alerts', {})
+        # Which cluster or site the alerts come from -- the same name the
+        # node_state collector records -- so a message says where it is from.
+        try:
+            from nomad.config import resolve_cluster_name
+            self.site = resolve_cluster_name(config) if config else None
+        except Exception:
+            self.site = None
         self.min_severity = self.config.get('min_severity', 'warning').lower()
         self.cooldown_minutes = self.config.get('cooldown_minutes', 15)
         # Resolve full database path
@@ -109,6 +116,8 @@ class AlertDispatcher:
         # Add timestamp if not present
         if 'timestamp' not in alert:
             alert['timestamp'] = datetime.now().isoformat()
+        if self.site and not alert.get('site'):
+            alert['site'] = self.site
 
         # Check minimum severity
         severity_order = {'info': 0, 'warning': 1, 'critical': 2}
@@ -185,9 +194,11 @@ class AlertDispatcher:
 
             # Use existing alerts table schema (from migrations)
             # Columns: severity, category, source, message, details, dedup_key
-            details = alert.get('details', {})
+            details = dict(alert.get('details') or {})
             if alert.get('host'):
                 details['host'] = alert['host']
+            if alert.get('site'):
+                details['site'] = alert['site']
 
             dedup_key = f"{alert.get('source')}:{alert.get('host')}:{alert.get('message', '')[:50]}"
 

@@ -9,8 +9,10 @@ Each backend handles a specific notification channel:
 - Generic Webhook (HTTP POST)
 """
 
+import html
 import json
 import logging
+from datetime import datetime
 from abc import ABC, abstractmethod
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -102,46 +104,64 @@ class EmailBackend(NotificationBackend):
             return False
 
     def _format_subject(self, alert: dict) -> str:
+        # Where it is and what happened, readable in an inbox list:
+        # "[WARNING] NØMAÐ spydur: Disk /scratch at 85.0% (threshold: 80%)"
         severity = alert.get('severity', 'INFO').upper()
-        source = alert.get('source', 'NØMAÐ')
-        return f"[{severity}] NØMAÐ Alert: {source}"
+        where = f" {alert['site']}" if alert.get('site') else ""
+        what = " ".join(str(alert.get('message') or alert.get('source') or 'alert').split())
+        if len(what) > 100:
+            what = what[:99] + "…"
+        return f"[{severity}] NØMAÐ{where}: {what}"
 
     def _format_text(self, alert: dict) -> str:
         return f"""NØMAÐ Alert
 ============
 Severity: {alert.get('severity', 'INFO')}
+Cluster: {alert.get('site') or 'unknown'}
 Source: {alert.get('source', 'unknown')}
-Host: {alert.get('host', 'unknown')}
-Time: {alert.get('timestamp', 'unknown')}
+Host: {alert.get('host') or 'unknown'}
+Time: {readable_time(alert.get('timestamp'))}
 
 Message:
 {alert.get('message', 'No message')}
 
 Details:
-{json.dumps(alert.get('details', {}), indent=2)}
+{json.dumps(alert.get('details', {}), indent=2, default=str)}
 """
 
     def _format_html(self, alert: dict) -> str:
         severity = alert.get('severity', 'INFO').upper()
         color = {'CRITICAL': '#e74c3c', 'WARNING': '#f39c12', 'INFO': '#3498db'}.get(severity, '#95a5a6')
+        e = lambda v: html.escape(str(v))   # node reasons and paths are not HTML
 
         return f"""
 <html>
 <body style="font-family: Arial, sans-serif; padding: 20px;">
     <div style="background: {color}; color: white; padding: 10px 20px; border-radius: 4px;">
-        <h2 style="margin: 0;">NØMAÐ Alert: {severity}</h2>
+        <h2 style="margin: 0;">NØMAÐ Alert: {severity}{' · ' + e(alert['site']) if alert.get('site') else ''}</h2>
     </div>
     <div style="padding: 20px; background: #f9f9f9; border-radius: 4px; margin-top: 10px;">
-        <p><strong>Source:</strong> {alert.get('source', 'unknown')}</p>
-        <p><strong>Host:</strong> {alert.get('host', 'unknown')}</p>
-        <p><strong>Time:</strong> {alert.get('timestamp', 'unknown')}</p>
+        <p><strong>Cluster:</strong> {e(alert.get('site') or 'unknown')}</p>
+        <p><strong>Source:</strong> {e(alert.get('source', 'unknown'))}</p>
+        <p><strong>Host:</strong> {e(alert.get('host') or 'unknown')}</p>
+        <p><strong>Time:</strong> {e(readable_time(alert.get('timestamp')))}</p>
         <hr>
         <p><strong>Message:</strong></p>
-        <p>{alert.get('message', 'No message')}</p>
+        <p>{e(alert.get('message', 'No message'))}</p>
     </div>
 </body>
 </html>
 """
+
+
+def readable_time(ts) -> str:
+    """'2026-09-29T17:33:41.698908' -> '2026-09-29 17:33 EDT' (the collecting host's zone)."""
+    if not ts:
+        return 'unknown'
+    try:
+        return datetime.fromisoformat(str(ts)).astimezone().strftime('%Y-%m-%d %H:%M %Z').strip()
+    except (TypeError, ValueError):
+        return str(ts)
 
 
 class SlackBackend(NotificationBackend):
@@ -167,12 +187,13 @@ class SlackBackend(NotificationBackend):
                 'icon_emoji': self.icon_emoji,
                 'attachments': [{
                     'color': color,
-                    'title': f"NØMAÐ Alert: {severity}",
+                    'title': f"NØMAÐ Alert: {severity}" + (f" · {alert['site']}" if alert.get('site') else ""),
                     'text': alert.get('message', 'No message'),
                     'fields': [
+                        {'title': 'Cluster', 'value': alert.get('site') or 'unknown', 'short': True},
                         {'title': 'Source', 'value': alert.get('source', 'unknown'), 'short': True},
-                        {'title': 'Host', 'value': alert.get('host', 'unknown'), 'short': True},
-                        {'title': 'Time', 'value': alert.get('timestamp', 'unknown'), 'short': True},
+                        {'title': 'Host', 'value': alert.get('host') or 'unknown', 'short': True},
+                        {'title': 'Time', 'value': readable_time(alert.get('timestamp')), 'short': True},
                     ],
                     'footer': 'NØMAÐ HPC Monitor'
                 }]
