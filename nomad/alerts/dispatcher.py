@@ -24,7 +24,7 @@ Usage:
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .backends import EmailBackend, SlackBackend, WebhookBackend
 
@@ -126,6 +126,13 @@ class AlertDispatcher:
             if (datetime.now() - last_time).total_seconds() < self.cooldown_minutes * 60:
                 logger.debug(f"Alert in cooldown: {alert_key}")
                 return {}
+        # Under cron every run is a new process, so the memory above starts
+        # empty each time and a condition that persists would be stored and
+        # sent on every run. The alerts already stored are the memory that
+        # survives between runs.
+        if self._stored_within_cooldown(alert):
+            logger.debug(f"Alert in cooldown (stored): {alert_key}")
+            return {}
 
         self._recent_alerts[alert_key] = datetime.now()
 
@@ -143,6 +150,30 @@ class AlertDispatcher:
                 results[backend_name] = False
 
         return results
+
+    def _stored_within_cooldown(self, alert: dict) -> bool:
+        """True if the same alert (source, host, severity) was stored within
+        the cooldown window -- by this run or an earlier one."""
+        if not self.db_path or self.cooldown_minutes <= 0:
+            return False
+        since = (datetime.now() - timedelta(minutes=self.cooldown_minutes)).isoformat()
+        try:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                # _store_alert writes the alert's source to `category` and its
+                # host to `source`.
+                row = conn.execute(
+                    "SELECT 1 FROM alerts WHERE category IS ? AND source IS ? "
+                    "AND severity IS ? AND timestamp >= ? LIMIT 1",
+                    (alert.get('source'), alert.get('host', 'unknown'),
+                     alert.get('severity'), since),
+                ).fetchone()
+            finally:
+                conn.close()
+            return row is not None
+        except sqlite3.Error as e:
+            logger.debug(f"Could not check stored alerts for cooldown: {e}")
+            return False
 
     def _store_alert(self, alert: dict):
         """Store alert in database."""

@@ -73,3 +73,11 @@ To prevent alert floods:
 [alerts]
 cooldown_minutes = 30  # Same alert won't repeat for 30 min
 ```
+
+"The same alert" is the same source, host and severity: `/scratch` on one
+host at *warning*. The cooldown is read from the alerts already stored in the
+database, so it holds across `nomad collect --once` runs from cron -- each run
+is a new process -- and a condition that persists is stored and sent once per
+window, not on every run. The default is 15 minutes; with collection every
+few minutes, a longer window (say `360`, six hours) keeps a full disk from
+sending dozens of emails a day. `nomad test-alerts` always sends its test.

@@ -1527,9 +1527,9 @@ def test_alerts(ctx, email, slack, webhook):
     """Test configured alert notification backends end-to-end.
 
     Runs a connection check on each configured backend, then dispatches
-    a synthetic warning-severity alert through the full dispatch path
-    (filtering, cooldown, send). Use this to confirm that real alerts
-    will reach their destinations.
+    a synthetic warning-severity alert through the dispatch path
+    (severity filter, send; a test ignores the cooldown). Use this to
+    confirm that real alerts will reach their destinations.
 
     Examples:
         nomad test-alerts                  # Test all configured backends
@@ -1598,6 +1598,9 @@ def test_alerts(ctx, email, slack, webhook):
 
     click.echo("")
     click.echo("Sending test alert (severity=warning)...")
+    # A test is sent every time it is asked for: the cooldown, which now
+    # remembers stored alerts between runs, would hold back a second test.
+    dispatcher.cooldown_minutes = 0
     send_results = dispatcher.dispatch({
         'severity': 'warning',
         'source': 'test',
@@ -1611,7 +1614,6 @@ def test_alerts(ctx, email, slack, webhook):
             "  No backends dispatched. Possible causes:", fg="yellow",
         ))
         click.echo("    - Alert filtered by [alerts] min_severity")
-        click.echo("    - Alert in cooldown window (cooldown_minutes)")
         click.echo("    - No backends matched the selected flags")
         return
 
