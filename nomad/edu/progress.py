@@ -136,6 +136,41 @@ def _count_user_jobs(db_path: str, username: str, days: int = 90) -> int:
         return 0
 
 
+SUMMARY_COLUMNS = (
+    "peak_cpu_percent", "peak_memory_gb", "avg_cpu_percent", "avg_memory_gb",
+    "avg_io_wait_percent", "total_nfs_read_gb", "total_nfs_write_gb",
+    "total_local_read_gb", "total_local_write_gb", "nfs_ratio", "used_gpu",
+    "avg_gpu_util", "health_score",
+)
+
+
+def summary_columns(conn: sqlite3.Connection) -> str:
+    """The job_summary columns scoring reads, as a SELECT list.
+
+    A column an older database lacks (avg_gpu_util arrived with a migration;
+    demo databases predate it) comes back as NULL -- "not measured" --
+    instead of failing the whole query.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(job_summary)")}
+    return ", ".join(f"js.{c}" if c in have else f"NULL AS {c}" for c in SUMMARY_COLUMNS)
+
+
+def summary_join(conn: sqlite3.Connection) -> str:
+    """How to match a job (j) to its measurements (js).
+
+    Job IDs are unique within a site but repeat across sites, so in a combined
+    database -- where every table carries source_site -- the match must be on
+    job ID *and* site; matching on job ID alone gives a spydur job an arachne
+    job's numbers.
+    """
+    def has_site(table):
+        return any(r[1] == "source_site"
+                   for r in conn.execute(f"PRAGMA table_info({table})"))
+    if has_site("jobs") and has_site("job_summary"):
+        return "j.job_id = js.job_id AND j.source_site = js.source_site"
+    return "j.job_id = js.job_id"
+
+
 def _load_user_jobs(
     db_path: str,
     username: str,
@@ -146,15 +181,10 @@ def _load_user_jobs(
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        rows = conn.execute("""
-            SELECT j.*, js.peak_cpu_percent, js.peak_memory_gb,
-                   js.avg_cpu_percent, js.avg_memory_gb,
-                   js.avg_io_wait_percent,
-                   js.total_nfs_read_gb, js.total_nfs_write_gb,
-                   js.total_local_read_gb, js.total_local_write_gb,
-                   js.nfs_ratio, js.used_gpu, js.avg_gpu_util, js.health_score
+        rows = conn.execute(f"""
+            SELECT j.*, js.job_id AS _summary_id, {summary_columns(conn)}
             FROM jobs j
-            LEFT JOIN job_summary js ON j.job_id = js.job_id
+            LEFT JOIN job_summary js ON {summary_join(conn)}
             WHERE j.user_name = ?
               AND j.end_time >= ?
               AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
@@ -177,7 +207,10 @@ def _split_job_fields(row: dict) -> tuple[dict, dict]:
         "runtime_seconds", "wait_time_seconds",
     }
     job = {k: row.get(k) for k in job_fields}
-    summary = {k: v for k, v in row.items() if k not in job_fields}
+    # In a combined database the site is source_site; report it as the cluster.
+    job["cluster"] = row.get("cluster") or row.get("source_site")
+    summary = {k: v for k, v in row.items()
+               if k not in job_fields and k not in ("source_site", "_summary_id")}
     return job, summary
 
 
@@ -324,7 +357,10 @@ def user_trajectory(
     Returns:
         UserTrajectory or None if insufficient data.
     """
-    rows = _load_user_jobs(db_path, username, days)
+    # Only measured jobs are scored -- the same rule as the lists in
+    # nomad.edu.population, so a person's page and their line agree.
+    rows = [r for r in _load_user_jobs(db_path, username, days)
+            if r.get("_summary_id") is not None]
     if len(rows) < 3:
         return None
 
@@ -501,11 +537,12 @@ def group_summary(
     weakest = min(dim_avgs, key=dim_avgs.get) if dim_avgs else "unknown"
     strongest = max(dim_avgs, key=dim_avgs.get) if dim_avgs else "unknown"
 
-    avg_overall = (sum(t.current_scores.get("cpu", 0)
-                       + t.current_scores.get("memory", 0)
-                       + t.current_scores.get("time", 0)
-                       for t in trajectories)
-                   / (len(trajectories) * 3)) if trajectories else 0
+    # Each person's overall is the mean of the dimensions that applied to
+    # them (before 1.7.5 this was cpu + memory + time over 3, counting a
+    # dimension with no data as zero).
+    person_overall = [sum(t.current_scores.values()) / len(t.current_scores)
+                      for t in trajectories if t.current_scores]
+    avg_overall = (sum(person_overall) / len(person_overall)) if person_overall else 0
 
     avg_improvement = (sum(t.overall_improvement for t in trajectories)
                        / len(trajectories)) if trajectories else 0

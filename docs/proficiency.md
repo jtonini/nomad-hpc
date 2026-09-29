@@ -19,21 +19,31 @@ This shift enables:
 
 Every completed job is scored across five proficiency dimensions:
 ```
-┌────────────────────────────────────────────────────────────┐
-│              Proficiency Fingerprint                       │
-├────────────────────────────────────────────────────────────┤
-│                                                            │
-│  CPU Efficiency      ████████░░  78%   Good                │
-│  Memory Efficiency   █████████░  89%   Excellent           │
-│  Time Estimation     ██████░░░░  62%   Developing          │
-│  I/O Awareness       █████████░  91%   Excellent           │
-│  GPU Utilization     ███░░░░░░░  34%   Needs Work          │
-│                                                            │
-│  ─────────────────────────────────────────────────────     │
-│  Overall Score       ███████░░░  71%   Good                │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+  NØMAÐ Group Report — cs101
+  Last 90 days · 4 members · 4 ran jobs · 4 scored · 935 of 935 jobs measured · demo-cluster
+
+  Median overall: 72/100 across 4 people (middle half 69–73)
+  Over the period: 1 of 4 improved, 3 steady, 0 declined
+
+  By dimension (median, people):
+    CPU        51   (4)
+    Memory     87   (4)
+    Time       81   (4)
+    I/O        69   (4)
+    GPU        70   (4)
+
+  Most common to work on:
+    CPU: 4 of 4
+    I/O: 2 of 4
+
+  Member             Jobs  Measured  Overall  Change  Weakest
+  diana               200       200       66      +1  I/O
+  charlie             243       243       70      +9  CPU
+  alice               260       260       73      +2  CPU
+  bob                 232       232       73      -2  CPU
 ```
+
+The Console's Group Reports page shows the same figures; see [edu](edu.md#nomad-edu-report).
 
 ### 1. CPU Efficiency
 
@@ -141,6 +151,11 @@ Where:
 | 50-80% | 15-30% | 40-64 | Developing |
 | > 80% | > 30% | 0-39 | Needs Work |
 
+**Applicability**: Scored only when NFS traffic was measured for the job.
+Slurm accounting has no NFS/local breakdown, so jobs measured only by the job
+collector show "not measured" rather than a score (before 1.7.5 the collector
+wrote an NFS ratio of 0 as a placeholder, which scored every job Excellent).
+
 **Common issues**:
 
 - Writing temp files to NFS instead of local scratch
@@ -173,7 +188,10 @@ $$\text{GPU Score} = \frac{\text{GPU Utilization} + \text{GPU Memory Utilization
 | 20-39% | 40-64 | Developing | Under-utilizing expensive resource |
 | < 20% | 0-39 | Needs Work | GPU mostly idle |
 
-**Applicability**: Only scored if job requested GPUs. Non-GPU jobs show "N/A".
+**Applicability**: Only scored if the job requested GPUs *and* its GPU
+utilization was measured (DCGM data for its nodes and time window). A GPU job
+without that data shows "not measured": the request alone says nothing about
+how the GPUs were used.
 
 **Common issues**:
 
@@ -194,19 +212,15 @@ Scores map to four proficiency levels:
 
 ## Overall Score
 
-The overall score is a weighted average:
+The overall score is the plain mean of the dimensions that apply to the job
+and were measured:
 
-$$\text{Overall} = \frac{\sum_{d \in \text{applicable}} w_d \times s_d}{\sum_{d \in \text{applicable}} w_d}$$
+$$\text{Overall} = \frac{1}{|A|}\sum_{d \in A} s_d \qquad A = \text{applicable, measured dimensions}$$
 
-**Default weights**:
-
-| Dimension | Weight | Rationale |
-|-----------|--------|-----------|
-| CPU | 1.0 | Core resource |
-| Memory | 1.0 | Core resource |
-| Time | 0.8 | Important for scheduling |
-| I/O | 0.8 | Important for cluster health |
-| GPU | 1.0 | Expensive resource (when applicable) |
+A dimension that was not measured is left out, never counted as zero or as a
+default. For a person or a period, dimensions are averaged over their measured
+jobs first, and the overall is the mean of those averages. Only jobs NØMAÐ
+measured (with a `job_summary` row) are scored; the rest are counted, not scored.
 
 ## Trajectory Tracking
 
@@ -280,7 +294,11 @@ nomad edu report cs301
 
 ## Database Storage
 
-Proficiency scores are persisted for longitudinal analysis:
+`nomad edu explain` records each job it explains in `proficiency_scores`.
+Trajectories, group reports and the Console's lists do not read this table:
+they score every measured job directly, so they cover everyone, not only the
+jobs someone happened to explain.
+
 ```sql
 CREATE TABLE proficiency_scores (
     id INTEGER PRIMARY KEY,

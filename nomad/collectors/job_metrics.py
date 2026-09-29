@@ -459,10 +459,10 @@ class JobMetricsCollector(BaseCollector):
         if job.max_vmsize_mb and job.max_rss_mb:
             job.had_swap = job.max_vmsize_mb > job.max_rss_mb * 2
 
-        # NFS ratio (placeholder - would need actual NFS vs local breakdown)
-        # For now, estimate from total I/O patterns
-        # In production, this would come from /proc or cgroups
-        job.nfs_ratio = 0.0  # Default to local
+        # NFS versus local I/O is not measured here (sacct has no such
+        # breakdown), so it stays None -- unknown. It used to be written as
+        # 0.0, which every reader took for "all local".
+        job.nfs_ratio = None
 
     def _compute_feature_vector(self, job: JobMetrics) -> None:
         """Compute normalized feature vector for similarity analysis."""

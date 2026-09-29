@@ -18,12 +18,16 @@ def test_gpu_not_applicable_without_request():
     assert not score_job(noreq, {}).dimensions["gpu"].applicable
 
 
-def test_gpu_requested_never_used():
-    assert _level({"used_gpu": 0}) == "Needs Work"
+def test_gpu_without_dcgm_data_is_not_graded():
+    # used_gpu is set from the request (req_gpus > 0), not measured, so it
+    # grades nothing either way (before 1.7.5: "never utilized" / "Good").
+    for summary in ({"used_gpu": 0}, {"used_gpu": 1}):
+        gpu = score_job(BASE, summary).dimensions["gpu"]
+        assert not gpu.applicable and gpu.level == "Unknown"
 
 
-def test_gpu_used_no_dcgm_data_falls_back():
-    assert _level({"used_gpu": 1}) == "Good"
+def test_gpu_idle_by_measurement_needs_work():
+    assert _level({"used_gpu": 1, "avg_gpu_util": 0}) == "Needs Work"
 
 
 def test_gpu_graded_bands():

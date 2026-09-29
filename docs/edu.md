@@ -129,38 +129,35 @@ nomad edu report <group_name> [options]
 **Example output**:
 ```
   NØMAÐ Group Report — cs101
-  ────────────────────────────────────────────────────────
-  Members: 4     Jobs: 602
-  Period: 2026-02-04 → 2026-02-16
+  Last 90 days · 4 members · 4 ran jobs · 4 scored · 935 of 935 jobs measured · demo-cluster
 
-  Key Insight
-  ────────────────────────────────────────────────────────
-    0/4 students improved overall proficiency
+  Median overall: 72/100 across 4 people (middle half 69–73)
+  Over the period: 1 of 4 improved, 3 steady, 0 declined
 
-  Group Proficiency
-  ────────────────────────────────────────────────────────
-    Memory Efficiency    █████████░   85.2%  → -0.8%
-    GPU Utilization      █████████░   85.0%  → +0.0%
-    I/O Awareness        ████████░░   80.2%  → -1.5%
-    Time Estimation      ████████░░   78.9%  → -1.1%
-    CPU Efficiency       █████░░░░░   51.9%  → -2.4%
+  By dimension (median, people):
+    CPU        51   (4)
+    Memory     87   (4)
+    Time       81   (4)
+    I/O        69   (4)
+    GPU        70   (4)
 
-    Weakest area:   cpu   |   Strongest: memory
+  Most common to work on:
+    CPU: 4 of 4
+    I/O: 2 of 4
 
-  Student Breakdown
-  ────────────────────────────────────────────────────────
-    Improving:   0
-    Stable:      4
-    Declining:   0
-
-  Per-Student Summary
-  ────────────────────────────────────────────────────────
-    User        Jobs    Overall   Change    Trend
-    charlie      136     73.2%    +0.7%       →
-    alice        173     78.9%    +0.3%       →
-    diana        147     76.8%    +0.1%       →
-    bob          146     76.1%    -3.0%       →
+  Member             Jobs  Measured  Overall  Change  Weakest
+  diana               200       200       66      +1  I/O
+  charlie             243       243       70      +9  CPU
+  alice               260       260       73      +2  CPU
+  bob                 232       232       73      -2  CPU
 ```
+
+Every figure says how many people and jobs it rests on. A job counts when it
+finished in the period and is scored only when NØMAÐ measured it; members with
+no jobs are listed apart, never averaged in as zero. Figures over people are
+medians. "Change" compares a member's first and last week with measured jobs,
+and needs two such weeks. The Console's Group Reports page shows the same
+numbers.
 
 ## Setting Up Groups
 

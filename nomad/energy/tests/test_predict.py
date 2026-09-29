@@ -68,6 +68,7 @@ def test_feature_extraction_shape_and_no_leakage(jobs_db):
 
 
 def test_baseline_ranks_wasteful_high(jobs_db):
+    pytest.importorskip("sklearn")   # the baseline model is scikit-learn's (the "ml" extra)
     res = predict_energy_waste(jobs_db, cluster_name="test", method="baseline")
     assert res.method == "baseline"
     assert res.n_jobs == 200

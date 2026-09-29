@@ -577,10 +577,22 @@ def score_io(job: dict, summary: dict) -> DimensionScore:
         nfs_ratio >= 0.60  → Needs Work (heavy NFS use)
     """
     nfs_ratio = summary.get("nfs_ratio")
-    total_io_gb = ((summary.get("total_nfs_read_gb") or 0) +
-                   (summary.get("total_nfs_write_gb") or 0) +
-                   (summary.get("total_local_read_gb") or 0) +
-                   (summary.get("total_local_write_gb") or 0))
+    io_fields = ("total_nfs_read_gb", "total_nfs_write_gb",
+                 "total_local_read_gb", "total_local_write_gb")
+    if (summary.get("total_nfs_read_gb") is None
+            and summary.get("total_nfs_write_gb") is None):
+        # The score is about NFS versus local storage, so it needs NFS traffic
+        # measured. Without it there is nothing to grade: not "little I/O",
+        # and not the nfs_ratio of 0.0 the job collector wrote as a
+        # placeholder before 1.7.5, which scored every job Excellent.
+        return DimensionScore(
+            name="I/O Awareness",
+            score=50,
+            level="Unknown",
+            detail="NFS versus local I/O was not measured for this job.",
+            applicable=False,
+        )
+    total_io_gb = sum(summary.get(f) or 0 for f in io_fields)
 
     if nfs_ratio is None or total_io_gb < 0.1:
         return DimensionScore(
@@ -639,7 +651,6 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
         avg_gpu_util ≥ 15  → Developing
         avg_gpu_util < 15  → Needs Work
     """
-    used_gpu = summary.get("used_gpu") or 0
     req_gpus = job.get("req_gpus", 0) or 0
 
     if req_gpus == 0:
@@ -651,38 +662,19 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
             applicable=False,
         )
 
-    if not used_gpu:
-        return DimensionScore(
-            name="GPU Utilization",
-            score=10,
-            level="Needs Work",
-            detail=(f"Requested {req_gpus} GPU(s) but GPU was never "
-                    f"utilized. GPU nodes are a scarce, expensive resource."),
-            suggestion=Suggestion(
-                directive="gres",
-                suggested_value=0,
-                current_value=req_gpus,
-                actual_usage=0,
-                unit="GPUs",
-                rationale="job did not use GPUs; remove --gres or run on CPU partition",
-            ),
-        )
-
-    # Graded scoring from real DCGM utilization (avg_gpu_util = mean
-    # real_util_pct over the job's node+window). None means no DCGM data was
-    # available for this job's node/window — we can't grade honestly, so fall
-    # back to the binary "activity detected" signal rather than inventing a
-    # number.
+    # Only a measurement can grade GPU use. `used_gpu` is not one: the job
+    # collector sets it from the request (req_gpus > 0), so before 1.7.5 a job
+    # whose GPU count was parsed differently was told its GPU "was never
+    # utilized", and one without DCGM data that "GPU activity" was detected.
     avg_util = summary.get("avg_gpu_util")
     if avg_util is None:
         return DimensionScore(
             name="GPU Utilization",
-            score=70,
-            level="Good",
-            detail=(f"GPU activity detected on {req_gpus} requested GPU(s). "
-                    f"(No DCGM utilization data for this job's node/window, "
-                    f"so efficiency can't be graded.)"),
-            suggestion=None,
+            score=50,
+            level="Unknown",
+            detail=(f"GPU use was not measured for this job "
+                    f"({req_gpus} GPU(s) requested)."),
+            applicable=False,
         )
 
     # Grade against the DCGM real utilization. Thresholds per the dimension's

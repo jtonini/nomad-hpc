@@ -112,14 +112,24 @@ class TestProficiencyScoring:
             "runtime_seconds": 1800,
         }
         summary = {
-            "used_gpu": 0,  # But didn't use them
+            "used_gpu": 1,
+            "avg_gpu_util": 2.0,  # measured: the GPUs sat idle
         }
 
         fp = score_job(job, summary)
 
         assert fp.dimensions["gpu"].applicable
         assert fp.dimensions["gpu"].score <= 20
-        assert "never utilized" in fp.dimensions["gpu"].detail.lower()
+        assert "very low gpu utilization" in fp.dimensions["gpu"].detail.lower()
+
+    def test_score_gpu_unmeasured_is_not_graded(self):
+        """used_gpu comes from the request, not a measurement: no grade from it."""
+        job = {"job_id": "12349", "req_gpus": 2, "req_cpus": 4,
+               "req_time_seconds": 3600, "runtime_seconds": 1800}
+        for summary in ({"used_gpu": 0}, {"used_gpu": 1}, {}):
+            gpu = score_job(job, summary).dimensions["gpu"]
+            assert not gpu.applicable
+            assert "not measured" in gpu.detail
 
 
 class TestMockCluster:

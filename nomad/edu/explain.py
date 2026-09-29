@@ -68,6 +68,16 @@ class C:
 
 # ── Database queries ─────────────────────────────────────────────────
 
+def _site_column(conn: sqlite3.Connection, table: str) -> str | None:
+    """The column naming a row's site: source_site in a combined database.
+
+    (Before 1.7.5 these queries asked for a `cluster` column, which no table
+    has, so --cluster always came back "not found".)
+    """
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    return "source_site" if "source_site" in cols else None
+
+
 def load_job(db_path: str, job_id: str, cluster: str = None) -> dict | None:
     """Load a job from the database.
     
@@ -79,19 +89,21 @@ def load_job(db_path: str, job_id: str, cluster: str = None) -> dict | None:
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        if cluster:
+        site_col = _site_column(conn, "jobs")
+        if cluster and site_col:
             row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ? AND cluster = ?", (job_id, cluster)
+                f"SELECT * FROM jobs WHERE job_id = ? AND {site_col} = ?", (job_id, cluster)
             ).fetchone()
         else:
-            # Check if job_id is unique
+            # A single site's database has one job per ID; a combined one may
+            # hold the same ID from several sites.
             rows = conn.execute(
                 "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
             ).fetchall()
             if len(rows) > 1:
-                clusters = [r['cluster'] for r in rows]
+                sites = [str(r[site_col]) if site_col else "?" for r in rows]
                 conn.close()
-                raise ValueError(f"Job {job_id} exists in multiple clusters: {', '.join(clusters)}. Use --cluster to specify.")
+                raise ValueError(f"Job {job_id} exists in multiple clusters: {', '.join(sites)}. Use --cluster to specify.")
             row = rows[0] if rows else None
         conn.close()
         return dict(row) if row else None
@@ -107,9 +119,10 @@ def load_summary(db_path: str, job_id: str, cluster: str = None) -> dict | None:
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        if cluster:
+        site_col = _site_column(conn, "job_summary")
+        if cluster and site_col:
             row = conn.execute(
-                "SELECT * FROM job_summary WHERE job_id = ? AND cluster = ?", (job_id, cluster)
+                f"SELECT * FROM job_summary WHERE job_id = ? AND {site_col} = ?", (job_id, cluster)
             ).fetchone()
         else:
             row = conn.execute(
@@ -127,14 +140,15 @@ def load_user_history(db_path: str, user: str, limit: int = 50) -> list[dict]:
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
+        from nomad.edu.progress import summary_join
+        rows = conn.execute(f"""
             SELECT j.*, js.peak_cpu_percent, js.peak_memory_gb,
                    js.avg_cpu_percent, js.avg_memory_gb, js.avg_io_wait_percent,
                    js.total_nfs_read_gb, js.total_nfs_write_gb,
                    js.total_local_read_gb, js.total_local_write_gb,
                    js.nfs_ratio, js.used_gpu, js.health_score
             FROM jobs j
-            LEFT JOIN job_summary js ON j.job_id = js.job_id
+            LEFT JOIN job_summary js ON {summary_join(conn)}
             WHERE j.user_name = ?
               AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
             ORDER BY j.end_time DESC
@@ -391,6 +405,7 @@ def explain_job(
     cluster: str = None,
     show_progress: bool = True,
     output_format: str = "terminal",
+    record: bool = True,
 ) -> str | None:
     """
     Generate a plain-language explanation of a job.
@@ -401,6 +416,9 @@ def explain_job(
         cluster:        Cluster name (optional, required if multiple clusters)
         show_progress:  Include progress comparison with recent jobs
         output_format:  "terminal" (colored text) or "json"
+        record:         Save the job's scores in proficiency_scores. Readers of
+                        a database they don't own (the Console reading the
+                        hub's combined.db) pass False.
 
     Returns:
         Formatted string, or None if job not found.
@@ -420,7 +438,8 @@ def explain_job(
     fingerprint = score_job(job, summary)
 
     # Save proficiency score to database for historical tracking
-    save_proficiency_score(db_path, fingerprint)
+    if record:
+        save_proficiency_score(db_path, fingerprint)
 
     # Compute progress if requested
     progress = {}

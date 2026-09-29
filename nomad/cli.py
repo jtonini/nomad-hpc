@@ -4859,15 +4859,15 @@ def edu_report(ctx, group_name, db_path, days, output_json):
         nomad edu report bio301 --days 120
         nomad edu report physics-lab --json
     """
-    from nomad.edu.progress import format_group_summary, group_summary
+    from nomad.edu.population import format_group_report, group_report
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
         db_path = get_db_path(config)
 
-    gs = group_summary(db_path, group_name, days)
+    gr = group_report(str(db_path), group_name, days)
 
-    if gs is None:
+    if gr is None:
         click.echo(f"No data found for group '{group_name}'.", err=True)
         click.echo("Ensure group membership data has been collected:")
         click.echo("  nomad collect -C groups --once")
@@ -4876,31 +4876,14 @@ def edu_report(ctx, group_name, db_path, days, output_json):
         raise SystemExit(1)
 
     if output_json:
-        result = {
-            "group_name": gs.group_name,
-            "member_count": gs.member_count,
-            "total_jobs": gs.total_jobs,
-            "date_range": gs.date_range,
-            "improvement_rate": gs.improvement_rate,
-            "avg_overall": gs.avg_overall,
-            "avg_improvement": gs.avg_improvement,
-            "users_improving": gs.users_improving,
-            "users_stable": gs.users_stable,
-            "users_declining": gs.users_declining,
-            "dimension_avgs": gs.dimension_avgs,
-            "dimension_improvements": gs.dimension_improvements,
-            "weakest_dimension": gs.weakest_dimension,
-            "strongest_dimension": gs.strongest_dimension,
-            "users": [
-                {"username": t.username, "total_jobs": t.total_jobs,
-                 "overall_improvement": t.overall_improvement,
-                 "current_scores": t.current_scores}
-                for t in gs.users
-            ],
-        }
+        from dataclasses import asdict
+        result = asdict(gr)
+        result.update(members_with_jobs=gr.members_with_jobs,
+                      members_scored=gr.members_scored, jobs=gr.jobs,
+                      scored_jobs=gr.scored_jobs, sites=gr.sites, days=days)
         click.echo(json.dumps(result, indent=2))
     else:
-        click.echo(format_group_summary(gs))
+        click.echo(format_group_report(gr, days))
 
 # =============================================================================
 # DIAGNOSTICS COMMANDS
