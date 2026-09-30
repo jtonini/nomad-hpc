@@ -8696,9 +8696,12 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             dm = DashboardHandler.data_manager
             try:
                 from nomad.insights import InsightEngine
+                from nomad.db import scope as _scope
                 hours = int(dict(urllib.parse.parse_qsl(parsed.query)).get('hours', '168'))
                 cluster_name = dict(urllib.parse.parse_qsl(parsed.query)).get('cluster', 'cluster')
-                engine = InsightEngine(dm.db_path, hours=hours, cluster_name=cluster_name)
+                _site = cluster_name if cluster_name in _scope.sites(dm.db_path) else None
+                engine = InsightEngine(dm.db_path, hours=hours, cluster_name=cluster_name,
+                                       site=_site)
                 result = engine.to_dict()
             except Exception as e:
                 result = {"error": str(e), "signals": [], "insights": [], "overall_health": "unknown", "signal_count": 0, "insight_count": 0}
@@ -8711,23 +8714,18 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             dm = DashboardHandler.data_manager
             try:
                 from nomad.dynamics.engine import DynamicsEngine
-                from nomad.insights.signals import create_site_db
                 hours = int(dict(urllib.parse.parse_qsl(parsed.query)).get('hours', '168'))
                 cluster_name = dict(urllib.parse.parse_qsl(parsed.query)).get('cluster', 'all')
-                use_db = dm.db_path
-                tmp_path = None
-                if cluster_name not in ('all', 'cluster'):
-                    try:
-                        tmp_path = create_site_db(
-                            Path(str(dm.db_path)), cluster_name)
-                        use_db = tmp_path
-                    except Exception:
-                        pass
-                engine = DynamicsEngine(use_db, hours=hours, cluster_name=cluster_name)
+                # One site of a combined database is read through views
+                # (nomad.db.scope), not copied to /tmp; sites are never pooled.
+                from nomad.db import scope as _scope
+                _sites = _scope.sites(dm.db_path)
+                site = (cluster_name if cluster_name in _sites
+                        else (_sites[0] if _sites else None))
+                engine = DynamicsEngine(dm.db_path, hours=hours,
+                                        cluster_name=site or cluster_name, site=site)
                 result = engine.to_dict()
-                if tmp_path:
-                    import os
-                    os.unlink(tmp_path)
+                result['sites'] = _sites
             except Exception as e:
                 result = {"error": str(e)}
             self.wfile.write(json.dumps(result, default=str).encode())

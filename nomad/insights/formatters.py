@@ -111,14 +111,48 @@ def _signal_display_name(title: str) -> str:
         "resilience_low":               "Cluster Resilience Low",
         "resilience_degrading":         "Cluster Resilience Degrading",
         "externality_detected":         "Inter-group Externality",
+        "alerts_raised":                "Alerts Raised",
+        "data_stale":                   "Data Not Updating",
+        "node_down":                    "Node Down",
+        "node_drain":                   "Node Drained",
+        "node_unhealthy":               "Node Unavailable",
+        "multiple_nodes_unhealthy":     "Several Nodes Unavailable",
     }
     return display_names.get(title, title.replace('_', ' ').title())
+
+
+def coverage_lines(coverage: list[dict] | None) -> list[str]:
+    """What was measured and what wasn't, one line per status."""
+    if not coverage:
+        return []
+    groups: dict[str, list[str]] = {}
+    for c in coverage:
+        name = c.get("label", c.get("source", "?")).lower()
+        if c.get("site") and len({x.get("site") for x in coverage}) > 1:
+            name = f"{c['site']} {name}"
+        if c.get("status") in ("stale", "failed") and c.get("detail"):
+            name += f" ({c['detail']})"
+        groups.setdefault(c.get("status", "?"), []).append(name)
+    words = [("measured", "Measured"), ("stale", "Not updating"),
+             ("failed", "Could not read"), ("no_data", "Nothing to read")]
+    return [f"{title}: {', '.join(groups[k])}" for k, title in words if groups.get(k)]
+
+
+_HEALTH_TEXT = {
+    "good": "good",
+    "nominal": "nominal with observations",
+    "degraded": "degraded -- action recommended",
+    "impaired": "impaired -- immediate attention needed",
+    "unknown": "unknown -- nothing measured in this window",
+}
 
 
 def format_cli_brief(
     narratives: list[tuple[Signal, str]],
     insights: list[Insight],
     cluster_name: str = "cluster",
+    health: str | None = None,
+    coverage: list[dict] | None = None,
 ) -> str:
     """
     Produce a concise CLI briefing (for `nomad insights brief`).
@@ -139,24 +173,23 @@ def format_cli_brief(
 
     # Overall health assessment
     all_severities = [s.severity for s, _ in narratives] + [i.severity for i in insights]
+    order = [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL]
+    worst = max(all_severities, key=order.index) if all_severities else Severity.INFO
+    if health is None:
+        health = {Severity.INFO: "good", Severity.NOTICE: "nominal",
+                  Severity.WARNING: "degraded", Severity.CRITICAL: "impaired"}[worst]
+    color = _CLI_COLORS[worst] if health != "unknown" else _DIM
+
+    lines.append("")
+    lines.append(f"  Cluster health: {color}{_BOLD}{_HEALTH_TEXT.get(health, health)}{_RESET}")
+    for line in coverage_lines(coverage):
+        lines.append(f"  {_DIM}{line}{_RESET}")
+    lines.append("")
     if not all_severities:
-        lines.append("")
-        lines.append(f"  {_CLI_COLORS[Severity.INFO]}Cluster health: good. No notable signals.{_RESET}")
-        lines.append("")
+        if health != "unknown":
+            lines.append("  No notable signals.")
+            lines.append("")
         return "\n".join(lines)
-
-    worst = max(all_severities, key=lambda s: [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL].index(s))
-
-    health_text = {
-        Severity.INFO: "good",
-        Severity.NOTICE: "nominal with observations",
-        Severity.WARNING: "degraded -- action recommended",
-        Severity.CRITICAL: "impaired -- immediate attention needed",
-    }[worst]
-
-    lines.append("")
-    lines.append(f"  Cluster health: {_CLI_COLORS[worst]}{_BOLD}{health_text}{_RESET}")
-    lines.append("")
 
     # Correlated insights first (Level 2)
     if insights:
@@ -203,6 +236,7 @@ def format_cli_detail(
     narratives: list[tuple[Signal, str]],
     insights: list[Insight],
     cluster_name: str = "cluster",
+    coverage: list[dict] | None = None,
 ) -> str:
     """
     Produce a detailed CLI report (for `nomad insights detail`).
@@ -216,6 +250,8 @@ def format_cli_detail(
     lines.append(f"  NØMAÐ Insight Report — {cluster_name}")
     lines.append(f"  {now}")
     lines.append(f"{'=' * 62}")
+    for line in coverage_lines(coverage):
+        lines.append(f"  {line}")
     lines.append("")
 
     if insights:
@@ -264,15 +300,22 @@ def format_json(
     narratives: list[tuple[Signal, str]],
     insights: list[Insight],
     cluster_name: str = "cluster",
+    health: str | None = None,
+    coverage: list[dict] | None = None,
+    site: str | None = None,
+    hours: int | None = None,
 ) -> str:
     """
     Produce JSON output for API/Console consumption.
+
+    ``overall_health`` is the engine's when given ("unknown" when nothing was
+    measured); ``coverage`` says, per source, what was measured.
     """
     now = datetime.now().isoformat()
 
     all_severities = [s.severity for s, _ in narratives] + [i.severity for i in insights]
-    worst = "good"
-    if all_severities:
+    worst = health or "good"
+    if health is None and all_severities:
         worst_sev = max(all_severities,
                     key=lambda s: [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL].index(s))
         worst = {
@@ -285,6 +328,10 @@ def format_json(
     data: dict[str, Any] = {
         "timestamp": now,
         "cluster": cluster_name,
+        "site": site,
+        "hours": hours,
+        "measured": any(c.get("status") == "measured" for c in (coverage or [])),
+        "coverage": coverage or [],
         "overall_health": worst,
         "signal_count": len(narratives),
         "insight_count": len(insights),
@@ -312,7 +359,7 @@ def format_json(
         ],
     }
 
-    return json.dumps(data, indent=2)
+    return json.dumps(data, indent=2, default=str)
 
 
 # ── Slack formatter ──────────────────────────────────────────────────────
@@ -325,28 +372,53 @@ _SLACK_ICONS = {
 }
 
 
+_HEALTH_SEVERITY = {"good": Severity.INFO, "nominal": Severity.NOTICE,
+                    "degraded": Severity.WARNING, "impaired": Severity.CRITICAL}
+
+
+def _problem_sources(coverage: list[dict] | None) -> list[str]:
+    """Sources that stopped updating or could not be read, one line each."""
+    words = {"stale": "not updating", "failed": "could not read"}
+    return [f"{c.get('label', c.get('source'))}: {words[c['status']]}"
+            + (f" ({c['detail']})" if c.get("detail") else "")
+            for c in (coverage or []) if c.get("status") in words]
+
+
 def format_slack(
     narratives: list[tuple[Signal, str]],
     insights: list[Insight],
     cluster_name: str = "cluster",
+    health: str | None = None,
+    coverage: list[dict] | None = None,
 ) -> str:
     """
     Produce a Slack-formatted message (Markdown).
+
+    The status is the engine's health when given -- which counts sources
+    that stopped updating or failed -- not only the worst signal.
     """
     blocks: list[str] = []
     now = datetime.now().strftime("%H:%M")
 
     # Health header
     all_severities = [s.severity for s, _ in narratives] + [i.severity for i in insights]
-    if not all_severities:
-        return f"*NØMAÐ — {cluster_name}* ({now})\n:large_green_circle: All systems nominal."
+    if health == "unknown":
+        return (f"*NØMAÐ — {cluster_name}* ({now})\n:white_circle: Health unknown: "
+                f"nothing current was measured.")
+    problems = _problem_sources(coverage)
+    if not all_severities and not problems:
+        return (f"*NØMAÐ — {cluster_name}* ({now})\n:large_green_circle: "
+                f"Nothing notable in what was measured.")
 
-    worst = max(all_severities,
-                key=lambda s: [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL].index(s))
-    icon = _SLACK_ICONS[worst]
+    order = [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL]
+    worst = max(all_severities, key=order.index) if all_severities else Severity.INFO
+    status = _HEALTH_SEVERITY.get(health, worst)
+    icon = _SLACK_ICONS[status]
 
     blocks.append(f"*NØMAÐ — {cluster_name}* ({now})")
-    blocks.append(f"{icon} *Status: {worst.value.upper()}*")
+    blocks.append(f"{icon} *Status: {(health or worst.value).upper()}*")
+    for line in problems:
+        blocks.append(f":warning: {line}")
 
     if insights:
         blocks.append("")
@@ -382,6 +454,8 @@ def format_email_digest(
     insights: list[Insight],
     cluster_name: str = "cluster",
     period: str = "daily",
+    health: str | None = None,
+    coverage: list[dict] | None = None,
 ) -> tuple[str, str]:
     """
     Produce an email digest (subject, body).
@@ -390,26 +464,42 @@ def format_email_digest(
     now = datetime.now().strftime("%Y-%m-%d")
 
     all_severities = [s.severity for s, _ in narratives] + [i.severity for i in insights]
-    if not all_severities:
-        subject = f"NØMAÐ {period.title()} Digest — {cluster_name} — All Clear ({now})"
+    measured_lines = "\n".join(coverage_lines(coverage))
+    problems = _problem_sources(coverage)
+    if health == "unknown":
+        subject = f"NØMAÐ {period.title()} Digest — {cluster_name} — Unknown ({now})"
         body = (
             f"NØMAÐ {period.title()} Digest\n"
             f"Cluster: {cluster_name}\n"
             f"Date: {now}\n\n"
-            f"All systems nominal. No notable signals detected.\n"
+            f"Health unknown: nothing current was measured.\n"
+            + (f"\n{measured_lines}\n" if measured_lines else "")
+        )
+        return subject, body
+    if not all_severities and not problems:
+        subject = f"NØMAÐ {period.title()} Digest — {cluster_name} — Nothing notable ({now})"
+        body = (
+            f"NØMAÐ {period.title()} Digest\n"
+            f"Cluster: {cluster_name}\n"
+            f"Date: {now}\n\n"
+            f"Nothing notable in what was measured.\n"
+            + (f"\n{measured_lines}\n" if measured_lines else "")
         )
         return subject, body
 
-    worst = max(all_severities,
-                key=lambda s: [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL].index(s))
+    order = [Severity.INFO, Severity.NOTICE, Severity.WARNING, Severity.CRITICAL]
+    worst = max(all_severities, key=order.index) if all_severities else Severity.INFO
+    status = (health or worst.value).upper()
 
-    subject = f"NØMAÐ {period.title()} Digest — {cluster_name} — {worst.value.upper()} ({now})"
+    subject = f"NØMAÐ {period.title()} Digest — {cluster_name} — {status} ({now})"
 
     body_parts: list[str] = []
     body_parts.append(f"NØMAÐ {period.title()} Digest")
     body_parts.append(f"Cluster: {cluster_name}")
     body_parts.append(f"Date: {now}")
-    body_parts.append(f"Overall status: {worst.value.upper()}")
+    body_parts.append(f"Overall status: {status}")
+    if measured_lines:
+        body_parts.append(measured_lines)
     body_parts.append(f"Signals: {len(narratives)} | Correlated findings: {len(insights)}")
     body_parts.append("")
     body_parts.append("=" * 50)

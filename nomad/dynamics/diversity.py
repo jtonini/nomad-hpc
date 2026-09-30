@@ -21,6 +21,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from nomad.db import scope
+
 
 @dataclass
 class DiversitySnapshot:
@@ -46,6 +48,10 @@ class DiversityResult:
     trend_slope: float = 0.0
     fragility_warning: bool = False
     fragility_detail: str = ""
+    trend_windows: int = 0       # windows with enough jobs to count in the trend
+    available: bool = True       # False when jobs can't be placed in groups
+    reason: str = ""             # why not, or how jobs were placed
+    attribution: dict | None = None
 
 
 def _compute_diversity(counts: dict[str, int]) -> tuple[float, float, float]:
@@ -90,12 +96,22 @@ def _needs_group_join(dimension: str) -> bool:
     return dimension == "group"
 
 
+# A trend window with fewer jobs than this is left out of the trend: the
+# index of a handful of jobs moves with every job.
+MIN_WINDOW_JOBS = 20
+
+_WHO = {"user": ("person", "people"), "group": ("group", "groups"),
+        "partition": ("partition", "partitions")}
+
+
 def compute_diversity(
     db_path: Path | str,
     dimension: str = "group",
     hours: int = 168,
     window_hours: int = 168,
     n_windows: int = 12,
+    site: str | None = None,
+    attribution: str = "auto",
 ) -> DiversityResult:
     """Compute diversity indices over job accounting data.
 
@@ -106,10 +122,15 @@ def compute_diversity(
     hours : how far back to look for the current snapshot
     window_hours : size of each trend window in hours
     n_windows : number of historical windows for trend analysis
+    site : on a combined database, the site to read
+    attribution : for dimension="group": "auto" places each job in one group
+        or declines (see nomad.dynamics.attribution); "membership" forces
+        the join to group_membership, counting a job once per group
     """
+    from nomad.dynamics.attribution import job_attribution
+
     db_path = Path(db_path)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = scope.connect(db_path, site)
 
     now = datetime.now()
     cutoff = now - timedelta(hours=hours)
@@ -117,12 +138,27 @@ def compute_diversity(
     # ── Current snapshot ──────────────────────────────────────────────
     cat_col = _get_category_column(dimension)
     join_group = _needs_group_join(dimension)
+    join_clause = ""
+    att = None
+    if join_group:
+        span = max(hours, window_hours * n_windows)
+        att = job_attribution(conn, (now - timedelta(hours=span)).isoformat(),
+                              mode=attribution)
+        if not att.available:
+            conn.close()
+            empty = DiversitySnapshot(window_start=cutoff, window_end=now,
+                                      shannon_h=0.0, simpson_d=0.0,
+                                      evenness_j=0.0, richness=0)
+            return DiversityResult(by_dimension=dimension, current=empty,
+                                   available=False, reason=att.reason,
+                                   attribution=att.as_dict())
+        cat_col, join_clause = att.group_expr, att.join
 
     if join_group:
         query = f"""
             SELECT {cat_col} AS category, COUNT(*) AS cnt
             FROM jobs j
-            LEFT JOIN group_membership gm ON j.user_name = gm.username
+            {join_clause}
             WHERE j.submit_time >= ?
             GROUP BY category
             ORDER BY cnt DESC
@@ -137,25 +173,6 @@ def compute_diversity(
         """
 
     rows = conn.execute(query, (cutoff.isoformat(),)).fetchall()
-
-    # Filter umbrella groups (>80% of all users)
-    if dimension == "group":
-        try:
-            total_users = conn.execute(
-                "SELECT COUNT(DISTINCT username) FROM group_membership"
-            ).fetchone()[0]
-            if total_users > 0:
-                umbrella = set()
-                for r2 in conn.execute(
-                    "SELECT group_name, COUNT(DISTINCT username) as cnt"
-                    " FROM group_membership GROUP BY group_name"
-                ).fetchall():
-                    if r2["cnt"] / total_users > 0.8:
-                        umbrella.add(r2["group_name"])
-                if umbrella:
-                    rows = [r for r in rows if r["category"] not in umbrella]
-        except Exception:
-            pass
     counts = {r["category"]: r["cnt"] for r in rows if r["category"]}
 
     h, d, j_val = _compute_diversity(counts)
@@ -186,7 +203,7 @@ def compute_diversity(
             tq = f"""
                 SELECT {cat_col} AS category, COUNT(*) AS cnt
                 FROM jobs j
-                LEFT JOIN group_membership gm ON j.user_name = gm.username
+                {join_clause}
                 WHERE j.submit_time >= ? AND j.submit_time < ?
                 GROUP BY category
             """
@@ -221,11 +238,15 @@ def compute_diversity(
     conn.close()
 
     # ── Trend analysis ────────────────────────────────────────────────
-    trend_direction = "stable"
+    # Fewer than three windows with enough jobs make no trend: say so
+    # rather than call it "stable".
+    trend_direction = "too_few_weeks"
     trend_slope = 0.0
+    h_vals = [t.shannon_h for t in trend
+              if t.richness > 0 and sum(t.category_counts.values()) >= MIN_WINDOW_JOBS]
     if len(trend) >= 3:
-        h_vals = [t.shannon_h for t in trend if t.richness > 0]
         if len(h_vals) >= 3:
+            trend_direction = "stable"
             # Simple linear regression on H' over time
             n = len(h_vals)
             x_mean = (n - 1) / 2
@@ -242,20 +263,21 @@ def compute_diversity(
     # ── Fragility check ───────────────────────────────────────────────
     fragility_warning = False
     fragility_detail = ""
-    if current.dominant_proportion > 0.6:
+    one, many = _WHO.get(dimension, ("category", "categories"))
+    total_now = sum(counts.values())
+    if current.dominant_proportion > 0.6 and current.richness >= 2:
         fragility_warning = True
+        lead = ("One person" if dimension == "user"
+                else f"The {one} '{current.dominant_category}'")
         fragility_detail = (
-            f"'{current.dominant_category}' accounts for "
-            f"{current.dominant_proportion:.0%} of all jobs. "
-            f"Workload is concentrated — loss of this group would "
-            f"dramatically reduce cluster utilization."
+            f"{lead} accounts for {current.dominant_proportion:.0%} of the "
+            f"{total_now:,} jobs in this window: the workload rests on one {one}."
         )
     elif trend_direction == "decreasing" and abs(trend_slope) > 0.02:
         fragility_warning = True
         fragility_detail = (
-            f"Diversity (H') is trending downward at "
-            f"{trend_slope:.3f}/window. Investigate whether user "
-            f"communities are being lost or consolidated."
+            f"Jobs are concentrating in fewer {many}: diversity (H') is "
+            f"falling by {abs(trend_slope):.3f} per window."
         )
 
     return DiversityResult(
@@ -266,4 +288,7 @@ def compute_diversity(
         trend_slope=trend_slope,
         fragility_warning=fragility_warning,
         fragility_detail=fragility_detail,
+        trend_windows=len(h_vals),
+        reason=att.reason if att else "",
+        attribution=att.as_dict() if att else None,
     )

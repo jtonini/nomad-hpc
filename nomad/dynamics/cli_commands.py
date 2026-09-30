@@ -103,8 +103,9 @@ def dyn_niche(ctx, db_path, hours, threshold, output_json):
 
     \b
     Computes pairwise niche overlap (Pianka's index) between groups.
-    Flags high-overlap pairs that are likely to compete for the same
-    resources, creating contention risk.
+    Flags pairs of groups whose average requests are similar. Similar
+    requests are not the same as running at the same time. Needs each job
+    placed in one group (see docs/dynamics.md).
 
     \b
     Examples:

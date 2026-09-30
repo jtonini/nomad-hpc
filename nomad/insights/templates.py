@@ -17,9 +17,11 @@ def _fmt_hours(h: float) -> str:
     """Format hours into human-readable duration."""
     if h < 1:
         return f"{h * 60:.0f} minutes"
-    if h < 24:
+    if h <= 24:
         return f"{h:.0f} hours"
     days = h / 24
+    if float(days).is_integer():
+        return f"{days:.0f} days"
     if days < 7:
         return f"{days:.1f} days"
     return f"{days / 7:.1f} weeks"
@@ -39,35 +41,33 @@ def _severity_word(sev: Severity) -> str:
 
 def narrate_job_success_rate(sig: Signal) -> str:
     m = sig.metrics
-    rate = m["success_rate"]
-    total = m["total"]
-    hours = m["hours"]
-    failed = m["failed"]
-    oom = m["oom"]
-    timed_out = m["timed_out"]
+    hours = m.get("hours", 24)
+    judged = m.get("judged", m.get("total", 0))
+    rate = m.get("problem_rate")
+    if rate is None and m.get("success_rate") is not None:
+        rate = 100 - m["success_rate"]
+    cancelled = m.get("cancelled", 0)
 
-    parts = []
-    if rate >= 95:
-        parts.append(f"{total:,} jobs processed in the last {_fmt_hours(hours)}, {rate:.1f}% success rate.")
-    elif rate >= 90:
-        parts.append(f"{total:,} jobs in the last {_fmt_hours(hours)}, {rate:.1f}% success rate — slightly below target.")
-    elif rate >= 80:
-        parts.append(f"{total:,} jobs in the last {_fmt_hours(hours)}, {rate:.1f}% success rate — below the 90% baseline.")
+    head = f"{judged:,} jobs ended in the last {_fmt_hours(hours)}"
+    if cancelled:
+        head += f" (and {cancelled:,} were cancelled, which is not counted as a failure)"
+    if rate is None:
+        return head + "."
+    if not m.get("problems"):
+        text = f"{head}; none failed or hit a limit."
     else:
-        parts.append(f"{total:,} jobs in the last {_fmt_hours(hours)}, only {rate:.1f}% succeeded — well below normal.")
-
-    # Break down failure modes
-    failures = []
-    if failed > 0:
-        failures.append(f"{failed} failed")
-    if timed_out > 0:
-        failures.append(f"{timed_out} timed out")
-    if oom > 0:
-        failures.append(f"{oom} ran out of memory")
-    if failures:
-        parts.append(f"Breakdown: {', '.join(failures)}.")
-
-    return " ".join(parts)
+        text = f"{head}; {rate:.1f}% failed or hit a limit."
+        kinds = []
+        for key, word in (("failed", "failed"), ("timed_out", "ran out of time"),
+                          ("oom", "ran out of memory"), ("node_fail", "lost to a node failure"),
+                          ("other_limit", "hit another limit")):
+            if m.get(key):
+                kinds.append(f"{m[key]:,} {word}")
+        if kinds:
+            text += " " + ", ".join(kinds) + "."
+    if judged < m.get("min_jobs", 50):
+        text += " Too few jobs to judge a rate."
+    return text
 
 
 def narrate_partition_failures(sig: Signal) -> str:
@@ -75,18 +75,15 @@ def narrate_partition_failures(sig: Signal) -> str:
     partition = m["partition"]
     failures = m["failures"]
     pct = m["pct"]
+    jobs = m.get("jobs")
+    elsewhere = m.get("elsewhere_pct")
 
-    if pct > 10:
-        return (
-            f"Failures are concentrated in the '{partition}' partition — "
-            f"{failures} failures accounting for {pct:.1f}% of all jobs. "
-            f"Investigate whether resource limits or node health in this partition "
-            f"are contributing."
-        )
-    return (
-        f"The '{partition}' partition has {failures} recent failures ({pct:.1f}% of jobs). "
-        f"Worth monitoring."
-    )
+    text = f"In the '{partition}' partition {failures:,}"
+    text += f" of {jobs:,} jobs" if jobs else " jobs"
+    text += f" failed or hit a limit ({pct:.1f}%)"
+    if elsewhere is not None:
+        text += f", against {elsewhere:.1f}% in the other partitions"
+    return text + "."
 
 
 def narrate_oom(sig: Signal) -> str:
@@ -94,38 +91,42 @@ def narrate_oom(sig: Signal) -> str:
     count = m["oom_count"]
     users = m.get("top_users", [])
 
-    text = f"{count} jobs failed due to insufficient memory."
+    text = f"{count} jobs were stopped for using more memory than they asked for."
     if users:
-        text += f" Most affected users: {', '.join(users)}."
-    text += " Recommendation: check requested vs. actual memory and adjust --mem flags."
+        text += f" Most of them belong to {', '.join(users)}."
+    text += " Compare what these jobs requested with their peak memory (nomad edu explain <job_id>)."
     return text
 
 
 def narrate_timeout(sig: Signal) -> str:
     m = sig.metrics
     count = m["timeout_count"]
-    return (
-        f"{count} jobs exceeded their time limit. "
-        f"Common causes: underestimated wall time, I/O bottlenecks, or "
-        f"competing workloads. Review with 'nomad edu explain <job_id>'."
-    )
+    share = m.get("share_pct")
+    text = f"{count} jobs ran out of time"
+    if share is not None:
+        text += f" ({share:.1f}% of the jobs that ended)"
+    return text + (". 'nomad edu explain <job_id>' shows how long a job ran against "
+                   "the time it asked for.")
 
 
 def narrate_job_rate_trend(sig: Signal) -> str:
     m = sig.metrics
-    prev = m["previous_rate"]
-    curr = m["current_rate"]
-    delta = m["delta"]
-
-    if delta > 0:
-        return (
-            f"Success rate is improving: {prev:.1f}% in the previous period to "
-            f"{curr:.1f}% now ({delta:+.1f} percentage points)."
-        )
+    prev = m.get("previous_problem_rate")
+    curr = m.get("current_problem_rate")
+    if prev is None or curr is None:
+        prev, curr = 100 - m["previous_rate"], 100 - m["current_rate"]
+    word = "fewer" if curr < prev else "more"
+    period = _fmt_hours(m.get("hours", 24))
     return (
-        f"Success rate is declining: {prev:.1f}% in the previous period to "
-        f"{curr:.1f}% now ({delta:+.1f} percentage points). Investigate recent changes."
+        f"{word.capitalize()} jobs are failing or hitting a limit: {curr:.1f}% in the last "
+        f"{period}, against {prev:.1f}% in the {period} before."
     )
+
+
+def _fmt_size_gb(gb: float) -> str:
+    if gb >= 1024:
+        return f"{gb / 1024:.1f} TB"
+    return f"{gb:.0f} GB"
 
 
 def narrate_filesystem_usage(sig: Signal) -> str:
@@ -133,12 +134,30 @@ def narrate_filesystem_usage(sig: Signal) -> str:
     server = m.get("server") or m.get("hostname", "unknown")
     usage = m.get("usage_pct") or m.get("usage_percent", 0)
     avail = m.get("avail_gb") or m.get("free_gb", 0)
+    paths = m.get("paths") or []
 
-    if usage >= 90:
-        return f"{server} is at {usage:.0f}% capacity with only {avail:.0f} GB remaining. Immediate attention needed."
-    if usage >= 80:
-        return f"{server} is at {usage:.0f}% capacity ({avail:.0f} GB remaining). Approaching critical threshold."
-    return f"{server} is at {usage:.0f}% ({avail:.0f} GB free). Above normal but not yet critical."
+    text = f"{server} is {usage:.0f}% full ({_fmt_size_gb(avail)} free)"
+    if len(paths) > 1:
+        text += f"; {' and '.join(paths)} are one filesystem"
+    text += "."
+    growth = m.get("growth_gb_per_day")
+    days_full = m.get("days_until_full")
+    if growth is not None and m.get("trend_days"):
+        if growth > 0.5:
+            text += f" Growing about {_fmt_size_gb(growth * 30)} a month"
+            if days_full is not None:
+                if days_full < 60:
+                    text += f"; full in about {days_full:.0f} days at that rate"
+                else:
+                    text += f"; full in about {days_full / 30:.0f} months at that rate"
+            text += "."
+        elif growth < -0.5:
+            text += " Use has been falling."
+        else:
+            text += " Use is steady."
+    if m.get("stale"):
+        text += f" (Last reading {str(m.get('as_of', ''))[:16].replace('T', ' ')}.)"
+    return text
 
 
 def narrate_disk_fill_projection(sig: Signal) -> str:
@@ -253,11 +272,16 @@ def narrate_gpu_failure_rate(sig: Signal) -> str:
     rate = m["fail_rate"]
     failed = m["failed"]
     total = m["total_gpu_jobs"]
-    return (
-        f"{rate:.0f}% of GPU jobs are failing ({failed}/{total}). "
-        f"GPU partition issues disproportionately affect research groups "
-        f"running ML training and simulation workloads."
-    )
+    text = f"{rate:.0f}% of GPU jobs failed or hit a limit ({failed:,} of {total:,})."
+    people = m.get("people")
+    top = m.get("top_person_share")
+    if people == 1:
+        text += " All of them are one person's."
+    elif people and top is not None and top >= 80:
+        text += f" {top:.0f}% of them are one person's (of {people} people)."
+    elif people:
+        text += f" They come from {people} people."
+    return text
 
 
 def narrate_gpu_oom(sig: Signal) -> str:
@@ -265,10 +289,8 @@ def narrate_gpu_oom(sig: Signal) -> str:
     count = m["gpu_oom_count"]
     total = m["total_gpu_jobs"]
     return (
-        f"{count} GPU jobs ran out of VRAM (of {total} total GPU jobs). "
-        f"Users may be requesting insufficient GPU memory or running models "
-        f"too large for the available hardware. "
-        f"Consider VRAM-aware scheduling or routing large jobs to high-memory GPU nodes."
+        f"{count} GPU jobs (of {total:,}) were stopped for using more memory than they "
+        f"asked for. This is the job's memory on the node (--mem), not GPU memory."
     )
 
 
@@ -279,27 +301,23 @@ def narrate_queue_pressure(sig: Signal) -> str:
     running = m["running"]
     ratio = m["ratio"]
 
-    if ratio > 5:
-        return (
-            f"Heavy backlog in '{partition}': {pending} jobs waiting with only "
-            f"{running} running ({ratio:.1f}x ratio). Users will experience significant delays."
-        )
+    if running == 0:
+        return f"'{partition}': {pending} jobs waiting and none running."
     return (
-        f"'{partition}' has elevated queue pressure: {pending} pending vs "
-        f"{running} running ({ratio:.1f}x ratio)."
+        f"'{partition}': {pending} jobs waiting and {running} running "
+        f"({ratio:.1f}× as many waiting as running)."
     )
 
 
 def narrate_high_wait_time(sig: Signal) -> str:
     m = sig.metrics
     partition = m["partition"]
-    avg = m["avg_wait_sec"] / 3600
+    med = m.get("median_wait_sec", m["avg_wait_sec"]) / 3600
     mx = m["max_wait_sec"] / 3600
-    return (
-        f"Average wait time in '{partition}' is {avg:.1f} hours (longest: {mx:.1f} hours). "
-        f"Consider whether fairshare weights need adjustment or if the partition "
-        f"needs additional resources."
-    )
+    jobs = m.get("jobs")
+    text = f"Jobs in '{partition}' waited a median {med:.1f} hours to start (longest {mx:.1f} hours"
+    text += f", {jobs:,} jobs)." if jobs else ")."
+    return text
 
 
 def narrate_network_latency(sig: Signal) -> str:
@@ -325,27 +343,33 @@ def narrate_packet_loss(sig: Signal) -> str:
 
 def narrate_active_alerts(sig: Signal) -> str:
     m = sig.metrics
-    total = m["total_active"]
-    crit = m["critical"]
-    warn = m["warning"]
-    resolved = m["resolved_recently"]
     messages = m.get("messages", [])
-
     if messages:
-        # Show actual alert messages
         text = "; ".join(messages[:5])
         if len(messages) > 5:
             text += f" (+{len(messages)-5} more)"
         return text
+    return f"{m.get('total_active', 0)} alerts."
 
-    parts = [f"{total} active alerts"]
-    if crit:
-        parts.append(f"{crit} critical")
-    if warn:
-        parts.append(f"{warn} warning")
-    text = f"{', '.join(parts)}."
-    if resolved:
-        text += f" ({resolved} alerts resolved recently.)"
+
+def narrate_alerts_raised(sig: Signal) -> str:
+    m = sig.metrics
+    total = m["total"]
+    conditions = m["conditions"]
+    period = _fmt_hours(m.get("hours", 24))
+    text = (f"{total:,} alert{'s' if total != 1 else ''} raised in the last {period}, "
+            f"about {conditions} condition{'s' if conditions != 1 else ''}")
+    top = m.get("top") or []
+    if top:
+        parts = []
+        for c in top[:3]:
+            when = str(c.get("last") or "")[:16].replace("T", " ")
+            parts.append(f"{c['message']} ({c['count']}×, last {when})")
+        text += ": " + "; ".join(parts)
+    text += "."
+    if m.get("unplaced"):
+        text += (f" {m['unplaced']} older alerts don't record their site and "
+                 f"are not counted here.")
     return text
 
 
@@ -381,21 +405,23 @@ def narrate_underutilized_instance(sig: Signal) -> str:
 def narrate_workstation_cpu(sig: Signal) -> str:
     m = sig.metrics
     host = m["hostname"]
-    avg = m["avg_cpu"]
-    return (
-        f"'{host}' is running at {avg:.0f}% average CPU. "
-        f"Users on this node may experience degraded interactive performance."
-    )
+    ratio = m['load'] / max(m['cpus'], 1)
+    text = (f"'{host}' has a load of {m['load']:.1f} on {m['cpus']} cores "
+            f"({ratio:.1f}× its cores).")
+    if ratio > 1:
+        text += " More work is waiting to run than it has cores, so it will feel slow."
+    return text
 
 
 def narrate_workstation_memory(sig: Signal) -> str:
     m = sig.metrics
     host = m["hostname"]
-    avg = m["avg_mem"]
+    pct = m.get("mem_pct", m.get("avg_mem", 0))
     return (
-        f"'{host}' at {avg:.0f}% memory utilization. "
-        f"Risk of OOM kills for user processes. Check for runaway processes."
+        f"'{host}' is using {pct:.0f}% of its memory. Processes on it risk being "
+        f"killed for memory; check for runaway processes."
     )
+
 
 
 # ── Template dispatch ────────────────────────────────────────────────────
@@ -404,11 +430,17 @@ def narrate_workstation_memory(sig: Signal) -> str:
 
 def narrate_diversity_fragility(sig: Signal) -> str:
     m = sig.metrics
+    share = m["dominant_proportion"]
+    if m.get("dimension", "group") == "user":
+        jobs = m.get("jobs")
+        text = (f"One person ran {share:.0%} of the "
+                + (f"{jobs:,} " if jobs else "")
+                + "jobs submitted in this window. Figures counted over jobs here "
+                  "mostly describe that person's work.")
+        return text
     return (
-        f"Workload diversity warning: '{m['dominant']}' accounts for "
-        f"{m['dominant_proportion']:.0%} of all jobs (H'={m['shannon_h']:.3f}). "
-        f"This concentration creates fragility — loss of this group "
-        f"would significantly reduce cluster utilization."
+        f"'{m['dominant']}' accounts for {share:.0%} of all jobs "
+        f"(H'={m['shannon_h']:.3f}): the workload rests on one group."
     )
 
 
@@ -425,11 +457,10 @@ def narrate_capacity_binding(sig: Signal) -> str:
     m = sig.metrics
     sat = ""
     if m.get("hours_to_saturation"):
-        sat = f" Projected saturation in {m['hours_to_saturation']:.0f} hours."
+        sat = f" At the current rise it would be full in about {m['hours_to_saturation']:.0f} hours."
     return (
-        f"{m['label']} is the binding constraint at "
-        f"{m['utilization']:.0%} utilization "
-        f"(overall pressure: {m['pressure']}).{sat}"
+        f"{m['label']} is at {m['utilization']:.0%}, the resource closest to its "
+        f"limit.{sat}"
     )
 
 
@@ -445,31 +476,28 @@ def narrate_capacity_saturation(sig: Signal) -> str:
 def narrate_niche_contention(sig: Signal) -> str:
     m = sig.metrics
     return (
-        f"{m['high_overlap_count']} group pair(s) with high resource overlap "
-        f"detected. Highest overlap: {m['top_pair_a']} and {m['top_pair_b']} "
-        f"(O={m['top_overlap']:.2f}). These groups compete for the same "
-        f"resources and may experience contention."
+        f"{m['high_overlap_count']} group pair(s) request similar mixes of "
+        f"resources (Pianka overlap of their average requests). Highest: "
+        f"{m['top_pair_a']} and {m['top_pair_b']} (O={m['top_overlap']:.2f}). "
+        f"Similar requests are not the same as running at the same time."
     )
 
 
 def narrate_resilience_low(sig: Signal) -> str:
     m = sig.metrics
-    rec = ""
-    if m.get("mean_recovery_hours"):
-        rec = f" Mean recovery time: {m['mean_recovery_hours']:.1f} hours."
-    return (
-        f"Cluster resilience is low ({m['score']:.0f}/100, "
-        f"trend: {m['trend']}).{rec} "
-        f"The system is slow to recover from disturbances."
-    )
+    text = f"Resilience score {m['score']:.0f}/100."
+    if m.get("summary"):
+        text += f" {m['summary']}"
+    elif m.get("mean_recovery_hours"):
+        text += f" Mean recovery time: {m['mean_recovery_hours']:.1f} hours."
+    return text
 
 
 def narrate_resilience_degrading(sig: Signal) -> str:
     m = sig.metrics
     return (
-        f"Cluster resilience is degrading — recovery times are "
-        f"increasing over successive disturbance events. "
-        f"Current score: {m['score']:.0f}/100."
+        f"Recovery from node failures and failure spikes is taking longer than "
+        f"earlier in the window. Resilience score {m['score']:.0f}/100."
     )
 
 
@@ -477,9 +505,9 @@ def narrate_externality_detected(sig: Signal) -> str:
     m = sig.metrics
     imposers = ", ".join(m.get("top_imposers", []))
     return (
-        f"{m['edge_count']} inter-group impact relationship(s) detected. "
-        f"Top imposer(s): {imposers}. These groups' resource usage "
-        f"correlates with increased failure rates in other groups."
+        f"{m['edge_count']} pair(s) of groups where one group's resource use rises "
+        f"and falls with the other's failure rate (strongest from: {imposers}). "
+        f"A correlation, not proof that one causes the other."
     )
 
 
@@ -502,6 +530,7 @@ _TEMPLATE_MAP: dict[str, callable] = {
     "high_network_latency": narrate_network_latency,
     "packet_loss": narrate_packet_loss,
     "active_alerts": narrate_active_alerts,
+    "alerts_raised": narrate_alerts_raised,
     "flapping_alert": narrate_flapping_alert,
     "cloud_cost_summary": narrate_cloud_cost,
     "underutilized_cloud_instance": narrate_underutilized_instance,
@@ -519,9 +548,20 @@ _TEMPLATE_MAP: dict[str, callable] = {
 
 
 def narrate(signal: Signal) -> str:
-    """Convert a signal into a narrative string using the appropriate template."""
+    """Convert a signal into a narrative string using the appropriate template.
+
+    A template that fails (a metric it expects is missing) falls back to the
+    signal's own detail: one malformed signal must not take down the brief
+    or the Console page with it.
+    """
     template = _TEMPLATE_MAP.get(signal.title)
     if template:
-        return template(signal)
+        try:
+            return template(signal)
+        except Exception as e:  # noqa: BLE001 - fall back, and say so in the log
+            import logging
+            logging.getLogger(__name__).warning(
+                "Narration failed for %s (%s: %s); using its detail",
+                signal.title, type(e).__name__, e)
     # Fallback: use the signal's detail field directly
     return signal.detail

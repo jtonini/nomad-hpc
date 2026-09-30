@@ -47,9 +47,20 @@ def _section_header(title: str) -> str:
 
 # ── Diversity formatter ───────────────────────────────────────────────
 
+_BY = {"user": "person", "group": "group", "partition": "partition"}
+
+
+def _not_computed(lines: list[str], reason: str) -> str:
+    lines.append(f"\n  Not computed: {reason}")
+    return "\n".join(lines)
+
+
 def format_diversity_cli(result: DiversityResult) -> str:
     """Format diversity analysis for CLI output."""
-    lines = [_section_header(f"Workload Diversity (by {result.by_dimension})")]
+    lines = [_section_header(
+        f"Workload Diversity (by {_BY.get(result.by_dimension, result.by_dimension)})")]
+    if not getattr(result, "available", True):
+        return _not_computed(lines, result.reason)
 
     c = result.current
     lines.append(f"\n  Shannon entropy (H'):  {c.shannon_h:.3f}")
@@ -68,8 +79,8 @@ def format_diversity_cli(result: DiversityResult) -> str:
 
     # Trend
     if result.trend:
-        arrow = {"increasing": "^", "decreasing": "v", "stable": "-"}[result.trend_direction]
-        lines.append(f"\n  Trend: {result.trend_direction} ({arrow}) "
+        arrow = {"increasing": "^", "decreasing": "v", "stable": "-"}.get(result.trend_direction, "?")
+        lines.append(f"\n  Trend: {result.trend_direction.replace('_', ' ')} ({arrow}) "
                      f"(slope: {result.trend_slope:+.4f}/window)")
 
         lines.append("\n  H' over time:")
@@ -89,6 +100,9 @@ def format_diversity_json(result: DiversityResult) -> dict:
     """Convert diversity result to JSON-serializable dict."""
     return {
         "dimension": result.by_dimension,
+        "available": getattr(result, "available", True),
+        "reason": getattr(result, "reason", ""),
+        "attribution": getattr(result, "attribution", None),
         "current": {
             "shannon_h": result.current.shannon_h,
             "simpson_d": result.current.simpson_d,
@@ -100,6 +114,7 @@ def format_diversity_json(result: DiversityResult) -> dict:
         },
         "trend_direction": result.trend_direction,
         "trend_slope": result.trend_slope,
+        "trend_windows": getattr(result, "trend_windows", 0),
         "fragility_warning": result.fragility_warning,
         "fragility_detail": result.fragility_detail,
         "trend": [
@@ -120,6 +135,8 @@ def format_niche_cli(result: NicheResult) -> str:
     """Format niche overlap analysis for CLI output."""
     lines = [_section_header("Niche Overlap Analysis")]
 
+    if not getattr(result, "available", True):
+        return _not_computed(lines, result.reason)
     if not result.profiles:
         lines.append("\n  Insufficient data for niche analysis.")
         return "\n".join(lines)
@@ -181,6 +198,9 @@ def format_niche_cli(result: NicheResult) -> str:
 def format_niche_json(result: NicheResult) -> dict:
     """Convert niche result to JSON-serializable dict."""
     return {
+        "available": getattr(result, "available", True),
+        "reason": getattr(result, "reason", ""),
+        "attribution": getattr(result, "attribution", None),
         "profiles": [
             {
                 "name": p.name,
@@ -244,10 +264,12 @@ def format_capacity_cli(result: CapacityResult) -> str:
 
 def format_capacity_json(result: CapacityResult) -> dict:
     """Convert capacity result to JSON-serializable dict."""
+    busiest = getattr(result, "busiest", None)
     return {
         "overall_pressure": result.overall_pressure,
         "summary": result.summary,
         "binding_constraint": result.binding_constraint.dimension if result.binding_constraint else None,
+        "busiest": busiest.dimension if busiest else None,
         "dimensions": [
             {
                 "dimension": d.dimension,
@@ -271,8 +293,10 @@ def format_resilience_cli(result: ResilienceResult) -> str:
     """Format resilience analysis for CLI output."""
     lines = [_section_header("System Resilience")]
 
-    lines.append(f"\n  Resilience score: {result.resilience_score:.0f}/100")
-    lines.append(f"  Trend: {result.resilience_trend}")
+    score = result.resilience_score
+    lines.append(f"\n  Resilience score: {score:.0f}/100" if score is not None
+                 else "\n  Resilience score: -- (nothing to read)")
+    lines.append(f"  Trend: {result.resilience_trend.replace('_', ' ')}")
     lines.append(f"  {result.summary}")
 
     if result.mean_recovery_hours is not None:
@@ -299,6 +323,8 @@ def format_resilience_json(result: ResilienceResult) -> dict:
     return {
         "resilience_score": result.resilience_score,
         "resilience_trend": result.resilience_trend,
+        "counted_events": getattr(result, "counted_events", 0),
+        "drains": getattr(result, "drains", 0),
         "mean_recovery_hours": result.mean_recovery_hours,
         "median_recovery_hours": result.median_recovery_hours,
         "summary": result.summary,
@@ -322,14 +348,16 @@ def format_externality_cli(result: ExternalityResult) -> str:
     """Format externality analysis for CLI output."""
     lines = [_section_header("Inter-Group Externalities")]
 
+    if not getattr(result, "available", True):
+        return _not_computed(lines, result.reason)
     lines.append(f"\n  {result.summary}")
 
     if result.group_profiles:
-        lines.append("\n  Group externality profiles:")
-        lines.append(f"    {'Group':<20s} {'Imposed':>8s} {'Received':>9s} {'Net':>8s}  Role")
+        lines.append("\n  Group profiles (correlations, not proof of cause):")
+        lines.append(f"    {'Group':<20s} {'Resource':>8s} {'Failure':>9s} {'Net':>8s}  Side")
         lines.append(f"    {'-' * 58}")
         for p in result.group_profiles:
-            role = "imposer" if p.net_score > 0 else "receiver" if p.net_score < 0 else "neutral"
+            role = "resource" if p.net_score > 0 else "failure" if p.net_score < 0 else "neutral"
             lines.append(
                 f"    {p.group_name:<20s} "
                 f"{p.imposed_score:>8.2f} "
@@ -339,7 +367,7 @@ def format_externality_cli(result: ExternalityResult) -> str:
             )
 
     if result.edges:
-        lines.append(f"\n  Impact relationships ({len(result.edges)} edges):")
+        lines.append(f"\n  Correlations ({len(result.edges)}):")
         for e in result.edges[:10]:  # top 10
             lines.append(
                 f"    {e.source_group} --> {e.target_group}: "
@@ -354,6 +382,9 @@ def format_externality_cli(result: ExternalityResult) -> str:
 def format_externality_json(result: ExternalityResult) -> dict:
     """Convert externality result to JSON-serializable dict."""
     return {
+        "available": getattr(result, "available", True),
+        "reason": getattr(result, "reason", ""),
+        "attribution": getattr(result, "attribution", None),
         "summary": result.summary,
         "top_imposers": result.top_imposers,
         "top_receivers": result.top_receivers,
@@ -401,11 +432,15 @@ def format_full_summary_cli(
     lines.append(f"  {'-' * 40}")
 
     # Diversity headline
-    h = diversity.current.shannon_h
-    trend = diversity.trend_direction
-    lines.append(f"  Diversity: H'={h:.3f} ({trend})")
-    if diversity.fragility_warning:
-        lines.append(f"    !! {diversity.fragility_detail}")
+    if getattr(diversity, "available", True):
+        h = diversity.current.shannon_h
+        trend = diversity.trend_direction
+        by = _BY.get(diversity.by_dimension, diversity.by_dimension)
+        lines.append(f"  Diversity by {by}: H'={h:.3f} ({trend})")
+        if diversity.fragility_warning:
+            lines.append(f"    !! {diversity.fragility_detail}")
+    else:
+        lines.append(f"  Diversity by group: not computed")
 
     # Capacity headline
     if capacity.binding_constraint:
@@ -414,25 +449,34 @@ def format_full_summary_cli(
             f"  Capacity: {bc.label} is binding at "
             f"{bc.current_utilization:.0%} [{capacity.overall_pressure}]"
         )
+    elif capacity.dimensions:
+        lines.append(f"  Capacity: {capacity.summary}")
 
     # Resilience headline
-    lines.append(
-        f"  Resilience: {resilience.resilience_score:.0f}/100 "
-        f"({resilience.resilience_trend})"
-    )
-
-    # Externality headline
-    if externality.top_imposers:
+    if resilience.resilience_score is not None:
         lines.append(
-            f"  Externalities: {len(externality.edges)} inter-group impacts; "
-            f"top imposer(s): {', '.join(externality.top_imposers)}"
+            f"  Resilience: {resilience.resilience_score:.0f}/100 "
+            f"({resilience.resilience_trend})"
         )
     else:
-        lines.append("  Externalities: no significant inter-group impacts")
+        lines.append("  Resilience: nothing to read")
+
+    # Externality headline
+    if not getattr(externality, "available", True):
+        lines.append("  Externalities: not computed")
+    elif externality.top_imposers:
+        lines.append(
+            f"  Externalities: {len(externality.edges)} inter-group correlation(s); "
+            f"strongest: {', '.join(externality.top_imposers)}"
+        )
+    else:
+        lines.append("  Externalities: no significant inter-group correlations")
 
     # Niche headline
     n_high = len(niche.high_overlap_pairs)
-    if n_high > 0:
+    if not getattr(niche, "available", True):
+        lines.append("  Niche overlap: not computed")
+    elif n_high > 0:
         lines.append(
             f"  Niche overlap: {n_high} high-overlap pair(s) "
             f"— contention risk detected"

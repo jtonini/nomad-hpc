@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from nomad.db import scope
+
 
 # Resource dimensions used for niche profiles
 RESOURCE_DIMENSIONS = [
@@ -57,6 +59,9 @@ class NicheResult:
     overlap_matrix: dict[tuple[str, str], float]
     high_overlap_pairs: list[OverlapPair]
     contention_risk_count: dict[str, int] = field(default_factory=dict)
+    available: bool = True       # False when jobs can't be placed in groups
+    reason: str = ""
+    attribution: dict | None = None
 
 
 def _pianka_overlap(p: dict[str, float], q: dict[str, float]) -> float:
@@ -96,6 +101,8 @@ def compute_niche_overlap(
     hours: int = 168,
     overlap_threshold: float = 0.6,
     min_jobs: int = 5,
+    site: str | None = None,
+    attribution: str = "auto",
 ) -> NicheResult:
     """Compute pairwise niche overlap between user groups.
 
@@ -105,56 +112,50 @@ def compute_niche_overlap(
     hours : how far back to look
     overlap_threshold : pairs above this value are flagged as high-overlap
     min_jobs : minimum jobs to include a group in analysis
+    site : on a combined database, the site to read
+    attribution : "auto" places each job in one group or declines (see
+        nomad.dynamics.attribution); "membership" forces the old join
     """
+    from nomad.dynamics.attribution import job_attribution
+
     db_path = Path(db_path)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = scope.connect(db_path, site)
 
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
+    att = job_attribution(conn, cutoff, mode=attribution)
+    if not att.available:
+        conn.close()
+        return NicheResult(
+            profiles=[], overlap_matrix={}, high_overlap_pairs=[],
+            contention_risk_count={"low": 0, "moderate": 0, "high": 0},
+            available=False, reason=att.reason, attribution=att.as_dict(),
+        )
+
     # ── Build group resource profiles ─────────────────────────────────
-    query = """
+    query = f"""
         SELECT
-            COALESCE(gm.group_name, 'ungrouped') AS grp,
+            {att.group_expr} AS grp,
             COUNT(*) AS job_count,
             AVG(j.req_cpus) AS avg_cpus,
             AVG(j.req_mem_mb) AS avg_mem_mb,
             AVG(j.req_gpus) AS avg_gpus,
             AVG(j.runtime_seconds) AS avg_runtime_sec
         FROM jobs j
-        LEFT JOIN group_membership gm ON j.user_name = gm.username
+        {att.join}
         WHERE j.submit_time >= ?
         GROUP BY grp
         HAVING job_count >= ?
         ORDER BY job_count DESC
     """
     rows = conn.execute(query, (cutoff, min_jobs)).fetchall()
-
-    # Filter umbrella groups (>80% of all users)
-    try:
-        total_users = conn.execute(
-            "SELECT COUNT(DISTINCT username) FROM group_membership"
-        ).fetchone()[0]
-        if total_users > 0:
-            umbrella = set()
-            grp_sizes = conn.execute(
-                "SELECT group_name, COUNT(DISTINCT username) as cnt"
-                " FROM group_membership GROUP BY group_name"
-            ).fetchall()
-            for g in grp_sizes:
-                if g["cnt"] / total_users > 0.8:
-                    umbrella.add(g["group_name"])
-            if umbrella:
-                rows = [r for r in rows if r["grp"] not in umbrella]
-    except Exception:
-        pass
-
     conn.close()
 
     if not rows:
         return NicheResult(
             profiles=[], overlap_matrix={},
             high_overlap_pairs=[], contention_risk_count={"low": 0, "moderate": 0, "high": 0},
+            reason=att.reason, attribution=att.as_dict(),
         )
 
     # Build raw profiles
@@ -234,4 +235,6 @@ def compute_niche_overlap(
         overlap_matrix=overlap_matrix,
         high_overlap_pairs=high_overlap_pairs,
         contention_risk_count=risk_counts,
+        reason=att.reason,
+        attribution=att.as_dict(),
     )

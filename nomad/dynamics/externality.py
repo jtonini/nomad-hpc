@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from nomad.db import scope
+
 
 @dataclass
 class ExternalityEdge:
@@ -52,11 +54,20 @@ class ExternalityResult:
     top_imposers: list[str] = field(default_factory=list)
     top_receivers: list[str] = field(default_factory=list)
     summary: str = ""
+    available: bool = True       # False when jobs can't be placed in groups
+    reason: str = ""
+    attribution: dict | None = None
+
+
+# Pearson's r over a handful of hours is noise: with 4 points, r >= 0.3
+# happens by chance most of the time. Pairs need this many shared hours.
+MIN_SHARED_WINDOWS = 12
 
 
 def _temporal_correlation(
     source_activity: list[tuple[str, float]],
     target_failures: list[tuple[str, float]],
+    min_windows: int = 4,
 ) -> float:
     """Compute correlation between source activity and target failures.
 
@@ -68,7 +79,7 @@ def _temporal_correlation(
     target_map = dict(target_failures)
     common_windows = sorted(set(source_map.keys()) & set(target_map.keys()))
 
-    if len(common_windows) < 4:
+    if len(common_windows) < min_windows:
         return 0.0
 
     sx = [source_map[w] for w in common_windows]
@@ -93,6 +104,8 @@ def compute_externalities(
     hours: int = 168,
     min_jobs: int = 10,
     correlation_threshold: float = 0.3,
+    site: str | None = None,
+    attribution: str = "auto",
 ) -> ExternalityResult:
     """Compute inter-group externality scores.
 
@@ -106,27 +119,41 @@ def compute_externalities(
     hours : how far back to analyze
     min_jobs : minimum jobs per group to include
     correlation_threshold : minimum |correlation| to report an edge
+    site : on a combined database, the site to read
+    attribution : "auto" places each job in one group or declines (see
+        nomad.dynamics.attribution); "membership" forces the old join
     """
+    from nomad.dynamics.attribution import job_attribution
+
     db_path = Path(db_path)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = scope.connect(db_path, site)
 
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
+    att = job_attribution(conn, cutoff, mode=attribution)
+    if not att.available:
+        conn.close()
+        return ExternalityResult(group_profiles=[], edges=[], summary=att.reason,
+                                 available=False, reason=att.reason,
+                                 attribution=att.as_dict())
+
     # ── Get group-level time series ───────────────────────────────────
     # Resource intensity per group per time window
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT
-            COALESCE(gm.group_name, 'ungrouped') AS grp,
+            {att.group_expr} AS grp,
             strftime('%Y-%m-%d %H', j.submit_time) AS window,
             COUNT(*) AS total_jobs,
-            SUM(CASE WHEN j.state = 'FAILED' THEN 1 ELSE 0 END) AS failed_jobs,
+            SUM(CASE WHEN UPPER(j.state) IN ('FAILED', 'NODE_FAIL', 'BOOT_FAIL',
+                     'TIMEOUT', 'OUT_OF_MEMORY') THEN 1 ELSE 0 END) AS failed_jobs,
             AVG(j.req_cpus) AS avg_cpus,
             AVG(j.req_mem_mb) AS avg_mem,
             SUM(j.req_cpus * j.runtime_seconds) / 3600.0 AS cpu_hours
         FROM jobs j
-        LEFT JOIN group_membership gm ON j.user_name = gm.username
-        WHERE j.submit_time >= ?
+        {att.join}
+        WHERE j.submit_time >= ? AND j.end_time IS NOT NULL
+          AND UPPER(j.state) NOT LIKE 'CANCELLED%'
+          AND UPPER(j.state) NOT IN ('RUNNING', 'PENDING', 'PREEMPTED')
         GROUP BY grp, window
         HAVING total_jobs >= 2
         ORDER BY grp, window
@@ -138,6 +165,7 @@ def compute_externalities(
         return ExternalityResult(
             group_profiles=[], edges=[],
             summary="Insufficient data for externality analysis.",
+            reason=att.reason, attribution=att.as_dict(),
         )
 
     # Organize by group
@@ -167,6 +195,7 @@ def compute_externalities(
             group_profiles=[], edges=[],
             summary="Fewer than two active groups — externality analysis requires "
                     "at least two groups with sufficient job history.",
+            reason=att.reason, attribution=att.as_dict(),
         )
 
     # ── Compute pairwise correlations ─────────────────────────────────
@@ -189,7 +218,8 @@ def compute_externalities(
                 for w, d in group_data[tgt].items()
             ]
 
-            corr = _temporal_correlation(src_activity, tgt_failures)
+            corr = _temporal_correlation(src_activity, tgt_failures,
+                                         min_windows=MIN_SHARED_WINDOWS)
 
             if abs(corr) >= correlation_threshold and corr > 0:
                 # Positive correlation: source activity → target failures
@@ -238,14 +268,16 @@ def compute_externalities(
     ][:3]
 
     # Summary
-    parts = [f"{len(edges)} inter-group impact relationships detected."]
+    parts = [f"{len(edges)} pair(s) of groups where one group's resource use "
+             f"rises and falls with the other's failure rate (a correlation, "
+             f"not proof of cause)."]
     if top_imposers:
         parts.append(
-            f"Highest net imposers: {', '.join(top_imposers)}."
+            f"Strongest on the resource side: {', '.join(top_imposers)}."
         )
     if top_receivers:
         parts.append(
-            f"Most affected groups: {', '.join(top_receivers)}."
+            f"Strongest on the failure side: {', '.join(top_receivers)}."
         )
     if not edges:
         parts = ["No significant inter-group externalities detected at current threshold."]
@@ -256,4 +288,6 @@ def compute_externalities(
         top_imposers=top_imposers,
         top_receivers=top_receivers,
         summary=" ".join(parts),
+        reason=att.reason,
+        attribution=att.as_dict(),
     )

@@ -4270,21 +4270,8 @@ def sync(ctx, config_file, output, dry_run):
         "  Phase 2: Merging databases", bold=True))
     click.echo()
 
-    # Tables that get a source_site column during merge.
-    # Every data table gets tagged so the dashboard can filter by site.
-    NEEDS_SITE_COL = {
-        'filesystems', 'queue_state',
-        'iostat_cpu', 'iostat_device',
-        'mpstat_core', 'mpstat_summary',
-        'vmstat', 'nfs_stats',
-        'jobs', 'job_summary', 'job_metrics', 'node_state',
-        'gpu_stats', 'workstation_state', 'group_membership',
-        'job_accounting', 'alert_history',
-        'interactive_sessions', 'interactive_summary',
-        'interactive_servers', 'network_perf',
-        'storage_state', 'proficiency_scores',
-        'collector_runs',
-    }
+    # Every merged table gets a source_site column (see needs_site below),
+    # so the dashboard and the analysis engines can read one site at a time.
 
     # No longer needed — all tables get source_site
     SAFE_TABLES = set()
@@ -4361,8 +4348,12 @@ def sync(ctx, config_file, output, dry_run):
                     cname, ctype = c[1], c[2] or 'TEXT'
                     col_defs.append(f"{cname} {ctype}")
 
-                # Check if table needs source_site
-                needs_site = table in NEEDS_SITE_COL
+                # Every data table is tagged with its site -- alerts and
+                # nodes too, which a fixed list used to leave out, so a
+                # combined database could not say which site raised an
+                # alert. A source table that already carries source_site
+                # keeps its own.
+                needs_site = 'source_site' not in col_names
 
                 # Create table in combined if not exists
                 if needs_site:
@@ -4540,6 +4531,17 @@ def sync(ctx, config_file, output, dry_run):
             ("job_summary", "job_id"),
             ("gpu_stats", "timestamp"),
             ("workstation_state", "timestamp"),
+            # Per-site reads (nomad.db.scope: WHERE source_site = ? AND
+            # timestamp >= ?) for the Insight and Dynamics engines.
+            ("node_state", "source_site, timestamp"),
+            ("filesystems", "source_site, timestamp"),
+            ("queue_state", "source_site, timestamp"),
+            ("iostat_device", "source_site, timestamp"),
+            ("gpu_stats", "source_site, timestamp"),
+            ("workstation_state", "source_site, timestamp"),
+            ("alerts", "source_site, timestamp"),
+            ("jobs", "source_site, end_time"),
+            ("jobs", "source_site, submit_time"),
         ]
         click.echo(f"  Indexing... ", nl=False)
         _built = 0
@@ -5467,10 +5469,11 @@ def insights():
 
 @insights.command('brief')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=24, help='Lookback window (hours)')
 @click.option('--cluster', default=None, help='Cluster name for display')
 @click.pass_context
-def insights_brief(ctx, db_path, hours, cluster):
+def insights_brief(ctx, db_path, hours, cluster, site):
     """Print a concise operational briefing."""
     from nomad.insights import InsightEngine
 
@@ -5482,21 +5485,28 @@ def insights_brief(ctx, db_path, hours, cluster):
         click.echo(f"Error: Database not found at {db_path}. Run 'nomad collect --once' first.", err=True)
         raise SystemExit(1)
 
-    if not cluster:
+    if cluster:
+        cluster_name = cluster
+    elif site:
+        cluster_name = site
+    else:
         from nomad.config import resolve_cluster_name
         cluster_name = resolve_cluster_name(ctx.obj.get('config', {}))
-    else:
-        cluster_name = cluster
-    engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
     click.echo(engine.brief())
 
 
 @insights.command('detail')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=24, help='Lookback window (hours)')
 @click.option('--cluster', default=None, help='Cluster name for display')
 @click.pass_context
-def insights_detail(ctx, db_path, hours, cluster):
+def insights_detail(ctx, db_path, hours, cluster, site):
     """Print a detailed operational analysis."""
     from nomad.insights import InsightEngine
 
@@ -5508,21 +5518,28 @@ def insights_detail(ctx, db_path, hours, cluster):
         click.echo(f"Error: Database not found at {db_path}. Run 'nomad collect --once' first.", err=True)
         raise SystemExit(1)
 
-    if not cluster:
+    if cluster:
+        cluster_name = cluster
+    elif site:
+        cluster_name = site
+    else:
         from nomad.config import resolve_cluster_name
         cluster_name = resolve_cluster_name(ctx.obj.get('config', {}))
-    else:
-        cluster_name = cluster
-    engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
     click.echo(engine.detail())
 
 
 @insights.command('json')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=24, help='Lookback window (hours)')
 @click.option('--cluster', default=None, help='Cluster name for display')
 @click.pass_context
-def insights_json(ctx, db_path, hours, cluster):
+def insights_json(ctx, db_path, hours, cluster, site):
     """Output insights as JSON (for API/Console integration)."""
     from nomad.insights import InsightEngine
 
@@ -5534,22 +5551,29 @@ def insights_json(ctx, db_path, hours, cluster):
         click.echo(f"Error: Database not found at {db_path}. Run 'nomad collect --once' first.", err=True)
         raise SystemExit(1)
 
-    if not cluster:
+    if cluster:
+        cluster_name = cluster
+    elif site:
+        cluster_name = site
+    else:
         from nomad.config import resolve_cluster_name
         cluster_name = resolve_cluster_name(ctx.obj.get('config', {}))
-    else:
-        cluster_name = cluster
-    engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
     click.echo(engine.to_json())
 
 
 @insights.command('slack')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=24, help='Lookback window (hours)')
 @click.option('--cluster', default=None, help='Cluster name for display')
 @click.option('--webhook', help='Slack webhook URL (if provided, posts directly)')
 @click.pass_context
-def insights_slack(ctx, db_path, hours, cluster, webhook):
+def insights_slack(ctx, db_path, hours, cluster, webhook, site):
     """Generate a Slack-formatted insight message."""
     from nomad.insights import InsightEngine
 
@@ -5561,12 +5585,18 @@ def insights_slack(ctx, db_path, hours, cluster, webhook):
         click.echo(f"Error: Database not found at {db_path}. Run 'nomad collect --once' first.", err=True)
         raise SystemExit(1)
 
-    if not cluster:
+    if cluster:
+        cluster_name = cluster
+    elif site:
+        cluster_name = site
+    else:
         from nomad.config import resolve_cluster_name
         cluster_name = resolve_cluster_name(ctx.obj.get('config', {}))
-    else:
-        cluster_name = cluster
-    engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
     message = engine.to_slack()
 
     if webhook:
@@ -5589,12 +5619,13 @@ def insights_slack(ctx, db_path, hours, cluster, webhook):
 
 @insights.command('digest')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=24, help='Lookback window (hours)')
 @click.option('--cluster', default=None, help='Cluster name for display')
 @click.option('--period', type=click.Choice(['daily', 'weekly']), default='daily', help='Digest period')
 @click.option('--email', 'email_addr', help='Send via email (requires configured SMTP)')
 @click.pass_context
-def insights_digest(ctx, db_path, hours, cluster, period, email_addr):
+def insights_digest(ctx, db_path, hours, cluster, period, email_addr, site):
     """Generate an email digest of insights."""
     from nomad.insights import InsightEngine
 
@@ -5609,12 +5640,18 @@ def insights_digest(ctx, db_path, hours, cluster, period, email_addr):
     if period == 'weekly':
         hours = max(hours, 168)
 
-    if not cluster:
+    if cluster:
+        cluster_name = cluster
+    elif site:
+        cluster_name = site
+    else:
         from nomad.config import resolve_cluster_name
         cluster_name = resolve_cluster_name(ctx.obj.get('config', {}))
-    else:
-        cluster_name = cluster
-    engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = InsightEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
     subject, body = engine.to_email(period=period)
 
     if email_addr:
@@ -6053,6 +6090,17 @@ def energy_predict(ctx, db_path, method, top, threshold, cluster_name):
         return
     click.echo(fmt.format_prediction_cli(result, top=top))
 
+
+def _dyn_site(db_path, site):
+    """The site for a dyn command; exits with the reason on a bad or missing one."""
+    from nomad.db import scope
+    try:
+        return scope.require_site(db_path, site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+
+
 @cli.group()
 def dyn():
     """System dynamics analysis — ecological and economic metrics.
@@ -6075,11 +6123,12 @@ def dyn():
 
 @dyn.command('summary')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=168, help='Analysis window (hours)')
 @click.option('--cluster', 'cluster_name', default=None, help='Cluster name')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_summary(ctx, db_path, hours, cluster_name, output_json):
+def dyn_summary(ctx, db_path, hours, cluster_name, output_json, site):
     """Full dynamics summary combining all metrics.
 
     Produces a holistic assessment of workload diversity, niche overlap,
@@ -6091,9 +6140,13 @@ def dyn_summary(ctx, db_path, hours, cluster_name, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
     if cluster_name is None:
-        cluster_name = config.get('cluster', {}).get('name', 'cluster')
+        cluster_name = site or config.get('cluster', {}).get('name', 'cluster')
 
-    engine = DynamicsEngine(db_path, hours=hours, cluster_name=cluster_name)
+    try:
+        engine = DynamicsEngine(db_path, hours=hours, cluster_name=cluster_name, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
     if output_json:
         click.echo(engine.to_json())
@@ -6103,12 +6156,13 @@ def dyn_summary(ctx, db_path, hours, cluster_name, output_json):
 
 @dyn.command('diversity')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=168, help='Analysis window (hours)')
 @click.option('--by', 'dimension', type=click.Choice(['group', 'partition', 'user']),
               default='group', help='Dimension to measure diversity over')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_diversity(ctx, db_path, hours, dimension, output_json):
+def dyn_diversity(ctx, db_path, hours, dimension, output_json, site):
     """Workload diversity indices (Shannon, Simpson).
 
     \b
@@ -6129,7 +6183,11 @@ def dyn_diversity(ctx, db_path, hours, dimension, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
 
-    engine = DynamicsEngine(db_path, hours=hours)
+    try:
+        engine = DynamicsEngine(db_path, hours=hours, site=site)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
 
     if output_json:
         import json
@@ -6140,17 +6198,19 @@ def dyn_diversity(ctx, db_path, hours, dimension, output_json):
 
 @dyn.command('niche')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=168, help='Analysis window (hours)')
 @click.option('--threshold', type=float, default=0.6, help='Overlap threshold for flagging')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_niche(ctx, db_path, hours, threshold, output_json):
+def dyn_niche(ctx, db_path, hours, threshold, output_json, site):
     """Resource usage overlap between user communities.
 
     \b
     Computes pairwise niche overlap (Pianka's index) between groups.
-    Flags high-overlap pairs that are likely to compete for the same
-    resources, creating contention risk.
+    Flags pairs of groups whose average requests are similar. Similar
+    requests are not the same as running at the same time. Needs each job
+    placed in one group (see docs/dynamics.md).
 
     \b
     Examples:
@@ -6165,7 +6225,8 @@ def dyn_niche(ctx, db_path, hours, threshold, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
 
-    result = compute_niche_overlap(db_path, hours=hours, overlap_threshold=threshold)
+    site = _dyn_site(db_path, site)
+    result = compute_niche_overlap(db_path, hours=hours, overlap_threshold=threshold, site=site)
 
     if output_json:
         import json
@@ -6176,10 +6237,11 @@ def dyn_niche(ctx, db_path, hours, threshold, output_json):
 
 @dyn.command('capacity')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=168, help='Analysis window (hours)')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_capacity(ctx, db_path, hours, output_json):
+def dyn_capacity(ctx, db_path, hours, output_json, site):
     """Multi-dimensional carrying capacity utilization.
 
     \b
@@ -6199,7 +6261,8 @@ def dyn_capacity(ctx, db_path, hours, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
 
-    result = compute_capacity(db_path, hours=hours)
+    site = _dyn_site(db_path, site)
+    result = compute_capacity(db_path, hours=hours, site=site)
 
     if output_json:
         import json
@@ -6210,10 +6273,11 @@ def dyn_capacity(ctx, db_path, hours, output_json):
 
 @dyn.command('resilience')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=720, help='Analysis window (hours, default 30 days)')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_resilience(ctx, db_path, hours, output_json):
+def dyn_resilience(ctx, db_path, hours, output_json, site):
     """Recovery time after disturbance events.
 
     \b
@@ -6237,7 +6301,8 @@ def dyn_resilience(ctx, db_path, hours, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
 
-    result = compute_resilience(db_path, hours=hours)
+    site = _dyn_site(db_path, site)
+    result = compute_resilience(db_path, hours=hours, site=site)
 
     if output_json:
         import json
@@ -6248,11 +6313,12 @@ def dyn_resilience(ctx, db_path, hours, output_json):
 
 @dyn.command('externality')
 @click.option('--db', 'db_path', type=click.Path(exists=True), help='Database path')
+@click.option('--site', default=None, help='On a combined database (nomad sync), the site to read')
 @click.option('--hours', type=int, default=168, help='Analysis window (hours)')
 @click.option('--threshold', type=float, default=0.3, help='Minimum correlation to report')
 @click.option('--json', 'output_json', is_flag=True, help='JSON output')
 @click.pass_context
-def dyn_externality(ctx, db_path, hours, threshold, output_json):
+def dyn_externality(ctx, db_path, hours, threshold, output_json, site):
     """Inter-user/group impact quantification.
 
     \b
@@ -6272,7 +6338,8 @@ def dyn_externality(ctx, db_path, hours, threshold, output_json):
     if db_path is None:
         db_path = str(get_db_path(config))
 
-    result = compute_externalities(db_path, hours=hours, correlation_threshold=threshold)
+    site = _dyn_site(db_path, site)
+    result = compute_externalities(db_path, hours=hours, correlation_threshold=threshold, site=site)
 
     if output_json:
         import json

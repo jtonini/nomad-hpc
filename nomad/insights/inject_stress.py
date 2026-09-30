@@ -5,9 +5,9 @@ Patch demo.py to inject stress scenarios into the demo database.
 These scenarios create co-occurring signals that trigger the Level 2
 correlator in the Insight Engine:
 
-1. Disk filling + job failures (disk_pressure_causing_failures)
-2. GPU OOM + GPU partition failures (gpu_capacity_mismatch)
-3. Network latency + job failures (network_induced_failures)
+1. Disk filling + job failures (disk_filling_and_failures)
+2. GPU OOM + GPU partition failures (gpu_jobs_out_of_memory)
+3. Network latency + job failures (network_issues_and_failures)
 4. Queue pressure + high wait times (partition_bottleneck)
 5. Cloud cost + underutilized instances (cloud_cost_optimization)
 6. Workstation overload + alerts (widespread_workstation_pressure)

@@ -271,7 +271,7 @@ class TestDiversity:
         from nomad.dynamics.diversity import compute_diversity
         result = compute_diversity(demo_db, n_windows=6)
         assert len(result.trend) > 0
-        assert result.trend_direction in ("increasing", "decreasing", "stable")
+        assert result.trend_direction in ("increasing", "decreasing", "stable", "too_few_weeks")
 
     def test_category_counts_sum(self, demo_db):
         from nomad.dynamics.diversity import compute_diversity
@@ -358,11 +358,18 @@ class TestCapacity:
         assert result is not None
 
     def test_binding_constraint_identified(self, demo_db):
-        from nomad.dynamics.capacity import compute_capacity
+        """The busiest resource is always named; it is called binding only
+        when it is near its limit (BINDING_AT)."""
+        from nomad.dynamics.capacity import compute_capacity, BINDING_AT
         result = compute_capacity(demo_db)
         if result.dimensions:
-            assert result.binding_constraint is not None
-            assert result.binding_constraint.is_binding
+            assert result.busiest is not None
+            if result.busiest.current_utilization >= BINDING_AT:
+                assert result.binding_constraint is result.busiest
+                assert result.binding_constraint.is_binding
+            else:
+                assert result.binding_constraint is None
+                assert not any(d.is_binding for d in result.dimensions)
 
     def test_utilization_range(self, demo_db):
         from nomad.dynamics.capacity import compute_capacity
@@ -412,7 +419,7 @@ class TestResilience:
     def test_trend_values(self, demo_db):
         from nomad.dynamics.resilience import compute_resilience
         result = compute_resilience(demo_db)
-        assert result.resilience_trend in ("improving", "degrading", "stable")
+        assert result.resilience_trend in ("improving", "degrading", "stable", "too_few_events")
 
 
 # ── Externality tests ────────────────────────────────────────────────

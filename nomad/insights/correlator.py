@@ -73,12 +73,11 @@ def _correlate_disk_and_jobs(signals: list[Signal]) -> list[Insight]:
             narrative = (
                 f"Disk space on {server} is filling at {rate:.1f} GB/hr "
                 f"(projected full in {hours:.0f}h) while job failures are elevated. "
-                f"These are likely connected — jobs writing large output files "
-                f"will fail when the filesystem reaches capacity. "
-                f"This pattern has been a common cause of cascading failures."
+                f"The two may be connected: jobs writing to a full filesystem fail. "
+                f"Check whether the failing jobs write there."
             )
             insights.append(Insight(
-                title="disk_pressure_causing_failures",
+                title="disk_filling_and_failures",
                 narrative=narrative,
                 severity=Severity.CRITICAL,
                 source_signals=combined,
@@ -111,19 +110,19 @@ def _correlate_gpu_oom_and_partition(signals: list[Signal]) -> list[Insight]:
             oom_count = sum(s.metrics.get("gpu_oom_count", 0) for s in gpu_oom)
 
             narrative = (
-                f"GPU jobs are failing due to VRAM exhaustion ({oom_count} OOM failures) "
-                f"and the GPU partition is showing elevated failure rates overall. "
-                f"The research workload may be outgrowing the available GPU memory capacity."
+                f"{oom_count} GPU jobs were stopped for using more memory than they "
+                f"asked for (--mem, the node's memory), and the GPU partition's "
+                f"failure rate is well above the rest of the site."
             )
             insights.append(Insight(
-                title="gpu_capacity_mismatch",
+                title="gpu_jobs_out_of_memory",
                 narrative=narrative,
                 severity=Severity.WARNING,
                 source_signals=combined,
                 recommendation=(
-                    "Review GPU memory requirements for the affected research groups. "
-                    "Consider VRAM-aware job routing, adding high-memory GPU nodes, "
-                    "or working with users to optimize model memory footprint."
+                    "Compare the memory these jobs request with their peaks "
+                    "('nomad edu explain <job_id>'), and look at what else the "
+                    "failing GPU jobs have in common before adding hardware."
                 ),
                 category="gpu",
             ))
@@ -148,8 +147,7 @@ def _correlate_queue_and_wait(signals: list[Signal]) -> list[Insight]:
 
             narrative = (
                 f"The '{partition}' partition has a deep backlog ({pending} pending jobs) "
-                f"and users are waiting an average of {avg_wait:.1f} hours for jobs to start. "
-                f"This partition is a bottleneck."
+                f"and its jobs waited a median {avg_wait:.1f} hours to start."
             )
             insights.append(Insight(
                 title="partition_bottleneck",
@@ -186,7 +184,7 @@ def _correlate_network_and_jobs(signals: list[Signal]) -> list[Insight]:
             f"are particularly sensitive to network issues."
         )
         insights.append(Insight(
-            title="network_induced_failures",
+            title="network_issues_and_failures",
             narrative=narrative,
             severity=_max_severity(combined),
             source_signals=combined,
@@ -234,22 +232,19 @@ def _correlate_cloud_cost_and_utilization(signals: list[Signal]) -> list[Insight
 
 
 def _correlate_workstation_and_alerts(signals: list[Signal]) -> list[Insight]:
-    """High workstation load + active alerts = user impact."""
+    """Several interactive machines under heavy load at the same time."""
     insights = []
     ws_cpu = [s for s in signals if s.title == "workstation_high_cpu"]
     ws_mem = [s for s in signals if s.title == "workstation_high_memory"]
-    alerts = [s for s in signals if s.title == "active_alerts"]
 
     overloaded = ws_cpu + ws_mem
-    if len(overloaded) >= 2 and alerts:
-        hosts = list({s.metrics.get("hostname", "") for s in overloaded})
-        combined = overloaded + alerts
+    hosts = sorted({s.metrics.get("hostname", "") for s in overloaded})
+    if len(hosts) >= 2:
+        combined = overloaded
 
         narrative = (
-            f"Multiple interactive nodes are under heavy load ({', '.join(hosts)}) "
-            f"and there are active alerts in the system. "
-            f"Users on these machines are likely experiencing "
-            f"degraded performance."
+            f"{len(hosts)} interactive machines are under heavy load at once "
+            f"({', '.join(hosts)})."
         )
         insights.append(Insight(
             title="widespread_workstation_pressure",
@@ -282,17 +277,16 @@ def _correlate_capacity_and_niche(signals: list[Signal]) -> list[Insight]:
     niche = niche_signals[0]
 
     return [Insight(
-        title="Contention Crisis",
+        title="contention_and_similar_groups",
         severity=Severity.CRITICAL if cap.metrics["utilization"] >= 0.9 else Severity.WARNING,
         narrative=(
             f"The binding resource ({cap.metrics['label']}) is at "
             f"{cap.metrics['utilization']:.0%} utilization while "
-            f"{niche.metrics['high_overlap_count']} group pair(s) compete "
-            f"for the same resources. Highest overlap: "
+            f"{niche.metrics['high_overlap_count']} group pair(s) request similar "
+            f"resources. Highest overlap: "
             f"{niche.metrics.get('top_pair_a', '?')} and {niche.metrics.get('top_pair_b', '?')} "
-            f"(O={niche.metrics.get('top_overlap', 0):.2f}). This combination amplifies contention — "
-            f"groups with overlapping resource profiles will experience "
-            f"disproportionate degradation as the binding constraint tightens."
+            f"(O={niche.metrics.get('top_overlap', 0):.2f}). Groups that request similar "
+            f"resources are the ones to watch when that resource is short."
         ),
         source_signals=[cap, niche],
         recommendation=(
@@ -315,16 +309,18 @@ def _correlate_externality_and_failures(signals: list[Signal]) -> list[Insight]:
     job = job_signals[0]
     imposers = ", ".join(ext.metrics.get("top_imposers", [])[:2])
     receivers = ", ".join(ext.metrics.get("top_receivers", [])[:2])
-    fail_rate = job.metrics.get("success_rate", 0)
+    problem_rate = job.metrics.get("problem_rate")
+    if problem_rate is None:
+        problem_rate = 100 - (job.metrics.get("success_rate") or 100)
     n_rels = ext.metrics.get("edge_count", 0)
     return [Insight(
-        title="Hidden Externality Costs",
+        title="group_correlation_and_failures",
         severity=Severity.WARNING,
         narrative=(
-            f"Job success rate is {fail_rate:.1f}% while {n_rels} inter-group "
-            f"impact relationships are active. Group {imposers} is imposing "
-            f"resource costs on {receivers}, contributing to failures "
-            f"in the affected groups."
+            f"{problem_rate:.1f}% of jobs failed or hit a limit, and {n_rels} "
+            f"pair(s) of groups show one group's resource use rising and falling "
+            f"with another's failures (strongest: {imposers} with {receivers}). "
+            f"A correlation worth checking, not proof of cause."
         ),
         source_signals=[ext, job],
         recommendation=(
@@ -337,7 +333,7 @@ def _correlate_externality_and_failures(signals: list[Signal]) -> list[Insight]:
 
 
 def _correlate_niche_and_clustering(signals: list[Signal]) -> list[Insight]:
-    """Niche overlap + failure clustering = contention driving failures."""
+    """Niche overlap + failure clustering: worth checking for contention."""
     niche = [s for s in signals if "niche" in s.title]
     clustering = [s for s in signals if s.title == "failure_clustering"]
     externality = [s for s in signals if "externality" in s.title]
@@ -370,8 +366,8 @@ def _correlate_niche_and_clustering(signals: list[Signal]) -> list[Insight]:
         f"(highest: {pair_a} and {pair_b} at O={overlap:.2f}), "
         f"and {n_failures} failures are clustering in the similarity "
         f"network (r={assort_r}, z={assort_z:.1f}). "
-        f"These groups compete for the same resources, and that contention "
-        f"is driving the observed failures."
+        f"The two may be connected: check whether the failing jobs ran "
+        f"when these groups' jobs did."
     )
     if imposer:
         narrative += (

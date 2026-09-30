@@ -54,11 +54,19 @@ class DynamicsEngine:
         hours: int = 168,
         cluster_name: str = "cluster",
         resilience_hours: int = 720,
+        site: str | None = None,
+        attribution: str = "auto",
     ):
+        from nomad.db import scope
         self.db_path = Path(db_path)
         self.hours = hours
-        self.cluster_name = cluster_name
+        # A combined database is read one site at a time (ValueError without one)
+        self.site = scope.require_site(self.db_path, site) if self.db_path.exists() else site
+        self.cluster_name = site if (site and cluster_name == "cluster") else cluster_name
         self.resilience_hours = resilience_hours
+        # "auto": group analyses only where each job can be placed in one
+        # group (nomad.dynamics.attribution); "membership" forces the join.
+        self.attribution = attribution
 
         # Results — computed lazily
         self._diversity: DiversityResult | None = None
@@ -73,7 +81,8 @@ class DynamicsEngine:
     def diversity(self) -> DiversityResult:
         if self._diversity is None:
             self._diversity = compute_diversity(
-                self.db_path, dimension="group", hours=self.hours
+                self.db_path, dimension="group", hours=self.hours,
+                site=self.site, attribution=self.attribution,
             )
         return self._diversity
 
@@ -81,7 +90,7 @@ class DynamicsEngine:
     def diversity_by_user(self) -> DiversityResult:
         if not hasattr(self, '_diversity_user') or self._diversity_user is None:
             self._diversity_user = compute_diversity(
-                self.db_path, dimension="user", hours=self.hours
+                self.db_path, dimension="user", hours=self.hours, site=self.site,
             )
         return self._diversity_user
 
@@ -89,7 +98,8 @@ class DynamicsEngine:
     def niche(self) -> NicheResult:
         if self._niche is None:
             self._niche = compute_niche_overlap(
-                self.db_path, hours=self.hours
+                self.db_path, hours=self.hours, site=self.site,
+                attribution=self.attribution,
             )
         return self._niche
 
@@ -97,7 +107,7 @@ class DynamicsEngine:
     def capacity(self) -> CapacityResult:
         if self._capacity is None:
             self._capacity = compute_capacity(
-                self.db_path, hours=self.hours
+                self.db_path, hours=self.hours, site=self.site,
             )
         return self._capacity
 
@@ -105,7 +115,7 @@ class DynamicsEngine:
     def resilience(self) -> ResilienceResult:
         if self._resilience is None:
             self._resilience = compute_resilience(
-                self.db_path, hours=self.resilience_hours
+                self.db_path, hours=self.resilience_hours, site=self.site,
             )
         return self._resilience
 
@@ -113,7 +123,8 @@ class DynamicsEngine:
     def externality(self) -> ExternalityResult:
         if self._externality is None:
             self._externality = compute_externalities(
-                self.db_path, hours=self.hours
+                self.db_path, hours=self.hours, site=self.site,
+                attribution=self.attribution,
             )
         return self._externality
 
@@ -133,18 +144,22 @@ class DynamicsEngine:
     def full_summary(self) -> str:
         """Full CLI summary combining all dynamics metrics."""
         self.run_all()
-        return format_full_summary_cli(
+        text = format_full_summary_cli(
             self.diversity, self.niche, self.capacity,
             self.resilience, self.externality, self.cluster_name,
         )
+        extra = [format_diversity_cli(self.diversity_by_user)]
+        if not self.diversity.available:
+            extra.append(f"\n  Group views: {self.diversity.reason}")
+        return text + "\n" + "\n".join(extra)
 
     def diversity_report(self, dimension: str = "group") -> str:
         """CLI diversity report."""
-        if dimension != "group" or self._diversity is None:
-            self._diversity = compute_diversity(
-                self.db_path, dimension=dimension, hours=self.hours
-            )
-        return format_diversity_cli(self.diversity)
+        if dimension == "group":
+            return format_diversity_cli(self.diversity)
+        return format_diversity_cli(compute_diversity(
+            self.db_path, dimension=dimension, hours=self.hours, site=self.site,
+        ))
 
     def niche_report(self) -> str:
         """CLI niche overlap report."""
@@ -171,19 +186,17 @@ class DynamicsEngine:
         )
 
     def to_dict(self) -> dict:
-        """Full dynamics report as Python dict."""
+        """Full dynamics report as Python dict.
+
+        ``diversity`` is by group -- with ``available: false`` and the reason
+        when jobs can't be placed in groups -- and ``diversity_by_user`` is
+        by person, which can always be counted.
+        """
         result = json.loads(self.to_json())
-        # Add user-level diversity alongside group diversity
-        du = self.diversity_by_user
-        result['diversity_by_user'] = {
-            'dimension': 'user',
-            'current': {
-                'shannon_h': du.current.shannon_h,
-                'simpson_d': du.current.simpson_d,
-                'richness': du.current.richness,
-                'dominant_category': du.current.dominant_category,
-                'dominant_proportion': du.current.dominant_proportion,
-                'category_counts': dict(du.current.category_counts),
-            },
-        }
+        result['site'] = self.site
+        result['hours'] = self.hours
+        result['diversity_by_user'] = format_diversity_json(self.diversity_by_user)
+        result['attribution'] = (self.diversity.attribution
+                                 or {"available": self.diversity.available,
+                                     "reason": self.diversity.reason})
         return result

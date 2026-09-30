@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from nomad.db import scope
+
 
 @dataclass
 class DimensionUtilization:
@@ -39,9 +41,10 @@ class DimensionUtilization:
 class CapacityResult:
     """Complete carrying capacity analysis."""
     dimensions: list[DimensionUtilization]
-    binding_constraint: DimensionUtilization | None = None
+    binding_constraint: DimensionUtilization | None = None  # only when >= BINDING_AT
     overall_pressure: str = "low"  # "low", "moderate", "high", "critical"
     summary: str = ""
+    busiest: DimensionUtilization | None = None
 
 
 def _compute_trend_slope(values: list[tuple[datetime, float]]) -> float:
@@ -84,190 +87,160 @@ def _project_saturation(current: float, slope: float) -> float | None:
     return hours
 
 
+# The busiest resource is called the binding constraint -- Liebig's scarcest
+# factor -- only when it is actually near its limit. At 28% nothing binds.
+BINDING_AT = 0.75
+
+
+def _hourly(rows) -> list[tuple[datetime, float]]:
+    """(hour start, mean of the values in it) from (timestamp, value) rows."""
+    buckets: dict[str, list[float]] = {}
+    for ts, value in rows:
+        if ts is None or value is None:
+            continue
+        buckets.setdefault(str(ts)[:13], []).append(float(value))
+    out = []
+    for hour in sorted(buckets):
+        try:
+            t = datetime.fromisoformat(hour.replace(" ", "T") + ":00")
+        except ValueError:
+            continue
+        vals = buckets[hour]
+        out.append((t, sum(vals) / len(vals)))
+    return out
+
+
+def _dimension(dimension, label, history, capacity, unit) -> DimensionUtilization | None:
+    if not history:
+        return None
+    current = history[-1][1]
+    slope = _compute_trend_slope(history)
+    return DimensionUtilization(
+        dimension=dimension, label=label,
+        current_utilization=current,
+        capacity=capacity, used=current * capacity if capacity else 0.0,
+        unit=unit,
+        trend_slope=slope,
+        hours_to_saturation=_project_saturation(current, slope),
+        history=history,
+    )
+
+
 def compute_capacity(
     db_path: Path | str,
     hours: int = 168,
     n_samples: int = 24,
+    site: str | None = None,
 ) -> CapacityResult:
     """Compute multi-dimensional carrying capacity utilization.
+
+    CPU and memory are what Slurm has allocated on the nodes that can take
+    jobs (allocated cores / cores in each snapshot); GPU is measured
+    utilization; I/O is the busiest device's utilization (an average over
+    every disk hides the one that is saturated); the queue is pending jobs
+    per running job, with 3 counted as full. Each is averaged per hour and
+    "current" is the latest hour.
 
     Parameters
     ----------
     db_path : path to NØMAÐ database
     hours : how far back to analyze
     n_samples : number of time samples for trend computation
+    site : on a combined database, the site to read
     """
     db_path = Path(db_path)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
+    conn = scope.connect(db_path, site)
 
     now = datetime.now()
-    cutoff = now - timedelta(hours=hours)
-
+    cutoff = (now - timedelta(hours=hours)).isoformat()
     dimensions: list[DimensionUtilization] = []
 
-    # ── CPU utilization ───────────────────────────────────────────────
-    # From node_state: cpu_alloc_percent averaged across nodes
-    cpu_rows = conn.execute("""
-        SELECT timestamp, AVG(cpu_alloc_percent) AS avg_cpu
-        FROM node_state
-        WHERE timestamp >= ? AND is_healthy = 1
-        GROUP BY strftime('%Y-%m-%d %H', timestamp)
-        ORDER BY timestamp
-    """, (cutoff.isoformat(),)).fetchall()
+    try:
+        ns = scope.table_columns(conn, "node_state")
+        healthy = "is_healthy = 1" if "is_healthy" in ns else "1"
+        if ns:
+            latest = conn.execute(
+                f"SELECT * FROM node_state WHERE timestamp = "
+                f"(SELECT MAX(timestamp) FROM node_state) AND {healthy}").fetchall()
+        else:
+            latest = []
 
-    if cpu_rows:
-        cpu_history = [
-            (datetime.fromisoformat(r["timestamp"]), r["avg_cpu"] / 100.0)
-            for r in cpu_rows if r["avg_cpu"] is not None
-        ]
-        cpu_current = cpu_history[-1][1] if cpu_history else 0.0
-        cpu_slope = _compute_trend_slope(cpu_history)
+        # ── CPU and memory: allocated share of what the nodes have ───────
+        for dim, label, alloc, total, pct, unit, scale in (
+            ("cpu", "CPU cores allocated", "cpus_alloc", "cpus_total",
+             "cpu_alloc_percent", "cores", 1.0),
+            ("memory", "Memory allocated", "memory_alloc_mb", "memory_total_mb",
+             "memory_alloc_percent", "GB", 1 / 1024),
+        ):
+            if {alloc, total} <= ns:
+                rows = conn.execute(f"""
+                    SELECT timestamp,
+                           CAST(SUM({alloc}) AS REAL) / NULLIF(SUM({total}), 0) AS frac
+                    FROM node_state WHERE timestamp >= ? AND {healthy}
+                    GROUP BY timestamp
+                """, (cutoff,)).fetchall()
+                history = _hourly((r["timestamp"], r["frac"]) for r in rows)
+                capacity = sum((r[total] or 0) for r in latest) * scale
+            elif pct in ns:
+                rows = conn.execute(f"""
+                    SELECT timestamp, {pct} / 100.0 AS frac
+                    FROM node_state WHERE timestamp >= ? AND {healthy}
+                """, (cutoff,)).fetchall()
+                history = _hourly((r["timestamp"], r["frac"]) for r in rows)
+                capacity = 0.0
+            else:
+                continue
+            d = _dimension(dim, label, history, capacity, unit)
+            if d:
+                dimensions.append(d)
 
-        # Get total CPU capacity from nodes table
-        cap_row = conn.execute(
-            "SELECT SUM(cpu_count) AS total_cpu FROM nodes WHERE status != 'down'"
-        ).fetchone()
-        total_cpu = float(cap_row["total_cpu"]) if cap_row and cap_row["total_cpu"] else 1.0
+        # ── GPU: measured utilization ────────────────────────────────────
+        if scope.table_columns(conn, "gpu_stats") >= {"gpu_util_percent", "timestamp"}:
+            rows = conn.execute("""
+                SELECT timestamp, gpu_util_percent / 100.0 AS frac
+                FROM gpu_stats WHERE timestamp >= ?
+            """, (cutoff,)).fetchall()
+            history = _hourly((r["timestamp"], r["frac"]) for r in rows)
+            reporting = conn.execute(
+                "SELECT COUNT(*) FROM gpu_stats WHERE timestamp = "
+                "(SELECT MAX(timestamp) FROM gpu_stats)").fetchone()[0]
+            d = _dimension("gpu", "GPU busy (measured)", history,
+                           float(reporting or 0), "GPUs reporting")
+            if d:
+                dimensions.append(d)
 
-        dimensions.append(DimensionUtilization(
-            dimension="cpu", label="CPU Cores",
-            current_utilization=cpu_current,
-            capacity=total_cpu, used=cpu_current * total_cpu,
-            unit="cores",
-            trend_slope=cpu_slope,
-            hours_to_saturation=_project_saturation(cpu_current, cpu_slope),
-            history=cpu_history,
-        ))
+        # ── Queue pressure (pending per running) ─────────────────────────
+        if scope.table_columns(conn, "queue_state"):
+            rows = conn.execute("""
+                SELECT timestamp,
+                       CAST(SUM(pending_jobs) AS REAL) / MAX(SUM(running_jobs), 1) AS pressure,
+                       SUM(pending_jobs) AS pending, SUM(running_jobs) AS running
+                FROM queue_state WHERE timestamp >= ?
+                GROUP BY timestamp ORDER BY timestamp
+            """, (cutoff,)).fetchall()
+            history = _hourly((r["timestamp"], min((r["pressure"] or 0) / 3.0, 1.0))
+                              for r in rows)
+            d = _dimension("queue", "Queue (pending per running)", history,
+                           float((rows[-1]["pending"] or 0) + (rows[-1]["running"] or 0))
+                           if rows else 0.0, "jobs")
+            if d:
+                d.used = float(rows[-1]["pending"] or 0)
+                dimensions.append(d)
 
-    # ── Memory utilization ────────────────────────────────────────────
-    mem_rows = conn.execute("""
-        SELECT timestamp, AVG(memory_alloc_percent) AS avg_mem
-        FROM node_state
-        WHERE timestamp >= ? AND is_healthy = 1
-        GROUP BY strftime('%Y-%m-%d %H', timestamp)
-        ORDER BY timestamp
-    """, (cutoff.isoformat(),)).fetchall()
-
-    if mem_rows:
-        mem_history = [
-            (datetime.fromisoformat(r["timestamp"]), r["avg_mem"] / 100.0)
-            for r in mem_rows if r["avg_mem"] is not None
-        ]
-        mem_current = mem_history[-1][1] if mem_history else 0.0
-        mem_slope = _compute_trend_slope(mem_history)
-
-        cap_row = conn.execute(
-            "SELECT SUM(memory_mb) AS total_mem FROM nodes WHERE status != 'down'"
-        ).fetchone()
-        total_mem_gb = float(cap_row["total_mem"]) / 1024 if cap_row and cap_row["total_mem"] else 1.0
-
-        dimensions.append(DimensionUtilization(
-            dimension="memory", label="Memory",
-            current_utilization=mem_current,
-            capacity=total_mem_gb, used=mem_current * total_mem_gb,
-            unit="GB",
-            trend_slope=mem_slope,
-            hours_to_saturation=_project_saturation(mem_current, mem_slope),
-            history=mem_history,
-        ))
-
-    # ── GPU utilization ───────────────────────────────────────────────
-    gpu_rows = conn.execute("""
-        SELECT timestamp, AVG(gpu_util_percent) AS avg_gpu_util
-        FROM gpu_stats
-        WHERE timestamp >= ?
-        GROUP BY strftime('%Y-%m-%d %H', timestamp)
-        ORDER BY timestamp
-    """, (cutoff.isoformat(),)).fetchall()
-
-    if gpu_rows:
-        gpu_history = [
-            (datetime.fromisoformat(r["timestamp"]), r["avg_gpu_util"] / 100.0)
-            for r in gpu_rows if r["avg_gpu_util"] is not None
-        ]
-        gpu_current = gpu_history[-1][1] if gpu_history else 0.0
-        gpu_slope = _compute_trend_slope(gpu_history)
-
-        cap_row = conn.execute(
-            "SELECT SUM(gpu_count) AS total_gpu FROM nodes WHERE gpu_count > 0 AND status != 'down'"
-        ).fetchone()
-        total_gpu = float(cap_row["total_gpu"]) if cap_row and cap_row["total_gpu"] else 1.0
-
-        dimensions.append(DimensionUtilization(
-            dimension="gpu", label="GPU",
-            current_utilization=gpu_current,
-            capacity=total_gpu, used=gpu_current * total_gpu,
-            unit="GPUs",
-            trend_slope=gpu_slope,
-            hours_to_saturation=_project_saturation(gpu_current, gpu_slope),
-            history=gpu_history,
-        ))
-
-    # ── Queue pressure (pending/running ratio) ────────────────────────
-    queue_rows = conn.execute("""
-        SELECT timestamp,
-               CAST(SUM(pending_jobs) AS REAL) / MAX(SUM(running_jobs), 1) AS pressure
-        FROM queue_state
-        WHERE timestamp >= ?
-        GROUP BY timestamp
-        ORDER BY timestamp
-    """, (cutoff.isoformat(),)).fetchall()
-
-    if queue_rows:
-        queue_history = [
-            (datetime.fromisoformat(r["timestamp"]),
-             min(r["pressure"] / 3.0, 1.0))  # normalize: 3.0 pending/running = 100%
-            for r in queue_rows if r["pressure"] is not None
-        ]
-        queue_current = queue_history[-1][1] if queue_history else 0.0
-        queue_slope = _compute_trend_slope(queue_history)
-
-        # Latest raw values for display
-        last_q = conn.execute(
-            "SELECT SUM(pending_jobs) AS pending, SUM(running_jobs) AS running FROM queue_state GROUP BY timestamp ORDER BY timestamp DESC LIMIT 1"
-        ).fetchone()
-        pending = float(last_q["pending"]) if last_q else 0
-        running = float(last_q["running"]) if last_q else 0
-
-        dimensions.append(DimensionUtilization(
-            dimension="queue", label="Scheduler Queue",
-            current_utilization=queue_current,
-            capacity=running + pending, used=pending,
-            unit="jobs pending",
-            trend_slope=queue_slope,
-            hours_to_saturation=_project_saturation(queue_current, queue_slope),
-            history=queue_history,
-        ))
-
-    # ── I/O (from iostat if available) ────────────────────────────────
-    io_rows = conn.execute("""
-        SELECT timestamp, AVG(util_percent) AS avg_io
-        FROM iostat_device
-        WHERE timestamp >= ?
-        GROUP BY strftime('%Y-%m-%d %H', timestamp)
-        ORDER BY timestamp
-    """, (cutoff.isoformat(),)).fetchall()
-
-    if io_rows:
-        io_history = [
-            (datetime.fromisoformat(r["timestamp"]), r["avg_io"] / 100.0)
-            for r in io_rows if r["avg_io"] is not None
-        ]
-        io_current = io_history[-1][1] if io_history else 0.0
-        io_slope = _compute_trend_slope(io_history)
-
-        dimensions.append(DimensionUtilization(
-            dimension="io", label="I/O",
-            current_utilization=io_current,
-            capacity=100, used=io_current * 100,
-            unit="%",
-            trend_slope=io_slope,
-            hours_to_saturation=_project_saturation(io_current, io_slope),
-            history=io_history,
-        ))
-
-    conn.close()
+        # ── I/O: the busiest device at each reading ──────────────────────
+        if scope.table_columns(conn, "iostat_device") >= {"util_percent", "timestamp"}:
+            rows = conn.execute("""
+                SELECT timestamp, MAX(util_percent) / 100.0 AS frac
+                FROM iostat_device WHERE timestamp >= ?
+                GROUP BY timestamp
+            """, (cutoff,)).fetchall()
+            history = _hourly((r["timestamp"], min(r["frac"], 1.0) if r["frac"] is not None else None)
+                              for r in rows)
+            d = _dimension("io", "Disk I/O (busiest device)", history, 100, "%")
+            if d:
+                dimensions.append(d)
+    finally:
+        conn.close()
 
     if not dimensions:
         return CapacityResult(
@@ -275,12 +248,21 @@ def compute_capacity(
             summary="Insufficient data to compute carrying capacity.",
         )
 
-    # ── Identify binding constraint ───────────────────────────────────
-    binding = max(dimensions, key=lambda d: d.current_utilization)
-    binding.is_binding = True
+    # The queue is shown but can't bind: pending jobs include held,
+    # dependent and throttled ones, so "3 waiting per running" is not a
+    # resource at its limit.
+    resources = [d for d in dimensions if d.dimension != "queue"]
+    if not resources:
+        return CapacityResult(
+            dimensions=dimensions,
+            summary="Only the queue was measured; no resource to compare.",
+        )
+    busiest = max(resources, key=lambda d: d.current_utilization)
+    max_util = busiest.current_utilization
+    binding = busiest if max_util >= BINDING_AT else None
+    if binding:
+        binding.is_binding = True
 
-    # Overall pressure assessment
-    max_util = binding.current_utilization
     if max_util >= 0.9:
         pressure = "critical"
     elif max_util >= 0.75:
@@ -290,24 +272,20 @@ def compute_capacity(
     else:
         pressure = "low"
 
-    # Summary narrative
-    sat_dims = [d for d in dimensions if d.hours_to_saturation is not None]
-    sat_note = ""
-    if sat_dims:
-        soonest = min(sat_dims, key=lambda d: d.hours_to_saturation)
-        sat_note = (
-            f" {soonest.label} is projected to reach saturation "
-            f"in {soonest.hours_to_saturation:.0f} hours at current growth rate."
-        )
-
-    summary = (
-        f"Binding constraint: {binding.label} at "
-        f"{binding.current_utilization:.0%} utilization.{sat_note}"
-    )
+    if binding:
+        summary = (f"Binding constraint: {binding.label} at "
+                   f"{binding.current_utilization:.0%}.")
+        if binding.hours_to_saturation is not None:
+            summary += (f" At the current rise it would be full in about "
+                        f"{binding.hours_to_saturation:.0f} hours.")
+    else:
+        summary = (f"Nothing is near its limit: the busiest is {busiest.label} "
+                   f"at {busiest.current_utilization:.0%}.")
 
     return CapacityResult(
         dimensions=dimensions,
         binding_constraint=binding,
         overall_pressure=pressure,
         summary=summary,
+        busiest=busiest,
     )

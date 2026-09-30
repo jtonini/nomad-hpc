@@ -221,11 +221,17 @@ def test_read_network_signals(demo_db):
 
 
 def test_read_alert_signals(demo_db):
+    """Alerts are reported as raised, grouped by condition.
+
+    nomad never marks an alert resolved, so none is called "active"; and a
+    condition raised again after each cooldown is not "flapping".
+    """
     signals = read_alert_signals(demo_db, hours=24)
-    active = [s for s in signals if s.title == "active_alerts"]
-    assert len(active) == 1
-    flapping = [s for s in signals if s.title == "flapping_alert"]
-    assert len(flapping) >= 1  # disk_usage triggered 3 times
+    raised = [s for s in signals if s.title == "alerts_raised"]
+    assert len(raised) == 1
+    assert raised[0].metrics["total"] == 3
+    assert raised[0].metrics["conditions"] == 1   # disk_usage on storage01, 3 times
+    assert not [s for s in signals if s.title in ("active_alerts", "flapping_alert")]
 
 
 def test_read_cloud_signals(demo_db):
@@ -281,7 +287,7 @@ def test_correlate_disk_and_jobs():
         ),
     ]
     insights = correlate(signals)
-    disk_insights = [i for i in insights if i.title == "disk_pressure_causing_failures"]
+    disk_insights = [i for i in insights if i.title == "disk_filling_and_failures"]
     assert len(disk_insights) == 1
     assert disk_insights[0].severity == Severity.CRITICAL
     assert "storage01" in disk_insights[0].narrative
@@ -361,9 +367,13 @@ def test_engine_empty_db(tmp_path):
 
     engine = InsightEngine(db_path, hours=24)
     assert engine.signal_count == 0
-    assert engine.overall_health == "good"
+    # Nothing was measured, so nothing can be called good.
+    assert engine.overall_health == "unknown"
+    assert not engine.measured
+    assert all(c["status"] == "no_data" for c in engine.coverage)
     brief = engine.brief()
-    assert "good" in brief.lower()
+    assert "nothing measured" in brief.lower()
+    assert engine.to_dict()["overall_health"] == "unknown"
 
 
 if __name__ == "__main__":
