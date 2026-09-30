@@ -105,8 +105,13 @@ def load_job(db_path: str, job_id: str, cluster: str = None) -> dict | None:
                 conn.close()
                 raise ValueError(f"Job {job_id} exists in multiple clusters: {', '.join(sites)}. Use --cluster to specify.")
             row = rows[0] if rows else None
+        out = dict(row) if row else None
+        if out is not None:
+            from nomad.edu.progress import memory_ceiling, memory_ceilings
+            out["_node_memory_mb"] = memory_ceiling(
+                memory_ceilings(conn), out.get("source_site") or out.get("cluster"))
         conn.close()
-        return dict(row) if row else None
+        return out
     except ValueError:
         raise
     except Exception as e:
@@ -154,8 +159,16 @@ def load_user_history(db_path: str, user: str, limit: int = 50) -> list[dict]:
             ORDER BY j.end_time DESC
             LIMIT ?
         """, (user, limit)).fetchall()
+        from nomad.edu.progress import memory_ceiling, memory_ceilings
+        ceilings = memory_ceilings(conn)
         conn.close()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            row = dict(r)
+            row["_node_memory_mb"] = memory_ceiling(
+                ceilings, row.get("source_site") or row.get("cluster"))
+            out.append(row)
+        return out
     except Exception as e:
         logger.error(f"Error loading user history: {e}")
         return []
@@ -183,7 +196,7 @@ def compute_progress(db_path: str, user: str, current_fp: JobFingerprint) -> dic
         "state", "exit_code", "exit_signal", "failure_reason",
         "submit_time", "start_time", "end_time", "req_cpus",
         "req_mem_mb", "req_gpus", "req_time_seconds",
-        "runtime_seconds", "wait_time_seconds",
+        "runtime_seconds", "wait_time_seconds", "_node_memory_mb",
     ]
     summary_fields = [
         "peak_cpu_percent", "peak_memory_gb", "avg_cpu_percent",

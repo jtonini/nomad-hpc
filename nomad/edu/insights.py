@@ -161,6 +161,9 @@ class Issue:
     context: dict[str, Any] | None = None  # structured payload for verdict-kind issues (target cluster, sbatch snippet, ...)
     cluster: str | None = None        # scope: which cluster this dimension issue came from (None = unscoped/verdict)
     partition: str | None = None      # scope: which partition within that cluster
+    direction: str = ""               # "lower" (asked for more than used) / "raise" (ran short)
+    other_direction_jobs: int = 0     # flagged jobs pointing the other way
+    advice_jobs: int = 0              # flagged jobs the suggested value is worked out from
 
     @property
     def affected_ratio(self) -> float:
@@ -691,13 +694,35 @@ def _aggregate_dimension(
     same_directive = [s for s in affected_suggestions
                       if s.directive == primary_directive]
 
+    # Which way the flagged jobs point: asked for more than they used
+    # ("lower") or ran out, came close, or used more than they asked for
+    # ("raise"). One piece of advice can only go one way, so it is worked
+    # out from the jobs that point the way most of them do.
+    lower = [s for s in same_directive
+             if s.current_value and s.suggested_value < s.current_value]
+    raise_ = [s for s in same_directive
+              if s.current_value and s.suggested_value > s.current_value]
+    if not lower and not raise_:
+        return issue            # nothing to change: every suggestion is the request
+    direction = "lower" if len(lower) >= len(raise_) else "raise"
+    group = lower if direction == "lower" else raise_
+    issue.direction = direction
+    issue.other_direction_jobs = len(raise_) if direction == "lower" else len(lower)
+
+    # Jobs that ask for very different amounts can't share one value
+    # ("3.9G -> 128G" came from jobs asking 3.9G and 160G together). The
+    # advice is for the most common request, from the jobs that make it.
+    requests = Counter(s.current_value for s in group)
+    typical_current, typical_n = requests.most_common(1)[0]
+    if typical_n >= 0.5 * len(group):
+        core = [s for s in group if s.current_value == typical_current]
+    else:
+        core = group
+        typical_current = statistics.median(sorted(s.current_value for s in group))
+    issue.advice_jobs = len(core)
+
     issue.directive = primary_directive
-
-    # Build usage distribution
-    issue.usage_stats = _build_usage_stats(same_directive)
-
-    # Pick typical current request value
-    typical_current = _typical_current_value(same_directive)
+    issue.usage_stats = _build_usage_stats(core)
     issue.current_value_typical = typical_current
     issue.current_display = _format_value_for_directive(
         primary_directive, typical_current
@@ -706,7 +731,7 @@ def _aggregate_dimension(
     # Aggregate using the strategy for this directive
     strategy = DIRECTIVE_STRATEGY.get(primary_directive, "mode")
     if strategy == "mode":
-        value, strategy_label, rationale = _aggregate_mode(same_directive)
+        value, strategy_label, rationale = _aggregate_mode(core)
     elif strategy == "quantile":
         if primary_directive == "mem":
             buffer = MEMORY_BUFFER_FACTOR
@@ -718,20 +743,35 @@ def _aggregate_dimension(
             buffer = 1.5
             rounder = lambda x: int(x)
         value, strategy_label, rationale = _aggregate_quantile(
-            same_directive, buffer, rounder,
+            core, buffer, rounder,
         )
     else:
-        value, strategy_label, rationale = _aggregate_mode(same_directive)
+        value, strategy_label, rationale = _aggregate_mode(core)
+
+    if direction == "raise" and dim_key in DIMENSION_FRAMING_UNDER:
+        # Raising the request: say why in those terms, not "you asked too much".
+        issue.rationale = DIMENSION_FRAMING_UNDER[dim_key]
+
+    # Advice has to move the request the way the jobs point. Rounded to a
+    # value Slurm takes, it can land on the request itself ("32G -> 32G") or
+    # past it; then there is nothing concrete to say, only the finding.
+    if (direction == "lower" and value >= typical_current) or \
+            (direction == "raise" and value <= typical_current):
+        return issue
 
     issue.suggested_value = value
     issue.suggested_display = _format_value_for_directive(
         primary_directive, value
     )
-    if dim_key in DIMENSION_FRAMING_UNDER and typical_current and value > typical_current:
-        # Raising the request: say why in those terms, not "you asked too much".
-        issue.rationale = DIMENSION_FRAMING_UNDER[dim_key]
     issue.strategy = strategy_label
-    issue.suggestion_rationale = rationale
+    notes = [rationale]
+    if len(core) < len(group):
+        notes.append(f"from your {len(core)} flagged jobs that request {issue.current_display}")
+    if issue.other_direction_jobs:
+        other = "ran short" if direction == "lower" else "asked for much more than they used"
+        notes.append(f"{issue.other_direction_jobs} other flagged "
+                     f"{'job' if issue.other_direction_jobs == 1 else 'jobs'} {other}")
+    issue.suggestion_rationale = "; ".join(notes)
 
     # Human phrase for the card (NØMAÐ serves non-specialists): name the flag
     # and the unit, not a bare number. e.g. "--ntasks from 8 to 1 core".
@@ -1221,8 +1261,8 @@ DIMENSION_FRAMING = {
 DIMENSION_FRAMING_UNDER = {
     "time": ("Your jobs ran out of walltime or came close to it; a job "
              "stopped at its limit loses the work since its last checkpoint."),
-    "memory": ("Your jobs ran out of memory or came close to it; a job "
-               "killed for memory loses its work."),
+    "memory": ("Your jobs ran out of memory, or used as much as they asked "
+               "for or more; a job killed for memory loses its work."),
 }
 
 # Actionable remedies for dimensions that have no single SLURM directive to

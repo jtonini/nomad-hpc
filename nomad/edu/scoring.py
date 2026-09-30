@@ -349,13 +349,20 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
         utilization <10%    → Needs Work
         OUT_OF_MEMORY       → Needs Work (under-requested)
     """
+    # A peak above the largest node's memory can't be real: Slurm's
+    # jobacct_gather/linux adds up every process's RSS, counting memory the
+    # processes share once per process. The loaders pass that node memory in
+    # as _node_memory_mb; without it nothing is checked.
+    reading_gb = summary.get("peak_memory_gb") or summary.get("peak_mem_gb") or 0
+    ceiling_mb = job.get("_node_memory_mb") or 0
+    implausible = bool(ceiling_mb and reading_gb * 1024 > ceiling_mb)
+
     # Check for OOM failure first — under-request, not over-request
-    job_state = job.get("state", "").upper()
+    job_state = (job.get("state") or "").upper()
     if job_state in ("OUT_OF_MEMORY", "OOM"):
         req_mem_mb_oom = job.get("req_mem_mb", 0) or 0
         req_mem_gb_oom = req_mem_mb_oom / 1024 if req_mem_mb_oom else 0
-        peak_mem_gb_oom = (summary.get("peak_memory_gb")
-                           or summary.get("peak_mem_gb")
+        peak_mem_gb_oom = ((reading_gb if not implausible else 0)
                            or req_mem_gb_oom)
         suggested_mb_oom = round_memory_up(peak_mem_gb_oom * 1024 * 1.5)
         return DimensionScore(
@@ -373,6 +380,18 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
                 unit="MB",
                 rationale="job hit OOM; increase request by 50%",
             ),
+        )
+
+    if implausible:
+        return DimensionScore(
+            name="Memory Efficiency",
+            score=50,
+            level="Unknown",
+            detail=(f"Slurm reported a peak of {reading_gb:,.0f}GB, more than any "
+                    f"node here has ({ceiling_mb / 1024:,.0f}GB), so it isn't a "
+                    f"measurement: its accounting counted memory shared between "
+                    f"the job's processes once per process. Not scored."),
+            applicable=False,
         )
 
     peak_mem_gb = summary.get("peak_memory_gb") or 0
@@ -428,6 +447,21 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
             actual_usage=peak_mem_gb * 1024,
             unit="MB",
             rationale=f"peak {peak_mem_gb:.1f}GB × 2x buffer",
+        )
+    elif utilization > 100:
+        # Used more than it asked for: the node let it, this time. Where
+        # Slurm enforces memory limits the job would have been killed.
+        suggested_mb = round_memory_up(peak_mem_gb * 1024 * 1.5)
+        detail = (f"Peaked at {peak_mem_gb:.1f}GB, more than the "
+                  f"{req_mem_gb:.0f}GB requested ({utilization:.0f}%). Where "
+                  f"memory limits are enforced, a job like this is killed.")
+        suggestion = Suggestion(
+            directive="mem",
+            suggested_value=suggested_mb,
+            current_value=req_mem_mb,
+            actual_usage=peak_mem_gb * 1024,
+            unit="MB",
+            rationale="peak × 1.5; request what the job uses",
         )
     else:
         suggested_mb = round_memory_up(peak_mem_gb * 1024 * 2)

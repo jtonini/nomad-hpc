@@ -104,6 +104,22 @@ The asymmetric formula penalizes under-utilization more harshly than slight over
 - Copy-pasting scripts without adjusting memory
 - Not profiling memory requirements
 
+**Used more than requested**: where Slurm doesn't enforce memory limits a job
+can peak above its request. It scores low and the advice is to request what it
+uses; it is not described as waste.
+
+**Readings no node could hold are not scored.** Slurm's `jobacct_gather/linux`
+adds up the RSS of every process in a job, so memory the processes share (a
+data loader's forked workers, a memory-mapped dataset) is counted once per
+process -- one arachne job reported 7 TB. A peak above the largest node's
+memory at that site (from `node_state`) is shown as "not a measurement" and
+left out. Readings inflated less than that can't be told apart; the fix is at
+the source: `JobAcctGatherParams=UsePss` in `slurm.conf`, which counts shared
+memory in proportion. (`jobacct_gather/cgroup` avoids the multiplying too, but
+on Slurm 22.05 with cgroup v2 it counts transparent huge pages twice: arachne
+reported 2.0 GB for a job the kernel measured at 1.0 GB. With `UsePss` the
+same job read 1.0 GB.)
+
 ### 3. Time Estimation
 
 **What it measures**: How accurately did the user estimate walltime?

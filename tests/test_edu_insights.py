@@ -190,40 +190,71 @@ class TestAggregation:
 
 
 class TestFramingFollowsTheSuggestion:
-    """The line explaining an issue must not contradict its suggestion."""
+    """The line explaining an issue must not contradict its suggestion, and
+    the suggestion must not contradict the jobs it is about."""
 
-    def _issue(self, key, directive, current, actual):
-        fps = [make_fp(f"j{i}", {key: (15.0, (directive, 0, current, actual), "")})
-               for i in range(4)]
+    def _issue(self, key, directive, jobs):
+        """jobs: (suggested, current, actual) per flagged job."""
+        fps = [make_fp(f"j{i}", {key: (15.0, (directive, sug, cur, act), "")})
+               for i, (sug, cur, act) in enumerate(jobs)]
         return _aggregate_dimension(key, fps, threshold=40.0)
 
     def test_walltime_too_short_says_so(self):
-        # 2 h requested, jobs ran ~2 h (timed out or nearly): raise the limit
-        issue = self._issue("time", "time", 7200, 7100)
+        # 2 h requested, jobs timed out at 2 h: each job's own advice is 3 h
+        issue = self._issue("time", "time", [(10800, 7200, 7100)] * 4)
+        assert issue.direction == "raise"
         assert issue.suggested_value > issue.current_value_typical
         assert "ran out of walltime" in issue.rationale
         assert "Over-requesting" not in issue.rationale
 
     def test_walltime_too_long_says_so(self):
-        issue = self._issue("time", "time", 36000, 600)
+        issue = self._issue("time", "time", [(900, 36000, 600)] * 4)
+        assert issue.direction == "lower"
         assert issue.suggested_value < issue.current_value_typical
         assert issue.rationale.startswith("Over-requesting walltime")
 
     def test_memory_too_little_says_so(self):
-        issue = self._issue("memory", "mem", 8192, 8000)
+        issue = self._issue("memory", "mem", [(16384, 8192, 9000)] * 4)
         assert issue.suggested_value > issue.current_value_typical
         assert "ran out of memory" in issue.rationale
 
     def test_memory_too_much_says_so(self):
-        issue = self._issue("memory", "mem", 65536, 1024)
+        issue = self._issue("memory", "mem", [(2048, 65536, 1024)] * 4)
         assert "unavailable to other jobs" in issue.rationale
 
     def test_text_output_uses_the_issue_framing(self):
         ui = UserInsights(username="u", job_count=4, window_days=90, total_job_count=4,
                           overall_score=30.0)
-        ui.issues = [self._issue("time", "time", 7200, 7100)]
+        ui.issues = [self._issue("time", "time", [(10800, 7200, 7100)] * 4)]
         text = format_user_insights(ui)
         assert "ran out of walltime" in text and "Over-requesting" not in text
+
+    def test_mixed_requests_advise_for_the_usual_one(self):
+        # Seen on spydur: most jobs ask 160G and use ~10G, a few ask 4G and
+        # use 16G. One value can't fit both; it used to say "4G -> 128G".
+        jobs = [(32768, 163840, 10240)] * 10 + [(24576, 4096, 16384)] * 3
+        issue = self._issue("memory", "mem", jobs)
+        assert issue.direction == "lower" and issue.other_direction_jobs == 3
+        assert issue.current_value_typical == 163840 and issue.advice_jobs == 10
+        assert issue.suggested_value < issue.current_value_typical
+        assert issue.suggested_value <= 32768            # p95 of 10G x 2, rounded
+        assert "3 other flagged jobs ran short" in issue.suggestion_rationale
+        assert "unavailable to other jobs" in issue.rationale
+
+    def test_advice_for_a_subset_says_which_jobs(self):
+        jobs = [(8192, 102400, 2048)] * 6 + [(8192, 204800, 2048)] * 4
+        issue = self._issue("memory", "mem", jobs)
+        assert issue.advice_jobs == 6
+        assert "from your 6 flagged jobs that request" in issue.suggestion_rationale
+
+    def test_no_advice_that_changes_nothing(self):
+        # rounded up, the advice lands on the request itself: "32G -> 32G"
+        issue = self._issue("memory", "mem", [(16384, 32768, 16000)] * 4)
+        assert issue is not None and issue.suggested_display == ""
+        assert issue.directive_label == ""
+        # every job's own suggestion is its request: no direction at all
+        issue = self._issue("memory", "mem", [(1024, 1024, 10)] * 4)
+        assert issue.suggested_display == "" and issue.direction == ""
 
 
 class TestTrajectory:

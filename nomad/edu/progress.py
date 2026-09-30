@@ -171,6 +171,38 @@ def summary_join(conn: sqlite3.Connection) -> str:
     return "j.job_id = js.job_id"
 
 
+def memory_ceilings(conn: sqlite3.Connection) -> dict:
+    """The largest node's memory (MB) at each site, from recent node_state.
+
+    A job's peak memory reading above it is not a measurement: Slurm's
+    jobacct_gather/linux adds up the RSS of every process in a job, so memory
+    those processes share (a data loader's forked workers) is counted once per
+    process -- 7 TB for one job on a node with far less. Readings like that are
+    set aside rather than scored. Sites without node_state get no ceiling.
+    """
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(node_state)")}
+        if not {"memory_total_mb", "timestamp"} <= cols:
+            return {}
+        site = ("COALESCE(source_site, cluster)" if {"source_site", "cluster"} <= cols
+                else "source_site" if "source_site" in cols
+                else "cluster" if "cluster" in cols else "NULL")
+        since = (datetime.now() - timedelta(days=7)).isoformat()
+        rows = conn.execute(
+            f"SELECT {site}, MAX(memory_total_mb) FROM node_state "
+            "WHERE timestamp >= ? GROUP BY 1", (since,)).fetchall()
+        return {r[0]: r[1] for r in rows if r[1]}
+    except sqlite3.Error:
+        return {}
+
+
+def memory_ceiling(ceilings: dict, site) -> float | None:
+    """A site's ceiling; with a single site known, that one."""
+    if site in ceilings:
+        return ceilings[site]
+    return next(iter(ceilings.values())) if len(ceilings) == 1 else None
+
+
 def _load_user_jobs(
     db_path: str,
     username: str,
@@ -190,8 +222,15 @@ def _load_user_jobs(
               AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
             ORDER BY j.end_time ASC
         """, (username, cutoff)).fetchall()
+        ceilings = memory_ceilings(conn)
         conn.close()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            row = dict(r)
+            row["_node_memory_mb"] = memory_ceiling(
+                ceilings, row.get("source_site") or row.get("cluster"))
+            out.append(row)
+        return out
     except Exception as e:
         logger.error(f"Error loading jobs for {username}: {e}")
         return []
@@ -204,7 +243,7 @@ def _split_job_fields(row: dict) -> tuple[dict, dict]:
         "state", "exit_code", "exit_signal", "failure_reason",
         "submit_time", "start_time", "end_time", "req_cpus",
         "req_mem_mb", "req_gpus", "req_time_seconds",
-        "runtime_seconds", "wait_time_seconds",
+        "runtime_seconds", "wait_time_seconds", "_node_memory_mb",
     }
     job = {k: row.get(k) for k in job_fields}
     # In a combined database the site is source_site; report it as the cluster.

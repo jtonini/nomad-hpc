@@ -33,7 +33,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from nomad.edu.progress import _split_job_fields, summary_columns, summary_join
+from nomad.edu.progress import (
+    _split_job_fields, memory_ceiling, memory_ceilings, summary_columns, summary_join,
+)
 from nomad.edu.scoring import JobFingerprint, score_job
 
 FINISHED = ("COMPLETED", "FAILED", "TIMEOUT")
@@ -177,6 +179,7 @@ def _compute(db_path: str, days: int, window_size: int) -> Population:
     conn.row_factory = sqlite3.Row
     try:
         join = summary_join(conn)
+        ceilings = memory_ceilings(conn)
         rows = conn.execute(f"""
             SELECT j.*, js.job_id AS _summary_id, {summary_columns(conn)}
             FROM jobs j
@@ -189,6 +192,8 @@ def _compute(db_path: str, days: int, window_size: int) -> Population:
             user = row.get("user_name")
             if not user:
                 continue
+            row["_node_memory_mb"] = memory_ceiling(
+                ceilings, row.get("source_site") or row.get("cluster"))
             _add(acc[user], row, start, window_size)
     finally:
         conn.close()

@@ -237,3 +237,66 @@ def test_me_text_says_what_was_scored(db):
     assert f"Overall score: {ui.overall_score:.0f} / 100" in text
     detailed = format_user_insights(ui, detailed=True)
     assert "By dimension (average over measured jobs): CPU" in detailed
+
+
+def test_memory_used_beyond_the_request_is_not_called_unused():
+    # Where memory limits aren't enforced a job can use more than it asked
+    # for; Explain used to say "...0GB was unused".
+    fp = score_job({"req_mem_mb": 7372, "req_cpus": 1}, {"peak_memory_gb": 9.1})
+    d = fp.dimensions["memory"]
+    assert "unused" not in d.detail and "more than the" in d.detail
+    assert d.suggestion.suggested_value > 7372
+
+
+# ── Memory readings no node could hold ─────────────────────────────────
+
+
+def _node_state(c, site, mem_mb):
+    c.execute("CREATE TABLE IF NOT EXISTS node_state (timestamp TEXT, node_name TEXT, "
+              "cluster TEXT, memory_total_mb INTEGER, source_site TEXT)")
+    c.execute("INSERT INTO node_state VALUES (?,?,?,?,?)",
+              (_ago(0, 1), "node53", site, mem_mb, site))
+
+
+def test_a_peak_above_any_node_is_not_scored():
+    # arachne, job 3772: sacct's MaxRSS said 7364444636K (7 TB) on one node
+    job = {"req_mem_mb": 460800, "req_cpus": 20, "state": "COMPLETED",
+           "_node_memory_mb": 512 * 1024}
+    d = score_job(job, {"peak_memory_gb": 7023.3, "avg_cpu_percent": 50}).dimensions["memory"]
+    assert d.applicable is False and d.suggestion is None
+    assert "7,023GB" in d.detail and "512GB" in d.detail
+    # the same reading with no ceiling known is scored as before
+    job.pop("_node_memory_mb")
+    assert score_job(job, {"peak_memory_gb": 7023.3}).dimensions["memory"].applicable
+    # and a real reading under the ceiling is scored
+    ok = dict(job, _node_memory_mb=512 * 1024)
+    assert score_job(ok, {"peak_memory_gb": 400.0}).dimensions["memory"].applicable
+
+
+def test_everyone_and_one_person_set_aside_impossible_readings(db):
+    from nomad.edu.insights import user_insights
+    c = sqlite3.connect(db)
+    _node_state(c, "arachne", 512 * 1024)
+    _node_state(c, "spydur", 1024 * 1024)
+    c.execute("DELETE FROM jobs WHERE user_name = 'bob'")
+    c.execute("DELETE FROM job_summary WHERE source_site = 'arachne'")
+    for jid, peak in (("700", 7023.3), ("701", 4134.4), ("702", 4.0)):
+        _job(c, jid, "bob", "arachne", _ago(3), cpu=50)
+        c.execute("UPDATE job_summary SET peak_memory_gb = ? WHERE job_id = ? AND source_site = 'arachne'",
+                  (peak, jid))
+    c.commit(); c.close()
+    popmod._CACHE.clear()
+    bob = popmod.population(db).people["bob"]
+    assert bob.scored_jobs == 3                       # still scored on CPU and time
+    ui = user_insights(db, "bob", cluster_capacities=[])
+    assert ui.dimensions == bob.dimensions
+    for issue in ui.issues:
+        if issue.dimension_key == "memory":
+            assert issue.total_applicable == 1        # only the 4 GB reading counts
+
+
+def test_explain_passes_the_ceiling(db):
+    c = sqlite3.connect(db)
+    _node_state(c, "arachne", 512 * 1024)
+    c.commit(); c.close()
+    assert load_job(db, "200", "arachne")["_node_memory_mb"] == 512 * 1024
