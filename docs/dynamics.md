@@ -66,7 +66,7 @@ So these analyses run only when each job can be placed in one group (`nomad.dyna
 1. the job records a group itself — an `account` column on `jobs`, or `group_name` — when at least two groups of two or more people hold 80% of the jobs and no single one covers more than 80% of the people (a catch-all Unix group such as `people`, or one private group per user, says nothing). nomad's job collector does not record the Slurm account on `jobs` yet; or
 2. membership is unambiguous — everyone who ran jobs belongs to at most one research group (leaving out umbrella groups that hold more than 80% of users), there are at least two groups of two or more people, and they account for 80% of the jobs.
 
-Otherwise the result is `available: false` with the reason, for example: *"Jobs don't record a group, and 12 of the 40 people who ran jobs belong to more than one group, so their jobs can't be placed in one. Group views need a group per job, such as a Slurm account."* Diversity by person is always computed.
+Otherwise the result is `available: false` with the reason, for example: *"Jobs don't record a group, and 12 of the 40 people who ran jobs in the last 12 weeks belong to more than one group, so their jobs can't be placed in one. Group views need a group per job, such as a Slurm account."* The reason names the period it counts: diversity by group places jobs over its trend windows (12 weeks by default), the other analyses over the window asked for. Diversity by person is always computed.
 
 In Python, `attribution="membership"` forces the old join for callers that want it knowingly; the reason then says how many people are counted once per group.
 

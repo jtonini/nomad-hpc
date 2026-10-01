@@ -69,13 +69,15 @@ Below 50 such jobs (`MIN_JOBS`) nothing about jobs rises above a notice and no c
 
 ### Alerts
 
-nomad stores alerts but never marks them resolved, so none is called "active": the reader reports alerts **raised** in the window, grouped by condition, with how many times and when last. A condition that persists is raised again after each cooldown (`cooldown_minutes`); that is not flapping, and nothing claims it is. Both column layouts are read: nomad's (`category`, `source` = host) and the demo database's (`source`, `host`).
+nomad stores alerts but never marks them resolved, so none is called "active": the reader reports alerts **raised** in the window, grouped by condition, with how many times and when last. A condition that persists is raised again after each cooldown (`cooldown_minutes`); that is not flapping, and nothing claims it is. Measured values don't split a condition: "Disk usage at 86.0% on /scratch" and "at 87.1%" are one; numbers in names do ("GPU 0" and "GPU 3", `/data1` and `/data2` stay apart). Alerts stored by `nomad test-alerts` (category `test`) prove that mail works and are not counted. Both column layouts are read: nomad's (`category`, `source` = host) and the demo database's (`source`, `host`).
 
 ### What was measured
 
-Next to the signals the engine keeps a **coverage** list: for each source, *measured*, *stale* (a snapshot source — nodes, filesystems, queue, workstations — whose newest reading is over 2 hours old), *no data* (not collected here, or nothing in the window), or *failed* (the reader raised; the error is given). A missing table is "no data"; any other database error is reported as a failure instead of being swallowed.
+Next to the signals the engine keeps a **coverage** list: for each source, *measured*, *stale* (a snapshot source — nodes, filesystems, queue, workstations — whose newest reading is over 2 hours old), *stopped* (a snapshot source silent for over 7 days — a retired collector, listed with its last reading; storage counts as current while either `filesystems` or `storage_state` reports), *no data* (not collected here, or nothing in the window), or *failed* (the reader raised; the error is given). A missing table is "no data"; any other database error is reported as a failure instead of being swallowed.
 
-Health rests on it: with nothing measured it is **unknown**, not "good". A stale or failed source counts as a warning, and a `data_stale` signal names what stopped updating (`No new readings from spydur: nodes (last reading 13:05, 3h ago)`).
+Health rests on it: with nothing measured it is **unknown**, not "good". A stale or failed source counts as a warning, and a `data_stale` signal names what stopped updating (`No new readings from spydur: nodes (last reading 13:05, 3h ago)`). A stopped source is not read and does not lower health: a workstation collector retired in April is not a warning every day since.
+
+Sizes are in decimal units, as on the Console's Dashboard (1 TB = 10<sup>12</sup> bytes).
 
 ### Step 2: Template Narration (Level 1)
 
@@ -202,7 +204,7 @@ engine = InsightEngine("/path/to/nomad.db", hours=168, cluster_name="mycluster")
 engine = InsightEngine("/path/to/combined.db", hours=168, site="spydur")
 
 print(engine.overall_health)    # "good", "nominal", "degraded", "impaired", "unknown"
-print(engine.coverage)          # per source: measured / stale / no_data / failed
+print(engine.coverage)          # per source: measured / stale / stopped / no_data / failed
 print(engine.signal_count)
 data = engine.to_dict()         # Python dict
 print(engine.to_slack())        # Slack markdown

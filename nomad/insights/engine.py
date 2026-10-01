@@ -137,7 +137,7 @@ class InsightEngine:
 
     @property
     def coverage(self) -> list[dict]:
-        """Per source (and site): measured / stale / no_data / failed."""
+        """Per source (and site): measured / stale / stopped / no_data / failed."""
         return self._coverage
 
     @property

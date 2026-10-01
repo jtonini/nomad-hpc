@@ -50,6 +50,21 @@ class Attribution:
                 "ambiguous_people": self.ambiguous_people}
 
 
+def _period(since: str) -> str:
+    """"in the last 12 weeks" for a cutoff, so counts aren't read as current."""
+    from datetime import datetime
+    t = scope.parse_time(since)
+    if t is None:
+        return "in this window"
+    hours = max(1, round((datetime.now() - t).total_seconds() / 3600))
+    if hours < 48:
+        return f"in the last {hours} hour{'s' if hours != 1 else ''}"
+    days = round(hours / 24)
+    if days % 7 == 0 and days >= 14:
+        return f"in the last {days // 7} weeks"
+    return f"in the last {days} days"
+
+
 def _unavailable(reason: str, people: int = 0, ambiguous: int = 0) -> Attribution:
     return Attribution(False, "none", "NULL", "", reason, people, ambiguous)
 
@@ -70,6 +85,7 @@ def job_attribution(conn: sqlite3.Connection, since: str,
     users = list(jobs_of)
     if not users:
         return _unavailable("No jobs in this window.")
+    when = _period(since)
     n_users = len(users)
     n_jobs = sum(jobs_of.values())
 
@@ -135,7 +151,7 @@ def job_attribution(conn: sqlite3.Connection, since: str,
     if ambiguous:
         return _unavailable(
             f"Jobs don't record a group, and {ambiguous} of the {n_users} people who "
-            f"ran jobs belong{'s' if ambiguous == 1 else ''} to more than one group, so "
+            f"ran jobs {when} belong{'s' if ambiguous == 1 else ''} to more than one group, so "
             f"their jobs can't be placed in one. Group views need a group per job, "
             f"such as a Slurm account.",
             n_users, ambiguous)
@@ -143,14 +159,14 @@ def job_attribution(conn: sqlite3.Connection, since: str,
                    if members_of.get(g, 0) >= 2}
     if len(groups_used) < 2:
         return _unavailable(
-            f"The {n_users} people who ran jobs here belong to "
+            f"The {n_users} people who ran jobs here {when} belong to "
             f"{len(groups_used) or 'no'} research group{'' if len(groups_used) == 1 else 's'} "
             f"of two or more people; group views need at least two.", n_users, 0)
     placed = sum(n for u, n in jobs_of.items()
                  if any(members_of.get(g, 0) >= 2 for g in groups_of.get(u, ())))
     if placed / n_jobs < MIN_PLACED_SHARE:
         return _unavailable(
-            f"Only {placed / n_jobs:.0%} of the jobs were run by people in a research "
+            f"Only {placed / n_jobs:.0%} of the jobs {when} were run by people in a research "
             f"group; comparing groups would leave most of the work out.", n_users, 0)
     return Attribution(True, "membership", expr, join,
                        "Jobs placed by their owner's group; everyone who ran jobs "

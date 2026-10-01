@@ -130,11 +130,12 @@ def coverage_lines(coverage: list[dict] | None) -> list[str]:
         name = c.get("label", c.get("source", "?")).lower()
         if c.get("site") and len({x.get("site") for x in coverage}) > 1:
             name = f"{c['site']} {name}"
-        if c.get("status") in ("stale", "failed") and c.get("detail"):
+        if c.get("status") in ("stale", "failed", "stopped") and c.get("detail"):
             name += f" ({c['detail']})"
         groups.setdefault(c.get("status", "?"), []).append(name)
     words = [("measured", "Measured"), ("stale", "Not updating"),
-             ("failed", "Could not read"), ("no_data", "Nothing to read")]
+             ("failed", "Could not read"), ("stopped", "Stopped reporting"),
+             ("no_data", "Nothing to read")]
     return [f"{title}: {', '.join(groups[k])}" for k, title in words if groups.get(k)]
 
 

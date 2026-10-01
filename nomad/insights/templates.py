@@ -124,9 +124,16 @@ def narrate_job_rate_trend(sig: Signal) -> str:
 
 
 def _fmt_size_gb(gb: float) -> str:
-    if gb >= 1024:
-        return f"{gb / 1024:.1f} TB"
-    return f"{gb:.0f} GB"
+    return _fmt_bytes(gb * 1073741824)
+
+
+def _fmt_bytes(b: float) -> str:
+    """Decimal units, as the Console's Dashboard shows them (1 TB = 10^12 bytes)."""
+    if abs(b) >= 1e12:
+        return f"{b / 1e12:.1f} TB"
+    if abs(b) >= 1e9:
+        return f"{b / 1e9:.0f} GB"
+    return f"{b / 1e6:.0f} MB"
 
 
 def narrate_filesystem_usage(sig: Signal) -> str:
@@ -136,15 +143,20 @@ def narrate_filesystem_usage(sig: Signal) -> str:
     avail = m.get("avail_gb") or m.get("free_gb", 0)
     paths = m.get("paths") or []
 
-    text = f"{server} is {usage:.0f}% full ({_fmt_size_gb(avail)} free)"
+    free_b = m.get("free_bytes")
+    free_text = _fmt_bytes(free_b) if free_b is not None else _fmt_size_gb(avail)
+    text = f"{server} is {usage:.0f}% full ({free_text} free)"
     if len(paths) > 1:
         text += f"; {' and '.join(paths)} are one filesystem"
     text += "."
     growth = m.get("growth_gb_per_day")
+    growth_b = m.get("growth_bytes_per_day")
     days_full = m.get("days_until_full")
     if growth is not None and m.get("trend_days"):
         if growth > 0.5:
-            text += f" Growing about {_fmt_size_gb(growth * 30)} a month"
+            month = (_fmt_bytes(growth_b * 30) if growth_b is not None
+                     else _fmt_size_gb(growth * 30))
+            text += f" Growing about {month} a month"
             if days_full is not None:
                 if days_full < 60:
                     text += f"; full in about {days_full:.0f} days at that rate"

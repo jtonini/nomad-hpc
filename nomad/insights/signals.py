@@ -16,6 +16,7 @@ reporting "nothing found".
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import statistics
 from dataclasses import dataclass, field
@@ -90,6 +91,16 @@ MIN_JOBS = 50
 # longer "now"; the engine says so instead of showing the old reading as
 # current.
 STALE_AFTER_HOURS = 2
+# A measured value in an alert message: a decimal, or a number with its unit
+# ("86.0%", "87%", "120ms", "85°C", "in 3 days"). Digits inside names
+# ("GPU 3", "/data2", "spdr17") are not values and keep conditions apart.
+_MEASURED = re.compile(
+    r"(?<![\w/.\-])\d+(?:\.\d+)?(?=\s*(?:%|ms\b|°C|days?\b|hours?\b|h\b))"
+    r"|(?<![\w/.\-])\d+\.\d+")
+# Quiet for longer than this, a source has stopped reporting -- a collector
+# retired months ago, not an outage to warn about every day. It is listed
+# with its last reading but no longer lowers health.
+STOPPED_AFTER_DAYS = 7
 
 
 def _get_conn(db_path: Path, site: str | None = None) -> sqlite3.Connection:
@@ -454,6 +465,8 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
                 metrics={
                     "server": label, "paths": paths, "site": site_label,
                     "usage_pct": usage,
+                    "free_bytes": free, "total_bytes": r["total_bytes"],
+                    "growth_bytes_per_day": growth,
                     "free_gb": (free or 0) / 1073741824.0,
                     "avail_gb": (free or 0) / 1073741824.0,
                     "total_gb": (r["total_bytes"] or 0) / 1073741824.0,
@@ -471,9 +484,12 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
         # storage_state (ZFS/NAS appliances)
         scols = scope.table_columns(conn, "storage_state")
         if scols:
+            # nomad's storage collector writes usage_pct; the demo database
+            # has usage_percent. Asking for the wrong one failed the reader.
+            ucol = "usage_pct" if "usage_pct" in scols else "usage_percent"
             cutoff = (now - timedelta(hours=hours)).isoformat()
-            rows = conn.execute("""
-                SELECT s1.hostname, s1.usage_percent, s1.total_bytes,
+            rows = conn.execute(f"""
+                SELECT s1.hostname, s1.{ucol} AS usage_percent, s1.total_bytes,
                        s1.used_bytes, s1.free_bytes, s1.timestamp
                 FROM storage_state s1
                 JOIN (SELECT hostname, MAX(timestamp) AS ts FROM storage_state
@@ -484,6 +500,7 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
                 usage = r["usage_percent"]
                 free_gb = (r["free_bytes"] or 0) / 1073741824.0
                 total_gb = (r["total_bytes"] or 0) / 1073741824.0
+                free_b, total_b = r["free_bytes"] or 0, r["total_bytes"] or 0
                 if usage is not None and usage >= 70:
                     sev = (Severity.CRITICAL if usage >= 90 else
                            Severity.WARNING if usage >= 80 else Severity.NOTICE)
@@ -491,8 +508,9 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
                         signal_type=SignalType.DISK,
                         severity=sev,
                         title="filesystem_usage",
-                        detail=f"{r['hostname']} at {usage:.0f}% ({free_gb:.1f} GB free)",
+                        detail=f"{r['hostname']} at {usage:.0f}% ({free_b / 1e9:.1f} GB free)",
                         metrics={"server": r["hostname"], "usage_pct": usage,
+                                 "free_bytes": free_b, "total_bytes": total_b,
                                  "avail_gb": free_gb, "free_gb": free_gb,
                                  "total_gb": total_gb, "as_of": r["timestamp"]},
                         affected_entities=[r["hostname"]],
@@ -500,8 +518,8 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
                     ))
 
                 # Filling fast enough to be full within two days?
-                history = conn.execute("""
-                    SELECT timestamp, usage_percent AS usage_pct FROM storage_state
+                history = conn.execute(f"""
+                    SELECT timestamp, {ucol} AS usage_pct FROM storage_state
                     WHERE hostname = ? AND timestamp >= ?
                     ORDER BY timestamp
                 """, (r["hostname"], cutoff)).fetchall()
@@ -521,7 +539,7 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
                 hours_to_full = (100 - history[-1]["usage_pct"]) / rate
                 if hours_to_full >= 48:
                     continue
-                fill_gb = rate / 100 * (total_gb or 0)
+                fill_gb = rate / 100 * total_b / 1e9           # decimal GB, as labelled
                 signals.append(Signal(
                     signal_type=SignalType.DISK,
                     severity=Severity.CRITICAL if hours_to_full < 12 else Severity.WARNING,
@@ -788,12 +806,18 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
                 elif s is None:
                     unplaced += 1
             rows = kept
+        # `nomad test-alerts` stores its test (category "test"): proof that
+        # mail works, not something about the system, so it doesn't count.
+        rows = [r for r in rows if (r["what"] or "").lower() != "test"]
         if not rows:
             return signals
 
+        # One condition however its numbers move: "/scratch at 86.0%" and
+        # "at 87.0%" are the same alert raised on different days.
         conditions: dict[tuple, dict] = {}
         for r in rows:
-            key = (r["what"] or "", r["host"] or "", (r["message"] or "")[:80])
+            shape = _MEASURED.sub("#", r["message"] or "")[:80]
+            key = (r["what"] or "", r["host"] or "", shape)
             c = conditions.setdefault(key, {
                 "message": r["message"] or "", "count": 0, "last": r["timestamp"],
                 "severity": (r["severity"] or "").lower(), "host": r["host"],
@@ -1272,10 +1296,13 @@ def _newest_for_site(conn, table: str, column: str, site: str | None):
 
 def _coverage_for(conn, src: Source, hours: int, now: datetime,
                   site: str | None = None) -> dict:
-    """measured / stale / no_data for one source, from its newest reading."""
+    """measured / stale / stopped / no_data for one source, from its newest reading."""
     newest = _newest_for_site(conn, src.table, src.time_column, site)
-    if src.key == "storage" and newest is None:
-        newest = _newest_for_site(conn, "storage_state", "timestamp", site)
+    if src.key == "storage":
+        # Either table is storage: a file server's storage_state still
+        # reporting keeps storage current when filesystems stopped.
+        other = _newest_for_site(conn, "storage_state", "timestamp", site)
+        newest = max((t for t in (newest, other) if t is not None), default=None)
     entry = {"source": src.key, "label": src.label,
              "newest": newest.isoformat(timespec="seconds") if newest else None}
     if newest is None:
@@ -1285,7 +1312,10 @@ def _coverage_for(conn, src: Source, hours: int, now: datetime,
         return entry
     age_h = (now - newest).total_seconds() / 3600
     window = src.hours_cap and min(hours, src.hours_cap) or hours
-    if src.snapshot and age_h > STALE_AFTER_HOURS:
+    if src.snapshot and age_h > STOPPED_AFTER_DAYS * 24:
+        entry.update(status="stopped",
+                     detail=f"last reading {newest:%Y-%m-%d}")
+    elif src.snapshot and age_h > STALE_AFTER_HOURS:
         entry.update(status="stale",
                      detail=f"last reading {newest:%Y-%m-%d %H:%M}, {age_h:.0f}h ago")
     elif not src.snapshot and age_h > window:
@@ -1334,7 +1364,8 @@ def read_all_signals_with_coverage(
     for src in SOURCES:
         entry = entries[src.key]
         h = min(hours, src.hours_cap) if src.hours_cap else hours
-        if entry["status"] == "no_data" and entry["newest"] is None:
+        if (entry["status"] == "no_data" and entry["newest"] is None) \
+                or entry["status"] == "stopped":
             entry["signals"] = 0
             coverage.append(entry)
             continue

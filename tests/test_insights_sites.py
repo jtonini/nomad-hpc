@@ -634,3 +634,132 @@ def test_a_one_member_group_does_not_make_its_member_ambiguous(tmp_path):
     div = compute_diversity(db, dimension="group", hours=168, site="x")
     assert div.available
     assert div.current.category_counts == {"a$": 20, "b$": 20}
+
+
+def test_a_test_alert_is_not_about_the_system(tmp_path):
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(db)
+    _schema(c)
+    c.execute("ALTER TABLE alerts ADD COLUMN source_site TEXT")
+    now = datetime.now()
+    c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
+              " source_site) VALUES (?, 'warning', 'test', 'cli-test',"
+              " 'NØMAÐ test alert (nomad test-alerts).', '{}', 'x')",
+              ((now - timedelta(hours=1)).isoformat(),))
+    c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
+              " source_site) VALUES (?, 'warning', 'disk', 'head', 'Disk usage at 81% on /home',"
+              " '{}', 'x')", ((now - timedelta(days=3)).isoformat(),))
+    c.commit(); c.close()
+    got = sig.read_alert_signals(db, hours=168, site="x")
+    assert got[0].metrics["total"] == 1
+    assert got[0].severity == sig.Severity.NOTICE        # nothing in the last day
+    assert "test alert" not in narrate(got[0])
+
+
+def test_an_alert_whose_numbers_move_is_one_condition(tmp_path):
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(db)
+    _schema(c)
+    c.execute("ALTER TABLE alerts ADD COLUMN source_site TEXT")
+    now = datetime.now()
+    for k, pct in enumerate(("86.0", "86.4", "87.0", "87.1")):
+        c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
+                  " source_site) VALUES (?, 'warning', 'disk', 'head', ?, '{}', 'x')",
+                  ((now - timedelta(hours=1 + 20 * k)).isoformat(),
+                   f"Disk usage at {pct}% on /scratch"))
+    c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
+              " source_site) VALUES (?, 'warning', 'disk', 'head', 'Disk usage at 81% on /home',"
+              " '{}', 'x')", ((now - timedelta(hours=2)).isoformat(),))
+    c.commit(); c.close()
+    got = sig.read_alert_signals(db, hours=168, site="x")
+    assert (got[0].metrics["total"], got[0].metrics["conditions"]) == (5, 2)
+
+
+def test_a_source_quiet_for_over_a_week_has_stopped_and_does_not_lower_health(tmp_path):
+    # A file server still reporting, and a workstation collector retired in spring.
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(db)
+    _schema(c)
+    now = datetime.now()
+    _fsonly(c, now)
+    old = (now - timedelta(days=160)).isoformat()
+    c.execute("INSERT INTO workstation_state (timestamp, hostname, load_avg_1m, cpu_count,"
+              " memory_total_mb, memory_used_mb, disk_total_gb, disk_used_gb, disk_usage_pct,"
+              " zombie_count, source_site) VALUES (?, 'ws9', 30, 4, 16000, 15500, 500, 100, 20,"
+              " 0, 'fsonly')", (old,))
+    c.commit(); c.close()
+    eng = InsightEngine(db, hours=168, site="fsonly")
+    ws = [x for x in eng.coverage if x["source"] == "workstations"][0]
+    assert ws["status"] == "stopped" and ws["signals"] == 0
+    assert ws["detail"] == f"last reading {(now - timedelta(days=160)):%Y-%m-%d}"
+    assert not _by_title(eng.signals, "data_stale")
+    assert not [s for s in eng.signals if s.title.startswith("workstation")]
+    assert eng.overall_health == "good"
+    assert "Stopped reporting: workstations (last reading" in eng.brief()
+
+
+def test_sizes_are_in_the_dashboards_decimal_units(combined):
+    from nomad.insights.templates import _fmt_bytes
+    assert (_fmt_bytes(43.1e12), _fmt_bytes(500e9), _fmt_bytes(2e6)) == \
+        ("43.1 TB", "500 GB", "2 MB")
+    got = sig.read_disk_signals(combined, hours=12, site="big")
+    scratch = [s for s in got if s.metrics["paths"] == ["/scratch"]][0]
+    free = scratch.metrics["free_bytes"]
+    assert f"({free / 1e12:.1f} TB free)" in narrate(scratch)
+
+
+def test_attribution_reasons_say_which_period_they_count(combined):
+    from nomad.dynamics.attribution import _period
+    now = datetime.now()
+    assert _period((now - timedelta(days=84)).isoformat()) == "in the last 12 weeks"
+    assert _period((now - timedelta(days=7)).isoformat()) == "in the last 7 days"
+    assert _period((now - timedelta(hours=24)).isoformat()) == "in the last 24 hours"
+    assert _period((now - timedelta(hours=6)).isoformat()) == "in the last 6 hours"
+    assert _period("not a time") == "in this window"
+    d = DynamicsEngine(combined, hours=168, site="big").to_dict()
+    # Diversity places jobs over its trend windows; niche over the window.
+    assert "people who ran jobs in the last 12 weeks" in d["diversity"]["reason"]
+    assert "people who ran jobs in the last 7 days" in d["niche"]["reason"]
+
+
+def test_numbers_in_names_keep_alert_conditions_apart(tmp_path):
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(db)
+    _schema(c)
+    c.execute("ALTER TABLE alerts ADD COLUMN source_site TEXT")
+    now = datetime.now()
+    msgs = ["GPU 0 memory at 91.0% (threshold: 90%)", "GPU 3 memory at 95.2% (threshold: 90%)",
+            "GPU 0 memory at 92.5% (threshold: 90%)", "Disk /data1 at 81.0% (threshold: 80%)",
+            "Disk /data2 at 81.0% (threshold: 80%)", "Node spdr06 load 12.40 (threshold: 8)",
+            "Node spdr17 load 9.10 (threshold: 8)"]
+    for k, m in enumerate(msgs):
+        c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
+                  " source_site) VALUES (?, 'warning', 'x', 'head', ?, '{}', 'x')",
+                  ((now - timedelta(hours=1 + k)).isoformat(), m))
+    c.commit(); c.close()
+    got = sig.read_alert_signals(db, hours=168, site="x")
+    assert (got[0].metrics["total"], got[0].metrics["conditions"]) == (7, 6)
+
+
+def test_a_storage_server_keeps_storage_current_when_filesystems_stopped(tmp_path):
+    db = tmp_path / "t.db"
+    c = sqlite3.connect(db)
+    _schema(c)
+    c.execute("CREATE TABLE storage_state (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT,"
+              " hostname TEXT, total_bytes INTEGER, used_bytes INTEGER, free_bytes INTEGER,"
+              " usage_pct REAL, source_site TEXT)")         # nomad's collector: usage_pct
+    now = datetime.now()
+    c.execute("INSERT INTO filesystems (timestamp, path, total_bytes, used_bytes,"
+              " available_bytes, used_percent, source_site) VALUES (?, '/home', ?, ?, ?, 50, 'x')",
+              ((now - timedelta(days=60)).isoformat(), TB, TB // 2, TB // 2))
+    c.execute("INSERT INTO storage_state (timestamp, hostname, total_bytes, used_bytes,"
+              " free_bytes, usage_pct, source_site) VALUES (?, 'nas1', ?, ?, ?, 97, 'x')",
+              ((now - timedelta(minutes=5)).isoformat(), 10**13, 97 * 10**11, 3 * 10**11))
+    c.commit(); c.close()
+    eng = InsightEngine(db, hours=24, site="x")
+    storage = [x for x in eng.coverage if x["source"] == "storage"][0]
+    assert storage["status"] == "measured"
+    nas = [s for s in eng.signals if s.metrics.get("server") == "nas1"]
+    assert nas and nas[0].severity == sig.Severity.CRITICAL
+    assert "(300.0 GB free)" in nas[0].detail
+    assert eng.overall_health == "impaired"
