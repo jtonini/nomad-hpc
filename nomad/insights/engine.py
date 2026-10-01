@@ -70,8 +70,8 @@ class InsightEngine:
         db_path: Path | str,
         hours: int = 24,
         cluster_name: str = "cluster",
-        site: Optional[str] = None,
-        config: Optional[dict] = None,
+        site: str | None = None,
+        config: dict | None = None,
     ):
         self.db_path = Path(db_path)
         self.hours = hours
@@ -104,7 +104,7 @@ class InsightEngine:
             if len(known) > 1:
                 sites = known
 
-        by_site: list[tuple[Optional[str], list[Signal]]] = []
+        by_site: list[tuple[str | None, list[Signal]]] = []
         for site in sites:
             signals, coverage = read_all_signals_with_coverage(
                 self.db_path, hours=self.hours, config=self.config, site=site)

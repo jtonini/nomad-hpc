@@ -9,6 +9,7 @@ Data collectors for monitoring HPC infrastructure.
 from .base import (
     BaseCollector,
     CollectionError,
+    MissingToolError,
     CollectionResult,
     CollectorRegistry,
     registry,
@@ -32,6 +33,7 @@ from .workstation import WorkstationCollector
 __all__ = [
     'BaseCollector',
     'CollectionError',
+    'MissingToolError',
     'CollectionResult',
     'CollectorRegistry',
     'registry',

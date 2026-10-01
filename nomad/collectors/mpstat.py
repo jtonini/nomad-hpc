@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from .base import BaseCollector, CollectionError, registry
+from .base import BaseCollector, CollectionError, registry, MissingToolError
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ class MPStatCollector(BaseCollector):
             return self._parse_mpstat_output(result.stdout)
 
         except FileNotFoundError:
-            raise CollectionError("mpstat not found - install sysstat package")
+            raise MissingToolError("mpstat not found - install sysstat package")
         except subprocess.TimeoutExpired:
             raise CollectionError("mpstat timed out")
 

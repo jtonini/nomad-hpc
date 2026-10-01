@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .base import BaseCollector, CollectionError, registry
+from .base import BaseCollector, CollectionError, registry, MissingToolError
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ class IOStatCollector(BaseCollector):
             return self._parse_iostat_output(result.stdout)
 
         except FileNotFoundError:
-            raise CollectionError("iostat not found - install sysstat package")
+            raise MissingToolError("iostat not found - install sysstat package")
         except subprocess.TimeoutExpired:
             raise CollectionError("iostat timed out")
 

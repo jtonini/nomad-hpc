@@ -17,6 +17,7 @@ Inspired by fileiotest methodology for isolating network bottlenecks.
 import logging
 import re
 import socket
+import sqlite3
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -112,6 +113,42 @@ class NetworkPerfStats:
         return True
 
 
+_NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]*$")
+
+
+def _valid_name(name: str) -> bool:
+    """A host name, IP address or user name -- nothing a shell would read."""
+    return bool(name) and len(name) <= 253 and bool(_NAME.match(name))
+
+
+def _host_names() -> set[str]:
+    """Names this host answers to (short forms), for test sources."""
+    names = {"localhost"}
+    for n in (socket.gethostname(), socket.getfqdn()):
+        if n:
+            names.add(n.split(".")[0].lower())
+    return names
+
+
+def _is_here(source: str) -> bool:
+    """A test's source is this host: one of its names, or one of its
+    addresses (an IP literal this host can bind to, loopback included)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(source)
+    except ValueError:
+        return source.split(".")[0].lower() in _host_names()
+    if ip.is_loopback:
+        return True
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((str(ip), 0))
+        return True
+    except OSError:
+        return False
+
+
 def run_command(cmd: str, timeout: int = 60) -> str:
     """Run command and return output."""
     try:
@@ -126,31 +163,30 @@ def run_command(cmd: str, timeout: int = 60) -> str:
 
 
 def measure_ping(host: str, count: int = 10) -> PingStats:
-    """Measure ping latency to host."""
-    stats = PingStats()
-
+    """Latency and loss to ``host``. No reply summary at all (unknown host,
+    no route, ping missing) counts as 100% loss."""
+    stats = PingStats(loss_pct=100.0)
     try:
-        output = run_command(f"ping -c {count} -q {host}", timeout=count + 10)
-
-        # Parse packet loss
-        # "3 packets transmitted, 3 received, 0% packet loss"
-        loss_match = re.search(r'(\d+(?:\.\d+)?)% packet loss', output)
-        if loss_match:
-            stats.loss_pct = float(loss_match.group(1))
-
-        # Parse RTT stats
-        # "rtt min/avg/max/mdev = 0.123/0.456/0.789/0.111 ms"
-        rtt_match = re.search(r'rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', output)
-        if rtt_match:
-            stats.min_ms = float(rtt_match.group(1))
-            stats.avg_ms = float(rtt_match.group(2))
-            stats.max_ms = float(rtt_match.group(3))
-            stats.mdev_ms = float(rtt_match.group(4))
-
-    except CollectionError as e:
+        # -i 0.2: the shortest interval an unprivileged user may use, so ten
+        # pings take two seconds, not ten. No shell: the host comes from config.
+        output = subprocess.run(
+            ["ping", "-c", str(int(count)), "-i", "0.2", "-W", "2", "-q", host],
+            capture_output=True, text=True, timeout=int(count) + 15).stdout
+    except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning(f"Ping to {host} failed: {e}")
-        stats.loss_pct = 100.0
+        return stats
 
+    # "3 packets transmitted, 3 received, 0% packet loss"
+    loss_match = re.search(r'(\d+(?:\.\d+)?)% packet loss', output)
+    if loss_match:
+        stats.loss_pct = float(loss_match.group(1))
+    # "rtt min/avg/max/mdev = 0.123/0.456/0.789/0.111 ms"
+    rtt_match = re.search(r'rtt min/avg/max/mdev = ([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)', output)
+    if rtt_match:
+        stats.min_ms = float(rtt_match.group(1))
+        stats.avg_ms = float(rtt_match.group(2))
+        stats.max_ms = float(rtt_match.group(3))
+        stats.mdev_ms = float(rtt_match.group(4))
     return stats
 
 
@@ -171,27 +207,33 @@ def measure_throughput_iperf(host: str, duration: int = 10) -> ThroughputStats |
     stats = ThroughputStats()
 
     try:
-        # Check if iperf3 is available
-        run_command("which iperf3")
+        import shutil as _shutil
+        if not _shutil.which("iperf3"):
+            return None
 
         retrans_before = get_tcp_retrans()
 
-        # Run iperf3 client
-        output = run_command(f"iperf3 -c {host} -t {duration} -J", timeout=duration + 30)
+        # Run iperf3 client (needs `iperf3 -s` running on the destination)
+        proc = subprocess.run(
+            ["iperf3", "-c", host, "-t", str(int(duration)), "-J"],
+            capture_output=True, text=True, timeout=int(duration) + 30)
+        output = proc.stdout
 
         retrans_after = get_tcp_retrans()
         stats.tcp_retrans = max(0, retrans_after - retrans_before)
 
-        # Parse JSON output
+        # Parse JSON output. With no `iperf3 -s` at the far end iperf3
+        # still prints JSON -- an "error" and an empty "end" -- which used
+        # to be stored as 0 Mbps. That is no measurement: fall back.
         import json
         data = json.loads(output)
-
-        if 'end' in data and 'sum_sent' in data['end']:
-            sent = data['end']['sum_sent']
-            stats.bytes_transferred = sent.get('bytes', 0)
-            stats.rate_mbps = sent.get('bits_per_second', 0) / 1_000_000
-            stats.duration_sec = sent.get('seconds', duration)
-
+        sent = (data.get('end') or {}).get('sum_sent')
+        if proc.returncode != 0 or data.get('error') or not sent:
+            logger.debug(f"iperf3 to {host} gave no result: {data.get('error')}")
+            return None
+        stats.bytes_transferred = sent.get('bytes', 0)
+        stats.rate_mbps = sent.get('bits_per_second', 0) / 1_000_000
+        stats.duration_sec = sent.get('seconds', duration)
         return stats
 
     except Exception as e:
@@ -200,47 +242,32 @@ def measure_throughput_iperf(host: str, duration: int = 10) -> ThroughputStats |
 
 
 def measure_throughput_ssh(host: str, user: str = None, size_mb: int = 50) -> ThroughputStats | None:
-    """Measure throughput using ssh + dd + pv (fallback method)."""
+    """Throughput of an SSH copy of ``size_mb`` of zeros, timed end to end.
+
+    A fallback when iperf3 isn't there. It measures what an SSH copy gets,
+    which encryption can limit below what the network carries. (It used to
+    report bytes / 10 s -- an assumed duration, not a measurement.)
+    """
+    import time as _time
     stats = ThroughputStats()
-
+    dest = f"{user}@{host}" if user else host
+    if not _valid_name(dest.replace("@", "", 1)):
+        return None
     try:
-        # Check if pv is available
-        run_command("which pv")
-
-        dest = f"{user}@{host}" if user else host
-
         retrans_before = get_tcp_retrans()
-
-        # Generate random data and transfer via SSH
-        # Using dd to generate, pv to measure, ssh to transfer
-        cmd = f"dd if=/dev/zero bs=1M count={size_mb} 2>/dev/null | pv -f -b 2>&1 | ssh -T -o BatchMode=yes {dest} 'cat > /dev/null'"
-
-        output = run_command(cmd, timeout=300)
-
-        retrans_after = get_tcp_retrans()
-        stats.tcp_retrans = max(0, retrans_after - retrans_before)
-
-        # Parse pv output - typically shows total bytes
-        # pv output: "52.4MiB" or "52428800"
-        bytes_match = re.search(r'([\d.]+)\s*(MiB|MB|GiB|GB|KiB|KB|B)?', output)
-        if bytes_match:
-            value = float(bytes_match.group(1))
-            unit = bytes_match.group(2) or 'B'
-            multipliers = {
-                'B': 1, 'KB': 1024, 'KiB': 1024,
-                'MB': 1024**2, 'MiB': 1024**2,
-                'GB': 1024**3, 'GiB': 1024**3,
-            }
-            stats.bytes_transferred = int(value * multipliers.get(unit, 1))
-        else:
-            stats.bytes_transferred = size_mb * 1024 * 1024
-
-        # Estimate rate (we don't have precise timing from pv -b)
-        # For now, use expected size
-        stats.rate_mbps = (stats.bytes_transferred * 8) / 1_000_000 / 10  # Assume ~10 sec
-
+        t0 = _time.monotonic()
+        result = subprocess.run(
+            f"dd if=/dev/zero bs=1M count={int(size_mb)} 2>/dev/null | "
+            f"ssh -T -o BatchMode=yes -o ConnectTimeout=10 {dest} 'cat > /dev/null'",
+            shell=True, capture_output=True, text=True, timeout=300)
+        elapsed = _time.monotonic() - t0
+        if result.returncode != 0 or elapsed <= 0:
+            return None
+        stats.tcp_retrans = max(0, get_tcp_retrans() - retrans_before)
+        stats.bytes_transferred = int(size_mb) * 1024 * 1024
+        stats.duration_sec = elapsed
+        stats.rate_mbps = stats.bytes_transferred * 8 / elapsed / 1_000_000
         return stats
-
     except Exception as e:
         logger.debug(f"SSH throughput test failed: {e}")
         return None
@@ -452,26 +479,46 @@ class NetworkPerfCollector(BaseCollector):
 
     def __init__(self, config: dict[str, Any], db_path: str):
         super().__init__(config, db_path)
-        self.network_tests = config.get('network_tests', [])
+        self.network_tests = config.get('network_tests', []) or []
         self.ping_count = config.get('ping_count', 10)
+        # Ping (latency, loss) every run; throughput only when asked for,
+        # at most once per throughput_interval per path: it puts real
+        # traffic on the wire and needs iperf3 -s (or SSH) at the far end.
+        self.throughput = bool(config.get('throughput', False))
+        self.throughput_interval = int(config.get('throughput_interval', 3600))
         self.iperf_duration = config.get('iperf_duration', 10)
         # Full fileiotest-style options
         self.full_test = config.get('full_test', False)
         self.num_files = config.get('num_files', 3)
         self.file_size_mb = config.get('file_size_mb', 10)
-        logger.info(f"NetworkPerfCollector initialized with {len(self.network_tests)} test paths (full_test={self.full_test})")
+        logger.info(f"NetworkPerfCollector initialized with {len(self.network_tests)} test paths "
+                    f"(throughput={self.throughput}, full_test={self.full_test})")
 
     def collect(self) -> list[dict[str, Any]]:
-        """Collect network performance metrics for all configured paths."""
-        results = []
+        """Measure every configured path that starts on this host."""
+        if not self.network_tests:
+            self.note = "no network_tests configured"
+            return []
+        import shutil
+        if not shutil.which("ping"):
+            # Without ping every path would read as unreachable.
+            self.note = "ping not installed"
+            return []
+        results, skipped = [], []
 
         for test_config in self.network_tests:
-            source = test_config.get('source', socket.gethostname())
-            dest = test_config.get('dest')
+            dest = str(test_config.get('dest') or '').strip()
+            source = str(test_config.get('source') or socket.gethostname()).strip()
             path_type = test_config.get('path_type', 'unknown')
             user = test_config.get('user')
 
-            if not dest:
+            if not dest or not _valid_name(dest) or (user and not _valid_name(user)):
+                skipped.append(f"{dest or '?'}: not a valid host name")
+                continue
+            # Tests run from this host. A path that starts elsewhere is
+            # measured by the nomad on that host, not mislabelled here.
+            if not _is_here(source):
+                skipped.append(f"{source}->{dest}: starts on another host")
                 continue
 
             try:
@@ -488,7 +535,30 @@ class NetworkPerfCollector(BaseCollector):
                     'timestamp': datetime.now().isoformat(),
                 })
 
+        if skipped:
+            self.note = "skipped " + "; ".join(skipped)
         return results
+
+    def _throughput_due(self, source: str, dest: str) -> bool:
+        """No throughput reading for this path within throughput_interval.
+
+        Read from the table, so it holds when cron starts a new process
+        for every run.
+        """
+        try:
+            with self.get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT MAX(timestamp) FROM network_perf WHERE source_host = ? "
+                    "AND dest_host = ? AND throughput_mbps IS NOT NULL", (source, dest)).fetchone()
+        except sqlite3.Error:
+            return True
+        if not row or not row[0]:
+            return True
+        try:
+            last = datetime.fromisoformat(str(row[0]))
+        except ValueError:
+            return True
+        return (datetime.now() - last).total_seconds() >= self.throughput_interval * 0.95
 
     def _collect_path(self, source: str, dest: str, path_type: str, user: str = None) -> NetworkPerfStats:
         """Collect metrics for a single network path."""
@@ -499,39 +569,35 @@ class NetworkPerfCollector(BaseCollector):
             timestamp=datetime.now(),
         )
 
-        # Measure ping latency
         stats.ping = measure_ping(dest, self.ping_count)
 
-        # Use full fileiotest-style measurement if enabled
-        if self.full_test:
-            full_results = measure_throughput_full(
-                dest, user,
-                num_files=self.num_files,
-                file_size_mb=self.file_size_mb,
-            )
-            if full_results.get('cold_cache'):
-                stats.throughput_cold = full_results['cold_cache']
-            if full_results.get('hot_cache_avg'):
-                stats.throughput_hot = full_results['hot_cache_avg']
-            if full_results.get('true_write'):
-                stats.throughput_write = full_results['true_write']
-            if full_results.get('tcp_retrans_total'):
-                if stats.throughput_hot:
-                    stats.throughput_hot.tcp_retrans = full_results['tcp_retrans_total']
-        else:
-            # Quick mode: iperf3 or SSH
-            stats.throughput_hot = measure_throughput_iperf(dest, self.iperf_duration)
-            if not stats.throughput_hot:
-                stats.throughput_hot = measure_throughput_ssh(dest, user)
+        if self.throughput and stats.ping.loss_pct < 100 and self._throughput_due(source, dest):
+            if self.full_test:
+                full_results = measure_throughput_full(
+                    dest, user,
+                    num_files=self.num_files,
+                    file_size_mb=self.file_size_mb,
+                )
+                if full_results.get('cold_cache'):
+                    stats.throughput_cold = full_results['cold_cache']
+                if full_results.get('hot_cache_avg'):
+                    stats.throughput_hot = full_results['hot_cache_avg']
+                if full_results.get('true_write'):
+                    stats.throughput_write = full_results['true_write']
+                if full_results.get('tcp_retrans_total'):
+                    if stats.throughput_hot:
+                        stats.throughput_hot.tcp_retrans = full_results['tcp_retrans_total']
+            else:
+                stats.throughput_hot = measure_throughput_iperf(dest, self.iperf_duration)
+                if not stats.throughput_hot:
+                    stats.throughput_hot = measure_throughput_ssh(dest, user)
 
-        # Determine status
-        if stats.is_healthy:
+        if stats.ping.loss_pct >= 100:
+            stats.status = 'unreachable'
+        elif stats.is_healthy:
             stats.status = 'healthy'
-        elif stats.ping and stats.ping.loss_pct < 10:
-            stats.status = 'degraded'
         else:
-            stats.status = 'error'
-
+            stats.status = 'degraded'
         return stats
 
     def store(self, data: list[dict[str, Any]]) -> None:

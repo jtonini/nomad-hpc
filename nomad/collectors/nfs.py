@@ -98,10 +98,12 @@ class NFSCollector(BaseCollector):
             )
             if result.returncode != 0:
                 self._nfs_available = False
+                self._nfs_reason = "nfsiostat not installed (nfs-utils)"
                 logger.info("nfsiostat not found - NFS collector will be skipped")
                 return False
         except (FileNotFoundError, subprocess.TimeoutExpired):
             self._nfs_available = False
+            self._nfs_reason = "nfsiostat not installed (nfs-utils)"
             return False
 
         # Check for NFS mounts
@@ -111,6 +113,7 @@ class NFSCollector(BaseCollector):
                 has_nfs = any(t in mounts for t in ['nfs ', 'nfs4 '])
                 if not has_nfs:
                     self._nfs_available = False
+                    self._nfs_reason = "no NFS mounts on this host"
                     logger.info("No NFS mounts detected - NFS collector will be skipped")
                     return False
         except Exception:
@@ -123,7 +126,8 @@ class NFSCollector(BaseCollector):
         """Collect NFS statistics from nfsiostat."""
 
         if not self._check_nfs_available():
-            return []  # Gracefully return empty
+            self.note = getattr(self, "_nfs_reason", None) or "NFS not available here"
+            return []
 
         try:
             # Run nfsiostat with 1 second interval, single report

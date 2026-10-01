@@ -98,7 +98,7 @@ What type of system is this?
 **Option 2 — Workstation group** disables SLURM collectors and enables the WorkstationCollector, which monitors remote machines via SSH. You will be asked for department names and hostnames. Workstation data appears in the Workstations page of the dashboard.
 
 !!! info "What gets disabled for workstation groups"
-    When you select workstation group, the following collectors are automatically disabled since they require SLURM: `slurm`, `job_metrics`, `node_state`, `groups`. The `disk`, `vmstat`, `gpu`, `nfs`, and `workstation` collectors remain active.
+    When you select workstation group, the following collectors are automatically disabled since they require SLURM: `slurm`, `job_metrics`, `node_state`. The `disk`, `vmstat`, `gpu`, `nfs`, `groups` (membership only; job accounting needs Slurm) and `workstation` collectors remain active.
 
 ---
 

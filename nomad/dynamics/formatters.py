@@ -440,7 +440,7 @@ def format_full_summary_cli(
         if diversity.fragility_warning:
             lines.append(f"    !! {diversity.fragility_detail}")
     else:
-        lines.append(f"  Diversity by group: not computed")
+        lines.append("  Diversity by group: not computed")
 
     # Capacity headline
     if capacity.binding_constraint:

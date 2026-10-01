@@ -22,6 +22,7 @@ Configuration (nomad.toml):
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import subprocess
 from datetime import datetime, timedelta
@@ -58,6 +59,9 @@ class GroupCollector(BaseCollector):
     ):
         super().__init__(config, db_path)
         self._clusters = config.get('clusters', {})
+        # With no [clusters] configured (a workstation hub, an interactive
+        # server), membership is read on this host under the site's name.
+        self._local_name = config.get('local_name') or 'local'
         # Filter: skip system groups with GID below this
         self._min_gid = config.get('min_gid', 1000)
         # Optional: only collect groups matching these prefixes
@@ -82,7 +86,8 @@ class GroupCollector(BaseCollector):
             ]
             if ssh_key:
                 ssh_cmd += ["-i", ssh_key]
-            ssh_cmd += [f"{ssh_user}@{host}", cmd]
+            ssh_cmd += ["-o", "BatchMode=yes",
+                        f"{ssh_user}@{host}" if ssh_user else host, cmd]
             full_cmd = ssh_cmd
         else:
             full_cmd = cmd.split()
@@ -332,6 +337,15 @@ class GroupCollector(BaseCollector):
         all_groups = []
         all_accounting = []
 
+        if not self._clusters:
+            # Group membership doesn't need Slurm; job accounting does.
+            all_groups = self._collect_groups(cluster_name=self._local_name)
+            if shutil.which('sacct'):
+                all_accounting = self._collect_accounting(cluster_name=self._local_name)
+            if not all_groups:
+                self.note = "getent group returned no groups at or above min_gid"
+            return [{'groups': all_groups, 'accounting': all_accounting}]
+
         for cluster_id, cluster_conf in self._clusters.items():
             name = cluster_conf.get('name', cluster_id)
             host = cluster_conf.get('host')
@@ -349,6 +363,11 @@ class GroupCollector(BaseCollector):
                     acct = self._collect_accounting(
                         host, ssh_user, ssh_key, name)
                     all_accounting.extend(acct)
+
+            elif cluster_type == 'workstations' and not ssh_user:
+                # No SSH account configured for the workstations: they share
+                # this hub's directory, so read membership here.
+                all_groups.extend(self._collect_groups(cluster_name=name))
 
             elif cluster_type == 'workstations':
                 # Workstation group: no headnode, try first node
@@ -376,10 +395,17 @@ class GroupCollector(BaseCollector):
                     cluster_name=name)
                 all_accounting.extend(acct)
 
+        if not all_groups:
+            self.note = "no group membership read from the configured clusters"
         return [{
             'groups': all_groups,
             'accounting': all_accounting,
         }]
+
+    def count_records(self, data: list[dict[str, Any]]) -> int:
+        """Memberships and accounting rows, not the one envelope."""
+        payload = data[0] if data else {}
+        return len(payload.get('groups', [])) + len(payload.get('accounting', []))
 
     def store(self, data: list[dict[str, Any]]) -> None:
         """Store group membership and accounting data in SQLite."""
@@ -390,7 +416,7 @@ class GroupCollector(BaseCollector):
         groups = payload.get('groups', [])
         accounting = payload.get('accounting', [])
 
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30)
         c = conn.cursor()
 
         # ── Create tables ────────────────────────────────────────────

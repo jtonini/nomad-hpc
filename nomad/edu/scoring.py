@@ -162,7 +162,7 @@ class Suggestion:
     actual_usage: float        # what the job actually used (peak or avg)
     unit: str                  # "cores", "MB", "seconds", "MB/s"
     rationale: str = ""        # one-line context: "1 of 6 cores active"
-    context: Optional[dict[str, Any]] = None  # structured payload for verdict-kind suggestions (cluster targets, headroom, sbatch snippets)
+    context: dict[str, Any] | None = None  # structured payload for verdict-kind suggestions (cluster targets, headroom, sbatch snippets)
 
     @property
     def utilization_pct(self) -> float:
@@ -205,7 +205,7 @@ class DimensionScore:
     detail: str                           # Human-readable explanation
     suggestion: Suggestion | None = None
     applicable: bool = True               # False if dimension doesn't apply
-    raw: Optional[dict[str, Any]] = None  # structured payload of input values used to compute this score
+    raw: dict[str, Any] | None = None  # structured payload of input values used to compute this score
 
     @property
     def bar(self) -> str:

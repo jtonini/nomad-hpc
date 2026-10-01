@@ -159,6 +159,12 @@ class PerUserCollector(BaseCollector):
             return []
         t0 = time.time()
         snapshots = list(self.iter_processes())
+        if psutil is None and not snapshots:
+            # Without psutil there are no processes to read. This used to
+            # return an empty envelope, logged as "1 records" every run:
+            # arachne looked healthy from May to September collecting nothing.
+            self.note = "psutil not installed: nothing collected"
+            return []
         live_session_ids = set()
         sample_rows = []
         alert_rows = []
@@ -211,6 +217,13 @@ class PerUserCollector(BaseCollector):
 
         evicted = self.tracks.gc(now=t0, live_session_ids=live_session_ids)
         return _envelope(sample_rows, alert_rows, fd_rows, evicted=evicted)
+
+    def count_records(self, data):
+        """Samples and alerts in the envelope, not the envelope itself."""
+        env = data[0] if data else {}
+        if isinstance(env, dict) and env.get("_kind") == "per_user_envelope":
+            return len(env.get("samples") or []) + len(env.get("alerts") or [])
+        return len(data)
 
     def store(self, data):
         if not data:

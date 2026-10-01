@@ -26,11 +26,18 @@ pid_file = "/var/run/nomade/nomade.pid"
 # ============================================
 
 [collectors]
-# Enable/disable specific collectors. Listed names map to the
-# [collectors.<name>] subtables below. Available collectors:
-#   disk, slurm, nodes, licenses, jobs, gpu, nfs,
-#   workstation, storage, network_perf, node_state
-enabled = ["disk", "slurm", "nodes", "licenses", "jobs"]
+# Each collector is turned on or off in its own table:
+#
+#   [collectors.nfs]
+#   enabled = false
+#
+# On unless turned off: disk, slurm, job_metrics, iostat, mpstat, vmstat,
+#   node_state, gpu, nfs, groups
+# Off unless turned on: interactive, workstation, per_user, storage,
+#   network_perf, cloud.aws
+#
+# (An `enabled = [...]` list here is not read.) `nomad collectors` shows,
+# on any host, which ones run, why, and whether they collect anything.
 
 # Default collection interval in seconds. Each [collectors.<name>]
 # subtable can override this with its own `interval = N`.
@@ -205,16 +212,19 @@ enabled = false
 # Collection interval (seconds)
 interval = 300
 
-# List of storage devices to monitor
-# Supported types: zfs, nfs, local
-[[storage_devices]]
+# Storage servers to monitor, reached over SSH (BatchMode: a key, no
+# password prompt) unless the hostname is this host. type = "zfs" reads
+# pool health and capacity (zpool); any type reads NFS exports. Capacity
+# without ZFS comes from `paths` (df), never from the server's root disk.
+[[collectors.storage.storage_devices]]
 hostname = "nas-01"
 type = "zfs"
 description = "Primary ZFS storage"
 
-[[storage_devices]]
+[[collectors.storage.storage_devices]]
 hostname = "nfs-home"
 type = "nfs"
+paths = ["/export/home"]
 description = "Home directories NFS server"
 
 # ZFS-specific settings
@@ -484,17 +494,20 @@ max_idle_sessions = 5        # Users with more idle sessions get flagged
 # ============================================
 # NETWORK PERFORMANCE COLLECTOR
 # ============================================
-# Measures host-to-host network throughput using fileiotest methodology.
-# For NFS-specific stats, see [collectors.nfs] which uses nfsiostat.
+# Latency and packet loss from this host to the hosts you list, every run
+# (ten pings, about two seconds per path). Throughput only if you turn it
+# on: it puts real traffic on the wire for iperf_duration seconds, at most
+# once per throughput_interval per path, and needs `iperf3 -s` running on
+# the destination (otherwise it times an SSH copy, which encryption may
+# limit below what the network carries).
+# For NFS client statistics, see [collectors.nfs] (nfsiostat).
 
 [collectors.network_perf]
 enabled = false
-interval = 3600  # 1 hour (throughput tests are resource-intensive)
-
-# Ping settings
 ping_count = 10
 
-# Quick mode: uses iperf3 (preferred) or ssh+dd
+throughput = false
+throughput_interval = 3600   # seconds between throughput tests, per path
 iperf_duration = 10
 
 # Full fileiotest mode: random files, cold/hot cache, true write
@@ -503,24 +516,21 @@ full_test = false
 num_files = 3       # Number of 10MB random files
 file_size_mb = 10   # Size per file
 
-# ─── Network paths to test ─────────────────────────────────────────────
-# path_type: 'switch' (campus network) or 'direct' (point-to-point baseline)
+# ─── Paths to test ─────────────────────────────────────────────────────
+# Each path starts on this host. `source` is optional; a path whose source
+# names another host is left to the nomad running there.
+# path_type labels the path: 'switch' (campus network), 'direct'
+# (point-to-point baseline), anything else you like.
 
-# Path through campus network switch
-[[network_tests]]
-source = "head-node"
+[[collectors.network_perf.network_tests]]
 dest = "storage-server"
 path_type = "switch"
-user = "root"
 
 # Direct point-to-point connection (baseline, no switch)
-# Compare with switch path to quantify congestion/overhead
-[[network_tests]]
-source = "wire-src"
-dest = "10.0.0.1"        # Private IP on direct cable
-path_type = "direct"
-user = "root"
-
+# [[collectors.network_perf.network_tests]]
+# dest = "10.0.0.1"        # Private IP on direct cable
+# path_type = "direct"
+# user = "root"            # only for the SSH throughput fallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────

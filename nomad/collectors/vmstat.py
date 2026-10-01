@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .base import BaseCollector, CollectionError, registry
+from .base import BaseCollector, CollectionError, registry, MissingToolError
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ class VMStatCollector(BaseCollector):
             return self._parse_vmstat_output(result.stdout)
 
         except FileNotFoundError:
-            raise CollectionError("vmstat not found")
+            raise MissingToolError("vmstat not found")
         except subprocess.TimeoutExpired:
             raise CollectionError("vmstat timed out")
 

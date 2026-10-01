@@ -39,6 +39,9 @@ class CollectionResult:
     duration_seconds: float = 0.0
     error_message: str | None = None
     data: list[dict[str, Any]] = field(default_factory=list)
+    # Why a successful run collected nothing (or less than it could):
+    # "nfsiostat not installed", "no network_tests configured".
+    note: str | None = None
 
     def __repr__(self) -> str:
         status = "✓" if self.success else "✗"
@@ -98,6 +101,9 @@ class BaseCollector(ABC):
         self._consecutive_failures = 0
         self._max_retries = config.get('max_retries', 3)
         self._retry_delay = config.get('retry_delay', 5)  # seconds
+        # Set by collect() when it has nothing to do for a known reason, so
+        # the run says why instead of logging "success, 0 records".
+        self.note: str | None = None
 
         logger.info(f"Initialized {self.name} collector")
 
@@ -126,10 +132,20 @@ class BaseCollector(ABC):
         pass
 
     def get_db_connection(self) -> sqlite3.Connection:
-        """Get a database connection with row factory."""
-        conn = sqlite3.connect(self.db_path)
+        """Get a database connection with row factory.
+
+        Waits up to 30 s for a lock: another collector, or a sync copying the
+        database, holds it briefly. The default 5 s made runs fail with
+        "database is locked" (about 1 in 100 on busy hosts).
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def count_records(self, data: list[dict[str, Any]]) -> int:
+        """Records a run collected. Collectors that return one envelope
+        (groups, per_user) override this to count what is inside it."""
+        return len(data)
 
     def run(self) -> CollectionResult:
         """
@@ -140,6 +156,7 @@ class BaseCollector(ABC):
         """
         start_time = time.time()
         timestamp = datetime.now()
+        self.note = None
 
         logger.debug(f"Starting {self.name} collection")
 
@@ -166,16 +183,19 @@ class BaseCollector(ABC):
             self._last_run = timestamp
             self._consecutive_failures = 0
 
+            count = self.count_records(data) if data else 0
             result = CollectionResult(
                 collector_name=self.name,
                 timestamp=timestamp,
                 success=True,
-                records_collected=len(data),
+                records_collected=count,
                 duration_seconds=duration,
                 data=data,
+                note=self.note,
             )
 
-            logger.info(f"{self.name}: Collected {len(data)} records in {duration:.2f}s")
+            logger.info(f"{self.name}: Collected {count} records in {duration:.2f}s"
+                        + (f" ({self.note})" if self.note else ""))
             self._log_collection_run(result)
 
             return result
@@ -204,6 +224,8 @@ class BaseCollector(ABC):
         for attempt in range(self._max_retries):
             try:
                 return self.collect()
+            except MissingToolError:
+                raise
             except Exception as e:
                 last_error = e
                 if attempt < self._max_retries - 1:
@@ -233,7 +255,9 @@ class BaseCollector(ABC):
                         datetime.now().isoformat(),
                         result.success,
                         result.records_collected,
-                        result.error_message,
+                        # On a successful run, the note saying why it
+                        # collected nothing (or less than it could).
+                        result.error_message or result.note,
                     )
                 )
                 conn.commit()
@@ -272,6 +296,13 @@ class BaseCollector(ABC):
 
 class CollectionError(Exception):
     """Raised when data collection fails."""
+    pass
+
+
+class MissingToolError(CollectionError):
+    """A command the collector needs isn't installed: retrying won't help,
+    so the run fails at once with the reason (it used to retry twice, 5 s
+    apart, on every run)."""
     pass
 
 

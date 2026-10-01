@@ -30,19 +30,6 @@ import toml
 from nomad.analysis.derivatives import (
     analyze_disk_trend,
 )
-from nomad.collectors.disk import DiskCollector
-from nomad.collectors.gpu import GPUCollector
-from nomad.collectors.groups import GroupCollector
-from nomad.collectors.interactive import InteractiveCollector
-from nomad.collectors.iostat import IOStatCollector
-from nomad.collectors.job_metrics import JobMetricsCollector
-from nomad.collectors.mpstat import MPStatCollector
-from nomad.collectors.nfs import NFSCollector
-from nomad.collectors.node_state import NodeStateCollector
-from nomad.collectors.per_user import PerUserCollector
-from nomad.collectors.slurm import SlurmCollector
-from nomad.collectors.vmstat import VMStatCollector
-from nomad.collectors.workstation import WorkstationCollector
 from nomad.issue.cli_commands import issue as issue_group
 
 # Cloud collectors (optional — only available when provider SDKs are installed)
@@ -206,131 +193,32 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
             "Check [alerts.*] configuration in nomad.toml."
         )
 
-    # Initialize collectors
-    collectors = []
-
-    # Disk collector
-    disk_config = config.get('collectors', {}).get('disk', {})
-    if not collector or 'disk' in collector:
-        if disk_config.get('enabled', True):
-            collectors.append(DiskCollector(disk_config, db_path))
-
-    # SLURM collector
-    slurm_config = config.get('collectors', {}).get('slurm', {})
-    if not collector or 'slurm' in collector:
-        if slurm_config.get('enabled', True):
-            collectors.append(SlurmCollector(slurm_config, db_path))
-
-    # Job metrics collector
-    job_metrics_config = config.get('collectors', {}).get('job_metrics', {})
-    if not collector or 'job_metrics' in collector:
-        if job_metrics_config.get('enabled', True):
-            collectors.append(JobMetricsCollector(job_metrics_config, db_path))
-
-    # IOStat collector
-    iostat_config = config.get('collectors', {}).get('iostat', {})
-    if not collector or 'iostat' in collector:
-        if iostat_config.get('enabled', True):
-            collectors.append(IOStatCollector(iostat_config, db_path))
-
-    # MPStat collector
-    mpstat_config = config.get('collectors', {}).get('mpstat', {})
-    if not collector or 'mpstat' in collector:
-        if mpstat_config.get('enabled', True):
-            collectors.append(MPStatCollector(mpstat_config, db_path))
-
-    # VMStat collector
-    vmstat_config = config.get('collectors', {}).get('vmstat', {})
-    if not collector or 'vmstat' in collector:
-        if vmstat_config.get('enabled', True):
-            collectors.append(VMStatCollector(vmstat_config, db_path))
-
-    # Node state collector
-    node_state_config = config.get('collectors', {}).get('node_state', {})
-    if not collector or 'node_state' in collector:
-        if node_state_config.get('enabled', True):
-            if 'cluster_name' not in node_state_config:
-                from nomad.config import resolve_cluster_name
-                node_state_config['cluster_name'] = resolve_cluster_name(config)
-            collectors.append(NodeStateCollector(node_state_config, db_path))
-
-    # GPU collector (graceful skip if no GPU)
-    gpu_config = config.get('collectors', {}).get('gpu', {})
-    if not collector or 'gpu' in collector:
-        if gpu_config.get('enabled', True):
-            collectors.append(GPUCollector(gpu_config, db_path))
-
-    # NFS collector (graceful skip if no NFS)
-    nfs_config = config.get('collectors', {}).get('nfs', {})
-    if not collector or 'nfs' in collector:
-        if nfs_config.get('enabled', True):
-            collectors.append(NFSCollector(nfs_config, db_path))
-
-
-    # Group membership and job accounting collector
-    groups_config = config.get('collectors', {}).get('groups', {})
-    if not collector or 'groups' in collector:
-        if groups_config.get('enabled', True):
-            groups_config['clusters'] = config.get('clusters', {})
-            collectors.append(GroupCollector(groups_config, db_path))
-
-    # Interactive session collector -- check [interactive] and [collectors.interactive]
-    interactive_config = config.get("interactive", {})
-    if not interactive_config:
-        interactive_config = config.get("collectors", {}).get("interactive", {})
-    if not collector or "interactive" in collector:
-        if interactive_config.get("enabled", False):
-            collectors.append(InteractiveCollector(interactive_config, db_path))
-
-    # Workstation collector (SSH-based remote collection)
-    ws_config = config.get('collectors', {}).get('workstation', {})
-    if not collector or 'workstation' in collector:
-        if ws_config.get('enabled', False):
-            collectors.append(WorkstationCollector(ws_config, db_path))
-
-    # Per-user process tracking collector (head-node misuse detection — Idea 18)
-    # Disabled by default. Enable per-host on head nodes only:
-    #   [collectors.per_user]
-    #   enabled = true
-    #   role = "headnode"
-    per_user_config = config.get('collectors', {}).get('per_user', {})
-    if not collector or 'per_user' in collector:
-        if per_user_config.get('enabled', False):
-            collectors.append(PerUserCollector(per_user_config, db_path))
-
-
-    # Cloud collectors
-    cloud_config = config.get('collectors', {}).get('cloud', {})
-    if not collector or 'aws' in collector or 'cloud' in collector:
-        aws_config = cloud_config.get('aws', {})
-        if HAS_AWS_COLLECTOR and aws_config.get('enabled', False):
-            collectors.append(AWSCollector(aws_config, db_path=str(db_path)))
+    # Which collectors run here: nomad.collectors.plan decides, the same
+    # answer `nomad collectors` explains. (A fixed list here used to leave
+    # out storage and network_perf, so enabling them did nothing.)
+    from nomad.collectors.plan import build
+    try:
+        collectors, planned = build(config, db_path, only=collector)
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
     if not collectors:
         raise click.ClickException("No collectors enabled")
 
-    # Report which collectors are running and which were skipped
-    all_collector_names = [
-        "disk", "slurm", "job_metrics", "iostat", "mpstat",
-        "vmstat", "node_state", "gpu", "nfs", "groups", "interactive",
-        "workstation"
-    ]
     running_names = [c.name for c in collectors]
-    skipped_names = [
-        n for n in all_collector_names
-        if n not in running_names
-        and config.get("collectors", {}).get(n, {}).get("enabled", True) is False
-    ]
     click.echo(f"Running collectors: {running_names}")
-    if skipped_names:
-        click.echo(f"Disabled collectors: {skipped_names}")
+    off = [p.name for p in planned if not p.enabled and p.name not in running_names]
+    if off:
+        click.echo(f"Not enabled here: {off}")
 
     if once:
         # Single collection cycle
         for c in collectors:
             result = c.run()
             status = click.style('✓', fg='green') if result.success else click.style('✗', fg='red')
-            click.echo(f"  {status} {c.name}: {result.records_collected} records")
+            why = result.error_message or result.note
+            click.echo(f"  {status} {c.name}: {result.records_collected} records"
+                       + (f" -- {why}" if why else ""))
     else:
         # Continuous collection
         click.echo(f"Starting continuous collection (interval: {interval}s)")
@@ -341,11 +229,105 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
                 for c in collectors:
                     result = c.run()
                     status = '✓' if result.success else '✗'
-                    click.echo(f"[{datetime.now():%H:%M:%S}] {status} {c.name}: {result.records_collected} records")
+                    why = result.error_message or result.note
+                    click.echo(f"[{datetime.now():%H:%M:%S}] {status} {c.name}: "
+                               f"{result.records_collected} records"
+                               + (f" -- {why}" if why else ""))
 
                 time.sleep(interval)
         except KeyboardInterrupt:
             click.echo("\nStopping collectors")
+
+
+@cli.command('collectors')
+@click.option('--db', type=click.Path(), help='Database to read (default: this host\'s; '
+              'a hub\'s combined.db shows every site)')
+@click.option('--days', type=int, default=7, show_default=True, help='Window for run counts')
+@click.pass_context
+def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
+    """Which collectors run here, why, and whether they collect anything.
+
+    On a site: every collector nomad has, whether this host's config turns
+    it on, what it needs that this host lacks, and how its runs went
+    (from collection_log). On the hub (--db combined.db): how each site's
+    collectors ran.
+    """
+    from nomad.collectors import plan as plan_mod
+    from nomad.collectors import status
+
+    config = ctx.obj['config']
+    db_path = Path(db).expanduser() if db else get_db_path(config)
+    stats, hub_sites = {}, []
+    if db_path.exists():
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            stats = status.read(conn, days)
+            hub_sites = status.sites(conn)
+        finally:
+            conn.close()
+
+    if hub_sites:
+        click.echo(f"Collectors at each site, last {days} days ({db_path})")
+        for site in hub_sites:
+            click.echo(f"\n{site}")
+            order = [sp.logged_as for sp in plan_mod.SPECS]
+            names = sorted({k for (s, k) in stats if s == site},
+                           key=lambda n: (order.index(n) if n in order else 99, n))
+            for name in names:
+                st = stats[(site, name)]
+                flag = "" if st.working else click.style("  <--", fg="yellow")
+                click.echo(f"  {name:13} {st.summary()}{flag}")
+                if st.last_message and not st.working:
+                    click.echo(f"  {'':13} {st.last_message[:100]}")
+            missing = [sp.name for sp in plan_mod.SPECS if (site, sp.logged_as) not in stats]
+            click.echo(f"  {'not run:':13} {', '.join(missing) or '-'}")
+        return
+
+    import socket
+    from nomad.config import resolve_cluster_name
+    planned = plan_mod.plan(config)
+    click.echo(f"Collectors on {socket.gethostname()} (site {resolve_cluster_name(config)})")
+    click.echo(f"  config:   {ctx.obj.get('config_path') or '(none found: built-in defaults)'}")
+    click.echo(f"  database: {db_path}{'' if db_path.exists() else ' (not created yet)'}")
+    click.echo("")
+    needs_config = {"storage": "storage_devices", "network_perf": "network_tests",
+                    "workstation": "workstations"}
+    problems = []
+    for p in planned:
+        st = stats.get((None, p.spec.logged_as))
+        state = click.style("on ", fg="green") if p.enabled else "off"
+        line = f"  {p.name:13} {state}  {p.why}"
+        click.echo(line)
+        if p.enabled:
+            missing = p.missing()
+            key = needs_config.get(p.name)
+            if key and not p.config.get(key):
+                missing.append(f"a {key} list in [collectors.{p.name}]")
+            if missing:
+                problems.append(f"{p.name} needs {', '.join(missing)}")
+                click.echo(f"  {'':13}      needs: {', '.join(missing)}")
+            if st:
+                click.echo(f"  {'':13}      {st.summary()}")
+                if st.last_message and not st.working:
+                    click.echo(f"  {'':13}      {st.last_message[:100]}")
+            else:
+                click.echo(f"  {'':13}      no runs logged in the last {days} days")
+        else:
+            click.echo(f"  {'':13}      for: {p.spec.where}")
+        for w in p.warnings:
+            problems.append(f"{p.name}: {w}")
+
+    listed = plan_mod.unused_enabled_list(config)
+    if listed is not None:
+        click.echo("")
+        click.echo("Note: the list [collectors] enabled = " + str(listed) + " is not read. "
+                   "Each collector's own [collectors.<name>] enabled = true/false decides; "
+                   "the ones marked 'on by default' run unless turned off there.")
+    if problems:
+        click.echo("")
+        click.echo(click.style("To look at:", bold=True))
+        for item in problems:
+            click.echo(f"  - {item}")
 
 
 @cli.command()
@@ -3230,8 +3212,10 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     lines.append("[collectors.job_metrics]")
     lines.append(f"enabled = {str(has_hpc).lower()}")
     lines.append("")
+    # Group membership doesn't need Slurm (job accounting does, and is
+    # skipped without it), so every site collects it.
     lines.append("[collectors.groups]")
-    lines.append(f"enabled = {str(has_hpc).lower()}")
+    lines.append("enabled = true")
     lines.append("")
 
     # GPU collector
@@ -4543,7 +4527,7 @@ def sync(ctx, config_file, output, dry_run):
             ("jobs", "source_site, end_time"),
             ("jobs", "source_site, submit_time"),
         ]
-        click.echo(f"  Indexing... ", nl=False)
+        click.echo("  Indexing... ", nl=False)
         _built = 0
         try:
             _idx_conn = sqlite3.connect(combined_tmp_path)

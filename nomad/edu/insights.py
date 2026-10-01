@@ -632,7 +632,7 @@ def _classify_severity(avg_score: float, affected_ratio: float) -> str:
 
 def _aggregate_dimension(
     dim_key: str,
-    fingerprints: "list[JobFingerprint] | list[SessionFingerprint]",
+    fingerprints: list[JobFingerprint] | list[SessionFingerprint],
     threshold: float,
 ) -> Issue | None:
     """Build an Issue for one dimension, or None if not systemic."""

@@ -158,10 +158,12 @@ class StorageStats:
             'arc_stats': self.arc_stats.to_dict() if self.arc_stats else None,
             'nfs_exports': [e.to_dict() if hasattr(e, 'to_dict') else e for e in self.nfs_exports],
             'nfs_clients_connected': self.nfs_clients_connected,
-            'total_bytes': self.total_bytes,
-            'used_bytes': self.used_bytes,
-            'free_bytes': self.free_bytes,
-            'usage_pct': self.usage_pct,
+            # No capacity measured (no ZFS pools, no paths configured) is
+            # NULL, not an empty server at 0%.
+            'total_bytes': self.total_bytes or None,
+            'used_bytes': self.used_bytes if self.total_bytes else None,
+            'free_bytes': self.free_bytes if self.total_bytes else None,
+            'usage_pct': self.usage_pct if self.total_bytes else None,
             'read_bytes_sec': self.read_bytes_sec,
             'write_bytes_sec': self.write_bytes_sec,
             'iops_read': self.iops_read,
@@ -181,20 +183,38 @@ class StorageStats:
         return True
 
 
-def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
-    """Run command locally or via SSH."""
-    if host and host not in ('localhost', '127.0.0.1', socket.gethostname()):
-        cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {host} '{cmd}'"
+_HOST = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]*$")
 
+
+def _is_local(host: str | None) -> bool:
+    return not host or host in ('localhost', '127.0.0.1', socket.gethostname(),
+                                socket.gethostname().split('.')[0])
+
+
+def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
+    """Run one of this module's fixed commands here, or on ``host`` over SSH.
+
+    A command that fails raises: an unreachable server used to come back as
+    empty output, and was stored as a server with no storage.
+    """
+    if _is_local(host):
+        argv, shell = cmd, True
+    else:
+        if not _HOST.match(host or ""):
+            raise CollectionError(f"not a valid host name: {host!r}")
+        argv = ["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", host, cmd]
+        shell = False
     try:
-        result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout
-        )
-        return result.stdout.strip()
+        result = subprocess.run(argv, shell=shell, capture_output=True, text=True,
+                                timeout=timeout)
     except subprocess.TimeoutExpired:
         raise CollectionError(f"Command timed out: {cmd[:50]}...")
     except Exception as e:
         raise CollectionError(f"Command failed: {e}")
+    if result.returncode != 0:
+        raise CollectionError(f"{cmd.split()[0]} failed on {host or 'localhost'} "
+                              f"(exit {result.returncode}): {result.stderr.strip()[:120]}")
+    return result.stdout.strip()
 
 
 def parse_zpool_list(output: str) -> list[ZFSPool]:
@@ -355,6 +375,10 @@ class StorageCollector(BaseCollector):
         """Collect metrics from all configured storage devices."""
         results = []
 
+        if not self.storage_devices:
+            self.note = "no storage_devices configured"
+            return []
+
         for device_config in self.storage_devices:
             hostname = device_config.get('hostname')
             storage_type = device_config.get('type', 'zfs')
@@ -363,7 +387,8 @@ class StorageCollector(BaseCollector):
                 continue
 
             try:
-                stats = self._collect_storage(hostname, storage_type)
+                stats = self._collect_storage(hostname, storage_type,
+                                              device_config.get('paths') or [])
                 results.append(stats.to_dict())
                 logger.debug(f"Collected from {hostname}: {stats.status}")
             except CollectionError as e:
@@ -383,10 +408,16 @@ class StorageCollector(BaseCollector):
 
         return results
 
-    def _collect_storage(self, hostname: str, storage_type: str) -> StorageStats:
+    def _collect_storage(self, hostname: str, storage_type: str,
+                         paths: list | None = None) -> StorageStats:
         """Collect metrics from a single storage device."""
         stats = StorageStats(hostname=hostname, storage_type=storage_type)
         stats.last_seen = datetime.now()
+        self._paths = [p for p in (paths or []) if isinstance(p, str) and p.startswith('/')
+                       and "'" not in p and ' ' not in p]
+
+        if not _is_local(hostname):
+            run_command('true', hostname)        # unreachable: raises, stored as offline
 
         if storage_type == 'zfs':
             self._collect_zfs(stats, hostname)
@@ -455,19 +486,28 @@ class StorageCollector(BaseCollector):
             pass
 
     def _collect_disk(self, stats: StorageStats, hostname: str) -> None:
-        """Collect generic disk metrics."""
-        # If ZFS didn't populate, use df
-        if stats.total_bytes == 0:
+        """Capacity from df, for the device's configured ``paths``.
+
+        Only when ZFS gave none, and only for paths named in the config: the
+        root filesystem of a file server says nothing about what it serves
+        (it used to be reported as the server's storage).
+        """
+        if stats.total_bytes or not getattr(self, '_paths', None):
+            return
+        seen = set()
+        for path in self._paths:
             try:
-                df_out = run_command('df -B1 / | tail -1', hostname)
-                parts = df_out.split()
-                if len(parts) >= 4:
-                    stats.total_bytes = int(parts[1])
-                    stats.used_bytes = int(parts[2])
-                    stats.free_bytes = int(parts[3])
-                    stats.usage_pct = (stats.used_bytes / max(stats.total_bytes, 1)) * 100
+                parts = run_command(f"df -B1 -P '{path}' | tail -1", hostname).split()
+                # Two paths on one filesystem count once (df's first column).
+                if len(parts) >= 4 and parts[0] not in seen:
+                    seen.add(parts[0])
+                    stats.total_bytes += int(parts[1])
+                    stats.used_bytes += int(parts[2])
+                    stats.free_bytes += int(parts[3])
             except (CollectionError, ValueError):
-                pass
+                continue
+        if stats.total_bytes:
+            stats.usage_pct = stats.used_bytes / stats.total_bytes * 100
 
     def store(self, data: list[dict[str, Any]]) -> None:
         """Store storage metrics in database."""
@@ -518,15 +558,16 @@ class StorageCollector(BaseCollector):
                 record.get('hostname'),
                 record.get('storage_type'),
                 record.get('status', 'unknown'),
-                record.get('total_bytes', 0),
-                record.get('used_bytes', 0),
-                record.get('free_bytes', 0),
-                record.get('usage_pct', 0),
-                record.get('read_bytes_sec', 0),
-                record.get('write_bytes_sec', 0),
-                record.get('iops_read', 0),
-                record.get('iops_write', 0),
-                record.get('nfs_clients_connected', 0),
+                # An offline server's capacity is unknown, not zero.
+                record.get('total_bytes'),
+                record.get('used_bytes'),
+                record.get('free_bytes'),
+                record.get('usage_pct'),
+                record.get('read_bytes_sec'),
+                record.get('write_bytes_sec'),
+                record.get('iops_read'),
+                record.get('iops_write'),
+                record.get('nfs_clients_connected'),
                 json.dumps(record.get('pools', [])),
                 json.dumps(record.get('arc_stats')),
                 json.dumps(record.get('nfs_exports', [])),

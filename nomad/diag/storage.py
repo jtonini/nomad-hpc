@@ -95,6 +95,10 @@ def get_storage_state(db_path: str, hostname: str) -> dict | None:
         conn.close()
         if row:
             result = dict(row)
+            # nomad's storage collector writes usage_pct; the demo database
+            # has usage_percent. Read either.
+            if result.get('usage_percent') is None and 'usage_pct' in result:
+                result['usage_percent'] = result['usage_pct']
             # Parse JSON fields
             for field in ['pools_json', 'arc_stats_json', 'nfs_exports_json']:
                 if result.get(field):
@@ -115,15 +119,22 @@ def get_state_history(db_path: str, hostname: str, hours: int = 24) -> list:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         since = (datetime.now() - timedelta(hours=hours)).isoformat()
+        # SELECT *: nomad's collector and the demo database name some
+        # columns differently (usage_pct / usage_percent); asking for the
+        # demo's names failed on real data and returned no history.
         rows = conn.execute("""
-            SELECT timestamp, status, total_bytes, used_bytes, free_bytes,
-                   usage_percent, throughput_read_mbps, throughput_write_mbps, pools_json
-            FROM storage_state 
+            SELECT * FROM storage_state
             WHERE hostname = ? AND timestamp > ?
             ORDER BY timestamp DESC
         """, (hostname, since)).fetchall()
         conn.close()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            if d.get('usage_percent') is None and 'usage_pct' in d:
+                d['usage_percent'] = d['usage_pct']
+            out.append(d)
+        return out
     except Exception as e:
         logger.error(f"Error getting state history: {e}")
         return []
@@ -138,7 +149,7 @@ def analyze_usage_trend(history: list) -> dict:
     data_points = []
     for record in history:
         timestamp = record.get('timestamp')
-        used = record.get('used_bytes', 0)
+        used = (record.get('used_bytes') or 0)
 
         if isinstance(timestamp, str):
             try:
@@ -152,7 +163,7 @@ def analyze_usage_trend(history: list) -> dict:
         return {}
 
     # Get total capacity from most recent record
-    total_bytes = history[0].get('total_bytes', 0) if history else 0
+    total_bytes = (history[0].get('total_bytes') or 0) if history else 0
 
     analysis = analyze_disk_derivative(data_points, limit_bytes=total_bytes)
 
@@ -177,11 +188,11 @@ def analyze_zfs_pools(pools: list) -> list[ZFSPoolDiagnostic]:
         diag = ZFSPoolDiagnostic(
             name=pool.get('name', 'unknown'),
             health=pool.get('health', 'UNKNOWN'),
-            capacity_pct=pool.get('capacity_pct', 0),
-            fragmentation_pct=pool.get('fragmentation_pct', 0),
-            read_errors=pool.get('read_errors', 0),
-            write_errors=pool.get('write_errors', 0),
-            checksum_errors=pool.get('checksum_errors', 0),
+            capacity_pct=(pool.get('capacity_pct') or 0),
+            fragmentation_pct=(pool.get('fragmentation_pct') or 0),
+            read_errors=(pool.get('read_errors') or 0),
+            write_errors=(pool.get('write_errors') or 0),
+            checksum_errors=(pool.get('checksum_errors') or 0),
             scrub_in_progress=pool.get('scrub_in_progress', False),
             last_scrub=pool.get('last_scrub'),
         )
@@ -222,7 +233,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, pools: li
     status = state.get('status', '')
 
     # Check overall capacity
-    usage_percent = state.get('usage_percent', 0)
+    usage_percent = (state.get('usage_percent') or 0)
     if usage_percent > 95:
         causes.append({
             'cause': 'Storage Almost Full',
@@ -250,7 +261,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, pools: li
     # Check ARC efficiency
     arc_stats = state.get('arc_stats')
     if arc_stats and isinstance(arc_stats, dict):
-        hit_ratio = arc_stats.get('hit_ratio', 0)
+        hit_ratio = (arc_stats.get('hit_ratio') or 0)
         if hit_ratio < 0.7:
             causes.append({
                 'cause': 'Low ZFS ARC Hit Ratio',
@@ -259,7 +270,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, pools: li
             })
 
     # Check NFS clients
-    nfs_clients = state.get('nfs_clients_connected', 0)
+    nfs_clients = (state.get('nfs_clients_connected') or 0)
     if nfs_clients > 100:
         causes.append({
             'cause': 'High NFS Client Load',
@@ -384,13 +395,13 @@ def diagnose_storage(
     )
 
     if state:
-        diag.total_bytes = state.get('total_bytes', 0)
-        diag.used_bytes = state.get('used_bytes', 0)
-        diag.free_bytes = state.get('free_bytes', 0)
-        diag.usage_percent = state.get('usage_percent', 0)
-        diag.nfs_clients = state.get('nfs_clients_connected', 0)
-        diag.read_bytes_sec = state.get('read_bytes_sec', 0)
-        diag.write_bytes_sec = state.get('write_bytes_sec', 0)
+        diag.total_bytes = (state.get('total_bytes') or 0)
+        diag.used_bytes = (state.get('used_bytes') or 0)
+        diag.free_bytes = (state.get('free_bytes') or 0)
+        diag.usage_percent = (state.get('usage_percent') or 0)
+        diag.nfs_clients = (state.get('nfs_clients_connected') or 0)
+        diag.read_bytes_sec = (state.get('read_bytes_sec') or 0)
+        diag.write_bytes_sec = (state.get('write_bytes_sec') or 0)
 
         # Parse ZFS pools
         pools_data = state.get('pools', [])
@@ -400,8 +411,8 @@ def diagnose_storage(
         # Parse ARC stats
         arc_stats = state.get('arc_stats')
         if arc_stats and isinstance(arc_stats, dict):
-            diag.arc_hit_ratio = arc_stats.get('hit_ratio', 0)
-            diag.arc_size_gb = arc_stats.get('size_bytes', 0) / (1024**3)
+            diag.arc_hit_ratio = (arc_stats.get('hit_ratio') or 0)
+            diag.arc_size_gb = (arc_stats.get('size_bytes') or 0) / (1024**3)
 
         # Parse NFS exports
         diag.nfs_exports = state.get('nfs_exports', [])
@@ -415,7 +426,7 @@ def diagnose_storage(
     if history:
         diag.resource_history = {
             'samples': len(history),
-            'avg_usage_percent': sum(h.get('usage_percent', 0) or 0 for h in history) / max(len(history), 1),
+            'avg_usage_percent': sum((h.get('usage_percent') or 0) or 0 for h in history) / max(len(history), 1),
         }
 
     # Determine causes

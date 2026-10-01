@@ -43,6 +43,7 @@ nav:
     - Setup Wizard: setup-wizard.md
     - System Install: system-install.md
     - Configuration: config.md
+    - Collectors: collectors.md
   - Features:
     - Dashboard: dashboard.md
     - GPU Monitoring: gpu.md

@@ -21,8 +21,8 @@ path = "nomad.db"
 # ============================================
 
 [collectors]
-# Enable/disable specific collectors
-enabled = ["disk", "slurm", "node_state"]
+# Each collector is turned on or off in its own [collectors.<name>] table
+# (enabled = true/false); see nomad.toml.example and `nomad collectors`.
 # Collection interval in seconds
 interval = 60
 

@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .base import BaseCollector, CollectionError, registry
+from .base import BaseCollector, CollectionError, registry, MissingToolError
 
 from nomad.alerts import send_alert
 
@@ -151,7 +151,7 @@ class NodeStateCollector(BaseCollector):
                 self._dispatch_state_alerts(records)
             return records
         except FileNotFoundError:
-            raise CollectionError("scontrol not found - SLURM not installed?")
+            raise MissingToolError("scontrol not found - SLURM not installed?")
         except subprocess.TimeoutExpired:
             raise CollectionError("scontrol timed out")
 

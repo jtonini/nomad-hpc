@@ -6,6 +6,7 @@
 |---------|-------------|
 | `nomad init` | Setup wizard |
 | `nomad collect` | Start data collection |
+| `nomad collectors` | Which collectors run here, why, and how their runs went |
 | `nomad dashboard` | Launch web interface |
 | `nomad demo` | Demo mode with synthetic data |
 | `nomad status` | System status |
@@ -59,7 +60,15 @@ nomad collect --once
 
 # Specific collectors
 nomad collect -C disk,slurm,groups
+
+# Which collectors run here, why, and whether they collect anything
+nomad collectors
+
+# On the hub: how every site's collectors ran in the last 7 days
+nomad collectors --db ~/.local/share/nomad/combined.db
 ```
+
+See [Collectors](collectors.md).
 
 ## Global Options
 

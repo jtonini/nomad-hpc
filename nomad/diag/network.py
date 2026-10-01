@@ -137,7 +137,7 @@ def analyze_throughput_trend(history: list) -> dict:
 
     for record in history:
         timestamp = record.get('timestamp')
-        throughput = record.get('throughput_mbps', 0)
+        throughput = (record.get('throughput_mbps') or 0)
 
         if isinstance(timestamp, str):
             try:
@@ -167,7 +167,7 @@ def analyze_latency_trend(history: list) -> dict:
 
     for record in history:
         timestamp = record.get('timestamp')
-        latency = record.get('ping_avg_ms', 0)
+        latency = (record.get('ping_avg_ms') or 0)
 
         if isinstance(timestamp, str):
             try:
@@ -200,7 +200,7 @@ def analyze_time_patterns(history: list) -> dict:
 
     for record in history:
         timestamp = record.get('timestamp')
-        throughput = record.get('throughput_mbps', 0)
+        throughput = (record.get('throughput_mbps') or 0)
 
         if not throughput:
             continue
@@ -249,7 +249,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, time_patt
     status = state.get('status', '')
 
     # Check packet loss
-    loss = state.get('ping_loss_pct', 0)
+    loss = (state.get('ping_loss_pct') or 0)
     if loss > 5:
         causes.append({
             'cause': 'High Packet Loss',
@@ -264,8 +264,8 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, time_patt
         })
 
     # Check latency
-    latency = state.get('ping_avg_ms', 0)
-    jitter = state.get('ping_mdev_ms', 0)
+    latency = (state.get('ping_avg_ms') or 0)
+    jitter = (state.get('ping_mdev_ms') or 0)
 
     if latency > 100:
         causes.append({
@@ -288,7 +288,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, time_patt
         })
 
     # Check TCP retransmits
-    retrans = state.get('tcp_retrans', 0)
+    retrans = (state.get('tcp_retrans') or 0)
     if retrans > 100:
         causes.append({
             'cause': 'Excessive TCP Retransmits',
@@ -303,7 +303,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, time_patt
         })
 
     # Check throughput
-    throughput = state.get('throughput_mbps', 0)
+    throughput = (state.get('throughput_mbps') or 0)
     if throughput and throughput < 100:
         causes.append({
             'cause': 'Low Throughput',
@@ -447,15 +447,15 @@ def diagnose_network(
     )
 
     if state:
-        diag.latency_avg_ms = state.get('ping_avg_ms', 0) or 0
-        diag.latency_jitter_ms = state.get('ping_mdev_ms', 0) or 0
-        diag.packet_loss_pct = state.get('ping_loss_pct', 0) or 0
-        diag.throughput_mbps = state.get('throughput_mbps', 0) or 0
-        diag.tcp_retrans = state.get('tcp_retrans', 0) or 0
+        diag.latency_avg_ms = (state.get('ping_avg_ms') or 0)
+        diag.latency_jitter_ms = (state.get('ping_mdev_ms') or 0) or 0
+        diag.packet_loss_pct = (state.get('ping_loss_pct') or 0) or 0
+        diag.throughput_mbps = (state.get('throughput_mbps') or 0) or 0
+        diag.tcp_retrans = (state.get('tcp_retrans') or 0) or 0
 
     # Calculate historical stats
     if history:
-        throughputs = [h.get('throughput_mbps', 0) for h in history if h.get('throughput_mbps')]
+        throughputs = [(h.get('throughput_mbps') or 0) for h in history if h.get('throughput_mbps')]
         if throughputs:
             diag.samples_count = len(throughputs)
             diag.avg_throughput_mbps = sum(throughputs) / len(throughputs)

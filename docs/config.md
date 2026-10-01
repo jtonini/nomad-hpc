@@ -22,8 +22,11 @@ log_level = "INFO"
 path = "/var/lib/nomad/nomad.db"
 
 [collectors]
-enabled = ["disk", "iostat", "slurm", "gpu", "nfs"]
-interval = 60  # seconds
+interval = 60  # seconds, for `nomad collect` without --once
+
+# Each collector is turned on or off in its own table (see Collectors).
+[collectors.nfs]
+enabled = false
 
 [collectors.disk]
 filesystems = ["/", "/home", "/scratch"]

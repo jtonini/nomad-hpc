@@ -615,6 +615,8 @@ class GPUCollector(BaseCollector):
     def collect(self) -> list[dict[str, Any]]:
         """Collect GPU statistics (DCGM if available, nvidia-smi otherwise)."""
         if not self._check_gpu_available():
+            self.note = ("none of the configured GPU nodes answered over SSH"
+                         if self._gpu_nodes else "no NVIDIA GPU here (nvidia-smi)")
             return []
 
         all_records: list[dict[str, Any]] = []
