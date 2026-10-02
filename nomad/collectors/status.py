@@ -27,6 +27,7 @@ class RunStats:
     last_run: str | None = None
     last_data: str | None = None     # ever, not only in the window
     last_message: str | None = None  # the newest error or note in the window
+    now_message: str | None = None   # the newest run's error or note, if it had one
 
     def summary(self) -> str:
         if not self.runs:
@@ -80,6 +81,14 @@ def read(conn: sqlite3.Connection, days: int = 7) -> dict[tuple, RunStats]:
             f"SELECT {site}, collector, MAX(started_at) FROM collection_log "
             "WHERE success AND records_collected > 0 GROUP BY 1, 2"):
         out.setdefault((s, k), RunStats()).last_data = last
+    # What the newest run said: a collector that worked earlier in the
+    # window and now collects nothing (per_user on arachne after 1.7.13)
+    # must not hide behind its older runs.
+    for s, k, msg, _ in conn.execute(
+            f"SELECT {site}, collector, error_message, MAX(started_at) FROM collection_log "
+            "WHERE started_at >= ? GROUP BY 1, 2", (since,)):
+        if msg and (s, k) in out:
+            out[(s, k)].now_message = " ".join(str(msg).split())
     return out
 
 

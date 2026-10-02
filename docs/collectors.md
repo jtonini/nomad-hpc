@@ -21,7 +21,7 @@ enabled = false
 | `vmstat` | on | every host | `vmstat` | `vmstat` |
 | `node_state` | on | Slurm head node | `scontrol` | `node_state` |
 | `gpu` | on | hosts with NVIDIA GPUs, or a head node reaching GPU nodes over SSH | `nvidia-smi` (DCGM if present) | `gpu_stats`, `gpu_health` |
-| `nfs` | on | hosts that mount NFS (client side) | `nfsiostat` (nfs-utils) | `nfs_stats` |
+| `nfs` | on | hosts that mount NFS (client side) | `nfsiostat` (nfs-utils, in `/usr/sbin`) | `nfs_stats` |
 | `groups` | on | every site | `getent`; `sacct` for job accounting | `group_membership`, `job_accounting` |
 | `interactive` | off | hosts running RStudio or Jupyter | — | `interactive_sessions`, `interactive_summary` |
 | `workstation` | off | a hub reaching workstations over SSH | `ssh` | `workstation_state`, `workstation_user_snapshot`, ... |
@@ -54,6 +54,12 @@ On a site, lists every collector: on or off and why, what it needs that this hos
 On the hub, `nomad collectors --db ~/.local/share/nomad/combined.db` shows each site's collectors and marks those that run but collect nothing.
 
 A collector that runs but has nothing to collect logs why — `nfsiostat not installed`, `no NFS mounts on this host`, `no NVIDIA GPU here`, `psutil not installed: nothing collected`, `no network_tests configured` — in `collection_log.error_message` of a successful run. Before 1.7.13 these logged "success, 0 records" (or, for `groups` and `per_user`, "1 records" whatever they held), which looked like a working collector. A command that isn't installed fails the run at once with the reason, without retrying.
+
+Commands are looked for on the PATH and in `/usr/sbin`, `/sbin`, `/usr/local/sbin` and `/usr/local/bin`: cron's PATH is only `/usr/bin:/bin`, and nfs-utils installs `nfsiostat` in `/usr/sbin`.
+
+## NFS
+
+On a host that mounts NFS, each run reads `nfsiostat 5 2` and keeps the second report: what each mount did in those 5 seconds (`sample_seconds` in `[collectors.nfs]`). The first report averages everything since the share was mounted. Per mount: operations, read and write rates, and round-trip and execution times and retransmissions weighted over reads and writes — empty (NULL) for a mount with no reads or writes in the sample, rather than 0 ms. A host that mounts nothing says "no NFS mounts on this host"; turn nfs off there.
 
 ## Network
 

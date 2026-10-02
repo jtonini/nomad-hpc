@@ -91,15 +91,9 @@ def db(tmp_path):
 
 
 def test_nfs_without_nfsiostat_logs_the_reason(db, monkeypatch):
-    from nomad.collectors.nfs import NFSCollector
-    real_run = subprocess.run
-
-    def fake_run(cmd, *a, **k):
-        if cmd[:2] == ["which", "nfsiostat"]:
-            return subprocess.CompletedProcess(cmd, 1, "", "")
-        return real_run(cmd, *a, **k)
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    r = NFSCollector({}, db).run()
+    from nomad.collectors import nfs
+    monkeypatch.setattr(nfs, "find_tool", lambda name: None)
+    r = nfs.NFSCollector({}, db).run()
     assert r.success and r.records_collected == 0
     assert r.note == "nfsiostat not installed (nfs-utils)"
     assert _log(db)[-1] == ("nfs", 1, 0, "nfsiostat not installed (nfs-utils)")
@@ -427,3 +421,109 @@ def test_workstation_clusters_without_an_ssh_account_read_membership_here(db, mo
     monkeypatch.setattr(c, "_run_cmd", run_cmd)
     r = c.run()
     assert calls == [None] and r.records_collected == 2
+
+
+
+# ── 1.7.14: tools outside cron's PATH; the newest run's reason ─────────
+
+def test_nfsiostat_in_usr_sbin_is_found_under_crons_path(db, tmp_path, monkeypatch):
+    """nfs-utils puts nfsiostat in /usr/sbin; cron's PATH is /usr/bin:/bin.
+    All four UR sites logged "nfsiostat not installed" with it installed."""
+    from nomad.collectors import base, nfs
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    tool = sbin / "nfsiostat"
+    tool.write_text("#!/bin/sh\necho\n")
+    tool.chmod(0o755)
+    monkeypatch.setattr(base, "EXTRA_TOOL_DIRS", (str(sbin),))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert base.find_tool("nfsiostat") == str(tool)
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda f, *a, **k: real_open(
+        tmp_path / "mounts" if f == "/proc/mounts" else f, *a, **k))
+    (tmp_path / "mounts").write_text("srv:/home /home nfs4 rw 0 0\n")
+    r = nfs.NFSCollector({}, db).run()
+    assert r.note == "nfsiostat printed nothing nomad could read"   # ran it, from sbin
+
+
+def test_the_hub_shows_why_a_collector_stopped_collecting(tmp_path, db):
+    """per_user on arachne: data all week from the old version's envelope,
+    nothing since the upgrade -- the newest run's reason is shown."""
+    from nomad.cli import cli
+    now = datetime.now()
+    rows = [("per_user", (now - timedelta(hours=h)).isoformat(), None, 1, 1, None, "arachne")
+            for h in range(30, 40)]
+    rows += [("per_user", (now - timedelta(hours=h)).isoformat(), None, 1, 0,
+              "psutil not installed: nothing collected", "arachne") for h in range(0, 5)]
+    _write_log(db, rows, site_col=True)
+    cfg = tmp_path / "nomad.toml"
+    cfg.write_text("[collectors]\n")
+    out = CliRunner().invoke(cli, ["-c", str(cfg), "collectors", "--db", str(db)]).output
+    assert "15 runs, 10 with data" in out
+    assert "now: psutil not installed: nothing collected" in out
+
+
+NFSIOSTAT_TWO_REPORTS = """
+srv1:/export/home mounted on /home:
+
+           ops/s       rpc bklog
+         512.000           0.000
+
+read:              ops/s            kB/s           kB/op         retrans    avg RTT (ms)    avg exe (ms)  avg queue (ms)          errors
+                 200.000        9000.000          45.000        0 (0.0%)           1.000           1.100           0.020        0 (0.0%)
+write:             ops/s            kB/s           kB/op         retrans    avg RTT (ms)    avg exe (ms)  avg queue (ms)          errors
+                 100.000        5000.000          50.000        0 (0.0%)           3.000           3.200           0.022        0 (0.0%)
+
+srv1:/export/scratch mounted on /scratch:
+
+           ops/s       rpc bklog
+           1.000           0.000
+
+read:             ops/s            kB/s           kB/op         retrans         avg RTT (ms)    avg exe (ms)
+                  0.000           0.000           0.000        0 (0.0%)           0.000           0.000
+write:            ops/s            kB/s           kB/op         retrans         avg RTT (ms)    avg exe (ms)
+                  0.000           0.000           0.000        0 (0.0%)           0.000           0.000
+
+srv1:/export/home mounted on /home:
+
+           ops/s       rpc bklog
+          19.857           0.000
+
+read:              ops/s            kB/s           kB/op         retrans    avg RTT (ms)    avg exe (ms)  avg queue (ms)          errors
+                   2.000         128.000          64.000        3 (1.5%)           1.000           1.200           0.020        0 (0.0%)
+write:             ops/s            kB/s           kB/op         retrans    avg RTT (ms)    avg exe (ms)  avg queue (ms)          errors
+                   2.000          58.000          29.000        0 (0.0%)           3.000           3.400           0.022        0 (0.0%)
+"""
+
+
+def test_nfsiostat_is_read_as_it_prints_the_latest_report_per_mount(db, tmp_path, monkeypatch):
+    """The parser expected one 8-number line per mount and never matched
+    real output; and `nfsiostat 1 1` gave since-mount averages."""
+    from nomad.collectors import base, nfs
+    sbin = tmp_path / "sbin"
+    sbin.mkdir()
+    out = tmp_path / "report.txt"
+    out.write_text(NFSIOSTAT_TWO_REPORTS)
+    args = tmp_path / "args.txt"
+    tool = sbin / "nfsiostat"
+    tool.write_text(f'#!/bin/sh\necho "$@" > {args}\ncat {out}\n')
+    tool.chmod(0o755)
+    monkeypatch.setattr(base, "EXTRA_TOOL_DIRS", (str(sbin),))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    real_open = open
+    monkeypatch.setattr("builtins.open", lambda f, *a, **k: real_open(
+        tmp_path / "mounts" if f == "/proc/mounts" else f, *a, **k))
+    (tmp_path / "mounts").write_text("srv1:/export/home /home nfs4 rw 0 0\n")
+
+    r = nfs.NFSCollector({}, db).run()
+    assert args.read_text().split() == ["5", "2"]          # a 5 s interval report
+    assert r.success and r.records_collected == 2 and r.note is None
+    conn = sqlite3.connect(db)
+    rows = {m: rest for m, *rest in conn.execute(
+        "SELECT mount_point, server, ops_per_sec, read_kb_per_sec, write_kb_per_sec, "
+        "avg_rtt_ms, retrans_percent FROM nfs_stats")}
+    conn.close()
+    # /home from the second report (19.857 ops/s), not the since-mount one (512)
+    assert rows["/home"] == ["srv1:/export/home", 19.857, 128.0, 58.0, 2.0, 0.75]
+    # an idle mount: rates 0, latency unknown rather than 0 ms
+    assert rows["/scratch"][1:] == [1.0, 0.0, 0.0, None, None]

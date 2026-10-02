@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from .base import BaseCollector, CollectionError, registry
+from .base import BaseCollector, CollectionError, registry, tool_env
 
 logger = logging.getLogger(__name__)
 
@@ -197,8 +197,9 @@ def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
     A command that fails raises: an unreachable server used to come back as
     empty output, and was stored as a server with no storage.
     """
+    env = None
     if _is_local(host):
-        argv, shell = cmd, True
+        argv, shell, env = cmd, True, tool_env()     # zpool, exportfs: /usr/sbin
     else:
         if not _HOST.match(host or ""):
             raise CollectionError(f"not a valid host name: {host!r}")
@@ -206,7 +207,7 @@ def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
         shell = False
     try:
         result = subprocess.run(argv, shell=shell, capture_output=True, text=True,
-                                timeout=timeout)
+                                timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         raise CollectionError(f"Command timed out: {cmd[:50]}...")
     except Exception as e:

@@ -20,6 +20,28 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Where system tools live that cron's PATH (/usr/bin:/bin) leaves out:
+# nfs-utils puts nfsiostat in /usr/sbin, ZFS puts zpool there. nomad
+# reported "nfsiostat not installed" at four sites where it was installed.
+EXTRA_TOOL_DIRS = ("/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/local/bin")
+
+
+def find_tool(name: str) -> str | None:
+    """Full path of a command, looking past cron's short PATH."""
+    import shutil
+    return shutil.which(name) or shutil.which(name, path=":".join(EXTRA_TOOL_DIRS))
+
+
+def tool_env() -> dict:
+    """The environment with EXTRA_TOOL_DIRS appended to PATH, for commands
+    run through a shell."""
+    import os
+    env = dict(os.environ)
+    path = env.get("PATH", "")
+    extra = [d for d in EXTRA_TOOL_DIRS if d not in path.split(":")]
+    env["PATH"] = ":".join([p for p in [path] if p] + extra)
+    return env
+
 # Alert integration (optional)
 try:
     from nomad.alerts.thresholds import check_and_alert

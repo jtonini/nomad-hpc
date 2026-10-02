@@ -99,8 +99,9 @@ class Planned:
     def missing(self) -> list[str]:
         """Commands and modules this collector needs that this host lacks."""
         out = []
+        from nomad.collectors.base import find_tool
         for c in self.spec.commands:
-            if not any(shutil.which(alt) for alt in c.split("|")):
+            if not any(find_tool(alt) for alt in c.split("|")):
                 out.append(c.replace("|", " or "))
         for m in self.spec.modules:
             try:

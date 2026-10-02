@@ -275,10 +275,13 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
                            key=lambda n: (order.index(n) if n in order else 99, n))
             for name in names:
                 st = stats[(site, name)]
-                flag = "" if st.working else click.style("  <--", fg="yellow")
+                flag = "" if st.working and not st.now_message else \
+                    click.style("  <--", fg="yellow")
                 click.echo(f"  {name:13} {st.summary()}{flag}")
                 if st.last_message and not st.working:
                     click.echo(f"  {'':13} {st.last_message[:100]}")
+                elif st.now_message:
+                    click.echo(f"  {'':13} now: {st.now_message[:100]}")
             missing = [sp.name for sp in plan_mod.SPECS if (site, sp.logged_as) not in stats]
             click.echo(f"  {'not run:':13} {', '.join(missing) or '-'}")
         return
@@ -310,6 +313,8 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
                 click.echo(f"  {'':13}      {st.summary()}")
                 if st.last_message and not st.working:
                     click.echo(f"  {'':13}      {st.last_message[:100]}")
+                elif st.now_message:
+                    click.echo(f"  {'':13}      now: {st.now_message[:100]}")
             else:
                 click.echo(f"  {'':13}      no runs logged in the last {days} days")
         else:

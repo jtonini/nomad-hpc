@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .base import BaseCollector, registry
+from .base import BaseCollector, registry, find_tool
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +37,11 @@ class NFSStats:
     write_kb_per_sec: float
 
     # Latency (ms)
-    avg_rtt_ms: float       # Round-trip time
-    avg_exe_ms: float       # Execution time (includes queue)
+    avg_rtt_ms: float | None   # Round-trip time (None: no reads or writes)
+    avg_exe_ms: float | None   # Execution time (includes queue)
 
     # Retransmissions
-    retrans_percent: float
+    retrans_percent: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -56,6 +56,18 @@ class NFSStats:
             'avg_exe_ms': self.avg_exe_ms,
             'retrans_percent': self.retrans_percent,
         }
+
+
+def _numbers(line: str) -> list[float]:
+    """Numbers on an nfsiostat value line; "(0.0%)" counts as one."""
+    out = []
+    for tok in line.split():
+        tok = tok.strip('()%')
+        try:
+            out.append(float(tok))
+        except ValueError:
+            continue
+    return out
 
 
 @registry.register
@@ -82,6 +94,8 @@ class NFSCollector(BaseCollector):
         super().__init__(config, db_path)
 
         self._nfs_available = None  # Lazy check
+        # Seconds the interval report covers (the run takes this long).
+        self._sample_seconds = int(config.get('sample_seconds', 5))
         logger.info("NFSCollector initialized")
 
     def _check_nfs_available(self) -> bool:
@@ -89,21 +103,12 @@ class NFSCollector(BaseCollector):
         if self._nfs_available is not None:
             return self._nfs_available
 
-        # Check for nfsiostat command
-        try:
-            result = subprocess.run(
-                ['which', 'nfsiostat'],
-                capture_output=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                self._nfs_available = False
-                self._nfs_reason = "nfsiostat not installed (nfs-utils)"
-                logger.info("nfsiostat not found - NFS collector will be skipped")
-                return False
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        # Check for nfsiostat (in /usr/sbin, outside cron's PATH)
+        self._nfsiostat = find_tool('nfsiostat')
+        if not self._nfsiostat:
             self._nfs_available = False
             self._nfs_reason = "nfsiostat not installed (nfs-utils)"
+            logger.info("nfsiostat not found - NFS collector will be skipped")
             return False
 
         # Check for NFS mounts
@@ -131,91 +136,107 @@ class NFSCollector(BaseCollector):
 
         try:
             # Run nfsiostat with 1 second interval, single report
+            # `nfsiostat N 2`: the first report averages everything since the
+            # share was mounted (months, on a server); the second covers the
+            # last N seconds, which is what "now" means. (`1 1` printed only
+            # the since-mount averages.)
             result = subprocess.run(
-                ['nfsiostat', '1', '1'],
+                [self._nfsiostat, str(self._sample_seconds), '2'],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=self._sample_seconds + 30,
             )
 
             if result.returncode != 0:
-                logger.debug(f"nfsiostat failed: {result.stderr}")
+                self.note = f"nfsiostat failed: {' '.join(result.stderr.split())[:100]}"
                 return []
 
-            return self._parse_nfsiostat_output(result.stdout)
+            records = self._parse_nfsiostat_output(result.stdout)
+            if not records:
+                self.note = "nfsiostat printed nothing nomad could read"
+            return records
 
         except subprocess.TimeoutExpired:
-            logger.warning("nfsiostat timed out")
+            self.note = "nfsiostat timed out"
             return []
         except Exception as e:
-            logger.debug(f"NFS collection failed: {e}")
+            self.note = f"NFS collection failed: {e}"
             return []
 
     def _parse_nfsiostat_output(self, output: str) -> list[dict[str, Any]]:
-        """Parse nfsiostat output."""
-        records = []
-        timestamp = datetime.now()
+        """The last report per mount from nfsiostat (nfs-utils 1.3 and 2.x).
 
-        lines = output.strip().split('\n')
+        Each mount prints::
 
-        current_mount = None
-        current_server = None
+            srv:/export/home mounted on /home:
 
-        for i, line in enumerate(lines):
-            line = line.strip()
+                       ops/s       rpc bklog
+                      19.857           0.000
 
-            # Detect mount line: "server:/export mounted on /mount/point"
+            read:   ops/s  kB/s  kB/op  retrans  avg RTT (ms)  avg exe (ms)  [avg queue (ms)  errors]
+                    2.394  128.582  53.712  0 (0.0%)  1.128  1.163  [0.020  0 (0.0%)]
+            write:  (the same columns)
+
+        With two reports, a mount appears twice; the later one wins.
+        """
+        timestamp = datetime.now().isoformat()
+        latest: dict[str, dict] = {}
+        mount = server = None
+        section = None
+        for raw in output.splitlines():
+            line = raw.strip()
             if ' mounted on ' in line:
-                parts = line.split(' mounted on ')
-                if len(parts) == 2:
-                    current_server = parts[0].strip()
-                    current_mount = parts[1].strip().rstrip(':')
+                server, mount = (p.strip() for p in line.split(' mounted on ', 1))
+                mount = mount.rstrip(':')
+                latest[mount] = {'mount_point': mount, 'server': server}
+                section = None
                 continue
-
-            # Skip headers and empty lines
-            if not line or line.startswith('op/s') or 'nfsiostat' in line.lower():
+            if mount is None or not line:
                 continue
+            if line.startswith('ops/s'):
+                section = 'ops'
+                continue
+            if line.startswith('read:') or line.startswith('write:'):
+                section = line.split(':', 1)[0]
+                continue
+            if section and line[0].isdigit():
+                values = _numbers(line)
+                rec = latest[mount]
+                if section == 'ops' and values:
+                    rec['ops'] = values[0]
+                elif section in ('read', 'write') and len(values) >= 7:
+                    # ops/s kB/s kB/op retrans (retrans%) RTT exe ...
+                    rec[section] = {'ops': values[0], 'kb': values[1],
+                                    'retrans_pct': values[4], 'rtt': values[5],
+                                    'exe': values[6]}
+                section = None
 
-            # Parse data line for current mount
-            if current_mount and line[0].isdigit():
-                stats = self._parse_data_line(line, current_mount, current_server)
-                if stats:
-                    records.append({
-                        'type': 'nfs',
-                        'timestamp': timestamp.isoformat(),
-                        **stats.to_dict()
-                    })
-                    current_mount = None
-                    current_server = None
+        records = []
+        for rec in latest.values():
+            r, w = rec.get('read'), rec.get('write')
+            if 'ops' not in rec and not r and not w:
+                continue
+            r = r or {'ops': 0.0, 'kb': 0.0, 'retrans_pct': 0.0, 'rtt': 0.0, 'exe': 0.0}
+            w = w or {'ops': 0.0, 'kb': 0.0, 'retrans_pct': 0.0, 'rtt': 0.0, 'exe': 0.0}
+            rw = r['ops'] + w['ops']
+            # Latency only means something when there were reads or writes.
+            weighted = {k: (r[k] * r['ops'] + w[k] * w['ops']) / rw if rw else None
+                        for k in ('rtt', 'exe', 'retrans_pct')}
 
-        return records
-
-    def _parse_data_line(self, line: str, mount: str, server: str) -> NFSStats | None:
-        """Parse a nfsiostat data line."""
-        try:
-            parts = line.split()
-            if len(parts) < 8:
-                return None
-
-            # Format varies but typically:
-            # op/s rpc_bklog read_ops/s read_kB/s write_ops/s write_kB/s ...
-            # Later columns may include RTT, exe time, etc.
-
-            return NFSStats(
-                mount_point=mount,
-                server=server or 'unknown',
-                ops_per_sec=float(parts[0]),
-                read_ops_per_sec=float(parts[2]) if len(parts) > 2 else 0,
-                write_ops_per_sec=float(parts[4]) if len(parts) > 4 else 0,
-                read_kb_per_sec=float(parts[3]) if len(parts) > 3 else 0,
-                write_kb_per_sec=float(parts[5]) if len(parts) > 5 else 0,
-                avg_rtt_ms=float(parts[6]) if len(parts) > 6 else 0,
-                avg_exe_ms=float(parts[7]) if len(parts) > 7 else 0,
-                retrans_percent=float(parts[8]) if len(parts) > 8 else 0,
+            stats = NFSStats(
+                mount_point=rec['mount_point'],
+                server=rec['server'],
+                ops_per_sec=rec.get('ops', rw),
+                read_ops_per_sec=r['ops'],
+                write_ops_per_sec=w['ops'],
+                read_kb_per_sec=r['kb'],
+                write_kb_per_sec=w['kb'],
+                avg_rtt_ms=weighted['rtt'],
+                avg_exe_ms=weighted['exe'],
+                retrans_percent=weighted['retrans_pct'],
             )
-        except (ValueError, IndexError) as e:
-            logger.debug(f"Failed to parse NFS data line: {e}")
-            return None
+            records.append({'type': 'nfs', 'timestamp': timestamp, **stats.to_dict()})
+        return records
 
     def store(self, data: list[dict[str, Any]]) -> None:
         """Store NFS statistics in database."""
