@@ -243,3 +243,20 @@ def test_ia3nk_gmx_mpi_is_not_whitelisted_by_default():
 def _empty_ancestry():
     from nomad.collectors.per_user.ancestry import AncestryResult
     return AncestryResult()
+
+
+def test_children_of_a_whitelisted_script_are_whitelisted():
+    """A backup script run by python3 (whose executable is the interpreter):
+    its rsync child does the heavy work."""
+    procs = {
+        200: ProcessInfo(pid=200, ppid=1, uid=10500, username="backup", command="python3",
+                         exe_path="/usr/bin/python3.11",
+                         script="/usr/local/sw/backup/backup.py"),
+        201: ProcessInfo(pid=201, ppid=200, uid=10500, username="backup", command="rsync",
+                         exe_path=None),
+    }
+    cfg = WhitelistConfig(parent_paths=("/usr/local/sw/",))
+    for pid in (200, 201):
+        anc = walk_ancestry(pid, procs.get)
+        m = match_whitelist(procs[pid], anc, cfg)
+        assert m is not None and m.reason == "parent_path", pid

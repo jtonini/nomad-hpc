@@ -1,295 +1,127 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""
-Tests for nomad.collectors.per_user.rules
+"""per_user rules: since when a condition has held, from one reading to the next.
 
-Synthetic process tracks calibrated against the four canonical cases
-from the Idea 18 validation:
-
-  - ia3nk's gmx_mpi: 95% CPU sustained 161 minutes
-    -> should fire cpu_10pct_5min and cpu_50pct_2min
-  - perickso's R: bursts to 670%, 75GB RSS, 109 minutes
-    -> should fire memory_16gb_2min (CPU rules also fire on the bursts)
-  - abezerra's antigravity language server: 25-34% CPU, 1-2GB RSS, 6.4h
-    -> cpu_10pct_5min fires; memory_4gb_10min does NOT (under 4GB)
-    -> if the same case had 5GB it WOULD fire memory_4gb_10min
-        as 'informational' (soft landing)
-  - sumo-bandplot: 99% CPU for 2 minutes
-    -> cpu_50pct_2min fires; cpu_10pct_5min does NOT (too short)
-    -> [the 80%/1min rule that would catch this isn't in v1; pacct adds it]
+The collector runs from cron; each reading carries averages over the
+interval since the previous one (CPU, I/O) or values at the reading
+(memory), and the collector keeps each rule's ``since`` between runs.
 """
 from __future__ import annotations
 
-import pytest
+import logging
 
 from nomad.collectors.per_user.rules import (
     DEFAULT_RULES,
-    ProcessTrack,
+    GB,
+    MB,
+    Reading,
     Rule,
-    RuleEngine,
-    Sample,
+    advance,
+    fires,
+    parse_rules,
+    step,
+    tolerance,
 )
 
-
-GB = 1024 ** 3
-
-
-def make_track(pid: int = 1234, username: str = "testuser") -> ProcessTrack:
-    return ProcessTrack(
-        process_session_id=f"sha1-{pid}",
-        pid=pid,
-        username=username,
-        uid=10001,
-        command="testcmd",
-    )
+CPU50 = Rule("cpu_50pct_2min", "cpu", 50.0, "percent", 120)
+CPU10 = Rule("cpu_10pct_5min", "cpu", 10.0, "percent", 300)
+MEM16 = Rule("memory_16gb_2min", "memory", 16.0, "gb", 120)
+MEM4 = Rule("memory_4gb_10min", "memory", 4.0, "gb", 600, "informational")
+IO50 = Rule("io_50mbs_10min", "io", 50.0, "mb_s", 600, "informational")
+UCPU = Rule("user_cpu_200pct_10min", "user_cpu", 200.0, "percent", 600)
 
 
-def feed(track: ProcessTrack, engine: RuleEngine, samples: list[Sample]) -> None:
-    """Feed samples one at a time, the way the collector would."""
-    for s in samples:
-        track.add_sample(s, engine.max_window_seconds)
+def run(rule, readings):
+    """Feed readings in order; return (since, fired) after each."""
+    since, out = None, []
+    for r in readings:
+        since = step(rule, r, since)
+        out.append((since, fires(rule, since, r.now)))
+    return out
 
 
-# ---------------------------------------------------------------------------
-# ia3nk: sustained high CPU should fire both CPU rules
-# ---------------------------------------------------------------------------
-
-def test_sustained_high_cpu_fires_both_cpu_rules():
-    engine = RuleEngine()
-    track = make_track()
-    # 6 minutes of 95% CPU at 60s sampling -> 7 samples (t=0..360)
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=95.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=360.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    assert "cpu_10pct_5min" in fired_ids
-    assert "cpu_50pct_2min" in fired_ids
+def cpu(now, start, pct):
+    return Reading(now=now, window_start=start, cpu_percent=pct)
 
 
-# ---------------------------------------------------------------------------
-# perickso: 75GB RSS for 109 minutes fires the high-memory rule
-# ---------------------------------------------------------------------------
-
-def test_high_memory_fires_actionable_rule():
-    engine = RuleEngine()
-    track = make_track()
-    # 3 minutes of 75GB at 60s sampling
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=5.0, memory_rss_bytes=75 * GB)
-               for i in range(4)]
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=180.0)
-    by_id = {f.rule.rule_id: f for f in firings}
-    assert "memory_16gb_2min" in by_id
-    assert by_id["memory_16gb_2min"].rule.severity == "actionable"
+def test_a_five_minute_average_above_fires_the_two_minute_rule_at_once():
+    # Cron every 300 s: the first interval average above 50% has held 300 s.
+    out = run(CPU50, [cpu(1300, 1000, 95.0)])
+    assert out == [(1000, True)]
 
 
-# ---------------------------------------------------------------------------
-# abezerra (under 4GB): cpu_10pct fires, no memory rule fires
-# ---------------------------------------------------------------------------
-
-def test_ide_language_server_under_memory_threshold_fires_only_cpu():
-    engine = RuleEngine()
-    track = make_track(username="abezerra")
-    # 6 minutes at 25% CPU and 1.5GB RSS
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=25.0, memory_rss_bytes=int(1.5 * GB))
-               for i in range(7)]
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=360.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    assert "cpu_10pct_5min" in fired_ids
-    assert "cpu_50pct_2min" not in fired_ids       # only 25%
-    assert "memory_4gb_10min" not in fired_ids     # only 1.5GB
-    assert "memory_16gb_2min" not in fired_ids
+def test_the_five_minute_rule_fires_on_a_299_second_interval():
+    assert tolerance(CPU10) == 30
+    assert run(CPU10, [cpu(1299, 1000, 40.0)]) == [(1000, True)]
+    assert run(CPU10, [cpu(1200, 1000, 40.0)]) == [(1000, False)]
 
 
-# ---------------------------------------------------------------------------
-# abezerra (5GB hypothetical): memory_4gb_10min fires as 'informational'
-# ---------------------------------------------------------------------------
-
-def test_ide_language_server_above_4gb_fires_informational_only():
-    engine = RuleEngine()
-    track = make_track(username="abezerra")
-    # 11 minutes at 5% CPU and 5GB RSS — quiet but holding memory
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=5.0, memory_rss_bytes=5 * GB)
-               for i in range(12)]
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=660.0)
-    by_id = {f.rule.rule_id: f for f in firings}
-    assert "memory_4gb_10min" in by_id
-    assert by_id["memory_4gb_10min"].rule.severity == "informational"
-    assert "memory_16gb_2min" not in by_id
-    assert "cpu_10pct_5min" not in by_id
+def test_since_carries_over_while_the_condition_holds_and_resets_below():
+    out = run(CPU10, [cpu(1300, 1000, 40.0), cpu(1600, 1300, 35.0),
+                      cpu(1900, 1600, 2.0), cpu(2200, 1900, 50.0)])
+    assert [s for s, _ in out] == [1000, 1000, None, 1900]
+    assert [f for _, f in out] == [True, True, False, True]
 
 
-# ---------------------------------------------------------------------------
-# sumo-bandplot: 2 minutes at 99% — only cpu_50pct_2min fires in v1
-# ---------------------------------------------------------------------------
-
-def test_short_burst_fires_only_two_minute_cpu_rule():
-    engine = RuleEngine()
-    track = make_track()
-    # 2 minutes at 99% — exactly the 50%/2min window
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=99.0, memory_rss_bytes=200_000_000)
-               for i in range(3)]                          # t=0, 60, 120
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=120.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    assert "cpu_50pct_2min" in fired_ids
-    assert "cpu_10pct_5min" not in fired_ids               # only 2 minutes of data
+def test_a_lifetime_average_dates_the_condition_from_the_start():
+    # First sight of a process two days old, 100% on average since it started.
+    started = 1000.0
+    now = started + 2 * 86400
+    out = run(CPU50, [cpu(now, started, 100.0)])
+    assert out == [(started, True)]
 
 
-# ---------------------------------------------------------------------------
-# Sustain windows: a brief dip below threshold should reset the window
-# ---------------------------------------------------------------------------
-
-def test_single_dip_tolerated_by_default_sustain_fraction():
-    """sustain_fraction=0.7 means up to 30% of samples can dip below threshold
-    and the rule still fires. This is the abezerra-style bursty workload case."""
-    engine = RuleEngine()
-    track = make_track()
-    # 6 minutes mostly at 60% CPU, with one sample at 5% (1/6 dip ~= 17%)
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    samples[3] = Sample(timestamp=180.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=360.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    # 1 dip out of 6 in-window samples = 83% satisfying, well above 70% threshold
-    assert "cpu_10pct_5min" in fired_ids
-    # Last 2 minutes still all >=50%, so this fires too
-    assert "cpu_50pct_2min" in fired_ids
+def test_memory_holds_only_from_the_first_reading_above():
+    r = lambda now, gb: Reading(now=now, window_start=now - 300, memory_bytes=int(gb * GB))
+    out = run(MEM16, [r(1000, 20), r(1300, 20)])
+    assert out == [(1000, False), (1000, True)]
+    out = run(MEM4, [r(1000, 5), r(1300, 5), r(1600, 5)])
+    assert [f for _, f in out] == [False, False, True]
+    assert run(MEM4, [r(1000, 5), r(1300, 3), r(1600, 5)])[-1] == (1600, False)
 
 
-def test_too_many_dips_prevent_firing():
-    """If more than 30% of samples dip below, even sustain_fraction=0.7 won't fire."""
-    engine = RuleEngine()
-    track = make_track()
-    # 6 minutes at 60% with 3 samples at 5% (3/6 = 50% dip ~= over the 30% budget)
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    samples[2] = Sample(timestamp=120.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
-    samples[4] = Sample(timestamp=240.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
-    samples[5] = Sample(timestamp=300.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=360.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    # 3 dips out of 6 in-window samples = 50% satisfying, below 70% threshold
-    assert "cpu_10pct_5min" not in fired_ids
+def test_io_in_megabytes_per_second():
+    r = lambda now, mbs: Reading(now=now, window_start=now - 300, io_bytes_per_s=mbs * MB)
+    out = run(IO50, [r(1300, 80), r(1600, 80)])
+    assert out == [(1000, False), (1000, True)]
 
 
-def test_strict_sustain_fraction_matches_old_all_semantics():
-    """A rule with sustain_fraction=1.0 requires ALL samples to satisfy threshold,
-    matching the pre-sustain_fraction strict behavior. This validates the
-    backward-compat path for sites that want the old strict semantics."""
-    strict_rule = Rule(
-        rule_id="strict_cpu",
-        rule_type="cpu",
-        threshold_value=10.0,
-        threshold_unit="percent",
-        duration_seconds=300,
-        sustain_fraction=1.0,
-    )
-    engine = RuleEngine(rules=(strict_rule,))
-    track = make_track()
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=60.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    samples[3] = Sample(timestamp=180.0, cpu_percent=5.0, memory_rss_bytes=100_000_000)
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=360.0)
-    # 1 dip is enough to break strict mode
-    assert len(firings) == 0
+def test_an_unmeasured_value_is_no_news_and_never_fires():
+    assert step(CPU50, Reading(now=1300, window_start=1000), None) is None
+    # A run by hand seconds after cron's: too short for an average.
+    assert step(CPU50, Reading(now=1305, window_start=1300), 1000) == 1000
+    assert advance(CPU50, Reading(now=1305, window_start=1300), 1000) == (1000, False)
+    assert advance(CPU50, cpu(1600, 1305, 90.0), 1000) == (1000, True)
+    assert step(IO50, Reading(now=1300, window_start=1000, cpu_percent=99.0), None) is None
 
 
-# ---------------------------------------------------------------------------
-# Cooldown: re-evaluating without new samples doesn't double-fire
-# ---------------------------------------------------------------------------
-
-def test_cooldown_suppresses_immediate_refire():
-    engine = RuleEngine(cooldown_seconds=3600)
-    track = make_track()
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=95.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    feed(track, engine, samples)
-    firings_1 = engine.evaluate(track, now=360.0)
-    firings_2 = engine.evaluate(track, now=420.0)          # 1 minute later
-    assert len(firings_1) > 0
-    assert len(firings_2) == 0
+def test_user_rules_are_per_user_and_windowed():
+    assert UCPU.per_user and UCPU.windowed
+    assert not CPU50.per_user and not MEM16.windowed
+    out = run(UCPU, [cpu(1300, 1000, 240.0), cpu(1600, 1300, 260.0)])
+    assert out == [(1000, False), (1000, True)]
 
 
-def test_cooldown_expires_and_allows_refire():
-    engine = RuleEngine(cooldown_seconds=600)              # 10 min cooldown
-    track = make_track()
-    samples = [Sample(timestamp=float(i * 60), cpu_percent=95.0, memory_rss_bytes=100_000_000)
-               for i in range(7)]
-    feed(track, engine, samples)
-    firings_1 = engine.evaluate(track, now=360.0)
-    # Continue sampling for another 15 minutes at 95%
-    for i in range(7, 22):
-        track.add_sample(
-            Sample(timestamp=float(i * 60), cpu_percent=95.0, memory_rss_bytes=100_000_000),
-            engine.max_window_seconds,
-        )
-    firings_2 = engine.evaluate(track, now=1320.0)         # 22 min total
-    assert len(firings_1) > 0
-    # Cooldown of 10 min should have expired by t=1320
-    fired_ids_2 = {f.rule.rule_id for f in firings_2}
-    assert "cpu_10pct_5min" in fired_ids_2
+def test_defaults_cover_each_kind_and_have_unique_ids():
+    kinds = {r.rule_type for r in DEFAULT_RULES}
+    assert kinds == {"cpu", "memory", "io", "user_cpu", "user_memory"}
+    ids = [r.rule_id for r in DEFAULT_RULES]
+    assert len(ids) == len(set(ids))
 
 
-# ---------------------------------------------------------------------------
-# Insufficient observation window: if we just started seeing the process,
-# we shouldn't fire even if all observed samples cross the threshold.
-# ---------------------------------------------------------------------------
-
-def test_short_observation_doesnt_fire():
-    engine = RuleEngine()
-    track = make_track()
-    # Only 1 sample
-    track.add_sample(
-        Sample(timestamp=0.0, cpu_percent=99.0, memory_rss_bytes=20 * GB),
-        engine.max_window_seconds,
-    )
-    firings = engine.evaluate(track, now=0.0)
-    assert firings == []
-
-
-# ---------------------------------------------------------------------------
-# pacct rules are accepted but ignored in v1
-# ---------------------------------------------------------------------------
-
-def test_pacct_rules_are_not_evaluated_in_v1():
-    pacct_rule = Rule(
-        rule_id="cpu_80pct_1min",
-        rule_type="cpu",
-        threshold_value=80.0,
-        threshold_unit="percent",
-        duration_seconds=60,
-        source="pacct",
-    )
-    engine = RuleEngine(rules=(*DEFAULT_RULES, pacct_rule))
-    track = make_track()
-    samples = [Sample(timestamp=float(i * 30), cpu_percent=99.0, memory_rss_bytes=100_000_000)
-               for i in range(3)]
-    feed(track, engine, samples)
-    firings = engine.evaluate(track, now=60.0)
-    fired_ids = {f.rule.rule_id for f in firings}
-    assert "cpu_80pct_1min" not in fired_ids
-
-
-# ---------------------------------------------------------------------------
-# Window eviction: track shouldn't grow unbounded
-# ---------------------------------------------------------------------------
-
-def test_window_eviction_bounds_sample_count():
-    engine = RuleEngine()                                  # max window = 600s
-    track = make_track()
-    # Feed 30 minutes (1800s) of samples at 60s intervals = 30 samples
-    for i in range(30):
-        track.add_sample(
-            Sample(timestamp=float(i * 60), cpu_percent=5.0, memory_rss_bytes=100_000_000),
-            engine.max_window_seconds,
-        )
-    # We should retain ~10 samples (last 600s)
-    assert len(track.samples) <= 12        # allow small slack for boundary
-    assert len(track.samples) >= 9
+def test_parse_rules_reads_tables_and_leaves_out_bad_ones(caplog):
+    with caplog.at_level(logging.WARNING):
+        rules = parse_rules([
+            {"rule_id": "a", "rule_type": "cpu", "threshold": 80, "duration_seconds": 600},
+            {"rule_id": "b", "rule_type": "user_memory", "threshold_value": 64,
+             "duration_seconds": 300, "severity": "informational"},
+            {"rule_id": "c", "rule_type": "disk", "threshold": 1, "duration_seconds": 1},
+            {"rule_id": "d", "rule_type": "cpu", "duration_seconds": 1},
+            {"rule_id": "a", "rule_type": "memory", "threshold": 8, "duration_seconds": 60},
+            {"rule_id": "e", "rule_type": "cpu", "threshold": 50, "duration_seconds": 60,
+             "severity": "urgent"},
+        ])
+    assert [r.rule_id for r in rules] == ["a", "b"]
+    assert rules[0].threshold_unit == "percent" and rules[0].severity == "actionable"
+    assert rules[1].threshold_unit == "gb" and rules[1].severity == "informational"
+    assert "disk" in caplog.text and "used twice" in caplog.text and "urgent" in caplog.text

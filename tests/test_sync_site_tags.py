@@ -24,6 +24,10 @@ def _site_db(path, host):
                   (now, host))
         c.execute("INSERT INTO node_state (timestamp, node_name, state, is_healthy)"
                   " VALUES (?, ?, 'IDLE', 1)", (now, f"{host}-n01"))
+        c.execute("INSERT INTO per_user_state (hostname, key, kind, seen_at)"
+                  " VALUES (?, 'run', 'run', 1.0)", (host,))
+        c.execute("INSERT INTO per_user_daily (day, hostname, username, cpu_seconds)"
+                  " VALUES ('2026-10-02', ?, 'ann', 60.0)", (host,))
 
 
 def test_sync_tags_alerts_and_every_table_with_the_site(tmp_path, monkeypatch):
@@ -61,6 +65,11 @@ def test_sync_tags_alerts_and_every_table_with_the_site(tmp_path, monkeypatch):
         if "source_site" not in cols:
             untagged.append(table)
     assert untagged == []
+    # per_user's counters from run to run are the site's working state, not data.
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "per_user_state" not in tables
+    assert c.execute("SELECT source_site FROM per_user_daily ORDER BY 1").fetchall() == [
+        ("alpha",), ("beta",)]
     indexes = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='index'")}
     assert "idx_alerts_source_site_timestamp" in indexes
     assert "idx_node_state_source_site_timestamp" in indexes

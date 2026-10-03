@@ -245,6 +245,45 @@ monitor_clients = true
 monitor_exports = true
 
 # ============================================
+# PER-USER COLLECTOR (login nodes, shared hosts)
+# ============================================
+# Who uses this host heavily, with what, for how long. Each run averages
+# CPU and I/O over the interval since the previous run; `nomad per-user`
+# shows what was flagged and who used the host most.
+[collectors.per_user]
+enabled = false
+role = "headnode"
+
+# A process is stored (with its command line) only above one of these;
+# the rest leave no row. Flags and daily per-user totals are kept; raw
+# samples for sample_retention_days (0 keeps them).
+floor_cpu_percent = 10
+floor_memory_gb = 2
+floor_io_mb_per_s = 10
+sample_retention_days = 30
+
+# Per-user CPU from systemd user slices (cgroups) where present: it also
+# counts processes too short-lived to be seen between two readings.
+user_slices = true
+
+[collectors.per_user.whitelist]
+min_uid = 1000                     # below this: system accounts, never flagged
+users = ["slurm", "munge"]
+parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root for
+                                   # other users') or the script an interpreter runs
+# user_commands = [["backupuser", "clusterbackup.py"]]   # command or script name
+
+# Rules replace the defaults when given. rule_type: cpu, memory, io (one
+# process), user_cpu, user_memory (all of a user's processes together).
+# threshold: % of one core, GB, or MB/s. duration_seconds is a minimum.
+# [[collectors.per_user.rules]]
+# rule_id = "cpu_50pct_2min"
+# rule_type = "cpu"
+# threshold = 50
+# duration_seconds = 120
+# severity = "actionable"          # or "informational"
+
+# ============================================
 # MAIL, SUPPORT AND ISSUE REPORTING
 # ============================================
 # These differ from one institution to the next. The CLI, the dashboard and

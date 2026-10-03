@@ -25,7 +25,7 @@ enabled = false
 | `groups` | on | every site | `getent`; `sacct` for job accounting | `group_membership`, `job_accounting` |
 | `interactive` | off | hosts running RStudio or Jupyter | — | `interactive_sessions`, `interactive_summary` |
 | `workstation` | off | a hub reaching workstations over SSH | `ssh` | `workstation_state`, `workstation_user_snapshot`, ... |
-| `per_user` | off | login nodes, shared interactive hosts | Python `psutil` | `per_user_sample`, `per_user_alert` |
+| `per_user` | off | login nodes, shared interactive hosts | Python `psutil` | `per_user_sample`, `per_user_alert`, `per_user_daily` |
 | `storage` | off | a host reaching ZFS/NFS servers over SSH | `ssh` | `storage_state` |
 | `network_perf` | off | any host; tests paths that start there | `ping`; `iperf3` for throughput | `network_perf` |
 | `cloud.aws` | off | sites with AWS resources | Python `boto3` | `cloud_metrics` |
@@ -77,6 +77,51 @@ path_type = "switch"
 - Each path starts on the host that runs it. A `source` naming another host (by name or address) is skipped, and the run says so; list that path in the other host's config.
 - A path with no reply at all is stored as `unreachable`.
 - **Throughput** is off unless `throughput = true`. It then runs at most once per `throughput_interval` (3600 s) per path — checked against the table, so it holds under cron — for `iperf_duration` seconds with `iperf3`, which needs `iperf3 -s` running on the destination. Without iperf3, or when no `iperf3 -s` answers, it times an SSH copy of 50 MB, which encryption may limit below what the network carries; if that fails too, no throughput is stored (never a 0).
+
+## Heavy use of login nodes (per_user)
+
+On a login node or another host people share, `per_user` says who used it heavily, with what, and for how long. Turn it on there:
+
+```toml
+[collectors.per_user]
+enabled = true
+```
+
+Each run (every 5 minutes from cron) reads every process and averages its CPU and I/O over the 5 minutes since the previous run, from counters that run left in `per_user_state`. A process seen for the first time gets its average since it started; if that is above a rule's threshold, the next reading confirms it is still busy, and the flag is dated from the process's start — a process that has run flat out for two days is flagged as such five minutes after per_user is turned on. Where systemd puts each user's logins in a slice (`user-<uid>.slice`, cgroup v2 or v1 with CPU accounting), it also reads each user's CPU there, which counts processes that started and ended between two readings — a parallel `make`, a loop starting short programs. Work of another account inside a user's slice (`sudo`, `su`), and nomad's own when its cron session runs in its account's slice, is not counted as that user's.
+
+What it keeps:
+
+- **A sample** (`per_user_sample`, with the command line) only for a process above a floor: `floor_cpu_percent` (10), `floor_memory_gb` (2) or `floor_io_mb_per_s` (10). Idle shells and daemons leave no row. Raw samples are deleted after `sample_retention_days` (30; 0 keeps them), a batch of 100,000 per run.
+- **Flags** (`per_user_alert`), kept. One row per episode — a process (or a user's processes together) above a rule's threshold without a break — and rule, written once the condition has held for the rule's duration and updated every run while it goes on: `last_seen`, `sustained_for_seconds`, `occurrences` (readings), and the episode's peaks.
+- **Daily totals** (`per_user_daily`), kept: for each user, host and day (local date), CPU seconds used, time busy (the user's processes together above the CPU floor), peaks of CPU and memory, and I/O where readable. An interval is added to the day it ends; one longer than two hours (the collector was stopped) is left out.
+
+The rules (a duration is a minimum: readings come every 5 minutes, so a 2-minute CPU rule fires on the first 5-minute average above it):
+
+| Rule | Over | Condition | Severity |
+|---|---|---|---|
+| `cpu_10pct_5min` | one process | CPU ≥ 10% of a core for 5 min | informational |
+| `cpu_50pct_2min` | one process | CPU ≥ 50% for 2 min | actionable |
+| `memory_4gb_10min` | one process | resident memory ≥ 4 GB for 10 min | informational |
+| `memory_16gb_2min` | one process | ≥ 16 GB for 2 min | actionable |
+| `user_cpu_200pct_10min` | a user's processes | together ≥ 2 cores for 10 min | actionable |
+| `user_memory_32gb_10min` | a user's processes | together ≥ 32 GB for 10 min | actionable |
+| `io_50mbs_10min` | one process | reads + writes ≥ 50 MB/s for 10 min | informational |
+
+A user's memory is the resident memory of their processes added up, so memory that forked workers share counts once for each.
+
+`[[collectors.per_user.rules]]` tables replace them (see `nomad.toml.example`). System accounts (uid below `min_uid`), `users`, `user_commands` and processes started from `parent_paths` are never flagged; they are stored, marked, when above the floor.
+
+I/O is what a process read and wrote through system calls — files on any filesystem, NFS included, pipes and sockets — so a large copy to NFS or a transfer through the host shows. Reading another user's I/O counters, and the executable path that `parent_paths` matches, needs root: run as another account, only that account's own processes have them. For a script run by an interpreter (`python3 /usr/local/sw/backup/backup.py`), `parent_paths` and `user_commands` also match the script, read from the command line, which needs no root: `user_commands = [["backupuser", "backup.py"]]`.
+
+If `/proc` is mounted with `hidepid`, an account other than root sees only its own processes; the run says so (`nomad collectors`).
+
+```bash
+nomad per-user                       # this host's database
+nomad per-user --db ~/.local/share/nomad/combined.db --days 30   # every site, on the hub
+nomad per-user --mask                # user and command names replaced, for sharing
+```
+
+Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
 
 ## Storage servers
 

@@ -1,266 +1,207 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """
-NØMAÐ per-user collector — rule engine.
+NØMAÐ per-user collector — rules: when a process, or a user's processes
+together, count as heavy use of the host.
 
-Pure-logic module. No I/O, no psutil, no DB. Takes sample observations in,
-emits alert decisions out. Fully testable with synthetic input.
+Pure logic: no I/O, no psutil, no database.
 
-Concepts
---------
-A *Rule* is a configured detection threshold:
-    cpu_percent >= 10 sustained for 5 minutes
-    memory_rss >= 16 GB sustained for 2 minutes
+The collector runs from cron (``nomad collect --once`` every few minutes), a
+fresh Python process each time, so nothing survives in memory from one
+reading to the next. The engine that used to keep a rolling window of
+samples in memory started empty every run and never saw a condition held
+for its duration: under cron it could not fire.
 
-A *ProcessTrack* is the per-PID rolling window of samples needed to evaluate
-sustain windows. The collector owns one of these per live process.
+So each reading says, for each rule, whether the condition held *over the
+interval since the previous reading* -- CPU and I/O as averages over that
+interval, from cumulative counters; memory as the value at the reading --
+and the collector keeps, per process (or user) and rule, since when it has
+held (``since``) in its state table. :func:`step` advances that, and
+:func:`fires` says when it has held long enough.
 
-A *RuleFiring* is what comes out when a rule's sustain window is satisfied.
-The collector turns firings into alert rows (with dedup against prior
-firings on the same process_session_id + rule_id).
-
-Design notes
-------------
-- Rules declare their `source` ('psutil' or 'pacct'). v1 wires only psutil
-  rules; pacct rules are accepted by the engine but no samples will satisfy
-  them until the pacct backend lands.
-- Sustain logic uses a deque of (timestamp, value) pairs. We evaluate by
-  asking: "of the samples within the last `duration_seconds`, do all of
-  them satisfy the threshold?". This is robust to clock skew and dropped
-  ticks (which the validation showed are rare but not impossible).
-- A rule fires at most once per process_session per cooldown window (default
-  1 hour). Re-firings within the cooldown bump `occurrences` rather than
-  inserting new alerts. This matches the existing `alerts` table pattern.
+A rule's ``duration_seconds`` is therefore "at least": with readings five
+minutes apart, a 2-minute CPU rule fires on the first five-minute average
+above its threshold.
 """
 from __future__ import annotations
 
-import time
-from collections import deque
-from dataclasses import dataclass, field
-from typing import Literal
-from collections.abc import Iterable
+import logging
+from dataclasses import dataclass
 
+logger = logging.getLogger(__name__)
 
-RuleType = Literal["cpu", "memory"]
-RuleSource = Literal["psutil", "pacct"]
-Severity = Literal["actionable", "informational"]
+# rule_type -> unit of threshold_value
+RULE_TYPES: dict[str, str] = {
+    "cpu": "percent",          # one process, % of one core, averaged over the interval
+    "memory": "gb",            # one process, resident memory at the reading
+    "io": "mb_s",              # one process, bytes read + written per second (needs root
+                               # for other users' processes)
+    "user_cpu": "percent",     # all of a user's processes together
+    "user_memory": "gb",
+}
+PER_USER_TYPES = frozenset({"user_cpu", "user_memory"})
+# Conditions measured as an average over the interval (they held across the
+# whole of it); the others are values at the reading.
+WINDOWED_TYPES = frozenset({"cpu", "io", "user_cpu"})
+SEVERITIES = ("actionable", "informational")
 
+GB = 1024 ** 3
+MB = 1000 ** 2
 
-# ---------------------------------------------------------------------------
-# Configuration: rule definitions
-# ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class Rule:
     """A single detection rule. Immutable; held in collector config."""
     rule_id: str                          # stable identifier, used in dedup keys
-    rule_type: RuleType
-    threshold_value: float                # 10.0 (percent) or 4.0 (gb)
-    threshold_unit: Literal["percent", "gb"]
+    rule_type: str                        # a key of RULE_TYPES
+    threshold_value: float                # 10.0 (percent), 4.0 (gb), 50 (mb_s)
+    threshold_unit: str
     duration_seconds: int
-    severity: Severity = "actionable"
-    source: RuleSource = "psutil"
+    severity: str = "actionable"
     edu_template_id: str | None = None    # optional handoff to edu engine
-    # Fraction of samples in the sustain window that must satisfy the
-    # threshold (0.0..1.0). 1.0 = strict "all samples". Defaults below tolerate
-    # ~30% dips on CPU rules (real-world workloads are bursty) and require
-    # strict sustain on memory rules (RSS doesn't dip the same way).
-    sustain_fraction: float = 0.7
+
+    @property
+    def per_user(self) -> bool:
+        return self.rule_type in PER_USER_TYPES
+
+    @property
+    def windowed(self) -> bool:
+        return self.rule_type in WINDOWED_TYPES
 
     def threshold_bytes(self) -> int | None:
-        """For memory rules, return the threshold expressed in bytes."""
+        """For memory rules, the threshold in bytes."""
         if self.threshold_unit == "gb":
-            return int(self.threshold_value * (1024 ** 3))
+            return int(self.threshold_value * GB)
+        return None
+
+    def value(self, reading: Reading) -> float | None:
+        """The reading's value in the rule's unit (None: not measured)."""
+        if self.rule_type in ("cpu", "user_cpu"):
+            return reading.cpu_percent
+        if self.rule_type in ("memory", "user_memory"):
+            return None if reading.memory_bytes is None else reading.memory_bytes / GB
+        if self.rule_type == "io":
+            return None if reading.io_bytes_per_s is None else reading.io_bytes_per_s / MB
         return None
 
 
-# Default rule set per the validation findings. The 80%/1min rule from the
-# handoff is *deliberately omitted* from v1: 60s sampling has too much aliasing
-# to reliably detect a 1-minute event. It returns when pacct lands.
+# Thresholds from the spydur/arachne validation (May 2026). Durations are
+# minimums: readings come every few minutes. cpu_10pct_5min is
+# informational: under cron it means 30 CPU-seconds in one 5-minute
+# interval, which a pip install or a short compile reaches.
 DEFAULT_RULES: tuple[Rule, ...] = (
-    Rule(
-        rule_id="cpu_10pct_5min",
-        rule_type="cpu",
-        threshold_value=10.0,
-        threshold_unit="percent",
-        duration_seconds=300,
-        severity="actionable",
-        edu_template_id="head_node_cpu_sustained",
-        sustain_fraction=0.7,              # tolerate dips on bursty CPU workloads
-    ),
-    Rule(
-        rule_id="cpu_50pct_2min",
-        rule_type="cpu",
-        threshold_value=50.0,
-        threshold_unit="percent",
-        duration_seconds=120,
-        severity="actionable",
-        edu_template_id="head_node_cpu_high",
-        sustain_fraction=0.7,              # tolerate dips on bursty CPU workloads
-    ),
-    Rule(
-        rule_id="memory_4gb_10min",
-        rule_type="memory",
-        threshold_value=4.0,
-        threshold_unit="gb",
-        duration_seconds=600,
-        severity="informational",          # softer — IDE/language-server case
-        edu_template_id="head_node_memory_moderate",
-        sustain_fraction=1.0,              # RSS doesn't dip; require strict sustain
-    ),
-    Rule(
-        rule_id="memory_16gb_2min",
-        rule_type="memory",
-        threshold_value=16.0,
-        threshold_unit="gb",
-        duration_seconds=120,
-        severity="actionable",
-        edu_template_id="head_node_memory_high",
-        sustain_fraction=1.0,              # RSS doesn't dip; require strict sustain
-    ),
+    Rule("cpu_10pct_5min", "cpu", 10.0, "percent", 300,
+         "informational", "head_node_cpu_sustained"),
+    Rule("cpu_50pct_2min", "cpu", 50.0, "percent", 120,
+         "actionable", "head_node_cpu_high"),
+    Rule("memory_4gb_10min", "memory", 4.0, "gb", 600,
+         "informational", "head_node_memory_moderate"),   # IDE / language-server case
+    Rule("memory_16gb_2min", "memory", 16.0, "gb", 120,
+         "actionable", "head_node_memory_high"),
+    # A user's processes together: many small ones (make -j, a pool of
+    # workers, a shell loop) that no single-process rule sees.
+    Rule("user_cpu_200pct_10min", "user_cpu", 200.0, "percent", 600,
+         "actionable", "head_node_user_cpu"),
+    Rule("user_memory_32gb_10min", "user_memory", 32.0, "gb", 600,
+         "actionable", "head_node_user_memory"),
+    # Data moved through the host by one process (copies to NFS, transfers).
+    # Measured only where the collector can read the process's I/O.
+    Rule("io_50mbs_10min", "io", 50.0, "mb_s", 600,
+         "informational", "head_node_io"),
 )
 
 
-# ---------------------------------------------------------------------------
-# Per-process state
-# ---------------------------------------------------------------------------
-
 @dataclass
-class Sample:
-    """One observation of a process. Constructed by the collector."""
-    timestamp: float                      # unix epoch seconds
-    cpu_percent: float
-    memory_rss_bytes: int
+class Reading:
+    """What one reading measured for a process, or for a user's processes."""
+    now: float                            # unix seconds of the reading
+    window_start: float | None            # start of the interval the averages cover
+    cpu_percent: float | None = None      # average over [window_start, now]
+    memory_bytes: int | None = None       # at the reading
+    io_bytes_per_s: float | None = None   # average over [window_start, now]
+    # First sight of a process that was already running at the previous
+    # reading: its averages are since it started, which may hide that it
+    # went idle long ago. They start the count but fire nothing until a
+    # reading over a real interval confirms them.
+    provisional: bool = False
 
 
-@dataclass
-class ProcessTrack:
-    """Rolling state for one process. Owned by the collector, evaluated here."""
-    process_session_id: str
-    pid: int
-    username: str
-    uid: int
-    command: str
+def step(rule: Rule, reading: Reading, since: float | None) -> float | None:
+    """Since when the rule's condition has held, after this reading.
 
-    # Bounded window: keep enough samples to evaluate the longest rule.
-    # Sized externally based on configured rules.
-    samples: deque[Sample] = field(default_factory=deque)
-
-    # Per-rule firing state (rule_id -> last_fired_unix). For cooldown.
-    last_fired: dict[str, float] = field(default_factory=dict)
-
-    # Peak observed (since track creation) — surfaced in alert payload.
-    peak_cpu_percent: float = 0.0
-    peak_memory_bytes: int = 0
-
-    def add_sample(self, s: Sample, max_window_seconds: int) -> None:
-        self.samples.append(s)
-        self.peak_cpu_percent = max(self.peak_cpu_percent, s.cpu_percent)
-        self.peak_memory_bytes = max(self.peak_memory_bytes, s.memory_rss_bytes)
-        # Evict samples older than the longest rule window
-        cutoff = s.timestamp - max_window_seconds
-        while self.samples and self.samples[0].timestamp < cutoff:
-            self.samples.popleft()
-
-
-# ---------------------------------------------------------------------------
-# Firings
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RuleFiring:
-    """Result of evaluating a rule against a track. The collector persists this."""
-    rule: Rule
-    track: ProcessTrack
-    fired_at: float                       # unix epoch
-    sustained_for_seconds: int            # how long the condition held
-    peak_cpu_percent: float
-    peak_memory_bytes: int
-
-
-# ---------------------------------------------------------------------------
-# Engine
-# ---------------------------------------------------------------------------
-
-class RuleEngine:
-    """Evaluates rules against process tracks.
-
-    Stateless across calls except via ProcessTrack.last_fired (cooldown).
-    The collector calls evaluate() once per tick per active track.
+    None when it does not hold now. An average over the interval that is
+    above the threshold means it held since the interval began; a value at
+    the reading, only since now. A reading that did not measure the value
+    (a run by hand seconds after cron's, too short for an average) is no
+    news either way: ``since`` stays as it was.
     """
+    v = rule.value(reading)
+    if v is None:
+        return since
+    if v < rule.threshold_value:
+        return None
+    if since is not None:
+        return since
+    if rule.windowed and reading.window_start is not None:
+        return reading.window_start
+    return reading.now
 
-    DEFAULT_COOLDOWN_SECONDS = 3600       # 1 hour: re-firings within this bump occurrences
 
-    def __init__(
-        self,
-        rules: Iterable[Rule] = DEFAULT_RULES,
-        cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
-    ) -> None:
-        self.rules: tuple[Rule, ...] = tuple(rules)
-        self.cooldown_seconds = cooldown_seconds
-        # Pre-compute the longest window — drives sample retention in tracks
-        self._max_window = max((r.duration_seconds for r in self.rules), default=0)
+def tolerance(rule: Rule) -> float:
+    """Slack for cron jitter: a 5-minute rule over a 299-second interval."""
+    return min(30.0, 0.1 * rule.duration_seconds)
 
-    @property
-    def max_window_seconds(self) -> int:
-        return self._max_window
 
-    def evaluate(self, track: ProcessTrack, now: float | None = None) -> list[RuleFiring]:
-        """Evaluate all rules against this track. Returns 0+ firings."""
-        if now is None:
-            now = time.time()
-        firings: list[RuleFiring] = []
-        for rule in self.rules:
-            if rule.source != "psutil":
-                # pacct-sourced rules are evaluated elsewhere (Component 1.5)
-                continue
-            firing = self._evaluate_rule(rule, track, now)
-            if firing is not None:
-                firings.append(firing)
-                track.last_fired[rule.rule_id] = now
-        return firings
+def fires(rule: Rule, since: float | None, now: float) -> bool:
+    return since is not None and (now - since) >= rule.duration_seconds - tolerance(rule)
 
-    def _evaluate_rule(
-        self, rule: Rule, track: ProcessTrack, now: float,
-    ) -> RuleFiring | None:
-        # Cooldown: don't fire again within the cooldown window
-        last = track.last_fired.get(rule.rule_id)
-        if last is not None and (now - last) < self.cooldown_seconds:
-            return None
 
-        window_start = now - rule.duration_seconds
-        # All samples in window must satisfy threshold
-        in_window = [s for s in track.samples if s.timestamp >= window_start]
-        if not in_window:
-            return None
+def advance(rule: Rule, reading: Reading, since: float | None) -> tuple[float | None, bool]:
+    """:func:`step`, and whether the rule fires on this reading: only on one
+    that measured its value, and for an average, over a real interval."""
+    since = step(rule, reading, since)
+    measured = rule.value(reading) is not None
+    confirmed = not (rule.windowed and reading.provisional)
+    return since, measured and confirmed and fires(rule, since, reading.now)
 
-        # We need samples covering at least `duration_seconds` of wall time.
-        # If the oldest in-window sample is younger than the window, we haven't
-        # observed the condition long enough yet.
-        oldest_ts = in_window[0].timestamp
-        if (now - oldest_ts) < rule.duration_seconds:
-            return None
 
-        if rule.rule_type == "cpu":
-            satisfying = sum(
-                1 for s in in_window if s.cpu_percent >= rule.threshold_value
-            )
-        elif rule.rule_type == "memory":
-            threshold_bytes = rule.threshold_bytes()
-            assert threshold_bytes is not None
-            satisfying = sum(
-                1 for s in in_window if s.memory_rss_bytes >= threshold_bytes
-            )
-        else:
-            return None
-        if (satisfying / len(in_window)) < rule.sustain_fraction:
-            return None
+def parse_rules(items) -> tuple[Rule, ...]:
+    """Rules from ``[[collectors.per_user.rules]]`` tables.
 
-        return RuleFiring(
-            rule=rule,
-            track=track,
-            fired_at=now,
-            sustained_for_seconds=int(now - oldest_ts),
-            peak_cpu_percent=track.peak_cpu_percent,
-            peak_memory_bytes=track.peak_memory_bytes,
-        )
+    Each needs rule_id, rule_type, threshold (or threshold_value) and
+    duration_seconds; severity defaults to actionable. A rule that does not
+    parse is warned about and left out.
+    """
+    out = []
+    for i, d in enumerate(items or ()):
+        try:
+            rule_type = str(d["rule_type"])
+            if rule_type not in RULE_TYPES:
+                raise ValueError(f"rule_type {rule_type!r} is not one of {', '.join(RULE_TYPES)}")
+            severity = str(d.get("severity", "actionable"))
+            if severity not in SEVERITIES:
+                raise ValueError(f"severity {severity!r} is not one of {', '.join(SEVERITIES)}")
+            threshold = float(d["threshold"] if "threshold" in d else d["threshold_value"])
+            duration = int(d["duration_seconds"])
+            if threshold <= 0 or duration < 0:
+                raise ValueError("threshold must be positive and duration_seconds not negative")
+            out.append(Rule(
+                rule_id=str(d["rule_id"]), rule_type=rule_type,
+                threshold_value=threshold, threshold_unit=RULE_TYPES[rule_type],
+                duration_seconds=duration, severity=severity,
+                edu_template_id=d.get("edu_template_id"),
+            ))
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning("per_user: rule %d left out (%s): %r", i + 1, e, d)
+    ids = [r.rule_id for r in out]
+    dupes = {i for i in ids if ids.count(i) > 1}
+    if dupes:
+        logger.warning("per_user: rule ids used twice, later ones left out: %s",
+                       ", ".join(sorted(dupes)))
+        seen, kept = set(), []
+        for r in out:
+            if r.rule_id not in seen:
+                seen.add(r.rule_id)
+                kept.append(r)
+        out = kept
+    return tuple(out)

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -113,3 +113,19 @@ def test_aggregate_returns_none_for_quiet_host(db_with_alerts):
     signals = read_per_user_signals(db_with_alerts)
     agg = aggregate_cluster_culture_signal(signals, "noiseless")
     assert agg is None
+
+
+def test_an_alert_that_goes_on_counts_by_when_it_was_last_seen(db_with_alerts):
+    """Under cron an alert row lives as long as its condition: fired two
+    weeks ago and still seen now is recent; fired and last seen two weeks
+    ago is not."""
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(db_with_alerts) as c:
+        c.execute("UPDATE per_user_alert SET fired_at = ? WHERE username = 'ia3nk'", (old,))
+        c.execute("UPDATE per_user_alert SET fired_at = ?, last_seen = ? "
+                  "WHERE username = 'perickso'", (old, old))
+    users = {s.username for s in read_per_user_signals(db_with_alerts, lookback_hours=168)}
+    assert users == {"ia3nk", "abezerra"}
+    assert insights_for_user(db_with_alerts, username="ia3nk", lookback_days=7)
+    assert not insights_for_user(db_with_alerts, username="perickso", lookback_days=7)

@@ -39,6 +39,10 @@ class ProcessInfo:
     username: str
     command: str                          # comm (16-byte kernel name)
     exe_path: str | None                  # /proc/<pid>/exe target
+    # The script an interpreter runs (`python3 /usr/local/sw/x/backup.py`):
+    # comm is then "python3", or the script name cut to 15 characters, and
+    # the executable is the interpreter. From the command line.
+    script: str | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,7 @@ class AncestryResult:
     """
     chain: list[str] = field(default_factory=list)
     exe_chain: list[str | None] = field(default_factory=list)
+    script_chain: list[str | None] = field(default_factory=list)   # scripts ancestors run
     depth: int = 0
     truncated: bool = False               # True if depth limit was hit
 
@@ -105,6 +110,7 @@ def walk_ancestry(
             return AncestryResult(
                 chain=[a.command for a in reversed(ancestors)],
                 exe_chain=[a.exe_path for a in reversed(ancestors)],
+                script_chain=[a.script for a in reversed(ancestors)],
                 depth=len(ancestors),
                 truncated=True,
             )
@@ -117,6 +123,7 @@ def walk_ancestry(
     return AncestryResult(
         chain=[a.command for a in reversed(ancestors)],
         exe_chain=[a.exe_path for a in reversed(ancestors)],
+        script_chain=[a.script for a in reversed(ancestors)],
         depth=len(ancestors),
     )
 
@@ -140,14 +147,18 @@ def match_whitelist(
     if proc.username in config.users:
         return WhitelistMatch(reason="user", detail=proc.username)
 
-    # Rule 3: (user, command basename) pair
-    cmd_basename = _command_basename(proc.command)
+    # Rule 3: (user, command basename) pair -- the command, or the script it runs
+    names = {_command_basename(proc.command)}
+    if proc.script:
+        names.add(_command_basename(proc.script))
     for u, c in config.user_commands:
-        if u == proc.username and c == cmd_basename:
+        if u == proc.username and c in names:
             return WhitelistMatch(reason="user_command", detail=f"{u}:{c}")
 
-    # Rule 4: parent path — recursive over the leaf's exe_path AND all ancestors
-    paths_to_check = [proc.exe_path, *ancestry.exe_chain]
+    # Rule 4: parent path — recursive over the leaf's exe_path (or the script
+    # it runs) AND all ancestors' (a backup script's rsync and tar children)
+    scripts = [p for p in (proc.script, *ancestry.script_chain) if p and p.startswith("/")]
+    paths_to_check = [proc.exe_path, *ancestry.exe_chain, *scripts]
     for path in paths_to_check:
         if path is None:
             continue

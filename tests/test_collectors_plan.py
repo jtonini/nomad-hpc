@@ -121,8 +121,8 @@ def test_per_user_without_psutil_says_so_instead_of_one_record(db, monkeypatch):
 def test_per_user_counts_what_its_envelope_holds(db):
     from nomad.collectors.per_user import collector as pu
     c = pu.PerUserCollector({"enabled": True}, db)
-    env = pu._envelope([{"x": 1}] * 3, [{"a": 1}], [], evicted=0)
-    assert c.count_records(env) == 4
+    env = pu._envelope([{"x": 1}] * 3, [{"a": 1}], [], daily=[{"d": 1}] * 2)
+    assert c.count_records(env) == 6
 
 
 def test_groups_without_clusters_reads_membership_here(db, monkeypatch):

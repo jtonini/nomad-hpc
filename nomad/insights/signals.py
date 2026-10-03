@@ -20,7 +20,7 @@ import re
 import sqlite3
 import statistics
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
@@ -1490,11 +1490,16 @@ def read_per_user_signals(
     lookback_hours: int = 168,
     hostname: str | None = None,
 ) -> list:
-    """Pull recent per_user_alert rows; aggregate by (host, user, rule, cmd)."""
-    cutoff = (datetime.now() - timedelta(hours=lookback_hours)).strftime(
+    """Pull recent per_user_alert rows; aggregate by (host, user, rule, cmd).
+
+    Recent by ``last_seen``: an alert row lives as long as its condition goes
+    on (a process at 100% for two weeks is one row, fired two weeks ago).
+    per_user writes its times in UTC.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).strftime(
         "%Y-%m-%d %H:%M:%S"
     )
-    where = ["fired_at >= ?"]
+    where = ["last_seen >= ?"]
     params: list = [cutoff]
     if hostname:
         where.append("hostname = ?")

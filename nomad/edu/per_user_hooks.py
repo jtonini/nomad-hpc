@@ -46,18 +46,19 @@ class Template:
 TEMPLATES: dict[str, Template] = {
     "head_node_cpu_sustained": Template(
         template_id="head_node_cpu_sustained",
-        title="Sustained CPU on the head node",
+        title="Steady CPU on the head node",
         explanation=(
-            "A process you ran on the head node held substantial CPU for "
-            "several minutes. Head nodes are shared infrastructure for editing "
-            "and submitting jobs; sustained compute belongs on a compute node."
+            "A process you ran on the head node kept using CPU (a tenth of a core "
+            "or more) for five minutes or longer. Short tasks like this are fine; "
+            "if it is computation that runs for long, it belongs on a compute node, "
+            "since head nodes are shared for editing and submitting jobs."
         ),
         remediation=(
-            "# Run an interactive compute session instead:\n"
+            "# For longer computation, run an interactive compute session:\n"
             "srun --pty -n1 -c4 --mem=16G --time=4:00:00 bash\n"
             "# Then run your command from inside that session."
         ),
-        severity="actionable",
+        severity="informational",
     ),
     "head_node_cpu_high": Template(
         template_id="head_node_cpu_high",
@@ -86,6 +87,52 @@ TEMPLATES: dict[str, Template] = {
             "# For IDE remote-dev workflows, target a persistent compute session:\n"
             "salloc -n1 -c4 --mem=16G --time=8:00:00\n"
             "# Then point your IDE's remote target to that node."
+        ),
+        severity="informational",
+    ),
+    "head_node_user_cpu": Template(
+        template_id="head_node_user_cpu",
+        title="Many processes busy on the head node",
+        explanation=(
+            "Your processes on the head node together kept more than two cores "
+            "busy for ten minutes or more -- a parallel build, a pool of workers, "
+            "or a loop starting many short programs. Each may look small; "
+            "together they slow the node for everyone logged in."
+        ),
+        remediation=(
+            "# Ask for the cores in a job and run the same command there:\n"
+            "srun --pty -n1 -c8 --mem=16G --time=2:00:00 bash\n"
+            "# e.g. make -j8 inside that session"
+        ),
+        severity="actionable",
+    ),
+    "head_node_user_memory": Template(
+        template_id="head_node_user_memory",
+        title="Your processes hold a lot of memory on the head node",
+        explanation=(
+            "Your processes on the head node together held more than 32 GB of "
+            "RAM for ten minutes or more. When the head node runs out of memory, "
+            "logins and job submission fail for everyone."
+        ),
+        remediation=(
+            "# Run the work in a job with a memory request:\n"
+            "srun --pty -n1 -c4 --mem=64G --time=4:00:00 bash"
+        ),
+        severity="actionable",
+    ),
+    "head_node_io": Template(
+        template_id="head_node_io",
+        title="Large data movement through the head node",
+        explanation=(
+            "A process of yours read or wrote more than 50 MB/s for ten minutes "
+            "or more on the head node: a large copy or transfer. Big transfers "
+            "through the head node slow it for everyone, and writing results to "
+            "shared storage while an analysis runs loads the file server too."
+        ),
+        remediation=(
+            "# Run large copies inside a job, not on the head node:\n"
+            "sbatch --wrap 'rsync -a src/ dest/' --time=4:00:00\n"
+            "# In analyses, write to local scratch and copy the results once at the end."
         ),
         severity="informational",
     ),
@@ -153,7 +200,7 @@ def insights_for_user(
                    SUM(occurrences) AS total_occurrences,
                    MAX(last_seen) AS most_recent
             FROM per_user_alert
-            WHERE username = ? AND fired_at >= ? AND edu_template_id IS NOT NULL
+            WHERE username = ? AND last_seen >= ? AND edu_template_id IS NOT NULL
             GROUP BY edu_template_id, command
             ORDER BY most_recent DESC
             """,
@@ -170,7 +217,7 @@ def insights_for_user(
             dimension="head_node_use",
             title=tpl.title,
             body=tpl.explanation,
-            severity=tpl.severity,
+            severity=r["severity"] or tpl.severity,   # the rule's, as configured
             occurrences=int(r["total_occurrences"] or 1),
             last_seen=r["most_recent"] or "",
             related_command=r["command"],

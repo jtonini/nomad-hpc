@@ -243,6 +243,51 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (9, "Add avg_gpu_util to job_summary (per-job DCGM real utilization)", """
         ALTER TABLE job_summary ADD COLUMN avg_gpu_util REAL;
     """),
+    # per_user under cron: counters one run leaves for the next, and daily
+    # per-user totals per host (kept; raw samples are pruned).
+    (10, "Add per_user_state and per_user_daily", """
+        CREATE TABLE IF NOT EXISTS per_user_state (
+            hostname            TEXT NOT NULL,
+            key                 TEXT NOT NULL,
+            kind                TEXT NOT NULL,
+            seen_at             REAL NOT NULL,
+            cpu_seconds         REAL,
+            io_read_bytes       INTEGER,
+            io_write_bytes      INTEGER,
+            rules               TEXT,
+            peak_cpu_percent    REAL,
+            peak_memory_bytes   INTEGER,
+            PRIMARY KEY (hostname, key)
+        );
+        CREATE TABLE IF NOT EXISTS per_user_daily (
+            day                 TEXT NOT NULL,
+            hostname            TEXT NOT NULL,
+            username            TEXT NOT NULL,
+            uid                 INTEGER,
+            cpu_seconds         REAL NOT NULL DEFAULT 0,
+            busy_seconds        REAL NOT NULL DEFAULT 0,
+            peak_cpu_percent    REAL,
+            peak_memory_bytes   INTEGER,
+            io_read_bytes       INTEGER,
+            io_write_bytes      INTEGER,
+            cpu_source          TEXT,
+            updated_at          DATETIME,
+            PRIMARY KEY (day, hostname, username)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pud_host_day
+            ON per_user_daily(hostname, day);
+    """),
+    # One column per migration: a migration that fails on "duplicate column"
+    # is recorded as applied, and the statements after it would never run.
+    (11, "Add cpu_window_seconds to per_user_sample", """
+        ALTER TABLE per_user_sample ADD COLUMN cpu_window_seconds REAL;
+    """),
+    (12, "Add io_read_bps to per_user_sample", """
+        ALTER TABLE per_user_sample ADD COLUMN io_read_bps REAL;
+    """),
+    (13, "Add io_write_bps to per_user_sample", """
+        ALTER TABLE per_user_sample ADD COLUMN io_write_bps REAL;
+    """),
 ]
 
 

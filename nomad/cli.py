@@ -335,6 +335,34 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
             click.echo(f"  - {item}")
 
 
+@cli.command('per-user')
+@click.option('--db', type=click.Path(), help='Database to read (default: this host\'s; '
+              'a hub\'s combined.db shows every site)')
+@click.option('--days', type=int, default=7, show_default=True, help='Window')
+@click.option('--mask', is_flag=True,
+              help='Replace user and command names with stand-ins (for sharing the output)')
+@click.pass_context
+def per_user_cmd(ctx: click.Context, db: str, days: int, mask: bool) -> None:
+    """Heavy use of shared hosts (login nodes): what was flagged, and who
+    used each host most.
+
+    From what the per_user collector stored: its flags (one line per process,
+    or per episode of a user's processes together) and its daily per-user
+    totals.
+    """
+    from nomad.collectors.per_user.report import report
+
+    db_path = Path(db).expanduser() if db else get_db_path(ctx.obj['config'])
+    if not db_path.exists():
+        raise click.ClickException(f"{db_path} does not exist")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        for line in report(conn, days=days, mask=mask, db_label=str(db_path)):
+            click.echo(line)
+    finally:
+        conn.close()
+
+
 @cli.command()
 @click.option('--path', '-p', default='/localscratch', help='Filesystem path to analyze')
 @click.option('--hours', '-h', type=int, default=24, help='Hours of history')
@@ -4269,6 +4297,8 @@ def sync(ctx, config_file, output, dry_run):
     SKIP_TABLES = {
         'schema_version', 'schema_migrations',
         'sqlite_sequence', 'config',
+        # per_user's counters from one run to the next: local working state.
+        'per_user_state',
     }
 
     # Build to a temp path so a failed or interrupted sync doesn't destroy
