@@ -180,18 +180,24 @@ def test_a_disk_filling_fast_is_forecast(sent):
     assert th._duration(1.2) == "1 hour" and th._duration(0.02) == "1 minute"
 
 
-def test_a_disk_past_its_critical_threshold_gets_no_forecast(sent):
-    th.ThresholdChecker({}).check("disk", [fs("/home", 99.9, hours_until_full=0.3)])
-    assert [a["source"] for a in sent] == ["disk"]            # the threshold alert only
-
-
-def test_a_disk_past_its_critical_threshold_gets_no_forecast_on_top(sent):
-    # Sunday at spydur: /home near 100%, some space freed and filled again.
-    th.ThresholdChecker({}).check("disk", [fs("/home", 99.6, hours_until_full=0.5,
-                                              fill_rate_bytes_per_day=2 * TB,
-                                              forecast_window_hours=1)])
+def test_past_its_critical_threshold_a_disk_is_forecast_only_when_filling_fast(sent):
+    # spydur /home at 97%, 529 GB left: slowly, the 95% alert says it all...
+    th.ThresholdChecker({}).check("disk", [fs("/home", 97.0, hours_until_full=30,
+                                              fill_rate_bytes_per_day=0.4 * TB,
+                                              forecast_window_hours=6)])
     assert [(a["source"], a["severity"]) for a in sent] == [("disk", "critical")]
-    assert sent[0]["message"] == "Disk /home at 99.6% (66.0 GB free; threshold: 95%)"
+    assert sent[0]["message"] == "Disk /home at 97.0% (494.7 GB free; threshold: 95%)"
+    sent.clear()
+    # ...at the weekend's rate the rest goes in hours: that is news.
+    th.ThresholdChecker({}).check("disk", [fs("/home", 97.0, hours_until_full=5,
+                                              fill_rate_bytes_per_day=2 * TB,
+                                              forecast_window_hours=6)])
+    assert [(a["source"], a["severity"]) for a in sent] == [("disk", "critical"),
+                                                            ("disk_forecast", "critical")]
+    sent.clear()
+    cfg = {"alerts": {"thresholds": {"disk": {"full_within_hours_past_critical": 2}}}}
+    th.ThresholdChecker(cfg).check("disk", [fs("/home", 97.0, hours_until_full=5)])
+    assert [a["source"] for a in sent] == ["disk"]
 
 
 def test_forecasts_can_be_turned_off(sent):

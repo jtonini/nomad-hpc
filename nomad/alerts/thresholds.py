@@ -44,6 +44,8 @@ DEFAULT_THRESHOLDS = {
         # Forecast: full within this many hours at the recent fill rate.
         'full_within_hours_warning': 72,
         'full_within_hours_critical': 24,
+        # Past used_percent_critical: only a disk filling within hours.
+        'full_within_hours_past_critical': 6,
     },
     'nfs': {
         'retrans_percent_warning': 1.0,
@@ -212,12 +214,17 @@ class ThresholdChecker:
         hours = item.get('hours_until_full')
         if not t.get('forecast_enabled', True) or hours is None or hours <= 0:
             return []
-        # Past its critical threshold, the disk has that alert; "full in 20
-        # minutes" each time a little space is freed and taken again (spydur
-        # /home, Sunday 4 Oct) adds nothing to it.
+        # Past its critical threshold the disk has that alert, reminded of
+        # once a day. A forecast adds to it only when the rest is going fast
+        # -- full within hours (spydur /home at 97%, 529 GB left: a fill like
+        # the weekend's would take them in six) -- not each time a little
+        # space is freed and taken again.
         if (item.get('used_percent') or 0) >= t.get('used_percent_critical', 95):
-            return []
-        if hours <= t.get('full_within_hours_critical', 24):
+            limit = t.get('full_within_hours_past_critical', 6)
+            if hours > limit:
+                return []
+            severity = 'critical'
+        elif hours <= t.get('full_within_hours_critical', 24):
             severity, limit = 'critical', t.get('full_within_hours_critical', 24)
         elif hours <= t.get('full_within_hours_warning', 72):
             severity, limit = 'warning', t.get('full_within_hours_warning', 72)

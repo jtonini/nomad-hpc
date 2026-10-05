@@ -38,6 +38,7 @@ filling, the reading stores the rate and when it will be full
 [alerts.thresholds.disk]
 full_within_hours_warning = 72
 full_within_hours_critical = 24
+full_within_hours_past_critical = 6   # once past used_percent_critical
 
 [alerts.predictive]
 enabled = true          # false: no forecasts
@@ -48,7 +49,9 @@ shared pool is forecast as the pool fills. It needs four readings over at
 least an hour and growth of at least 0.1% of the filesystem over the window;
 readings of another filesystem (the path unmounted, `df` reading the one
 beneath: a different size *and* usage) are left out, and a disk already full gets the threshold
-alert instead, and so does one already past its critical threshold.
+alert instead. Past its critical threshold a disk has that alert, reminded
+of daily; a forecast is added only when the rest will be gone within
+`full_within_hours_past_critical` (6) hours.
 `days_until_full_*` under `[alerts.predictive]` and
 `disk_fill_days_warning`, which older configs carry for a forecast that never
 ran, are not read.

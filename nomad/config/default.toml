@@ -89,6 +89,8 @@ used_percent_critical = 95
 # ([collectors.disk], default 6).
 full_within_hours_warning = 72
 full_within_hours_critical = 24
+# Past used_percent_critical, only when full within this many hours.
+full_within_hours_past_critical = 6
 
 [alerts.thresholds.nfs]
 retrans_percent_warning = 1.0
