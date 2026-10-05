@@ -309,6 +309,22 @@ from = "hpc@your-institution.edu"   # must be an address the server accepts;
 # password_file = ""         # a file holding that password, readable only by
                              # you -- never the password itself
 
+# ─── Console access ──────────────────────────────────────────────
+# Who may see what in the Console, on the machine that runs it. Anyone not
+# named who signs in is a viewer: their own work. Check with
+# `nomad console roles NETID`.
+[console.roles]
+admin = []                   # NetIDs: everything, settings included
+operator = []                # everything, no settings
+
+[console.labs]
+# A PI also sees the members of the labs they lead: the group named by
+# group_pattern for them (when it exists), and any group listed in leads.
+# Empty (the default): no labs from names, only from leads.
+group_pattern = ""           # e.g. "{netid}$" where a faculty member's group
+                             # is their NetID followed by $
+leads = {}                   # e.g. { NETID = ["chemlab$"] }
+
 # ─── Support ─────────────────────────────────────────────────────
 # Where people's questions go, e.g. the Console's "Contact support".
 [support]

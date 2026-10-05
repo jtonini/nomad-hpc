@@ -4802,6 +4802,79 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     sys.exit(code)
 
 
+@console.command('roles')
+@click.argument('netid', required=False)
+@click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
+@click.option('--mask', is_flag=True, help='Counts only: no NetIDs or group names.')
+@click.pass_context
+def console_roles(ctx, netid, db, mask):
+    """Who may see what in the Console, as nomad.toml says.
+
+    \b
+    nomad console roles            the roles and lab rules in the file
+    nomad console roles NETID      what that person would see
+
+    Roles and labs live in [console.roles] and [console.labs] of nomad.toml
+    on the machine that runs the Console; see docs/config.md.
+    """
+    import sqlite3
+
+    from nomad.config.access import access_from, members_lookup, visible_people
+    config = ctx.obj.get('config', {}) or {}
+    acc = access_from(config, log=False)
+    show = (lambda names: f"{len(names)}") if mask else \
+        (lambda names: f"{len(names)}" + (f" ({', '.join(sorted(names))})" if names else ""))
+    click.echo(f"Console access, from {ctx.obj.get('config_path') or 'no config file'}")
+    click.echo(f"  admin:     {show(acc.admins)}")
+    click.echo(f"  operator:  {show(acc.operators)}")
+    rule = f'group_pattern "{acc.group_pattern}"' if acc.group_pattern else \
+        "no group_pattern (labs only from leads)"
+    click.echo(f"  labs:      {rule}; leads listed for {len(acc.leads)} "
+               f"{'person' if len(acc.leads) == 1 else 'people'}")
+    click.echo("  anyone else who signs in: viewer (their own work)")
+    for p in acc.problems:
+        click.echo(click.style(f"  ! {p}", fg='yellow'))
+    if not netid:
+        return
+
+    db_path = Path(db).expanduser() if db else get_db_path(config)
+    exists = members = None
+    conn = None
+    if db_path.exists():
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        exists, members = members_lookup(conn)
+    who = "this person" if mask else netid
+    click.echo(f"\n{who}:")
+    role = acc.role(netid)
+    labs = acc.lab_groups(netid, exists)
+    if role:
+        line = role
+    elif labs:
+        line = f"viewer, and a PI: leads {len(labs)} lab{'' if len(labs) == 1 else 's'}"
+    else:
+        line = "viewer"
+    click.echo(f"  role: {line}")
+    # Every group listed for them; the one their name gives only if it exists.
+    listed = list(acc.leads.get(netid.strip().lower(), ()))
+    listed += [g for g in labs if g not in listed]
+    for i, g in enumerate(listed, 1):
+        name = f"lab #{i}" if mask else g
+        if members is None:
+            click.echo(f"    {name}: (no database at {db_path}: size unknown)")
+        else:
+            n = len(members(g))
+            click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
+    if role:
+        click.echo("  sees individually: everyone")
+    elif members is not None:
+        people = visible_people(acc, netid, members, exists)
+        others = len(people - {netid.strip().lower()})
+        click.echo("  sees individually: their own work" +
+                   (f" and {others} lab members" if others else ""))
+    if conn is not None:
+        conn.close()
+
+
 @cli.group()
 def edu():
     """NØMAÐ Edu — Educational analytics for HPC.
