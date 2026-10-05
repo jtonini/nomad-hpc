@@ -66,9 +66,9 @@ quota_backend = "quota"
 # For custom quota command
 # quota_command = "/usr/local/bin/get_quota.sh"
 
-# Derivative analysis settings
-derivative_window = 5        # Number of points for derivative calculation
-derivative_smoothing = 0.3   # Exponential smoothing factor (0-1)
+# Fill forecast: each reading fits the last N hours of readings with a line
+# and says when the filesystem will be full ([alerts.thresholds.disk]).
+forecast_window_hours = 6
 
 # Large file detection
 large_file_threshold_gb = 100
@@ -334,10 +334,13 @@ enabled = true
 [alerts]
 # Alert dispatch configuration.
 #
-# Only signals at or above min_severity are dispatched. Cooldown
-# prevents the same alert from being sent repeatedly.
+# Only signals at or above min_severity are dispatched. Each condition (a
+# disk path, a mount, a GPU, a node) is raised when it appears or gets
+# worse, then reminded of once every reminder_hours while it lasts -- not on
+# every collection run. Not seen for episode_gap_minutes, it has ended.
 min_severity = "warning"     # info | warning | critical
-cooldown_minutes = 15
+reminder_hours = 24
+episode_gap_minutes = 60
 
 # ─── Email dispatch ──────────────────────────────────────────────
 # Sent through [mail] above. To enable: fill in [mail], put your
@@ -365,28 +368,22 @@ url = ""
 # ALERT THRESHOLDS
 # ============================================
 
-[alerts.thresholds]
-# Disk
-disk_warning_percent = 85
-disk_critical_percent = 95
-disk_fill_days_warning = 7    # Warn if disk will be full in N days
+[alerts.thresholds.disk]
+used_percent_warning = 80
+used_percent_critical = 95
+# Forecast: full within this many hours at the fill rate of the last
+# forecast_window_hours ([collectors.disk], default 6).
+full_within_hours_warning = 72
+full_within_hours_critical = 24
 
-# Queue
-queue_depth_warning = 100
-queue_depth_critical = 500
-queue_wait_warning_hours = 24
+[alerts.thresholds.nfs]
+retrans_percent_warning = 1.0
+retrans_percent_critical = 5.0
+avg_rtt_ms_warning = 50
+avg_rtt_ms_critical = 100
 
-# Nodes
-node_down_alert = true
-node_drain_alert = true
-
-# Licenses
-license_low_threshold = 3     # Alert when < N licenses available
-license_percent_warning = 90  # Alert when > N% licenses in use
-
-# Jobs
-job_stuck_days = 7
-job_health_warning = 0.4      # Alert when predicted health < threshold
+# Node state alerts (down, drained, failing) come from the node_state
+# collector and need no thresholds.
 
 # ============================================
 # DERIVATIVE ALERT THRESHOLDS

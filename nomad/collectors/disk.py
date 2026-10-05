@@ -13,7 +13,7 @@ import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +66,68 @@ class QuotaInfo:
             'limit_bytes': self.limit_bytes,
             'used_percent': self.used_percent,
         }
+
+
+# Fill forecast: the readings of the last few hours, fitted with a straight
+# line. Two 5-minute readings (what the old derivative check used) make a
+# rate out of noise; a few hours of them make one out of what is happening.
+FORECAST_WINDOW_HOURS = 6.0
+FORECAST_MIN_READINGS = 4
+FORECAST_MIN_SPAN_SECONDS = 3600
+# Growth over the window smaller than this share of the filesystem is not a
+# trend worth projecting.
+FORECAST_MIN_GROWTH = 0.001
+
+
+def fill_forecast(readings, total_bytes, available_bytes):
+    """(rate in bytes per second, hours until full) from [(unix_s, bytes)], the
+    bytes rising as the filesystem fills (used, or free space negated).
+
+    Least squares over the readings. The hours are None unless the line
+    rises, by at least FORECAST_MIN_GROWTH of the filesystem over the
+    readings' span, with free space left; the rate is None without enough
+    readings (FORECAST_MIN_READINGS over FORECAST_MIN_SPAN_SECONDS).
+    """
+    pts = sorted(readings)
+    if len(pts) < FORECAST_MIN_READINGS:
+        return None, None
+    span = pts[-1][0] - pts[0][0]
+    if span < FORECAST_MIN_SPAN_SECONDS:
+        return None, None
+    n = len(pts)
+    mt = sum(t for t, _ in pts) / n
+    mu = sum(u for _, u in pts) / n
+    sxx = sum((t - mt) ** 2 for t, _ in pts)
+    if sxx <= 0:
+        return None, None
+    rate = sum((t - mt) * (u - mu) for t, u in pts) / sxx
+    if rate <= 0 or rate * span < FORECAST_MIN_GROWTH * (total_bytes or 0):
+        return rate, None
+    if not available_bytes or available_bytes <= 0:
+        return rate, None                 # already full: the threshold alert says so
+    return rate, available_bytes / rate / 3600
+
+
+def _close(a, b) -> bool:
+    try:
+        return abs(a - b) <= 0.1 * max(abs(a), abs(b))
+    except TypeError:
+        return False
+
+
+def _same_filesystem(total, used, now_total, now_used) -> bool:
+    """Another filesystem differs in both size and usage (an unmounted
+    /home: df reads the root filesystem beneath). A dataset on a shared pool
+    changes size as the pool fills, its usage staying put; a filesystem
+    emptied by a cleanup keeps its size."""
+    return _close(total, now_total) or _close(used, now_used)
+
+
+def _parse_time(text):
+    try:
+        return datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
 
 
 @registry.register
@@ -346,19 +408,50 @@ class DiskCollector(BaseCollector):
         return []
 
     def store(self, data: list[dict[str, Any]]) -> None:
-        """Store collected data in the database."""
-        timestamp = datetime.now().isoformat()
+        """Store collected data in the database.
+
+        Each filesystem reading also gets its fill forecast (from this and
+        the readings of the last ``forecast_window_hours``), stored in the
+        row's ``fill_rate_bytes_per_day`` and ``days_until_full`` and added
+        to the record, where the alert check reads it.
+        """
+        now = datetime.now()
+        timestamp = now.isoformat()
+        window = float(self.config.get('forecast_window_hours', FORECAST_WINDOW_HOURS))
+        since = (now - timedelta(hours=window)).isoformat()
 
         with self.get_db_connection() as conn:
             for record in data:
                 record_type = record.get('type')
 
                 if record_type == 'filesystem':
+                    total = record['total_bytes']
+                    readings = []
+                    for ts, t_total, t_used, t_avail in conn.execute(
+                            "SELECT timestamp, total_bytes, used_bytes, available_bytes "
+                            "FROM filesystems WHERE path = ? AND timestamp >= ? "
+                            "ORDER BY timestamp", (record['path'], since)):
+                        t = _parse_time(ts)
+                        # A reading of another filesystem (the path unmounted:
+                        # df read the one beneath) is not this one's history.
+                        if t is None or not _same_filesystem(
+                                t_total, t_used, total, record['used_bytes']):
+                            continue
+                        readings.append((t.timestamp(), -t_avail))
+                    # The decline of free space, not the growth of "used": on
+                    # a pool shared by several datasets the free space shrinks
+                    # while this one's own usage stays flat.
+                    readings.append((now.timestamp(), -record['available_bytes']))
+                    rate, hours = fill_forecast(readings, total, record['available_bytes'])
+                    record['fill_rate_bytes_per_day'] = None if rate is None else rate * 86400
+                    record['hours_until_full'] = hours
+                    record['forecast_window_hours'] = (readings[-1][0] - readings[0][0]) / 3600
                     conn.execute(
                         """
                         INSERT INTO filesystems 
-                        (path, total_bytes, used_bytes, available_bytes, used_percent, timestamp)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        (path, total_bytes, used_bytes, available_bytes, used_percent, timestamp,
+                         fill_rate_bytes_per_day, days_until_full)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             record['path'],
@@ -367,6 +460,8 @@ class DiskCollector(BaseCollector):
                             record['available_bytes'],
                             record['used_percent'],
                             timestamp,
+                            record['fill_rate_bytes_per_day'],
+                            None if hours is None else hours / 24,
                         )
                     )
 

@@ -288,6 +288,27 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (13, "Add io_write_bps to per_user_sample", """
         ALTER TABLE per_user_sample ADD COLUMN io_write_bps REAL;
     """),
+    # One row per alert condition (source|host|subject): when it was first
+    # and last seen, and last raised. Raised on appearing, on getting worse
+    # and once a reminder interval while it lasts -- not on every run.
+    (14, "Add alert_state", """
+        CREATE TABLE IF NOT EXISTS alert_state (
+            key             TEXT PRIMARY KEY,
+            source          TEXT,
+            host            TEXT,
+            subject         TEXT,
+            severity        TEXT NOT NULL,
+            first_seen      TEXT NOT NULL,
+            last_seen       TEXT NOT NULL,
+            last_raised     TEXT,
+            raised_count    INTEGER NOT NULL DEFAULT 0,
+            message         TEXT,
+            last_severity   TEXT,
+            worst_seen      TEXT,
+            retry_at        TEXT,
+            send_failures   INTEGER NOT NULL DEFAULT 0
+        );
+    """),
 ]
 
 

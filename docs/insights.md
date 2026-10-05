@@ -69,7 +69,7 @@ Below 50 such jobs (`MIN_JOBS`) nothing about jobs rises above a notice and no c
 
 ### Alerts
 
-nomad stores alerts but never marks them resolved, so none is called "active": the reader reports alerts **raised** in the window, grouped by condition, with how many times and when last. A condition that persists is raised again after each cooldown (`cooldown_minutes`); that is not flapping, and nothing claims it is. Measured values don't split a condition: "Disk usage at 86.0% on /scratch" and "at 87.1%" are one; numbers in names do ("GPU 0" and "GPU 3", `/data1` and `/data2` stay apart). Alerts stored by `nomad test-alerts` (category `test`) prove that mail works and are not counted. Both column layouts are read: nomad's (`category`, `source` = host) and the demo database's (`source`, `host`).
+nomad stores alerts but never marks them resolved, so none is called "active": the reader reports alerts **raised** in the window, grouped by condition, with how many times and when last. A condition that persists is raised again once a day (`reminder_hours`; every `cooldown_minutes` before 1.7.16); that is not flapping, and nothing claims it is. Alerts from 1.7.16 name their condition (`dedup_key`: source, host, what on the host, metric) and are grouped by it; for older ones, measured values don't split a condition: "Disk usage at 86.0% on /scratch" and "at 87.1%" are one; numbers in names do ("GPU 0" and "GPU 3", `/data1` and `/data2` stay apart). Alerts stored by `nomad test-alerts` (category `test`) prove that mail works and are not counted. Both column layouts are read: nomad's (`category`, `source` = host) and the demo database's (`source`, `host`).
 
 ### What was measured
 

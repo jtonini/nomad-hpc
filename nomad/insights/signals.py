@@ -769,8 +769,9 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
     """Alerts raised in the window, grouped by what they were about.
 
     nomad stores alerts but never marks them resolved, so an alert is not
-    "active": it was raised. A condition that persists is raised again after
-    each cooldown, which is not flapping either -- so neither is claimed.
+    "active": it was raised. A condition that persists is raised again once
+    a day (1.7.16; every cooldown before), which is not flapping either --
+    so neither is claimed.
     The stored columns differ: nomad writes category/source(=host), the demo
     database source(=metric)/host; both are read.
     """
@@ -787,9 +788,10 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
         else:
             what, host = ("category" if "category" in cols else "source"), "source"
         details = "details" if "details" in cols else "NULL"
+        dedup = "dedup_key" if "dedup_key" in cols else "NULL"
         rows = conn.execute(f"""
             SELECT severity, {what} AS what, {host} AS host, message,
-                   {details} AS details, timestamp
+                   {details} AS details, timestamp, {dedup} AS dedup
             FROM alerts WHERE timestamp >= ?
             ORDER BY timestamp DESC
         """, (cutoff,)).fetchall()
@@ -816,8 +818,13 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
         # "at 87.0%" are the same alert raised on different days.
         conditions: dict[tuple, dict] = {}
         for r in rows:
-            shape = _MEASURED.sub("#", r["message"] or "")[:80]
-            key = (r["what"] or "", r["host"] or "", shape)
+            # 1.7.16 names the condition (source|host|subject[|metric]); a
+            # forecast's "in 45 hours" and "in 1.9 days" are one condition.
+            if r["dedup"] and "|" in str(r["dedup"]):
+                key = ("key", str(r["dedup"]), "")
+            else:
+                shape = _MEASURED.sub("#", r["message"] or "")[:80]
+                key = (r["what"] or "", r["host"] or "", shape)
             c = conditions.setdefault(key, {
                 "message": r["message"] or "", "count": 0, "last": r["timestamp"],
                 "severity": (r["severity"] or "").lower(), "host": r["host"],

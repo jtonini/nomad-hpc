@@ -189,9 +189,9 @@ class NodeStateCollector(BaseCollector):
         """
         Dispatch alerts for unhealthy nodes via the AlertDispatcher.
 
-        Deduplication is handled by the dispatcher's cooldown (same
-        source:host:severity within cooldown_minutes is suppressed),
-        so a node staying DOWN for hours sends one alert, not many.
+        The dispatcher raises each node's condition once when it starts,
+        again if it gets worse, and once a day while it lasts, so a node
+        staying DOWN for hours sends one alert, not many.
         """
         for rec in records:
             if rec.get('is_healthy', 1):

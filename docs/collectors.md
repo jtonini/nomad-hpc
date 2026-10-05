@@ -57,6 +57,14 @@ A collector that runs but has nothing to collect logs why — `nfsiostat not ins
 
 Commands are looked for on the PATH and in `/usr/sbin`, `/sbin`, `/usr/local/sbin` and `/usr/local/bin`: cron's PATH is only `/usr/bin:/bin`, and nfs-utils installs `nfsiostat` in `/usr/sbin`.
 
+## Disks
+
+`disk` reads each of `filesystems` with `df` every run. Each reading also
+fits the readings of the last `forecast_window_hours` (default 6) with a
+straight line and stores the fill rate and when the filesystem will be full
+(`fill_rate_bytes_per_day`, `days_until_full`); a disk that will be full
+soon raises a `disk_forecast` alert (see `docs/alerts.md`).
+
 ## NFS
 
 On a host that mounts NFS, each run reads `nfsiostat 5 2` and keeps the second report: what each mount did in those 5 seconds (`sample_seconds` in `[collectors.nfs]`). The first report averages everything since the share was mounted. Per mount: operations, read and write rates, and round-trip and execution times and retransmissions weighted over reads and writes — empty (NULL) for a mount with no reads or writes in the sample, rather than 0 ms. A host that mounts nothing says "no NFS mounts on this host"; turn nfs off there.

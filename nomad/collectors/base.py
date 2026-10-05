@@ -187,8 +187,14 @@ class BaseCollector(ABC):
             data = self._collect_with_retry()
 
             # Store data
+            store_error = None
             if data:
-                self.store(data)
+                try:
+                    self.store(data)
+                except Exception as e:
+                    # Still check what was collected: a disk too full to
+                    # store into is the one to alert about.
+                    store_error = e
 
                 # Check thresholds and trigger alerts
                 if HAS_ALERTS and self.config.get('alerts_enabled', True):
@@ -199,7 +205,9 @@ class BaseCollector(ABC):
                         full_config = getattr(registry, '_config', {})
                         check_and_alert(self.name, data, full_config, host=host)
                     except Exception as e:
-                        logger.debug(f"Alert check skipped: {e}")
+                        logger.warning(f"{self.name}: alert check failed: {e}")
+            if store_error is not None:
+                raise store_error
 
             duration = time.time() - start_time
             self._last_run = timestamp

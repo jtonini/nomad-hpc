@@ -6,10 +6,8 @@ from .backends import EmailBackend, SlackBackend, WebhookBackend
 from .dispatcher import AlertDispatcher, get_dispatcher, init_dispatcher, send_alert
 from .thresholds import (
     DEFAULT_THRESHOLDS,
-    PredictiveChecker,
     ThresholdChecker,
     check_and_alert,
-    check_disk_prediction,
 )
 
 __all__ = [
@@ -23,6 +21,4 @@ __all__ = [
     'ThresholdChecker',
     'check_and_alert',
     'DEFAULT_THRESHOLDS',
-    'PredictiveChecker',
-    'check_disk_prediction'
 ]

@@ -73,12 +73,22 @@ enabled = false
 enabled = true
 # Minimum severity to dispatch: info, warning, critical
 min_severity = "warning"
-# Cooldown between duplicate alerts (minutes)
+# A condition (a disk path, a mount, a node) is raised when it appears or
+# gets worse, then reminded of every reminder_hours while it lasts.
+reminder_hours = 24
+# Not seen for this long, it has ended; seen again, it is raised again.
+episode_gap_minutes = 60
+# Only where alerts have no database to remember them in: the same alert
+# is held back this long.
 cooldown_minutes = 15
 
 [alerts.thresholds.disk]
 used_percent_warning = 80
 used_percent_critical = 95
+# Full within this many hours at the rate of the last forecast_window_hours
+# ([collectors.disk], default 6).
+full_within_hours_warning = 72
+full_within_hours_critical = 24
 
 [alerts.thresholds.nfs]
 retrans_percent_warning = 1.0
@@ -92,10 +102,8 @@ temperature_warning = 80
 temperature_critical = 90
 
 [alerts.predictive]
-# Predictive alerts using derivative analysis
+# Disk fill forecasts (when: full_within_hours_* in [alerts.thresholds.disk]).
 enabled = true
-days_until_full_warning = 7
-days_until_full_critical = 1
 
 # Email notifications (optional)
 [alerts.email]

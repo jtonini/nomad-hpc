@@ -170,6 +170,9 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
     try:
         from nomad.alerts import init_dispatcher
         dispatcher = init_dispatcher(config)
+        # Alerts, and what has been raised (alert_state), go to the database
+        # this run collects into -- also without [database] path, or --db.
+        dispatcher.db_path = str(db_path)
         if dispatcher.backends:
             backend_names = [b.__class__.__name__ for b in dispatcher.backends]
             click.echo(
@@ -197,6 +200,11 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
     # answer `nomad collectors` explains. (A fixed list here used to leave
     # out storage and network_perf, so enabling them did nothing.)
     from nomad.collectors.plan import build
+    # The alert check after each collector reads its thresholds from the
+    # registry's config, which nothing used to set: [alerts.thresholds] in
+    # nomad.toml was never read, and every site alerted at 80/95%.
+    from nomad.collectors.base import registry as _registry
+    _registry._config = config
     try:
         collectors, planned = build(config, db_path, only=collector)
     except ValueError as e:
@@ -812,6 +820,34 @@ def status(ctx: click.Context, db: str) -> None:
     except sqlite3.OperationalError:
         pass
 
+def _show_active_alerts(conn, config) -> None:
+    """Conditions that hold now (seen within the episode gap), from alert_state."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(alert_state)")}
+    if not cols:
+        return
+    gap = float((config.get('alerts', {}) or {}).get('episode_gap_minutes', 60))
+    since = (datetime.now() - timedelta(minutes=gap)).isoformat()
+    site = "source_site" if "source_site" in cols else "NULL"
+    now_sev = "COALESCE(last_severity, severity)" if "last_severity" in cols else "severity"
+    active = conn.execute(
+        f"SELECT {site}, {now_sev}, message, first_seen, last_raised, raised_count "
+        "FROM alert_state WHERE last_seen >= ? "
+        f"ORDER BY CASE {now_sev} WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, "
+        "first_seen", (since,)).fetchall()
+    click.echo(click.style(f"  Active now: {len(active)}", bold=True)
+               + ("" if active else " (no condition seen in the last "
+                  f"{gap:g} minutes)"))
+    for r in active:
+        color = {'critical': 'red', 'warning': 'yellow'}.get(r[1], 'blue')
+        where = f"{r[0]}: " if r[0] else ""
+        click.echo(f"    {click.style(r[1].upper()[:4], fg=color)}  {where}{r[2]}")
+        click.echo(f"          since {str(r[3])[:16].replace('T', ' ')}, raised {r[5]}x, "
+                   f"last {str(r[4] or '-')[:16].replace('T', ' ')}")
+    click.echo()
+    click.echo(click.style("  Raised, newest first", bold=True))
+    click.echo()
+
+
 @cli.command()
 @click.option('--db', type=click.Path(), help='Database path override')
 @click.option('--unresolved', is_flag=True, help='Show only unresolved alerts')
@@ -861,6 +897,7 @@ def alerts(ctx: click.Context, db: str, unresolved: bool, severity: str) -> None
     click.echo()
     click.echo(click.style("═══ Alerts ═══", bold=True))
     click.echo()
+    _show_active_alerts(conn, config)
 
     if not rows:
         click.echo("  No alerts found")

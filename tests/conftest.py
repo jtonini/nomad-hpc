@@ -1,6 +1,20 @@
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _registry_config_restored():
+    """`nomad collect` sets the collector registry's config (for the alert
+    check); a test that runs it must not leave it for the next."""
+    from nomad.collectors.base import registry
+    had = hasattr(registry, "_config")
+    saved = getattr(registry, "_config", None)
+    yield
+    if had:
+        registry._config = saved
+    elif hasattr(registry, "_config"):
+        del registry._config
+
+
 # --- Idea 18 Component 1 fixtures ------------------------------------------
 
 def _bootstrap_db_with_migrations(db_path: str) -> None:
