@@ -75,6 +75,43 @@ Ctrl-C, closing the window, or ending the launcher with `kill` closes the
 tunnel. On Windows, ending Python from Task Manager does not: end `ssh.exe`
 there too, or use Ctrl-C.
 
+## From a cluster
+
+Typed in a shell on a cluster over SSH, `nomad console` (the same as
+`nomad console launch`) knows a browser there would not be on your screen, and
+prints the one line to run on your own computer, through the cluster:
+
+```
+$ nomad console
+A browser started on spydur would not be on your screen. On your own computer, run:
+
+    ssh -N -L 8000:localhost:8000 -J NETID@spydur.example.edu NETID@console-host.example.edu
+
+then open http://localhost:8000 and sign in with your NetID. ...
+```
+
+Your own computer then needs nothing but ssh. Two names come from the
+environment, which a cluster's shared `nomad` command sets for everyone:
+`NOMAD_CONSOLE_HOST` (the machine that serves the Console) and
+`NOMAD_LOGIN_HOST` (the cluster, as people's computers reach it). `--here`
+opens the tunnel and browser on the cluster after all (a remote desktop, say).
+
+A shared install is one virtual environment every user can read (for example
+`/usr/local/sw/nomad`) and a small `nomad` script on everyone's PATH:
+
+```
+#!/bin/bash
+export NOMAD_CONSOLE_HOST="${NOMAD_CONSOLE_HOST:-console-host.example.edu}"
+export NOMAD_LOGIN_HOST="${NOMAD_LOGIN_HOST:-cluster.example.edu}"
+exec env -u PYTHONHOME -u PYTHONPATH /usr/local/sw/nomad/bin/nomad "$@"
+```
+
+Clearing `PYTHONHOME` and `PYTHONPATH` keeps a site's own Python settings
+(an Anaconda in the login scripts, say) from breaking nomad's environment.
+Users can run every command, but nomad's databases stay readable only by the
+account that collects them, so what anyone sees of other people goes through
+the Console's own scoping.
+
 ## On the server: accounts that may only open the tunnel
 
 To let people open the Console without giving them a shell on its machine,

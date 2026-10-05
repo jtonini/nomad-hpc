@@ -25,6 +25,8 @@ posix_only = pytest.mark.skipif(os.name == "nt", reason="fake ssh is a POSIX scr
 def saved_file(tmp_path, monkeypatch):
     path = tmp_path / "console_launch.json"
     monkeypatch.setattr(L, "SAVED", path)
+    for var in (L.ENV_HOST, L.ENV_LOGIN, "SSH_CONNECTION", "SSH_TTY"):
+        monkeypatch.delenv(var, raising=False)
     return path
 
 
@@ -353,7 +355,7 @@ def test_launch_opens_saves_and_reports_when_the_tunnel_closes(fake_ssh, saved_f
     out = []
     port = free_port()
     code = L.launch(L.Target("carol@mingus.example"), local_port=port,
-                    out=out.append, ssh=str(fake_ssh))
+                    out=out.append, ssh=str(fake_ssh), here=True)
     text = "\n".join(out)
     assert code == 0
     assert opened == [f"http://127.0.0.1:{port}/"]
@@ -367,7 +369,7 @@ def test_launch_when_ssh_cannot_log_in(fake_ssh, saved_file, monkeypatch):
     monkeypatch.setenv("FAKE_SSH_MODE", "fail")
     out = []
     code = L.launch(L.Target("carol@nowhere"), out=out.append, ssh=str(fake_ssh),
-                    open_browser=False)
+                    open_browser=False, here=True)
     assert code == 255
     assert "Check the machine name" in "\n".join(out)
     assert not saved_file.exists()          # a failed launch is not remembered
@@ -386,7 +388,7 @@ def test_something_else_on_the_port_is_not_taken_for_the_console(fake_ssh, saved
     out = []
     try:
         code = L.launch(L.Target("carol@mingus.example"), local_port=port, out=out.append,
-                        ssh=str(fake_ssh), open_browser=False)
+                        ssh=str(fake_ssh), open_browser=False, here=True)
     finally:
         other.shutdown()
         other.server_close()
@@ -402,7 +404,7 @@ def test_launch_when_nothing_answers_through_the_tunnel(fake_ssh, saved_file, mo
     monkeypatch.setenv("FAKE_SSH_SECONDS", "10")
     out = []
     code = L.launch(L.Target("carol@mingus.example"), out=out.append, ssh=str(fake_ssh),
-                    open_browser=False, no_console=1, local_port=free_port())
+                    open_browser=False, no_console=1, local_port=free_port(), here=True)
     assert code == 1
     assert "nothing answers" in "\n".join(out)
     assert not saved_file.exists()
@@ -420,7 +422,7 @@ def test_print_only_needs_no_ssh_here(saved_file, monkeypatch):
 def test_no_ssh_client(monkeypatch):
     monkeypatch.setattr(L.shutil, "which", lambda name: None)
     with pytest.raises(L.LaunchError, match="OpenSSH Client"):
-        L.launch(L.Target("u@h"), out=lambda s: None)
+        L.launch(L.Target("u@h"), out=lambda s: None, here=True)
 
 
 def _alive(pid):
@@ -442,7 +444,7 @@ def test_stopping_the_launcher_closes_the_tunnel(fake_ssh, tmp_path, how):
                PYTHONUNBUFFERED="1")
     proc = subprocess.Popen(
         [sys.executable, "-m", "nomad.console.launch", "carol@mingus.example",
-         "--no-browser", "--port", str(free_port())],
+         "--no-browser", "--here", "--port", str(free_port())],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
         start_new_session=True, cwd=Path(__file__).resolve().parents[1])
     ssh_pid = None
@@ -515,3 +517,66 @@ def test_nomad_loads_without_posix_only_modules():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                        cwd=Path(__file__).resolve().parents[1])
     assert r.returncode == 0, r.stderr
+
+
+# -- from a shell on a cluster ----------------------------------------------------
+
+@pytest.mark.parametrize("env,platform,want", [
+    ({}, "darwin", True),
+    ({}, "win32", True),
+    ({"DISPLAY": ":0"}, "linux", True),
+    ({"WAYLAND_DISPLAY": "wayland-0"}, "linux", True),
+    ({}, "linux", False),                                   # a server with no display
+    ({"SSH_CONNECTION": "1 2 3 4"}, "darwin", False),
+    ({"SSH_TTY": "/dev/pts/3", "DISPLAY": "localhost:10"}, "linux", False),
+])
+def test_browser_here(env, platform, want):
+    assert L.browser_here(env, platform) is want
+
+
+def test_on_a_cluster_it_prints_the_line_for_your_own_computer(monkeypatch):
+    monkeypatch.setenv("SSH_CONNECTION", "10.0.0.5 50000 10.0.0.1 22")
+    monkeypatch.setattr(L, "_user", lambda: "carol")
+    monkeypatch.setattr(L.shutil, "which", lambda name: pytest.fail("no ssh should run here"))
+    out = []
+    code = L.launch(L.Target("mingus.example"), out=out.append, local_port=None)
+    text = "\n".join(out)
+    assert code == 0
+    assert "ssh -N -L 8000:localhost:8000 -J carol@" in text
+    assert text.count("carol@mingus.example") == 1
+    assert "http://localhost:8000" in text
+
+
+def test_the_jump_is_this_cluster_by_the_name_users_reach_it_by(monkeypatch):
+    monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
+    monkeypatch.setattr(L, "_user", lambda: "carol")
+    lines = L.instructions(L.Target("carol@mingus.example.edu"))
+    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 -J carol@spydur.example.edu "
+                                "carol@mingus.example.edu")
+    assert 'leave out "-J carol@spydur.example.edu"' in lines[-1]
+
+
+def test_no_jump_on_the_consoles_own_machine(monkeypatch):
+    monkeypatch.setattr(L, "_user", lambda: "zeus")
+    lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
+    assert lines[2].strip() == "ssh -N -L 8000:localhost:8000 zeus@mingus.example.edu"
+
+
+def test_the_site_names_the_consoles_machine(monkeypatch, saved_file):
+    monkeypatch.setenv(L.ENV_HOST, "mingus.example.edu")
+    monkeypatch.setattr(L, "_user", lambda: "carol")
+    assert L.resolve(None, None, None) == L.Target("carol@mingus.example.edu")
+    # A launch that worked, and the command line, both come first.
+    L.save(L.Target("carol@other.example.edu"))
+    assert L.resolve(None, None, None).destination == "carol@other.example.edu"
+    assert L.resolve("x@y", None, None).destination == "x@y"
+
+
+def test_nomad_console_alone_is_launch(monkeypatch, saved_file):
+    monkeypatch.setenv("SSH_CONNECTION", "1 2 3 4")
+    monkeypatch.setenv(L.ENV_HOST, "mingus.example.edu")
+    monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
+    r = CliRunner().invoke(cli, ["console"])
+    assert r.exit_code == 0, r.output
+    assert "-J " in r.output and "@spydur.example.edu" in r.output
+    assert "On your own computer, run:" in r.output

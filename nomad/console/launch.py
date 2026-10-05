@@ -13,9 +13,18 @@ a computer without nomad (Python 3.8 or later):
 Nothing secret is kept: ssh asks for the password itself, and only the
 machine names of the last successful launch are remembered, so that next time
 ``nomad console launch`` alone is enough.
+
+Run on a cluster over SSH, where a browser would not be the person's own, it
+prints the one ssh line to run on their own computer instead, through this
+cluster. A site sets two names for that, in the environment (the shared
+``nomad`` command on a cluster sets them):
+
+    NOMAD_CONSOLE_HOST   the machine that serves the Console (mingus.richmond.edu)
+    NOMAD_LOGIN_HOST     this cluster, as people's computers reach it
 """
 from __future__ import annotations
 
+import getpass
 import http.client
 import json
 import os
@@ -38,6 +47,8 @@ NO_CONSOLE_SECONDS = 15     # tunnel up, nothing answering through it: give up
 TRUST_AFTER_SECONDS = 10    # an answer ssh has not vouched for, trusted after this long
 READY = "NOMAD-TUNNEL-READY"
 SAVED = Path.home() / ".config" / "nomad" / "console_launch.json"
+ENV_HOST = "NOMAD_CONSOLE_HOST"
+ENV_LOGIN = "NOMAD_LOGIN_HOST"
 
 NO_SSH = (
     "No ssh command was found on this computer. On Windows 10 and 11, add "
@@ -305,14 +316,74 @@ def stop(proc) -> None:
             pass
 
 
+# -- on a remote shell -------------------------------------------------------------
+
+def _user() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "NETID"
+
+
+def browser_here(env=None, platform: str | None = None) -> bool:
+    """Whether a browser opened here would be in front of the person.
+
+    Not over SSH (the browser would be on this machine, not theirs), and not on
+    a Linux or BSD machine with no display.
+    """
+    env = os.environ if env is None else env
+    platform = sys.platform if platform is None else platform
+    if env.get("SSH_CONNECTION") or env.get("SSH_TTY"):
+        return False
+    if platform.startswith(("linux", "freebsd", "openbsd", "netbsd")):
+        return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
+    return True
+
+
+def _short(host: str) -> str:
+    return host.rsplit("@", 1)[-1].split(".", 1)[0].lower()
+
+
+def instructions(target: Target, login_host: str | None = None) -> list:
+    """What to run on one's own computer, from a shell on a cluster."""
+    user = _user()
+    dest = target.destination if "@" in target.destination else f"{user}@{target.destination}"
+    here = login_host or os.environ.get(ENV_LOGIN) or socket.getfqdn()
+    jump = None if _short(here) == _short(dest) else f"{user}@{here.rsplit('@', 1)[-1]}"
+    port = target.remote_port
+    words = ["ssh", "-N", "-L", f"{port}:localhost:{port}"]
+    if jump:
+        words += ["-J", jump]
+    words.append(dest)
+    lines = [
+        f"A browser started on {_short(here)} would not be on your screen. "
+        "On your own computer, run:",
+        "",
+        "    " + shlex.join(words),
+        "",
+        f"then open http://localhost:{port} and sign in with your NetID. That window "
+        "keeps the tunnel open; Ctrl-C there closes it.",
+    ]
+    if jump:
+        lines.append(f"(If your computer reaches {target.host} directly, leave out "
+                     f"\"-J {jump}\".)")
+    return lines
+
+
 # -- the whole thing ----------------------------------------------------------
 
 def launch(target: Target, *, local_port: int | None = None, open_browser: bool = True,
            print_only: bool = False, out: Callable[[str], None] = print,
            ssh: str | None = None, saved_path: Path | None = None,
            timeout: float = WAIT_SECONDS, no_console: float = NO_CONSOLE_SECONDS,
-           trust_after: float = TRUST_AFTER_SECONDS) -> int:
+           trust_after: float = TRUST_AFTER_SECONDS, here: bool | None = None) -> int:
+    """here: open the tunnel and browser on this machine even over SSH; None
+    decides by browser_here()."""
     target.validate()
+    if not print_only and not (browser_here() if here is None else here):
+        for line in instructions(target):
+            out(line)
+        return 0
     port = pick_local_port(local_port, target.remote_port)
     if print_only:
         out(manual_command(target, port))
@@ -385,6 +456,9 @@ def resolve(destination: str | None, via: str | None, remote_port: int | None,
         return Target(destination, via,
                       DEFAULT_REMOTE_PORT if remote_port is None else remote_port).validate()
     saved = load_saved(saved_path)
+    if saved is None and os.environ.get(ENV_HOST):
+        host = os.environ[ENV_HOST].strip()
+        saved = Target(host if "@" in host else f"{_user()}@{host}")
     if saved is None:
         raise LaunchError("Which machine serves the Console? For example:\n"
                           "  nomad console launch NETID@mingus.richmond.edu")
@@ -406,11 +480,14 @@ def main(argv: list | None = None) -> int:
     p.add_argument("--no-browser", action="store_true")
     p.add_argument("--print", dest="print_only", action="store_true",
                    help="only print the ssh command")
+    p.add_argument("--here", action="store_true",
+                   help="open the tunnel and browser on this machine even over SSH")
     a = p.parse_args(argv)
     try:
         target = resolve(a.destination, a.via, a.remote_port)
         return launch(target, local_port=a.port, open_browser=not a.no_browser,
-                      print_only=a.print_only, out=lambda m: print(m, flush=True))
+                      print_only=a.print_only, out=lambda m: print(m, flush=True),
+                      here=True if a.here else None)
     except LaunchError as e:
         print(e, file=sys.stderr)
         return 2

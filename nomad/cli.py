@@ -4748,9 +4748,15 @@ def demo(jobs, days, seed, port, no_launch):
 # EDU COMMANDS
 # =============================================================================
 
-@cli.group()
-def console():
-    """The NØMAÐ Console, the web interface."""
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def console(ctx):
+    """The NØMAÐ Console, the web interface.
+
+    `nomad console` alone is `nomad console launch`.
+    """
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(console_launch)
 
 
 @console.command('launch')
@@ -4765,7 +4771,10 @@ def console():
 @click.option('--no-browser', is_flag=True, help='Do not open the browser.')
 @click.option('--print', 'print_only', is_flag=True,
               help='Only print the ssh command to run by hand.')
-def console_launch(destination, via, local_port, remote_port, no_browser, print_only):
+@click.option('--here', is_flag=True,
+              help='Open the tunnel and browser on this machine even over SSH.')
+def console_launch(destination, via, local_port, remote_port, no_browser, print_only,
+                   here):
     """Open the Console in your browser, through an SSH tunnel.
 
     Run it on the computer you are sitting at, the one with the browser.
@@ -4778,12 +4787,16 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     ssh asks for your password itself; nomad never sees it. The tunnel stays
     open until you press Ctrl-C. The machine names of the last launch that
     worked are remembered, so next time `nomad console launch` is enough.
+
+    On a cluster over SSH, a browser would not be on your screen: it prints
+    the one ssh line to run on your own computer instead (NOMAD_CONSOLE_HOST
+    and NOMAD_LOGIN_HOST name the machines; the shared `nomad` sets them).
     """
     from nomad.console.launch import LaunchError, launch, resolve
     try:
         target = resolve(destination, via, remote_port)
         code = launch(target, local_port=local_port, open_browser=not no_browser,
-                      print_only=print_only, out=click.echo)
+                      print_only=print_only, out=click.echo, here=True if here else None)
     except LaunchError as e:
         raise click.ClickException(str(e))
     sys.exit(code)
