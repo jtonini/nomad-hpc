@@ -9,7 +9,7 @@ on:
 jobs:
   test-ubuntu:
     name: Test Ubuntu (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -33,7 +33,7 @@ jobs:
 
   test-rocky:
     name: Test Rocky Linux 9
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: rockylinux:9
 
@@ -52,7 +52,7 @@ jobs:
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +73,7 @@ jobs:
 
   docs:
     name: Build Docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4

@@ -46,6 +46,7 @@ nav:
     - Collectors: collectors.md
   - Features:
     - Dashboard: dashboard.md
+    - Console Access: console.md
     - GPU Monitoring: gpu.md
     - Educational Analytics: edu.md
     - Alerts: alerts.md

@@ -8,6 +8,7 @@
 | `nomad collect` | Start data collection |
 | `nomad collectors` | Which collectors run here, why, and how their runs went |
 | `nomad dashboard` | Launch web interface |
+| `nomad console launch` | Open the Console in your browser through an SSH tunnel ([Console access](console.md)) |
 | `nomad demo` | Demo mode with synthetic data |
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |

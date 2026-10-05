@@ -16,7 +16,6 @@ Commands:
 
 import json
 import logging
-import fcntl
 import sqlite3
 import sys
 import time
@@ -4157,6 +4156,7 @@ def sync(ctx, config_file, output, dry_run):
     # overlapping run can therefore swap in a PARTIAL combined.db with no error
     # at all, silently dropping whole sites. An exclusive advisory lock makes
     # that impossible, and the kernel releases it if this process dies.
+    import fcntl  # POSIX only; imported here so `nomad` itself loads on Windows
     _lock_path = combined_path.with_suffix(combined_path.suffix + ".lock")
     try:
         _lock_fh = open(_lock_path, "w")
@@ -4741,6 +4741,47 @@ def demo(jobs, days, seed, port, no_launch):
 # =============================================================================
 # EDU COMMANDS
 # =============================================================================
+
+@cli.group()
+def console():
+    """The NØMAÐ Console, the web interface."""
+
+
+@console.command('launch')
+@click.argument('destination', required=False)
+@click.option('--via', metavar='[USER@]HOST',
+              help='Go through this machine first (as ssh -J).')
+@click.option('--port', 'local_port', type=click.IntRange(1, 65535),
+              help="Port on this computer (default: the Console's own number if free, "
+                   "else any free one).")
+@click.option('--remote-port', type=click.IntRange(1, 65535),
+              help="The Console's port on its machine (default 8000).")
+@click.option('--no-browser', is_flag=True, help='Do not open the browser.')
+@click.option('--print', 'print_only', is_flag=True,
+              help='Only print the ssh command to run by hand.')
+def console_launch(destination, via, local_port, remote_port, no_browser, print_only):
+    """Open the Console in your browser, through an SSH tunnel.
+
+    Run it on the computer you are sitting at, the one with the browser.
+    DESTINATION is [USER@]HOST of the machine that serves the Console:
+
+    \b
+        nomad console launch NETID@mingus.richmond.edu
+        nomad console launch NETID@mingus.richmond.edu --via NETID@WORKSTATION
+
+    ssh asks for your password itself; nomad never sees it. The tunnel stays
+    open until you press Ctrl-C. The machine names of the last launch that
+    worked are remembered, so next time `nomad console launch` is enough.
+    """
+    from nomad.console.launch import LaunchError, launch, resolve
+    try:
+        target = resolve(destination, via, remote_port)
+        code = launch(target, local_port=local_port, open_browser=not no_browser,
+                      print_only=print_only, out=click.echo)
+    except LaunchError as e:
+        raise click.ClickException(str(e))
+    sys.exit(code)
+
 
 @cli.group()
 def edu():
