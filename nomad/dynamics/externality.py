@@ -153,7 +153,7 @@ def compute_externalities(
         {att.join}
         WHERE j.submit_time >= ? AND j.end_time IS NOT NULL
           AND UPPER(j.state) NOT LIKE 'CANCELLED%'
-          AND UPPER(j.state) NOT IN ('RUNNING', 'PENDING', 'PREEMPTED')
+          AND UPPER(j.state) NOT IN ('RUNNING', 'PENDING', 'PREEMPTED', 'UNKNOWN')
         GROUP BY grp, window
         HAVING total_jobs >= 2
         ORDER BY grp, window

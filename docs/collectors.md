@@ -57,6 +57,29 @@ A collector that runs but has nothing to collect logs why — `nfsiostat not ins
 
 Commands are looked for on the PATH and in `/usr/sbin`, `/sbin`, `/usr/local/sbin` and `/usr/local/bin`: cron's PATH is only `/usr/bin:/bin`, and nfs-utils installs `nfsiostat` in `/usr/sbin`.
 
+## Jobs
+
+The `slurm` collector reads running and pending jobs from `squeue` and every
+user's jobs of the last `job_history_days` (7) from `sacct --allusers`
+(without it, `sacct` run by anyone but root shows only that account's own
+jobs). `partitions` limits both to the partitions listed; empty means all.
+
+A job that ended between two runs leaves `squeue`; if that run's `sacct`
+pull did not report it, it is looked up in `sacct` by number, and the answer
+is taken only if its submit time matches (Slurm reuses job numbers after its
+counter restarts). When `sacct` cannot account for the job yet, it is marked
+`UNKNOWN`: it has ended, its outcome is not known, it has no exit code or
+failure reason, and no success or failure count includes it. The next `sacct`
+pull corrects it. A pending array range (`123_[5-10]`) that left the queue is
+dropped, since each of its tasks has a row of its own. Nothing is concluded
+about any job in a run where `squeue` did not answer.
+
+Before 1.7.19 such jobs were marked `COMPLETED`, with an end time in UTC
+where every other job time is local, so a failed job could count as a
+success. Those rows (`COMPLETED`, an end time without a `T`) are looked up in
+`sacct` too, 200 a run, and become `UNKNOWN` (end time moved to local) if
+`sacct` no longer has them.
+
 ## Disks
 
 `disk` reads each of `filesystems` with `df` every run. Each reading also

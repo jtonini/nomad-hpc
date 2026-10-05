@@ -13,14 +13,98 @@ Uses squeue, sinfo, and sacct commands to gather:
 """
 
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .base import BaseCollector, CollectionError, registry
 
 logger = logging.getLogger(__name__)
+
+SACCT_FORMAT = ("JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,ReqMem,"
+                "ReqTRES,Timelimit,Elapsed,Submit,Start,End,ExitCode")
+
+# Jobs looked up by number in sacct per run: those that left the queue, and
+# older records whose outcome was assumed rather than read (see
+# SlurmCollector._settle_ended_jobs).
+LOOKUP_BATCH = 200
+LOOKUP_MAX = 1000           # at most this many a run; the rest wait for the next
+
+# States of a job that has not ended. squeue shows them; sacct shows them for
+# jobs it still has as running.
+ACTIVE_STATES = ('RUNNING', 'PENDING', 'COMPLETING', 'CONFIGURING', 'SUSPENDED',
+                 'REQUEUED', 'REQUEUE_HOLD', 'REQUEUE_FED', 'RESIZING', 'SIGNALING',
+                 'STAGE_OUT', 'STOPPED', 'RESV_DEL_HOLD', 'SPECIAL_EXIT', 'EXPEDITING')
+
+# An end time written by SQLite's datetime('now') (UTC, a space, no 'T'): the
+# mark of an outcome assumed by versions before 1.7.19. Every time read from
+# Slurm is stored as local ISO time, with a 'T'.
+_ASSUMED_END = "end_time GLOB '????-??-?? ??:??:??'"
+
+# Sent through store() when squeue answered but there is nothing else to
+# store, so that jobs which were running are still settled.
+_LISTING = 'squeue_listing'
+
+# A job number sacct -j accepts: 123, 123_4 (array task), 123+0 (het job part).
+# A pending array range ("123_[5-10]") is not one job; its tasks get their own rows.
+_LOOKUP_ID = re.compile(r'^\d+(_\d+)?(\+\d+)?$')
+
+# A job that left the queue and that sacct cannot (yet) account for. Not a
+# Slurm state: its outcome is unknown, and no success or failure count takes it.
+UNKNOWN = 'UNKNOWN'
+
+_JOB_UPSERT = """
+    INSERT INTO jobs
+    (job_id, user_name, group_name, partition, job_name, state,
+     node_list, submit_time, start_time, end_time, exit_code,
+     exit_signal, failure_reason,
+     req_cpus, req_mem_mb, req_gpus, req_time_seconds,
+     runtime_seconds, wait_time_seconds)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(job_id) DO UPDATE SET
+        state = excluded.state,
+        node_list = excluded.node_list,
+        start_time = excluded.start_time,
+        end_time = excluded.end_time,
+        exit_code = excluded.exit_code,
+        exit_signal = excluded.exit_signal,
+        failure_reason = excluded.failure_reason,
+        runtime_seconds = excluded.runtime_seconds,
+        wait_time_seconds = excluded.wait_time_seconds
+"""
+_JOB_FIELDS = ('job_id', 'user_name', 'group_name', 'partition', 'job_name', 'state',
+               'node_list', 'submit_time', 'start_time', 'end_time', 'exit_code',
+               'exit_signal', 'failure_reason', 'req_cpus', 'req_mem_mb', 'req_gpus',
+               'req_time_seconds', 'runtime_seconds', 'wait_time_seconds')
+
+
+def _state_word(state) -> str:
+    """'CANCELLED by 123' -> 'CANCELLED'."""
+    parts = str(state or '').split()
+    return parts[0].rstrip('+').upper() if parts else ''
+
+
+def _same_submit(stored, submit) -> bool:
+    """Whether a stored submit time is sacct's: job numbers are reused after
+    Slurm's counter restarts, and sacct -j answers with the newest job of a number."""
+    if submit is None:
+        return False
+    try:
+        return datetime.fromisoformat(str(stored).replace(' ', 'T')) == submit
+    except ValueError:
+        return False
+
+
+def _utc_to_local(text):
+    """'YYYY-MM-DD HH:MM:SS' in UTC (SQLite's datetime('now')) as local ISO time,
+    the clock every other job time is in; anything else comes back unchanged."""
+    try:
+        t = datetime.strptime(str(text), '%Y-%m-%d %H:%M:%S')
+    except (TypeError, ValueError):
+        return text
+    return t.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None).isoformat()
 
 
 @dataclass
@@ -195,17 +279,24 @@ class SlurmCollector(BaseCollector):
     def __init__(self, config: dict[str, Any], db_path: str):
         super().__init__(config, db_path)
 
-        self.partitions = config.get('partitions', None)  # None = all
+        # None or [] = all ("empty = all", as the example config says).
+        self.partitions = config.get('partitions') or None
         self.job_history_days = config.get('job_history_days', 7)
         self.collect_queue = config.get('collect_queue', True)
         self.collect_jobs = config.get('collect_jobs', True)
         self.collect_completed = config.get('collect_completed', True)
+        # Every job id squeue listed in this run, before any partition filter;
+        # None when squeue did not answer, and then nothing can be concluded
+        # about jobs that seem gone.
+        self._squeue_ids: set[str] | None = None
+        self._listed: set[str] = set()
 
         logger.info(f"SlurmCollector monitoring partitions: {self.partitions or 'all'}")
 
     def collect(self) -> list[dict[str, Any]]:
         """Collect SLURM queue and job data."""
         data = []
+        self._squeue_ids = None
 
         # Collect queue state
         if self.collect_queue:
@@ -228,6 +319,7 @@ class SlurmCollector(BaseCollector):
                         'type': 'job',
                         **job.to_dict()
                     })
+                self._squeue_ids = set(self._listed)
             except Exception as e:
                 logger.warning(f"Failed to collect jobs: {e}")
 
@@ -244,45 +336,28 @@ class SlurmCollector(BaseCollector):
                 logger.warning(f"Failed to collect completed jobs: {e}")
 
         if not data:
-            raise CollectionError("No SLURM data collected")
+            if self._squeue_ids is None:
+                raise CollectionError("No SLURM data collected")
+            # An empty queue and no recent jobs: nothing to store, but the jobs
+            # that were running have ended and still need their outcomes.
+            self.note = (f"queue empty; no jobs in sacct's last "
+                         f"{self.job_history_days} days")
+            data.append({'type': _LISTING})
 
         return data
+
+    def count_records(self, data: list[dict[str, Any]]) -> int:
+        return sum(1 for r in data if r.get('type') != _LISTING)
 
     def _collect_completed_jobs(self) -> list[JobInfo]:
         """Collect completed job information from sacct."""
         try:
-            # sacct format includes ExitCode which gives us exit_status:signal
-            # Format: JobID|User|Group|Partition|JobName|State|NodeList|AllocCPUS|ReqMem|ReqTRES|Timelimit|Elapsed|Submit|Start|End|ExitCode
-            format_str = "JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,ReqMem,ReqTRES,Timelimit,Elapsed,Submit,Start,End,ExitCode"
-
-            result = subprocess.run(
-                [
-                    'sacct',
-                    '-n',  # No header
-                    '-P',  # Parseable (pipe-delimited)
-                    '-X',  # No job steps, only main job
-                    f'--starttime=now-{self.job_history_days}days',
-                    f'--format={format_str}',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.returncode != 0:
-                raise CollectionError(f"sacct failed: {result.stderr}")
-
-            jobs = []
-            for line in result.stdout.strip().split('\n'):
-                if not line.strip():
-                    continue
-
-                job = self._parse_sacct_job(line)
-                if job:
+            # --allusers: without it sacct shows a non-root user only their own
+            # jobs, and every other job would go unaccounted for.
+            jobs = [job for job in self._sacct('--allusers',
+                                               f'--starttime=now-{self.job_history_days}days')
                     # Filter by partition if configured
-                    if self.partitions is None or job.partition in self.partitions:
-                        jobs.append(job)
-
+                    if self.partitions is None or job.partition in self.partitions]
             logger.debug(f"Collected {len(jobs)} completed jobs from sacct")
             return jobs
 
@@ -291,6 +366,38 @@ class SlurmCollector(BaseCollector):
         except FileNotFoundError:
             logger.warning("sacct command not found - skipping completed job collection")
             return []
+
+    def _sacct(self, *selection: str) -> list[JobInfo]:
+        """sacct, one line per job (no steps), parsed. Raises on failure."""
+        # ExitCode gives exit_status:signal.
+        result = subprocess.run(
+            ['sacct', '-n', '-P', '-X', *selection, f'--format={SACCT_FORMAT}'],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise CollectionError(f"sacct failed: {result.stderr}")
+        jobs = []
+        for line in result.stdout.splitlines():
+            if line.strip():
+                job = self._parse_sacct_job(line)
+                if job:
+                    jobs.append(job)
+        return jobs
+
+    def _lookup_jobs(self, job_ids: list[str]) -> dict[str, JobInfo] | None:
+        """What sacct knows about these jobs, by number; None if sacct can't be asked."""
+        found: dict[str, JobInfo] = {}
+        try:
+            for i in range(0, len(job_ids), LOOKUP_BATCH):
+                chunk = job_ids[i:i + LOOKUP_BATCH]
+                for job in self._sacct('-j', ','.join(chunk)):
+                    found[str(job.job_id)] = job
+        except (CollectionError, subprocess.TimeoutExpired, OSError) as e:
+            logger.warning(f"sacct lookup of {len(job_ids)} jobs failed: {e}")
+            return None
+        return found
 
     def _parse_sacct_job(self, line: str) -> JobInfo | None:
         """Parse a single sacct output line into JobInfo."""
@@ -468,9 +575,13 @@ class SlurmCollector(BaseCollector):
                 raise CollectionError(f"squeue failed: {result.stderr}")
 
             jobs = []
+            listed = set()
             for line in result.stdout.strip().split('\n'):
                 if not line.strip():
                     continue
+                # Every listed job counts as still there, whether or not its
+                # line parses or its partition is one we follow.
+                listed.add(line.split('|', 1)[0].strip())
 
                 job = self._parse_job_line(line)
                 if job:
@@ -478,6 +589,7 @@ class SlurmCollector(BaseCollector):
                     if self.partitions is None or job.partition in self.partitions:
                         jobs.append(job)
 
+            self._listed = listed
             return jobs
 
         except subprocess.TimeoutExpired:
@@ -699,87 +811,104 @@ class SlurmCollector(BaseCollector):
 
                 elif record_type == 'job':
                     # Upsert job data with exit_signal, failure_reason, wait_time
-                    conn.execute(
-                        """
-                        INSERT INTO jobs
-                        (job_id, user_name, group_name, partition, job_name, state,
-                         node_list, submit_time, start_time, end_time, exit_code,
-                         exit_signal, failure_reason,
-                         req_cpus, req_mem_mb, req_gpus, req_time_seconds, 
-                         runtime_seconds, wait_time_seconds)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(job_id) DO UPDATE SET
-                            state = excluded.state,
-                            node_list = excluded.node_list,
-                            start_time = excluded.start_time,
-                            end_time = excluded.end_time,
-                            exit_code = excluded.exit_code,
-                            exit_signal = excluded.exit_signal,
-                            failure_reason = excluded.failure_reason,
-                            runtime_seconds = excluded.runtime_seconds,
-                            wait_time_seconds = excluded.wait_time_seconds
-                        """,
-                        (
-                            record['job_id'],
-                            record['user_name'],
-                            record['group_name'],
-                            record['partition'],
-                            record['job_name'],
-                            record['state'],
-                            record['node_list'],
-                            record['submit_time'],
-                            record['start_time'],
-                            record['end_time'],
-                            record['exit_code'],
-                            record['exit_signal'],
-                            record['failure_reason'],
-                            record['req_cpus'],
-                            record['req_mem_mb'],
-                            record['req_gpus'],
-                            record['req_time_seconds'],
-                            record['runtime_seconds'],
-                            record['wait_time_seconds'],
-                        )
-                    )
+                    conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
 
-            # Clean up stale RUNNING jobs that are no longer in squeue.
-            # When a job finishes between collection cycles, it disappears
-            # from squeue but stays as RUNNING in the DB. Mark these as
-            # COMPLETED so counts stay accurate. The sacct collector will
-            # later update them with the real exit code/state.
-            current_running = set()
-            for record in data:
-                if (record.get('type') == 'job'
-                        and record.get('state') in ('RUNNING', 'PENDING')):
-                    current_running.add(str(record['job_id']))
-
-            if current_running:
-                # Find DB jobs marked RUNNING that are no longer in squeue
-                try:
-                    stale_rows = conn.execute(
-                        "SELECT job_id FROM jobs WHERE state IN ('RUNNING', 'PENDING')"
-                    ).fetchall()
-                    stale_ids = [
-                        r['job_id'] for r in stale_rows
-                        if str(r['job_id']) not in current_running
-                    ]
-                    if stale_ids:
-                        placeholders = ','.join('?' for _ in stale_ids)
-                        conn.execute(
-                            f"UPDATE jobs SET state='COMPLETED',"
-                            f" end_time=datetime('now')"
-                            f" WHERE job_id IN ({placeholders})",
-                            stale_ids
-                        )
-                        conn.commit()
-                        logger.info(
-                            f"Marked {len(stale_ids)} stale jobs"
-                            f" as COMPLETED (no longer in squeue)")
-                except Exception as e:
-                    logger.warning(f"Failed to clean stale jobs: {e}")
+            # Committed before sacct is asked about anything, so the database
+            # is not held locked while it answers.
+            conn.commit()
+            try:
+                self._settle_ended_jobs(conn, data)
+            except Exception as e:
+                logger.warning(f"Failed to settle ended jobs: {e}")
 
             conn.commit()
             logger.debug(f"Stored {len(data)} SLURM records")
+
+    def _settle_ended_jobs(self, conn, data: list[dict[str, Any]]) -> None:
+        """Give jobs that left the queue their real outcome, never an assumed one.
+
+        A job that ends between two runs leaves squeue; when this run's sacct
+        pull already reported it, the upsert above has its outcome. The rest
+        are looked up in sacct by number (with the submit time checked, since
+        numbers are reused). Those sacct cannot account for yet are marked
+        UNKNOWN: ended by now, outcome not known, no exit code or failure
+        reason, so no success or failure count takes them; the next sacct
+        pull corrects them. A pending array range ("123_[5-10]") that left the
+        queue is dropped: it stood for tasks that now have rows of their own.
+
+        Versions before 1.7.19 marked such jobs COMPLETED, with the end time
+        in UTC (no 'T') where every other job time is local. Those rows are
+        looked up too, LOOKUP_BATCH a run, newest first; if sacct no longer
+        has them they become UNKNOWN, with the end time moved to local.
+        """
+        listed = self._squeue_ids
+        if listed is None:
+            return      # squeue did not answer this run: no job can be called ended
+        still = set(listed) | {
+            str(r['job_id']) for r in data
+            if r.get('type') == 'job' and _state_word(r.get('state')) in ACTIVE_STATES}
+        marks = ','.join('?' * len(ACTIVE_STATES))
+        ended = [str(r[0]) for r in conn.execute(
+            f"SELECT job_id FROM jobs WHERE state IN ({marks})", ACTIVE_STATES)
+            if str(r[0]) not in still][:LOOKUP_MAX]
+        ended_set = set(ended)
+        recent = (datetime.now() - timedelta(days=self.job_history_days)).isoformat(
+            timespec='seconds')
+        repair = [str(r[0]) for r in conn.execute(
+            f"SELECT job_id FROM jobs WHERE (state = 'COMPLETED' AND {_ASSUMED_END}) "
+            "OR (state = ? AND end_time >= ?) "
+            # assumed outcomes first: the 7-day pull settles recent UNKNOWNs anyway
+            "ORDER BY state = ?, end_time DESC LIMIT ?",
+            (UNKNOWN, recent, UNKNOWN, LOOKUP_BATCH))
+            if str(r[0]) not in ended_set]
+        todo = ended + repair
+        if not todo:
+            return
+
+        found = self._lookup_jobs([j for j in todo if _LOOKUP_ID.match(j)])
+        now = datetime.now().isoformat(timespec='seconds')
+        settled = unknown = dropped = 0
+        for job_id in todo:
+            row = conn.execute("SELECT state, submit_time, end_time FROM jobs WHERE job_id = ?",
+                               (job_id,)).fetchone()
+            if row is None:
+                continue
+            if '[' in job_id:
+                conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+                dropped += 1
+                continue
+            fresh = job_id in ended_set
+            job = (found or {}).get(job_id)
+            if job is not None and not (_same_submit(row['submit_time'], job.submit_time)
+                                        or (row['submit_time'] is None and fresh)):
+                job = None      # sacct's job of that number is another, later one
+            if job is not None:
+                if fresh and _state_word(job.state) in ACTIVE_STATES:
+                    continue    # sacct still has it running: leave it as it is
+                # Its outcome; or, for a row marked UNKNOWN or assumed, sacct
+                # saying it is still active, which puts it back as it is.
+                record = job.to_dict()
+                conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
+                settled += 1
+            elif fresh:
+                cur = conn.execute(
+                    f"UPDATE jobs SET state = ?, end_time = ?, exit_code = NULL, "
+                    f"exit_signal = NULL, failure_reason = NULL "
+                    f"WHERE job_id = ? AND state IN ({marks})",
+                    (UNKNOWN, now, job_id, *ACTIVE_STATES))
+                unknown += cur.rowcount
+            elif found is not None and row['state'] == 'COMPLETED':
+                # An old assumed outcome sacct cannot confirm: say so.
+                cur = conn.execute(
+                    f"UPDATE jobs SET state = ?, end_time = ?, exit_code = NULL, "
+                    f"exit_signal = NULL, failure_reason = NULL "
+                    f"WHERE job_id = ? AND state = 'COMPLETED' AND {_ASSUMED_END}",
+                    (UNKNOWN, _utc_to_local(row['end_time']), job_id))
+                unknown += cur.rowcount
+        if settled or unknown or dropped:
+            logger.info(f"Jobs that left the queue or had an assumed outcome: "
+                        f"{settled} settled from sacct, {unknown} marked {UNKNOWN}, "
+                        f"{dropped} pending array ranges dropped")
 
     def get_queue_history(
         self,

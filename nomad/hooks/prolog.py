@@ -138,6 +138,7 @@ def score_job(features: dict, db_path: Path, logger) -> dict:
             WHERE req_cpus BETWEEN ? AND ?
               AND req_mem_mb BETWEEN ? AND ?
               AND req_time_seconds BETWEEN ? AND ?
+              AND COALESCE(state, '') != 'UNKNOWN'
         """
 
         cursor = conn.execute(similar_query, (

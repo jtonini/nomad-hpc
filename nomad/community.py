@@ -198,7 +198,8 @@ def load_jobs_from_db(db_path: Path, start_date: str | None = None, end_date: st
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
 
-    query = "SELECT * FROM jobs WHERE 1=1"
+    # A job whose outcome is not known would be exported as a success.
+    query = "SELECT * FROM jobs WHERE UPPER(COALESCE(state, '')) != 'UNKNOWN'"
     params = []
 
     if start_date:

@@ -1516,20 +1516,26 @@ def report(ctx, db, output):
     lines.append(f"  Database: {db_path}")
     lines.append("")
 
+    # A job whose outcome is not known (state UNKNOWN) is neither.
+    unknown = sum(1 for j in jobs if str(j.get("state") or "").upper() == "UNKNOWN")
+    jobs = [j for j in jobs if str(j.get("state") or "").upper() != "UNKNOWN"]
     total = len(jobs)
-    success = sum(1 for j in jobs if j.get("failure_reason", 0) == 0)
+    success = sum(1 for j in jobs if (j.get("failure_reason") or 0) == 0)
     failed = total - success
     lines.append("  JOB SUMMARY")
     lines.append(f"  Total jobs: {total}")
-    lines.append(f"  Success: {success} ({100*success/total:.1f}%)")
-    lines.append(f"  Failed: {failed} ({100*failed/total:.1f}%)")
+    if total:
+        lines.append(f"  Success: {success} ({100*success/total:.1f}%)")
+        lines.append(f"  Failed: {failed} ({100*failed/total:.1f}%)")
+    if unknown:
+        lines.append(f"  Outcome unknown (not counted): {unknown}")
     lines.append("")
 
     if failed > 0:
         lines.append("  FAILURE BREAKDOWN")
         failure_counts = {}
         for j in jobs:
-            fr = j.get("failure_reason", 0)
+            fr = j.get("failure_reason") or 0
             if fr > 0:
                 name = FAILURE_NAMES.get(fr, f"Type {fr}")
                 failure_counts[name] = failure_counts.get(name, 0) + 1

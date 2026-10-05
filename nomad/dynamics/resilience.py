@@ -164,6 +164,7 @@ def _detect_job_failure_spikes(
                      THEN 1 ELSE 0 END) AS failed
         FROM jobs
         WHERE end_time >= ?
+          AND UPPER(COALESCE(state, '')) != 'UNKNOWN'   -- outcome not known
         GROUP BY window
         HAVING total >= ?
         ORDER BY window
