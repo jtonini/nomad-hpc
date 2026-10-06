@@ -358,7 +358,13 @@ def instructions(target: Target, login_host: str | None = None) -> list:
     here = login_host or os.environ.get(ENV_LOGIN) or socket.getfqdn()
     jump = None if _short(here) == _short(dest) else f"{user}@{here.rsplit('@', 1)[-1]}"
     port = target.remote_port
-    words = ["ssh", "-N", "-L", f"{port}:localhost:{port}"]
+    # Once connected, ssh itself says so: a tunnel prints nothing otherwise,
+    # and a silent window reads as a hung one. (No ; or % in the message:
+    # LocalCommand runs it through a shell, and % starts ssh's own tokens.)
+    words = ["ssh", "-N", "-L", f"{port}:localhost:{port}",
+             "-o", "PermitLocalCommand=yes",
+             "-o", f"LocalCommand=echo Tunnel open: http://localhost:{port} -- keep this "
+                   "window open, Ctrl-C closes it"]
     if jump:
         words += ["-J", jump]
     words.append(dest)

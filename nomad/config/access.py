@@ -11,6 +11,7 @@
     leads = { NETID = ["group$"] } # exceptions and extra groups
 
     [console.labs.resources."group$"]
+    name = "Smith Lab"            # how the lab is shown (else its group)
     workstations = ["adam", "eve"] # the lab's own machines
     storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 
@@ -85,6 +86,7 @@ class Access:
     leads: dict = field(default_factory=dict)       # netid -> tuple of group names
     resources: dict = field(default_factory=dict)   # group -> {kind: tuple of names}
     servers: dict = field(default_factory=dict)     # storage server -> (name, note)
+    lab_names: dict = field(default_factory=dict)   # group -> how the lab is shown
     problems: tuple = ()                            # what in the file was ignored, and why
 
     def role(self, netid) -> str | None:
@@ -100,6 +102,11 @@ class Access:
     def named(self) -> set:
         """Everyone the file names: their access is the file's, not users.json's."""
         return set(self.admins) | set(self.operators) | set(self.leads)
+
+    def lab_label(self, group: str) -> str:
+        """"Smith Lab (jsmith$)" when the lab has a name, else the group."""
+        name = self.lab_names.get(group)
+        return f"{name} ({group})" if name else group
 
     def lab_groups(self, netid, group_exists: Callable[[str], bool] | None = None,
                    tagged: Callable[[str], set] | None = None) -> list:
@@ -194,6 +201,7 @@ def access_from(config: dict | None, log: bool = True) -> Access:
             leads[n] = tuple(dict.fromkeys(leads.get(n, ()) + tuple(names)))
 
     resources: dict[str, dict] = {}
+    lab_names: dict[str, str] = {}
     raw = labs.get("resources") or {}
     if not isinstance(raw, dict):
         problems.append('[console.labs.resources] should hold one table per lab, '
@@ -207,8 +215,14 @@ def access_from(config: dict | None, log: bool = True) -> Access:
             continue
         kinds = {}
         for kind, names in table.items():
+            if kind == "name":
+                if isinstance(names, str) and names.strip():
+                    lab_names[group.strip()] = " ".join(names.split())
+                else:
+                    problems.append(f"{where} name should be text; ignored")
+                continue
             if kind not in RESOURCE_KINDS:
-                problems.append(f"{where} {kind}: unknown; the kinds are "
+                problems.append(f"{where} {kind}: unknown; the settings are name, "
                                 f"{', '.join(RESOURCE_KINDS)}")
                 continue
             kinds[kind] = tuple(dict.fromkeys(_names(names, f"{where} {kind}", problems)))
@@ -221,7 +235,7 @@ def access_from(config: dict | None, log: bool = True) -> Access:
         logger.warning("nomad.toml: %s", p)
     return Access(admins=frozenset(found["admin"]), operators=frozenset(found["operator"]),
                   group_pattern=pattern, leads=leads, resources=resources,
-                  servers=servers, problems=tuple(problems))
+                  servers=servers, lab_names=lab_names, problems=tuple(problems))
 
 
 _SERVER_KEYS = ("name", "note")

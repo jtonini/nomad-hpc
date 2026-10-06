@@ -542,7 +542,7 @@ def test_on_a_cluster_it_prints_the_line_for_your_own_computer(monkeypatch):
     code = L.launch(L.Target("mingus.example"), out=out.append, local_port=None)
     text = "\n".join(out)
     assert code == 0
-    assert "ssh -N -L 8000:localhost:8000 -J carol@" in text
+    assert "ssh -N -L 8000:localhost:8000 " in text and " -J carol@" in text
     assert text.count("carol@mingus.example") == 1
     assert "http://localhost:8000" in text
 
@@ -551,15 +551,33 @@ def test_the_jump_is_this_cluster_by_the_name_users_reach_it_by(monkeypatch):
     monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
     monkeypatch.setattr(L, "_user", lambda: "carol")
     lines = L.instructions(L.Target("carol@mingus.example.edu"))
-    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 -J carol@spydur.example.edu "
-                                "carol@mingus.example.edu")
+    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS + " "
+                                "-J carol@spydur.example.edu carol@mingus.example.edu")
     assert 'leave out "-J carol@spydur.example.edu"' in lines[-1]
 
 
 def test_no_jump_on_the_consoles_own_machine(monkeypatch):
     monkeypatch.setattr(L, "_user", lambda: "zeus")
     lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
-    assert lines[2].strip() == "ssh -N -L 8000:localhost:8000 zeus@mingus.example.edu"
+    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS
+                                + " zeus@mingus.example.edu")
+
+
+# Once both logins succeed, ssh prints this itself: a tunnel is otherwise silent.
+OPEN_SAYS = ("-o PermitLocalCommand=yes -o 'LocalCommand=echo Tunnel open: "
+             "http://localhost:8000 -- keep this window open, Ctrl-C closes it'")
+
+
+def test_the_open_message_runs_through_a_shell_as_one_echo():
+    import shlex
+    lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
+    words = shlex.split(lines[2])
+    local = next(w for w in words if w.startswith("LocalCommand="))
+    command = local.split("=", 1)[1]
+    assert ";" not in command and "%" not in command and "&" not in command
+    out = subprocess.run(["sh", "-c", command], capture_output=True, text=True).stdout
+    assert out == ("Tunnel open: http://localhost:8000 -- keep this window open, "
+                   "Ctrl-C closes it\n")
 
 
 def test_the_site_names_the_consoles_machine(monkeypatch, saved_file):

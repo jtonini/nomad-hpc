@@ -153,7 +153,7 @@ def test_a_pi_gets_the_machines_of_the_labs_they_lead():
 
 
 @pytest.mark.parametrize("resources,expect", [
-    ({"carol$": {"printers": ["p1"]}}, "unknown; the kinds are workstations, storage"),
+    ({"carol$": {"printers": ["p1"]}}, "unknown; the settings are name, workstations, storage"),
     ({"carol$": ["adam"]}, "should be a table"),
     ({"carol$": {"workstations": [3]}}, "is not a name"),
 ])

@@ -5046,7 +5046,7 @@ def console_roles(ctx, netid, db, mask):
     listed = list(acc.leads.get(netid.strip().lower(), ()))
     listed += [g for g in labs if g not in listed]
     for i, g in enumerate(listed, 1):
-        name = f"lab #{i}" if mask else g
+        name = f"lab #{i}" if mask else acc.lab_label(g)
         if members is None:
             click.echo(f"    {name}: (no database at {db_path}: size unknown)")
         else:
@@ -5085,7 +5085,10 @@ def lab():
     nomad lab add-nas LAB HOST         a NAS collected here (its pools), listed as the lab's
     nomad lab add-storage LAB SERVER[:/export]
                                        storage the lab's machines mount, listed as the lab's
+    nomad lab name LAB "NAME"          how the lab is shown, e.g. "Smith Lab"
     nomad lab remove LAB HOST
+
+    For storage that is everyone's, LAB is "shared": add-nas shared HOST.
 
     LAB is the PI's NetID (with group_pattern set) or the lab's group, e.g.
     jdoe or jdoe$. A workstation's lab travels with its data, so add it
@@ -5207,9 +5210,11 @@ def lab_add_machine(ctx, lab_name, host, apply):
 @click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
 @click.pass_context
 def lab_add_nas(ctx, lab_name, host, kind, paths, name, note, apply):
-    """A NAS collected here over ssh (the storage collector), listed as LAB's."""
+    """A NAS collected here over ssh (the storage collector), listed as LAB's
+    (LAB "shared": everyone's storage, listed for no lab)."""
     import subprocess
-    from nomad.config.labs import ST_SECTION, WS_SECTION, _entries, _list_path, add_nas
+    from nomad.config.labs import (SHARED, ST_SECTION, WS_SECTION, _entries, _list_path,
+                                   add_nas)
 
     def check(d, group):
         nas = _entries(d, _list_path(d, ST_SECTION, "storage_devices"))
@@ -5217,7 +5222,8 @@ def lab_add_nas(ctx, lab_name, host, kind, paths, name, note, apply):
         listed = (((d.get("console") or {}).get("labs") or {}).get("resources") or {})
         return (len([e for e in nas if e.get("hostname") == host.strip()]) == 1
                 and not any(e.get("hostname") == host.strip() for e in ws)
-                and host.strip() in (listed.get(group) or {}).get("storage", []))
+                and (group == SHARED
+                     or host.strip() in (listed.get(group) or {}).get("storage", [])))
     notes = [f"{host}: {_lab_reach(host, nas=(kind == 'zfs'))}"]
     try:
         cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
@@ -5255,6 +5261,21 @@ def lab_add_storage(ctx, lab_name, target, name, note, apply):
     _lab_run(ctx, lab_name, lambda e, g: add_storage(e, g, target, name, note), check, apply)
 
 
+@lab.command('name')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('shown', metavar='NAME')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_name_cmd(ctx, lab_name, shown, apply):
+    """How LAB is shown, e.g. "Smith Lab" ("" goes back to its group)."""
+    from nomad.config.labs import RESOURCES, _get, set_name
+
+    def check(d, group):
+        got = (_get(d, RESOURCES + (group,)) or {}).get("name")
+        return got == (" ".join(shown.split()) or None)
+    _lab_run(ctx, lab_name, lambda e, g: set_name(e, g, shown), check, apply)
+
+
 @lab.command('remove')
 @click.argument('lab_name', metavar='LAB')
 @click.argument('host')
@@ -5262,17 +5283,22 @@ def lab_add_storage(ctx, lab_name, target, name, note, apply):
 @click.pass_context
 def lab_remove(ctx, lab_name, host, apply):
     """HOST out of LAB: no longer collected here, no longer listed."""
-    from nomad.config.labs import (ST_SECTION, WS_SECTION, _entries, _list_path,
+    from nomad.config.labs import (SHARED, ST_SECTION, WS_SECTION, _entries, _list_path,
                                    _listing_groups, _resources, remove)
 
     def check(d, group):
+        if group == SHARED:
+            nas = _entries(d, _list_path(d, ST_SECTION, "storage_devices"))
+            return not any(e.get("hostname") == host for e in nas)
         ws = _entries(d, _list_path(d, WS_SECTION, "workstations"))
         nas = _entries(d, _list_path(d, ST_SECTION, "storage_devices"))
         res = _resources(d, group)
-        # A NAS another lab still lists stays collected.
+        # A NAS another lab still lists, or a shared one, stays collected.
         return (not any(e.get("hostname") == host for e in ws)
                 and (not any(e.get("hostname") == host for e in nas)
-                     or bool(_listing_groups(d, host)))
+                     or bool(_listing_groups(d, host))
+                     or any(e.get("hostname") == host and e.get("shared") is True
+                            for e in nas))
                 and not any(x == host or x.startswith(host + ":")
                             for v in res.values() for x in v))
     _lab_run(ctx, lab_name, lambda e, g: remove(e, g, host), check, apply)

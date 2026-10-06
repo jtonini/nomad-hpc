@@ -392,3 +392,86 @@ def test_usable_space_from_the_pools_root_datasets(monkeypatch, tmp_path):
 def test_parse_zfs_roots():
     from nomad.collectors.storage import parse_zfs_roots
     assert parse_zfs_roots("tank\t5\t7\ntank/home\t1\t7\nbad\tx\t1\n") == {"tank": (5, 7)}
+
+
+# --- lab names and shared storage --------------------------------------------
+
+def test_a_lab_has_a_name(toml):
+    from nomad.config.access import access_from
+    e = TomlEdit(toml)
+    assert labs.set_name(e, "pi1$", "Chem  Lab") == ['pi1$: shown as "Chem Lab"']
+    # The lab's lists stay; adding to them keeps the name.
+    labs.add_storage(e, "pi1$", "srv:/x")
+    t = e.data["console"]["labs"]["resources"]["pi1$"]
+    assert t == {"name": "Chem Lab", "storage": ["10.0.0.28:/mnt/pool/home", "srv:/x"]}
+    a = access_from(e.data, log=False)
+    assert a.lab_label("pi1$") == "Chem Lab (pi1$)" and a.lab_label("pi9$") == "pi9$"
+    assert labs.set_name(e, "pi1$", "Chem Lab") == []
+    assert labs.set_name(e, "pi1$", "") == ["pi1$: shown by its group"]
+    assert "name" not in e.data["console"]["labs"]["resources"]["pi1$"]
+    with pytest.raises(labs.LabError, match="not a lab"):
+        labs.set_name(e, "shared", "Everyone")
+
+
+def test_a_wrong_lab_name_is_said_and_left_out():
+    from nomad.config.access import access_from
+    a = access_from({"console": {"labs": {"resources": {"g$": {"name": 3}}}}}, log=False)
+    assert a.lab_names == {} and any("name should be text" in p for p in a.problems)
+
+
+def test_a_shared_nas_is_collected_named_and_listed_for_no_lab(toml):
+    e = TomlEdit(toml)
+    assert labs.lab_group(e.data, "Shared") == "shared"
+    changes = labs.add_nas(e, "shared", "bignas", note="community $HOME, all users")
+    assert changes[-1] == 'bignas: note "community $HOME, all users"'
+    d = e.data
+    assert {"hostname": "bignas", "type": "zfs", "shared": True} in \
+        d["collectors"]["storage"]["storage_devices"]
+    assert "bignas" not in str(d["console"]["labs"]["resources"])
+    assert "shared NAS collected here (no lab): bignas, community $HOME, all users" in \
+        labs.summary(d)
+    with pytest.raises(labs.LabError, match="add-nas shared"):
+        labs.add_storage(e, "shared", "bignas:/x")
+    # Listed for a lab too, it can't simply be dropped as shared.
+    labs.add_storage(e, "pi1$", "bignas")
+    with pytest.raises(labs.LabError, match="listed for pi1"):
+        labs.remove(e, "shared", "bignas")
+    assert labs.remove(e, "pi1$", "bignas") == ["bignas: still collected as a NAS (shared)",
+                                                "pi1$: no longer lists bignas"]
+    # Added for a lab again later, it stays everyone's.
+    labs.add_nas(e, "pi1$", "bignas")
+    assert {"hostname": "bignas", "type": "zfs", "shared": True} in \
+        e.data["collectors"]["storage"]["storage_devices"]
+    labs.remove(e, "pi1$", "bignas")
+    assert labs.remove(e, "shared", "bignas") == ["bignas: no longer collected as a NAS"]
+
+
+def test_name_and_shared_commands(toml, monkeypatch):
+    monkeypatch.setattr(cli_mod, "_lab_reach", lambda host, nas=False: "reachable over ssh")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
+    run = CliRunner().invoke
+    r = run(cli, ["-c", str(toml), "lab", "name", "pi1", "Chem Lab", "--apply"])
+    assert r.exit_code == 0 and '+ pi1$: shown as "Chem Lab"' in r.output, r.output
+    r = run(cli, ["-c", str(toml), "lab", "add-nas", "shared", "bignas", "--name", "big",
+                  "--note", "everyone's homes", "--apply"])
+    assert r.exit_code == 0, r.output
+    r = run(cli, ["-c", str(toml), "lab", "show"])
+    assert "Chem Lab (pi1$):" in r.output
+    assert "shared NAS collected here (no lab): bignas, everyone's homes" in r.output
+    r = run(cli, ["-c", str(toml), "lab", "remove", "shared", "bignas", "--apply"])
+    assert r.exit_code == 0 and "no longer collected as a NAS" in r.output, r.output
+
+
+def test_roles_show_the_labs_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 6, 9, 45))
+    cfg = tmp_path / "nomad.toml"
+    cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
+                   '[console.labs.resources."pi3$"]\nname = "Chem Lab"\nstorage = ["nas2"]\n')
+    db = tmp_path / "combined.db"
+    _hub(db)
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "pi3", "--db", str(db)])
+    assert "    Chem Lab (pi3$): 1 members" in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "pi3", "--db", str(db),
+                                 "--mask"])
+    assert "Chem Lab" not in r.output and "lab #1: 1 members" in r.output

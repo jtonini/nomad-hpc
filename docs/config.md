@@ -83,6 +83,7 @@ group_pattern = "{netid}$"     # the group a faculty member leads, by its name
 leads = { NETID = ["chemlab$"] }   # exceptions and extra groups
 
 [console.labs.resources."NETID$"]
+name = "Smith Lab"             # how the lab is shown (else its group)
 workstations = ["adam", "eve"] # the lab's own machines
 storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 
@@ -136,8 +137,13 @@ nomad lab add-nas LAB HOST [--name NAME] [--note "..."] [--type zfs|nfs] [--path
                                         a NAS collected here (its pools), listed as the lab's
 nomad lab add-storage LAB SERVER[:/export] [--name NAME] [--note "..."]
                                         storage the lab's machines mount, listed as the lab's
+nomad lab name LAB "NAME"               how the lab is shown, e.g. "Smith Lab"
 nomad lab remove LAB HOST
 ```
+
+For storage that is everyone's, LAB is `shared`: `nomad lab add-nas shared
+HOST --note "community $HOME"` collects it and names it, listed for no lab.
+It stays collected when a lab that also lists it removes it.
 
 LAB is the PI's NetID when `group_pattern` is set (`jdoe` is `jdoe$`
 with `"{netid}$"`), or the lab's group itself.

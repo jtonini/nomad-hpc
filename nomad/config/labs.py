@@ -6,6 +6,8 @@
                            tagged with the lab's group (department = "GROUP")
     add-nas LAB HOST       a NAS the storage collector reaches over ssh (its
                            pools' health and space), listed as the lab's
+                           (LAB "shared": everyone's, listed for no lab)
+    name LAB "NAME"        how the lab is shown ("Smith Lab")
     add-storage LAB SERVER[:/export]
                            storage the lab's machines mount, listed as the lab's
     remove LAB HOST        out of all of these for that lab
@@ -35,6 +37,10 @@ class LabError(Exception):
     pass
 
 
+# The LAB of storage that is everyone's: collected, listed for no lab.
+SHARED = "shared"
+
+
 # A host as nomad reaches it over ssh: a name or an address, no user@ (the
 # user comes from ~/.ssh/config), nothing a shell would read.
 _HOST = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
@@ -59,8 +65,11 @@ def _no_inline(edit: TomlEdit, path: tuple, what: str) -> None:
 
 def lab_group(config: dict, lab: str) -> str:
     """The lab's group: LAB itself when it has a $ or there is no
-    group_pattern, else the pattern with LAB as the NetID."""
+    group_pattern, else the pattern with LAB as the NetID ("shared" stays
+    "shared")."""
     lab = lab.strip()
+    if lab.lower() == SHARED:
+        return SHARED
     pattern = (((config.get("console") or {}).get("labs") or {}).get("group_pattern") or "")
     if "$" in lab or "{netid}" not in pattern:
         return lab
@@ -109,9 +118,25 @@ def _resources(data: dict, group: str) -> dict:
     return out
 
 
-def _set_resources(edit: TomlEdit, group: str, res: dict) -> None:
+def _set_resources(edit: TomlEdit, group: str, res: dict, name: str | None = None) -> None:
+    """The lab's table: its name (kept unless given) and lists."""
     _no_inline(edit, RESOURCES + (group,), f'the "{group}" lab')
-    edit.set_table(RESOURCES + (group,), {k: v for k, v in res.items() if v})
+    if name is None:
+        name = (_get(edit.data, RESOURCES + (group,)) or {}).get("name")
+    body = {"name": name} if isinstance(name, str) and name else {}
+    body.update({k: v for k, v in res.items() if v})
+    edit.set_table(RESOURCES + (group,), body)
+
+
+def set_name(edit: TomlEdit, group: str, name: str) -> list:
+    if group == SHARED:
+        raise LabError('"shared" is not a lab; give the PI\'s NetID or the lab\'s group')
+    name = " ".join(name.split())
+    old = (_get(edit.data, RESOURCES + (group,)) or {}).get("name")
+    if old == (name or None):
+        return []
+    _set_resources(edit, group, _resources(edit.data, group), name)
+    return [f'{group}: shown as "{name}"' if name else f"{group}: shown by its group"]
 
 
 def _listing_groups(data: dict, server: str) -> list:
@@ -173,8 +198,12 @@ def add_nas(edit: TomlEdit, group: str, host: str, kind: str = "zfs",
         edit.remove_entries(ws, hostname=host)
         changes.append(f"{host}: no longer collected as a workstation (a NAS is storage)")
     path = _list_path(edit.data, ST_SECTION, "storage_devices")
-    entry = {"hostname": host, "type": kind, **({"paths": list(paths)} if paths else {})}
     current = [e for e in _entries(edit.data, path) if e.get("hostname") == host]
+    entry = {"hostname": host, "type": kind, **({"paths": list(paths)} if paths else {})}
+    # Everyone's storage says so, so that taking it off a lab never stops it
+    # being collected (the collector ignores the key).
+    if group == SHARED or any(e.get("shared") is True for e in current):
+        entry["shared"] = True
     if current != [entry]:
         _no_inline(edit, path, "the storage devices")
         _enable(edit, ST_SECTION, "the storage collector", changes)
@@ -182,12 +211,18 @@ def add_nas(edit: TomlEdit, group: str, host: str, kind: str = "zfs",
         edit.add_entry(path, entry)
         changes.append(f"{host}: a NAS collected here ({kind}"
                        + (f", paths {', '.join(paths)}" if paths else "") + ")")
-    changes += add_storage(edit, group, host, name, note)
+    if group == SHARED:
+        _set_name(edit, host, name, note, changes)
+    else:
+        changes += add_storage(edit, group, host, name, note)
     return changes
 
 
 def add_storage(edit: TomlEdit, group: str, target: str, name: str | None = None,
                 note: str | None = None) -> list:
+    if group == SHARED:
+        raise LabError('"shared" storage is listed for no lab: add-storage needs a lab; '
+                       "a shared NAS is added with add-nas shared HOST")
     server, _, export = target.strip().partition(":")
     if not server or (":" in target and not export.startswith("/")):
         raise LabError(f"{target}: a storage server, or server:/export as the lab's "
@@ -207,6 +242,16 @@ def add_storage(edit: TomlEdit, group: str, target: str, name: str | None = None
 def remove(edit: TomlEdit, group: str, host: str) -> list:
     data = edit.data
     changes = []
+    if group == SHARED:
+        st = _list_path(data, ST_SECTION, "storage_devices")
+        if any(e.get("hostname") == host for e in _entries(data, st)):
+            listing = _listing_groups(data, host)
+            if listing:
+                raise LabError(f"{host} is listed for {', '.join(listing)}; remove it "
+                               "from those labs first")
+            edit.remove_entries(st, hostname=host)
+            changes.append(f"{host}: no longer collected as a NAS")
+        return changes
     ws = _list_path(data, WS_SECTION, "workstations")
     for e in _entries(data, ws):
         if e.get("hostname") == host:
@@ -216,11 +261,14 @@ def remove(edit: TomlEdit, group: str, host: str) -> list:
             edit.remove_entries(ws, hostname=host)
             changes.append(f"{host}: no longer collected as a workstation")
     st = _list_path(edit.data, ST_SECTION, "storage_devices")
-    if any(e.get("hostname") == host for e in _entries(edit.data, st)):
+    device = [e for e in _entries(edit.data, st) if e.get("hostname") == host]
+    if device:
         others = [g for g in _listing_groups(edit.data, host) if g != group]
         if others:
             changes.append(f"{host}: still collected as a NAS (listed for {', '.join(others)} "
                            "too)")
+        elif any(e.get("shared") is True for e in device):
+            changes.append(f"{host}: still collected as a NAS (shared)")
         else:
             edit.remove_entries(st, hostname=host)
             changes.append(f"{host}: no longer collected as a NAS")
@@ -241,11 +289,14 @@ def summary(config: dict, group: str | None = None) -> list:
     res = _get(config, RESOURCES) or {}
     names = _get(config, NAMES) or {}
     groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res))
-    if group:
+    if group == SHARED:
+        groups = []
+    elif group:
         groups = [g for g in groups if g == group] or [group]
     lines = []
     for g in groups:
-        lines.append(f"{g}:")
+        shown = (_get(config, RESOURCES + (g,)) or {}).get("name")
+        lines.append(f"{shown} ({g}):" if shown else f"{g}:")
         machines = sorted(e.get("hostname") for e in ws if e.get("department") == g)
         listed = _resources(config, g)
         if machines:
@@ -260,14 +311,18 @@ def summary(config: dict, group: str | None = None) -> list:
             here = next((e for e in nas if e.get("hostname") == server), None)
             lines.append(f"  storage: {label}" + (f", {n['note']}" if n.get("note") else "")
                          + (f"; a NAS collected here ({here.get('type', 'zfs')})" if here else ""))
-        if len(lines) and lines[-1] == f"{g}:":
+        if lines[-1] in (f"{g}:", f"{shown} ({g}):"):
             lines.append("  nothing here")
     untagged = sorted(e.get("hostname") for e in ws if not e.get("department"))
     if untagged and not group:
         lines.append(f"workstations collected here with no lab: {', '.join(untagged)}")
     other_nas = sorted(e.get("hostname") for e in nas
-                       if not any(e.get("hostname") == t.partition(":")[0]
-                                  for r in res.values() for t in (r.get("storage") or [])))
-    if other_nas and not group:
-        lines.append(f"NAS collected here, listed for no lab: {', '.join(other_nas)}")
+                       if e.get("shared") is True
+                       or not any(e.get("hostname") == t.partition(":")[0]
+                                  for r in res.values() if isinstance(r, dict)
+                                  for t in (r.get("storage") or [])))
+    if other_nas and group in (None, SHARED):
+        lines.append("shared NAS collected here (no lab): " + ", ".join(
+            f"{h}, {names[h]['note']}" if (names.get(h) or {}).get("note") else h
+            for h in other_nas))
     return lines
