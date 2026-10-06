@@ -68,13 +68,17 @@ def get_db_path(config: dict[str, Any]) -> Path:
     Resolution:
       1. [database].path — if absolute, use as-is; if relative, join with data_dir
       2. Fall back to data_dir / nomad.db
+
+    A leading ~ in either is the home directory. It used to be taken as a
+    directory named "~" under wherever nomad ran (cron: the home directory),
+    so the database went to ~/~/.local/share/nomad/nomad.db.
     """
     default_data = str(Path.home() / '.local' / 'share' / 'nomad')
-    data_dir = Path(config.get('general', {}).get('data_dir', default_data))
+    data_dir = Path(config.get('general', {}).get('data_dir', default_data)).expanduser()
 
     db_path_str = config.get('database', {}).get('path', '')
     if db_path_str:
-        db_path = Path(db_path_str)
+        db_path = Path(db_path_str).expanduser()
         if db_path.is_absolute():
             return db_path
         return data_dir / db_path
@@ -151,7 +155,7 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
 
     # Determine database path
     if db:
-        db_path = Path(db)
+        db_path = Path(db).expanduser()
     else:
         db_path = get_db_path(config)
 

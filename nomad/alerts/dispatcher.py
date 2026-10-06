@@ -86,7 +86,8 @@ class AlertDispatcher:
             from pathlib import Path
             data_dir = config.get('general', {}).get('data_dir',
                 str(Path.home() / '.local' / 'share' / 'nomad'))
-            db_full = Path(data_dir) / db_rel
+            # A leading ~ is the home directory (as in get_db_path).
+            db_full = Path(data_dir).expanduser() / Path(db_rel).expanduser()
             self.db_path = str(db_full)
         else:
             self.db_path = None
