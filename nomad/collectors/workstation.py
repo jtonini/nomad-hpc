@@ -16,6 +16,7 @@ Supports both local and SSH-based remote collection.
 """
 
 import logging
+import shlex
 import socket
 import sqlite3
 import subprocess
@@ -272,7 +273,11 @@ def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
     """Run command locally or via SSH."""
     remote = bool(host and host not in ('localhost', '127.0.0.1', socket.gethostname()))
     if remote:
-        cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {host} 'echo {OUTPUT_MARK}; {cmd}'"
+        # Quoted for the local shell: a command with its own single quotes
+        # used to end the quoting early, and ran on the machine as something
+        # else (grep -c ' Z' became grep -c Z).
+        cmd = (f"ssh -o ConnectTimeout=10 -o BatchMode=yes {shlex.quote(host)} "
+               f"{shlex.quote(f'echo {OUTPUT_MARK}; {cmd}')}")
 
     try:
         result = subprocess.run(
@@ -578,7 +583,10 @@ class WorkstationCollector(BaseCollector):
             pass
 
         try:
-            zombie_out = run_command("ps aux | grep -c ' Z'", hostname)
+            # Processes whose state is Z, and nothing else: counting lines of
+            # `ps aux` with " Z" in them also counted this command's own grep
+            # and shell (and any command line with a Z in it).
+            zombie_out = run_command("ps -A -o stat= | grep -c Z", hostname)
             stats.zombie_count = int(zombie_out.strip())
         except (CollectionError, ValueError):
             pass

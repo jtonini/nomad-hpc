@@ -7,6 +7,7 @@ The `nomad diag` commands provide targeted analysis for common HPC issues, helpi
 nomad diag network    # Network performance analysis
 nomad diag storage    # Storage health and I/O patterns
 nomad diag node       # Node-level resource bottlenecks
+nomad diag workstation HOST   # A departmental workstation's latest reading
 ```
 
 ---
@@ -149,6 +150,32 @@ Recommendations:
   - Swap activity on memory-bound workload - consider job memory limits
   - GPU 2 idle while others near capacity - check job GPU allocation
 ```
+
+---
+
+## Workstation Diagnostics
+
+A workstation's latest reading from the workstation collector, judged; the
+Console's Workstation Diagnostic panel shows the same.
+```bash
+nomad diag workstation labws1
+```
+
+### What It Checks
+
+- **Memory**: above 85% used is flagged, above 95% critical
+- **Local disk**: above 85% is flagged, above 95% critical
+- **Load**: above the core count is flagged, above twice the core count critical
+- **Swap**: more than 1 GB in use
+- **Zombie processes**: any; more than 10 is flagged as many
+- **Not reporting**: the latest reading is more than an hour old
+- **Incomplete reading**: a figure the collector couldn't read (it stores
+  zeros when a command fails on the machine) is named as missing, not
+  passed as 0%
+
+The last day's readings are summarized (samples, average load and memory,
+most users). They are not judged for trends: readings five minutes apart are
+too noisy for a slope and acceleration from the last three.
 
 ---
 

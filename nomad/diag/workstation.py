@@ -87,42 +87,130 @@ def get_workstation_state(db_path: str, hostname: str) -> dict | None:
 
 
 def get_state_history(db_path: str, hostname: str, hours: int = 24) -> list:
-    """Get workstation state changes over time."""
+    """The workstation's readings over the last ``hours``, oldest first, each
+    in the terms of reading()."""
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         since = (datetime.now() - timedelta(hours=hours)).isoformat()
         rows = conn.execute("""
-            SELECT timestamp, status, load_1m, memory_percent, disk_percent,
-                   users_logged_in
-            FROM workstation_state 
+            SELECT * FROM workstation_state
             WHERE hostname = ? AND timestamp > ?
-            ORDER BY timestamp DESC
+            ORDER BY timestamp
         """, (hostname, since)).fetchall()
         conn.close()
-        return [dict(r) for r in rows]
+        return [reading(dict(r)) for r in rows]
     except Exception as e:
         logger.error(f"Error getting state history: {e}")
         return []
 
 
+def _number(row: dict, *keys) -> float | None:
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def reading(row: dict | None) -> dict:
+    """One workstation_state row in the terms this module judges by.
+
+    The collector's columns are load_avg_1m, memory_used_mb of
+    memory_total_mb, and disk_usage_pct of disk_total_gb. This module used to
+    read load_1m, memory_percent and disk_percent, which no table has, and so
+    showed every workstation at 0% load, memory and disk with nothing to flag.
+
+    A figure the reading doesn't have is None, not 0: when a command fails the
+    collector stores zeros (a total of 0 MB or 0 GB, a load of 0 with no
+    uptime), and those are not measurements.
+    """
+    row = row or {}
+
+    load = _number(row, 'load_avg_1m', 'load_1m')
+    if load == 0 and 'uptime_seconds' in row and not row.get('uptime_seconds'):
+        load = None
+
+    mem_total = _number(row, 'memory_total_mb')
+    mem_used = _number(row, 'memory_used_mb')
+    if mem_total and mem_total > 0 and mem_used is not None:
+        mem_pct = max(0.0, min(100.0, mem_used / mem_total * 100))
+    else:
+        mem_total = None
+        mem_pct = _number(row, 'memory_percent')
+
+    disk_total = _number(row, 'disk_total_gb')
+    disk_pct = _number(row, 'disk_usage_pct', 'disk_percent')
+    if disk_total is not None and disk_total <= 0:
+        disk_pct = None
+    elif disk_pct is None and disk_total:
+        disk_pct = (_number(row, 'disk_used_gb') or 0) / disk_total * 100
+
+    cpus = _number(row, 'cpu_count')
+    return {
+        'timestamp': row.get('timestamp'),
+        'status': row.get('status'),
+        'load': load,
+        'cpu_count': int(cpus) if cpus and cpus > 0 else 1,
+        'memory_total_mb': int(mem_total) if mem_total else None,
+        'mem_pct': mem_pct,
+        'disk_pct': disk_pct,
+        'swap_used_mb': int(_number(row, 'swap_used_mb') or 0),
+        'users': int(_number(row, 'users_logged_in') or 0),
+        'processes': int(_number(row, 'process_count') or 0),
+        'zombies': int(_number(row, 'zombie_count') or 0),
+    }
+
+
+# A reading older than this is not the machine's present state: the collector
+# runs every five minutes.
+STALE_AFTER = timedelta(minutes=60)
+
+
+def _age(timestamp) -> timedelta | None:
+    try:
+        when = (timestamp if isinstance(timestamp, datetime)
+                else datetime.fromisoformat(str(timestamp)))
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is not None:
+        when = when.astimezone().replace(tzinfo=None)
+    return datetime.now() - when
+
+
+def _either(words: list) -> str:
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " or " + words[-1]
+
+
+def _series(history: list, key: str) -> list:
+    """(time, value) pairs, oldest first, leaving out readings without it."""
+    out = []
+    for record in history:
+        value = record.get(key)
+        stamp = record.get('timestamp')
+        if value is None or stamp is None:
+            continue
+        if isinstance(stamp, str):
+            try:
+                stamp = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+        out.append((stamp, value))
+    return sorted(out, key=lambda p: p[0])
+
+
 def analyze_memory_trend(history: list) -> dict:
     """Analyze memory usage trend."""
-    if not history or not HAS_DERIVATIVES:
+    points = _series(history, 'mem_pct')
+    if not points or not HAS_DERIVATIVES:
         return {}
 
-    analyzer = DerivativeAnalyzer(window_size=len(history))
-
-    for record in history:
-        timestamp = record.get('timestamp')
-        mem_total = record.get('memory_percent', 1)
-        mem_used = record.get('memory_percent', 0)
-
-        if mem_total > 0:
-            mem_pct = (mem_used / mem_total) * 100
-            if isinstance(timestamp, str):
-                timestamp = datetime.fromisoformat(timestamp)
-            analyzer.add_point(timestamp, mem_pct)
+    analyzer = DerivativeAnalyzer(window_size=len(points))
+    for timestamp, mem_pct in points:
+        analyzer.add_point(timestamp, mem_pct)
 
     analysis = analyzer.analyze(limit=100)  # 100% is the limit
 
@@ -136,17 +224,12 @@ def analyze_memory_trend(history: list) -> dict:
 
 def analyze_disk_trend(history: list) -> dict:
     """Analyze disk usage trend."""
-    if not history or not HAS_DERIVATIVES:
+    points = _series(history, 'disk_pct')
+    if not points or not HAS_DERIVATIVES:
         return {}
 
-    analyzer = DerivativeAnalyzer(window_size=len(history))
-
-    for record in history:
-        timestamp = record.get('timestamp')
-        disk_pct = record.get('disk_percent', 0)
-
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
+    analyzer = DerivativeAnalyzer(window_size=len(points))
+    for timestamp, disk_pct in points:
         analyzer.add_point(timestamp, disk_pct)
 
     analysis = analyzer.analyze(limit=100)
@@ -162,17 +245,12 @@ def analyze_disk_trend(history: list) -> dict:
 
 def analyze_load_trend(history: list, cpu_count: int = 1) -> dict:
     """Analyze CPU load trend."""
-    if not history or not HAS_DERIVATIVES:
+    points = _series(history, 'load')
+    if not points or not HAS_DERIVATIVES:
         return {}
 
-    analyzer = DerivativeAnalyzer(window_size=len(history))
-
-    for record in history:
-        timestamp = record.get('timestamp')
-        load = record.get('load_1m', 0)
-
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
+    analyzer = DerivativeAnalyzer(window_size=len(points))
+    for timestamp, load in points:
         analyzer.add_point(timestamp, load)
 
     # Limit is CPU count * 2 (high load threshold)
@@ -198,20 +276,37 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
         return causes
 
-    status = state.get('status', '')
+    r = reading(state)
+
+    age = _age(state.get('timestamp'))
+    if age is not None and age > STALE_AFTER:
+        hours_ago = age.total_seconds() / 3600
+        causes.append({
+            'cause': 'Workstation not reporting',
+            'confidence': 'high',
+            'detail': (f'Last reading {hours_ago:.1f} h ago ({state.get("timestamp")}); '
+                       'the figures shown are from then')
+        })
+
+    missing = [what for what, value in (('load', r['load']), ('memory', r['mem_pct']),
+                                        ('disk', r['disk_pct'])) if value is None]
+    if missing:
+        causes.append({
+            'cause': 'Incomplete Reading',
+            'confidence': 'low',
+            'detail': (f'The latest reading has no {_either(missing)} figures, '
+                       'so those checks were skipped')
+        })
 
     # Check memory pressure
-    mem_total = state.get('memory_percent', 1)
-    mem_used = state.get('memory_percent', 0)
-    mem_pct = (mem_used / mem_total * 100) if mem_total > 0 else 0
-
-    if mem_pct > 95:
+    mem_pct = r['mem_pct']
+    if mem_pct is not None and mem_pct > 95:
         causes.append({
             'cause': 'Critical Memory Pressure',
             'confidence': 'high',
             'detail': f'Memory at {mem_pct:.1f}% - system may be swapping heavily'
         })
-    elif mem_pct > 85:
+    elif mem_pct is not None and mem_pct > 85:
         causes.append({
             'cause': 'High Memory Usage',
             'confidence': 'medium',
@@ -219,7 +314,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
 
     # Check swap usage
-    swap_used = state.get('swap_used_mb', 0)
+    swap_used = r['swap_used_mb']
     if swap_used > 1024:  # More than 1GB swap
         causes.append({
             'cause': 'Heavy Swap Usage',
@@ -228,14 +323,14 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
 
     # Check disk usage
-    disk_pct = state.get('disk_percent', 0)
-    if disk_pct > 95:
+    disk_pct = r['disk_pct']
+    if disk_pct is not None and disk_pct > 95:
         causes.append({
             'cause': 'Disk Almost Full',
             'confidence': 'high',
             'detail': f'Disk at {disk_pct:.1f}% - may cause application failures'
         })
-    elif disk_pct > 85:
+    elif disk_pct is not None and disk_pct > 85:
         causes.append({
             'cause': 'High Disk Usage',
             'confidence': 'medium',
@@ -243,15 +338,15 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
 
     # Check CPU load
-    load = state.get('load_1m', 0)
-    cpu_count = state.get('cpu_count', 1)
-    if load > cpu_count * 2:
+    load = r['load']
+    cpu_count = r['cpu_count']
+    if load is not None and load > cpu_count * 2:
         causes.append({
             'cause': 'CPU Overload',
             'confidence': 'high',
             'detail': f'Load average {load:.1f} exceeds {cpu_count * 2} (2x CPU count)'
         })
-    elif load > cpu_count:
+    elif load is not None and load > cpu_count:
         causes.append({
             'cause': 'High CPU Load',
             'confidence': 'medium',
@@ -259,7 +354,7 @@ def analyze_potential_causes(state: dict, history: list, trends: dict) -> list:
         })
 
     # Check zombie processes
-    zombies = state.get('zombie_count', 0)
+    zombies = r['zombies']
     if zombies > 10:
         causes.append({
             'cause': 'Many Zombie Processes',
@@ -346,6 +441,11 @@ def generate_recommendations(causes: list, state: dict, trends: dict) -> list:
             recommendations.append('Identify what is writing: iotop -o')
             recommendations.append('Check for runaway log files: lsof +D /var/log')
 
+        elif cause['cause'] == 'Incomplete Reading':
+            host = (state or {}).get('hostname') or '<hostname>'
+            recommendations.append('Check what the collector can read there: '
+                                   f'nomad diag workstation {host} --prereqs')
+
         elif cause['cause'] == 'Workstation not reporting':
             recommendations.append('Ping workstation: ping <hostname>')
             recommendations.append('Check SSH access: ssh <hostname> hostname')
@@ -394,34 +494,32 @@ def diagnose_workstation(
     )
 
     if state:
-        diag.cpu_load = state.get('load_1m', 0)
-        diag.cpu_count = state.get('cpu_count', 1)
-        diag.memory_total_mb = state.get('memory_percent', 0)
-        mem_used = state.get('memory_percent', 0)
-        diag.memory_used_pct = (mem_used / diag.memory_total_mb * 100) if diag.memory_total_mb > 0 else 0
-        diag.disk_used_pct = state.get('disk_percent', 0)
-        diag.swap_used_mb = state.get('swap_used_mb', 0)
-        diag.users_logged_in = state.get('users_logged_in', 0)
-        diag.process_count = state.get('process_count', 0)
-        diag.zombie_count = state.get('zombie_count', 0)
+        r = reading(state)
+        diag.cpu_load = r['load'] or 0.0
+        diag.cpu_count = r['cpu_count']
+        diag.memory_total_mb = r['memory_total_mb'] or 0
+        diag.memory_used_pct = r['mem_pct'] or 0.0
+        diag.disk_used_pct = r['disk_pct'] or 0.0
+        diag.swap_used_mb = r['swap_used_mb']
+        diag.users_logged_in = r['users']
+        diag.process_count = r['processes']
+        diag.zombie_count = r['zombies']
 
-    # Analyze trends
-    diag.trends = {
-        'memory': analyze_memory_trend(history),
-        'disk': analyze_disk_trend(history),
-        'load': analyze_load_trend(history, diag.cpu_count),
-    }
+    # Not judged from trends: the analysis takes its slope and acceleration
+    # from the last three readings, five minutes apart, where ordinary noise
+    # reads as "accelerating" (a critical memory leak or a disk filling).
+    # analyze_*_trend stay for when there is a sound method.
+    diag.trends = {}
 
     # Build resource history summary
     if history:
+        loads = [h['load'] for h in history if h['load'] is not None]
+        mems = [h['mem_pct'] for h in history if h['mem_pct'] is not None]
         diag.resource_history = {
             'samples': len(history),
-            'avg_load': sum(h.get('load_1m', 0) or 0 for h in history) / max(len(history), 1),
-            'avg_mem_pct': sum(
-                (h.get('memory_percent', 0) / max(h.get('memory_percent', 1), 1) * 100)
-                for h in history
-            ) / max(len(history), 1),
-            'max_users': max(h.get('users_logged_in', 0) or 0 for h in history),
+            'avg_load': sum(loads) / len(loads) if loads else 0.0,
+            'avg_mem_pct': sum(mems) / len(mems) if mems else 0.0,
+            'max_users': max(h['users'] for h in history),
         }
 
     # Determine causes
