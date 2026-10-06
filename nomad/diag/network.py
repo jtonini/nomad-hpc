@@ -347,11 +347,24 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, time_patt
             'detail': 'Latency has been increasing over time'
         })
 
+    measured = any(h.get('throughput_mbps') for h in (history or [])) \
+        or bool(state.get('throughput_mbps'))
     if not causes:
         causes.append({
             'cause': 'No obvious issues detected',
             'confidence': 'low',
-            'detail': 'Network path appears healthy'
+            'detail': ('Network path appears healthy' if measured else
+                       'Latency and packet loss are normal')
+        })
+    if not measured:
+        # The collector pings every run; throughput (and the TCP retransmits
+        # counted during it) only when its throughput test is on. Without it
+        # the Console shows both as 0, which is not a measurement.
+        causes.append({
+            'cause': 'Throughput Not Measured',
+            'confidence': 'low',
+            'detail': ('Only ping runs on this path: throughput and TCP retransmits '
+                       'show 0 because they are not measured')
         })
 
     return causes
@@ -397,6 +410,11 @@ def generate_recommendations(causes: list, state: dict, time_patterns: dict) -> 
 
     if not recommendations:
         recommendations.append('Network appears healthy - no action required')
+
+    if any(c['cause'] == 'Throughput Not Measured' for c in causes):
+        dest = (state or {}).get('dest_host') or '<dest>'
+        recommendations.append('To measure throughput: throughput = true under '
+                               f'[collectors.network_perf], with iperf3 -s running on {dest}')
 
     return list(dict.fromkeys(recommendations))  # Remove duplicates
 
@@ -452,6 +470,12 @@ def diagnose_network(
         diag.packet_loss_pct = (state.get('ping_loss_pct') or 0) or 0
         diag.throughput_mbps = (state.get('throughput_mbps') or 0) or 0
         diag.tcp_retrans = (state.get('tcp_retrans') or 0) or 0
+        if not state.get('throughput_mbps'):
+            # Throughput runs at most hourly; the newest row may be ping only.
+            last = next((h for h in history if h.get('throughput_mbps')), None)
+            if last is not None:
+                diag.throughput_mbps = last['throughput_mbps']
+                diag.tcp_retrans = last.get('tcp_retrans') or 0
 
     # Calculate historical stats
     if history:

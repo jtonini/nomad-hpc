@@ -177,6 +177,58 @@ def analyze_usage_trend(history: list) -> dict:
     }
 
 
+# How fast a server fills is judged as the Insights engine judges a
+# filesystem: least squares over daily averages, from at least a week of
+# readings. The derivative analysis (analyze_usage_trend) took slope and
+# acceleration from the last three readings, minutes apart and in reverse
+# order, and called a server filling "rapidly" from noise (a HIGH cause on a
+# server read for an hour, "full in 122.9 days").
+FILL_TREND_DAYS = 30
+FILL_MIN_DAYS = 7
+
+
+def fill_rate(db_path: str, hostname: str, free_bytes: float | None,
+              now: datetime | None = None) -> dict:
+    """The server's growth in bytes a day and the days until it is full, from
+    the last FILL_TREND_DAYS days; {} with fewer than FILL_MIN_DAYS days."""
+    now = now or datetime.now()
+    try:
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute("""
+            SELECT substr(timestamp, 1, 10) AS day, AVG(used_bytes)
+            FROM storage_state
+            WHERE hostname = ? AND timestamp >= ? AND used_bytes > 0
+            GROUP BY day ORDER BY day
+        """, (hostname, (now - timedelta(days=FILL_TREND_DAYS)).isoformat())).fetchall()
+        conn.close()
+    except sqlite3.Error as e:
+        logger.error(f"Error reading storage history: {e}")
+        return {}
+    points = []
+    for day, used in rows:
+        try:
+            points.append((datetime.fromisoformat(day).toordinal(), float(used)))
+        except (TypeError, ValueError):
+            continue
+    if len(points) < FILL_MIN_DAYS:
+        return {}
+    mx = sum(x for x, _ in points) / len(points)
+    my = sum(y for _, y in points) / len(points)
+    den = sum((x - mx) ** 2 for x, _ in points)
+    if not den:
+        return {}
+    growth = sum((x - mx) * (y - my) for x, y in points) / den
+    days = (free_bytes / growth) if (growth > 0 and free_bytes) else None
+    return {
+        'trend': 'increasing' if growth > 0 else 'decreasing' if growth < 0 else 'stable',
+        'first_derivative': growth,          # bytes a day
+        'trend_days': len(points),
+        'days_until_full': days,
+        'alert_level': ('critical' if days is not None and days < 3 else
+                        'warning' if days is not None and days < 14 else 'normal'),
+    }
+
+
 def analyze_zfs_pools(pools: list) -> list[ZFSPoolDiagnostic]:
     """Analyze ZFS pools for issues."""
     pool_diagnostics = []
@@ -278,22 +330,16 @@ def analyze_potential_causes(state: dict, history: list, trends: dict, pools: li
             'detail': f'{nfs_clients} NFS clients connected'
         })
 
-    # Check trend analysis
-    if trends.get('usage', {}).get('alert_level') == 'critical':
-        days = trends['usage'].get('days_until_full')
-        detail = 'Storage filling rapidly'
-        if days:
-            detail += f' - estimated full in {days:.1f} days'
+    # How fast it fills (fill_rate: a week or more of daily averages)
+    usage = trends.get('usage') or {}
+    days = usage.get('days_until_full')
+    if days is not None and days < 30:
+        rate = (usage.get('first_derivative') or 0) / 1024 ** 3
         causes.append({
-            'cause': 'Rapid Storage Fill Rate',
-            'confidence': 'high',
-            'detail': detail
-        })
-    elif trends.get('usage', {}).get('alert_level') == 'warning':
-        causes.append({
-            'cause': 'Storage Fill Rate Increasing',
-            'confidence': 'medium',
-            'detail': 'Storage usage accelerating - monitor closely'
+            'cause': 'Storage Filling Fast' if days < 3 else 'Storage Filling',
+            'confidence': 'high' if days < 3 else 'medium' if days < 14 else 'low',
+            'detail': (f'At the last {usage.get("trend_days")} days\' rate '
+                       f'({rate:+.1f} GB/day) it is full in {days:.0f} days')
         })
 
     if not causes:
@@ -417,9 +463,11 @@ def diagnose_storage(
         # Parse NFS exports
         diag.nfs_exports = state.get('nfs_exports', [])
 
-    # Analyze trends
+    # How fast it fills, from daily averages (not the derivative analysis)
+    free = diag.free_bytes or ((diag.total_bytes - diag.used_bytes)
+                               if diag.total_bytes and diag.used_bytes else None)
     diag.trends = {
-        'usage': analyze_usage_trend(history),
+        'usage': fill_rate(db_path, hostname, free),
     }
 
     # Build resource history summary
@@ -537,7 +585,8 @@ def format_diagnostic(diag: StorageDiagnostic) -> str:
 
         d1 = trend.get('first_derivative')
         if d1:
-            lines.append(f"    Fill Rate:    {d1/1024**3:+.2f} GB/day")
+            lines.append(f"    Fill Rate:    {d1/1024**3:+.2f} GB/day "
+                         f"(last {trend.get('trend_days')} days)")
 
         days = trend.get('days_until_full')
         if days and days < 365:

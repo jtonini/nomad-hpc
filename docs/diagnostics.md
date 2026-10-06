@@ -28,6 +28,13 @@ nomad diag network --threshold 100   # Flag if <100 MB/s
 - **Packet loss**: Percentage of dropped packets
 - **Path analysis**: Identifies bottleneck links
 
+The network collector pings every run. It measures throughput (and the TCP
+retransmits during it) only with `throughput = true` under
+`[collectors.network_perf]`, at most hourly, with `iperf3 -s` (or ssh) at the
+far end. Without it the diagnostic says "Throughput Not Measured" rather than
+showing 0 Mbps as a reading, and it shows the last measured throughput when
+the newest row is ping only.
+
 ### Output Example
 ```
 Network Diagnostics Report
@@ -69,6 +76,10 @@ nomad diag storage --detailed
 - **I/O patterns**: Sequential vs random, read/write ratio
 - **Queue depth**: Outstanding I/O requests
 - **Error rates**: Failed operations, retries
+- **Fill rate**: growth by least squares over daily averages, from at least
+  a week of readings in the last 30 days, and the days until full at that
+  rate: under 30 days is noted, under 14 is flagged, under 3 is high. A
+  server read for less than a week has no fill rate.
 
 ### Output Example
 ```
