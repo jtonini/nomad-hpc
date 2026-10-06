@@ -268,7 +268,7 @@ def _sized_db(path, rows):
 
 
 HOME, SCRATCH, LOGP = ("nas:/mnt/everything/shared-home", "nas:/mnt/everything/scratch",
-                       "nas2:/mnt/everything/logP")
+                       "nas2:/mnt/data/projects")
 
 
 def test_latest_size_of_each_export_and_the_free_space_they_share(tmp_path):
@@ -276,7 +276,7 @@ def test_latest_size_of_each_export_and_the_free_space_they_share(tmp_path):
         ("2026-10-05T22:00:00", "adam", "/home", HOME, 1, 40 * TB, 2 * TB, 38 * TB),
         ("2026-10-05T22:21:00", "adam", "/home", HOME, 1, 40 * TB, 3 * TB, 37 * TB),
         ("2026-10-05T22:21:00", "adam", "/scratch", SCRATCH, 1, 45 * TB, 8 * TB, 37 * TB),
-        ("2026-10-05T22:21:00", "adam", "/logP", LOGP, 1, 9 * TB, 1 * TB, 37 * TB),
+        ("2026-10-05T22:21:00", "adam", "/projects", LOGP, 1, 9 * TB, 1 * TB, 37 * TB),
         ("2026-10-05T22:26:00", "boyi", "/home", HOME, 0, None, None, None),   # hung
     ])
     sizes = export_sizes(c, [HOME, SCRATCH, LOGP, "nas", "nowhere:/x"])
@@ -303,6 +303,35 @@ def test_sharing_is_found_whichever_machine_was_read(tmp_path):
     assert sizes[HOME].host == "adam"                     # ties go by machine name
     assert sizes[HOME].shares_free_with == (SCRATCH,)
     assert sizes[SCRATCH].shares_free_with == (HOME,)
+
+
+def test_exports_on_different_machines_are_seen_sharing(tmp_path):
+    # One export is mounted on a single machine, the other on five others;
+    # no machine reads both, and the run read the same free space for them.
+    logp, flaps = "srv:/mnt/pool/b", "srv:/mnt/pool/a"
+    free = 35265522958336
+    rows = [("2026-10-06T08:21:35", "ws9", "/b", logp, 1, 58 * TB, 23 * TB, free)]
+    rows += [("2026-10-06T08:21:35", h, "/a", flaps, 1, 43 * TB, 8 * TB, free)
+             for h in ("ws1", "ws2", "ws3", "ws4", "ws5")]
+    # Another server 43 GB apart in the same run stays its own pool.
+    rows += [("2026-10-06T08:21:35", "adam", "/home", HOME, 1, 90 * TB, 55 * TB,
+              free + 43 * 10 ** 9)]
+    c = _sized_db(tmp_path / "c.db", rows)
+    sizes = export_sizes(c, [logp, flaps, HOME])
+    assert sizes[logp].shares_free_with == (flaps,)
+    assert sizes[flaps].shares_free_with == (logp,)
+    assert sizes[HOME].shares_free_with == ()
+    group, = shared_free(c, sizes)
+    assert (group.exports, group.used, group.avail) == ((flaps, logp), 31 * TB, free)
+
+
+def test_two_exports_43_gb_apart_on_one_server_are_two_pools(tmp_path):
+    a, b = "srv:/pool1/a", "srv:/pool2/b"
+    c = _sized_db(tmp_path / "c.db", [
+        ("2026-10-06T08:21:35", "ws9", "/a", a, 1, 58 * TB, 23 * TB, 35 * TB),
+        ("2026-10-06T08:21:35", "adam", "/b", b, 1, 43 * TB, 8 * TB, 35 * TB + 43 * 10 ** 9),
+    ])
+    assert export_sizes(c, [a, b])[a].shares_free_with == ()
 
 
 def test_sharing_tolerates_writes_between_the_two_readings(tmp_path):
@@ -427,8 +456,8 @@ def test_cli_roles_shows_the_space(tmp_path):
          int(36.9 * TB)),
         ("2026-10-05T22:21:00", "adam", "/scratch", SCRATCH, 1, 45 * TB, int(8.1 * TB),
          int(36.9 * TB)),
-        ("2026-10-05T21:00:00", "adam", "/logP", LOGP, 1, 9 * TB, 1 * TB, 8 * TB),
-        ("2026-10-05T22:21:00", "adam", "/logP", LOGP, 1, None, None, None),  # v1 probe since
+        ("2026-10-05T21:00:00", "adam", "/projects", LOGP, 1, 9 * TB, 1 * TB, 8 * TB),
+        ("2026-10-05T22:21:00", "adam", "/projects", LOGP, 1, None, None, None),  # v1 probe since
     ])
     c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
     c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
@@ -449,7 +478,7 @@ def test_cli_roles_shows_the_space(tmp_path):
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
                                  "--mask"])
     assert "everything" not in r.output and "nas" not in r.output
-    # Sorted: logP (#1), scratch (#2), shared-home (#3).
+    # Sorted: nas2 (#1), scratch (#2), shared-home (#3).
     assert "storage #3: mounted and responding, 2026-10-05T22:21; 8% used" in r.output
     assert "free space shared with storage #2" in r.output
     assert "    storage #2 + storage #3, together: 24% used (11.2 TB), 36.9 TB free" in r.output

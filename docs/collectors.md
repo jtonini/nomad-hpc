@@ -176,10 +176,13 @@ reaching the NAS. "Used" is the whole export's, whoever wrote it.
 Exports that are datasets of one ZFS pool each report their own used space
 but share the pool's free space, and each one's total is its own used space
 plus that shared free space. So their totals overlap and must not be added
-up. When a machine reads the same free space (within 0.1%) for two exports
-of one server in one run, `nomad console roles` says "free space shared
-with ...", leaves out each one's total, and adds a line with their space
-together: their used space summed, the free space counted once.
+up. When two exports of one server are read with the same free space
+(within 0.1%, at most 1 GiB) in one run, whether by the same lab machine or
+by two (an export mounted on a single machine is read by no other),
+`nomad console roles` says "free space shared with ...", leaves out each
+one's total, and adds a line with their space together: their used space
+summed, the free space counted once. Exports on different server addresses
+are never put together, even if the same NAS answers on both.
 
 Only the collecting host needs 1.7.24 for the sizes; the hub's combined
 database gains the columns at its next sync.

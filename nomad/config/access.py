@@ -253,9 +253,9 @@ class ExportSize:
     """An export's size as a lab machine mounting it last read it (the mount
     probe's statvfs(), df's numbers), in bytes. ``used`` is the whole
     export's, whoever wrote it. ``shares_free_with``: other exports of the
-    same server that a machine read the same free space for at the same
-    moment -- most likely datasets of one pool, whose free space is one and
-    must not be added up."""
+    same server read with the same free space in the same run -- most
+    likely datasets of one pool, whose free space is one and must not be
+    added up."""
     when: str
     host: str
     total: int
@@ -292,10 +292,10 @@ _SIZE_COLUMNS = {"source", "timestamp", "hostname", "is_responsive",
                  "total_bytes", "used_bytes", "avail_bytes"}
 _SIZED = ("total_bytes IS NOT NULL AND used_bytes IS NOT NULL AND avail_bytes IS NOT NULL "
           "AND is_responsive = 1")
-# Two statvfs() calls a probe makes a moment apart see a busy pool's free
-# space move a little: 0.1%, at most 1 GiB. Separate pools rarely come this
-# close; when they do, the free space is counted once -- less than there is,
-# never more.
+# The readings of one run, made by the lab machines seconds apart, see a busy
+# pool's free space move a little: 0.1%, at most 1 GiB. Separate pools rarely
+# come this close; when they do, the free space is counted once -- less than
+# there is, never more.
 SHARED_FREE_TOLERANCE = 0.001
 SHARED_FREE_MAX_GAP = 2 ** 30
 
@@ -310,10 +310,12 @@ def export_sizes(conn, names: Iterable[str]) -> dict[str, ExportSize]:
     has one. A server named alone has no single size; a database from before
     the sizes were collected (1.7.24) gives none.
 
-    Exports of one server count as sharing their free space when any machine
-    read the same free space (within SHARED_FREE_TOLERANCE) for them in one
-    run, at the time of either one's latest size; sharing holds both ways and
-    chains (A with B and B with C puts all three together).
+    Exports of one server count as sharing their free space when the same
+    free space (within SHARED_FREE_TOLERANCE) was read for them in one run,
+    at the time of either one's latest size -- by one machine or by two: an
+    export may be mounted on a single machine, and no other machine then
+    reads it with the rest. Sharing holds both ways and chains (A with B and
+    B with C puts all three together).
     """
     wanted = sorted({n for n in names if isinstance(n, str) and n.partition(":")[2]})
     cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_mount_state)")}
@@ -345,18 +347,17 @@ def export_sizes(conn, names: Iterable[str]) -> dict[str, ExportSize]:
             continue
         marks = ", ".join("?" * len(group))
         for when in sorted({latest[s][0] for s in group}):
-            seen: dict[str, dict] = {}
-            for host, source, avail in conn.execute(
-                    "SELECT hostname, source, avail_bytes FROM workstation_mount_state "
+            read: dict[str, set] = {}       # export -> the free space read, by any machine
+            for source, avail in conn.execute(
+                    "SELECT source, avail_bytes FROM workstation_mount_state "
                     f"WHERE timestamp = ? AND source IN ({marks}) AND {_SIZED}",
                     (when, *group)):
-                seen.setdefault(host, {})[source] = avail
-            for read in seen.values():
-                found = sorted(read)
-                for i, a in enumerate(found):
-                    for b in found[i + 1:]:
-                        if _same_free(read[a], read[b]):
-                            parent[top(a)] = top(b)
+                read.setdefault(source, set()).add(avail)
+            found = sorted(read)
+            for i, a in enumerate(found):
+                for b in found[i + 1:]:
+                    if any(_same_free(x, y) for x in read[a] for y in read[b]):
+                        parent[top(a)] = top(b)
 
     members: dict[str, list] = {}
     for source in latest:
