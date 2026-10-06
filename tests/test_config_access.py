@@ -125,3 +125,76 @@ def test_cli_roles(tmp_path, db):
     assert "carol" not in r.output.split("Console access")[1].replace("console.labs", "")
     assert "jtonini" not in r.output
     assert "lab #1: 2 members" in r.output
+
+
+# -- a lab's own machines -----------------------------------------------------------
+
+LAB = {"console": {"labs": {
+    "group_pattern": "{netid}$",
+    "leads": {"dana": ["physlab$"]},
+    "resources": {
+        "carol$": {"workstations": ["adam", "eve", "adam"], "storage": ["sarahvaughan"]},
+        "physlab$": {"workstations": "zappa", "storage": ["nas2:/export/phys"]},
+    },
+}}}
+
+
+def test_a_pi_gets_the_machines_of_the_labs_they_lead():
+    from nomad.config.access import access_from
+    a = access_from(LAB)
+    assert a.problems == ()
+    assert a.resources["carol$"]["workstations"] == ("adam", "eve")     # listed once
+    # carol$ has resources listed, so it counts as existing even without group data
+    assert a.lab_resources("carol", lambda g: False) == {
+        "workstations": {"adam", "eve"}, "storage": {"sarahvaughan"}}
+    assert a.lab_resources("dana") == {"workstations": {"zappa"},
+                                       "storage": {"nas2:/export/phys"}}
+    assert a.lab_resources("s1", lambda g: False) == {"workstations": set(), "storage": set()}
+
+
+@pytest.mark.parametrize("resources,expect", [
+    ({"carol$": {"printers": ["p1"]}}, "unknown; the kinds are workstations, storage"),
+    ({"carol$": ["adam"]}, "should be a table"),
+    ({"carol$": {"workstations": [3]}}, "is not a name"),
+])
+def test_wrong_machine_lists_are_said_and_left_out(resources, expect):
+    from nomad.config.access import access_from
+    a = access_from({"console": {"labs": {"resources": resources}}}, log=False)
+    assert any(expect in p for p in a.problems), a.problems
+    assert not a.resources.get("carol$", {}).get("printers")
+
+
+def test_people_outside_the_lab_are_another_user():
+    from nomad.config.access import OTHER_USER, shown_name
+    assert shown_name("s1", {"carol", "s1"}) == "s1"
+    assert shown_name("S1", {"carol", "s1"}) == "S1"
+    assert shown_name("stranger", {"carol", "s1"}) == OTHER_USER
+    assert shown_name("stranger", None) == "stranger"      # admins see everyone
+
+
+def test_cli_roles_shows_the_machines(tmp_path):
+    cfg = tmp_path / "nomad.toml"
+    cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
+                   '[console.labs.resources."carol$"]\n'
+                   'workstations = ["adam", "ghost"]\nstorage = ["sarahvaughan"]\n')
+    dbp = tmp_path / "combined.db"
+    c = sqlite3.connect(dbp)
+    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
+    c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
+    c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT)")
+    c.execute("INSERT INTO workstation_state VALUES ('2026-10-05T19:00:00', 'adam')")
+    c.execute("CREATE TABLE workstation_mount_state (timestamp TEXT, hostname TEXT, source TEXT)")
+    c.execute("INSERT INTO workstation_mount_state VALUES "
+              "('2026-10-05T18:00:00', 'adam', 'sarahvaughan:/export/parish')")
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles"])
+    assert "machines:  listed for 1 lab: 2 workstations, 1 storage" in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp)])
+    assert r.exit_code == 0, r.output
+    assert "adam: last reported 2026-10-05T19:00" in r.output
+    assert "ghost: not in the data" in r.output
+    assert "sarahvaughan: last reported 2026-10-05T18:00" in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
+                                 "--mask"])
+    assert "adam" not in r.output and "workstation #1: last reported" in r.output

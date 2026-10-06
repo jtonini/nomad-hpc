@@ -4802,6 +4802,27 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     sys.exit(code)
 
 
+def _last_seen(conn, kind, name):
+    """When a listed workstation or storage last appeared in the data, or None."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    queries = []
+    if kind == 'workstations':
+        queries = [("workstation_state", "hostname = ?", (name,))]
+    else:
+        host, _, export = name.partition(':')
+        queries = [("storage_state", "hostname = ?", (host,))] if not export else []
+        queries.append(("workstation_mount_state",
+                        "source = ? OR source LIKE ?" if not export else "source = ?",
+                        (name, f"{name}:%") if not export else (name,)))
+    best = None
+    for table, where, args in queries:
+        if table in tables:
+            t = conn.execute(f"SELECT MAX(timestamp) FROM {table} WHERE {where}", args).fetchone()[0]
+            if t and (best is None or str(t) > str(best)):
+                best = t
+    return str(best)[:16] if best else None
+
+
 @console.command('roles')
 @click.argument('netid', required=False)
 @click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
@@ -4831,6 +4852,12 @@ def console_roles(ctx, netid, db, mask):
         "no group_pattern (labs only from leads)"
     click.echo(f"  labs:      {rule}; leads listed for {len(acc.leads)} "
                f"{'person' if len(acc.leads) == 1 else 'people'}")
+    if acc.resources:
+        nw = sum(len(r.get('workstations', ())) for r in acc.resources.values())
+        ns = sum(len(r.get('storage', ())) for r in acc.resources.values())
+        click.echo(f"  machines:  listed for {len(acc.resources)} "
+                   f"lab{'' if len(acc.resources) == 1 else 's'}: {nw} workstations, "
+                   f"{ns} storage")
     click.echo("  anyone else who signs in: viewer (their own work)")
     for p in acc.problems:
         click.echo(click.style(f"  ! {p}", fg='yellow'))
@@ -4864,6 +4891,13 @@ def console_roles(ctx, netid, db, mask):
         else:
             n = len(members(g))
             click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
+    res = acc.lab_resources(netid, exists)
+    for kind in ('workstations', 'storage'):
+        for i, name in enumerate(sorted(res[kind]), 1):
+            label = f"{kind[:-1] if kind.endswith('s') else kind} #{i}" if mask else name
+            seen = _last_seen(conn, kind, name) if conn is not None else None
+            click.echo(f"    {label}: " + (f"last reported {seen}" if seen else
+                       ("not in the data" if conn is not None else "(no database)")))
     if role:
         click.echo("  sees individually: everyone")
     elif members is not None:
