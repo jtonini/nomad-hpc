@@ -198,10 +198,11 @@ def _lab_db(path):
 
 
 def test_workstations_tagged_by_their_collector(tmp_path):
+    from datetime import datetime
     from nomad.config.access import access_from, members_lookup, workstation_tags
     _lab_db(tmp_path / "c.db")
     c = sqlite3.connect(tmp_path / "c.db")
-    tagged = workstation_tags(c)
+    tagged = workstation_tags(c, now=datetime(2026, 10, 5, 19, 30))
     assert tagged("carol$") == {"eve", "dead"}        # "moved" follows its latest tag
     assert tagged("physics$") == {"moved"}
     a = access_from({"console": {"labs": {"group_pattern": "{netid}$"}}})
@@ -220,7 +221,10 @@ def test_no_department_column_means_no_tags(tmp_path):
     assert workstation_tags(c)("carol$") == set()
 
 
-def test_cli_roles_shows_the_machines(tmp_path):
+def test_cli_roles_shows_the_machines(tmp_path, monkeypatch):
+    import nomad.cli as cli_mod
+    from datetime import datetime
+    monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 5, 18, 50))
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
                    '[console.labs.resources."carol$"]\n'

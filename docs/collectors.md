@@ -214,6 +214,6 @@ type = "nfs"
 paths = ["/export/home"]
 ```
 
-Reached over SSH with `BatchMode` (a key, no password prompt) unless `hostname` is this host. `type = "zfs"` reads pool health and capacity; any type reads NFS exports and connected clients. Without ZFS, capacity comes only from the `paths` listed (df) — never from the server's root disk. An unreachable server is stored as `offline` with its capacity unknown (NULL), not as an empty server.
+Reached over SSH with `BatchMode` (a key, no password prompt) unless `hostname` is this host. `type = "zfs"` reads pool health and capacity: the space users have, from each pool's root dataset (`zfs list`), so RAIDZ parity isn't counted as it is in `zpool list`, and a boot pool (`boot-pool`, `freenas-boot`, `bpool`) isn't counted at all. It works on TrueNAS CORE (FreeBSD) as on Linux. Any type reads NFS exports and connected clients. A login banner is skipped, as for workstations. `nomad lab add-nas` adds a NAS (see docs/config.md). Without ZFS, capacity comes only from the `paths` listed (df) — never from the server's root disk. An unreachable server is stored as `offline` with its capacity unknown (NULL), not as an empty server.
 
 `[[storage_devices]]` and `[[network_tests]]` at the top level of `nomad.toml`, where older examples put them, are still read, with a warning to move them.

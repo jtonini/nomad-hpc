@@ -123,6 +123,42 @@ private or automatic: the break-glass password, and the record made at
 someone's first login. A setting that is wrong is reported and left out,
 never guessed at.
 
+### Adding machines and labs: `nomad lab`
+
+`nomad lab` edits these settings in `nomad.toml` for you: it backs up the
+file first, keeps its comments, and writes nothing that doesn't read back as
+intended. Each command shows the change; `--apply` writes it.
+
+```
+nomad lab show [LAB]
+nomad lab add-machine LAB HOST          a workstation collected here, tagged with the lab
+nomad lab add-nas LAB HOST [--name NAME] [--note "..."] [--type zfs|nfs] [--path P]
+                                        a NAS collected here (its pools), listed as the lab's
+nomad lab add-storage LAB SERVER[:/export] [--name NAME] [--note "..."]
+                                        storage the lab's machines mount, listed as the lab's
+nomad lab remove LAB HOST
+```
+
+LAB is the PI's NetID when `group_pattern` is set (`jdoe` is `jdoe$`
+with `"{netid}$"`), or the lab's group itself.
+
+- **add-machine** goes on the host that collects the workstation (a lab's
+  own head node, or the hub for a lab without one). It turns the workstation
+  collector on there if needed, and says whether the host answers over SSH
+  with a key.
+- **add-nas** is for a NAS the storage collector reads over SSH: pool health,
+  and the space users have (each pool's root dataset, so RAIDZ parity isn't
+  counted; a boot pool isn't storage). A host listed as a workstation moves
+  to storage. It says whether cron on this host runs the storage collector.
+- **add-storage** goes on the Console's machine: an export the lab's machines
+  mount, or a server, with an optional name and note for the server.
+- **remove** takes a host out of a lab: no longer collected here, no longer
+  listed.
+
+A workstation's lab travels with its data, so it is added where it is
+collected; storage listings and server names are read on the Console's
+machine. On a hub that also collects a lab, one command does all of it.
+
 `nomad console roles` shows what the file grants, and anything wrong in it;
 `nomad console roles NETID` shows what that person would see, with each lab's
 size, and whether each of their machines is online (and when it last was) or
@@ -130,7 +166,10 @@ whether each storage export is mounted and responding, by server (with its
 name and note), with its space when the lab machines report it: percent used, used of total and free, in decimal units
 (those of `df -H`), and for exports of one pool "free space shared with ..."
 and a line with their space together (see docs/collectors.md, Workstation
-mounts); a machine known only by
+mounts), and for a NAS the storage collector reads, its state, space and
+pools' health. A machine or NAS whose latest record is over an hour old
+shows as "no report since ..."; a workstation with no record in two days no
+longer counts as its lab's. A machine known only by
 its tag is marked `[tagged]` (`--db` for the database holding group membership, such as the hub's
 combined database; `--mask` for counts only).
 

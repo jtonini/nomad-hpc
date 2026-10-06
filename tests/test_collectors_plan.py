@@ -244,14 +244,24 @@ def test_storage_never_reports_a_servers_root_disk(db, monkeypatch):
     from nomad.collectors import storage as st
     seen = []
 
+    from nomad.collectors.workstation import OUTPUT_MARK
+    mark = f"echo {OUTPUT_MARK}; "
+
     def fake_run(argv, shell=False, **k):
         cmd = argv if isinstance(argv, str) else argv[-1]
+        # Over ssh the command comes after the mark, which it prints first.
+        remote = cmd.startswith(mark)
+        cmd = cmd[len(mark):] if remote else cmd
         seen.append(cmd)
+
+        def done(rc, out, err=""):
+            return subprocess.CompletedProcess(
+                argv, rc, (f"{OUTPUT_MARK}\n{out}" if remote else out), err)
         if cmd.startswith("df -B1 -P '/export/home'"):
-            return subprocess.CompletedProcess(argv, 0, "/dev/x 1000 600 400 60% /export/home", "")
+            return done(0, "/dev/x 1000 600 400 60% /export/home")
         if cmd == "true":
-            return subprocess.CompletedProcess(argv, 0, "", "")
-        return subprocess.CompletedProcess(argv, 1, "", "not here")   # no zpool, no exportfs
+            return done(0, "")
+        return done(1, "", "not here")   # no zpool, no exportfs
     monkeypatch.setattr(st.subprocess, "run", fake_run)
     st.StorageCollector({"storage_devices": [
         {"hostname": "nfs1", "type": "nfs"},
@@ -385,13 +395,17 @@ def test_the_aws_collector_is_found_under_the_name_it_logs(tmp_path, db):
 
 def test_two_paths_on_one_filesystem_count_once(db, monkeypatch):
     from nomad.collectors import storage as st
+    from nomad.collectors.workstation import OUTPUT_MARK
+    mark = f"echo {OUTPUT_MARK}; "
 
     def fake_run(argv, shell=False, **k):
         cmd = argv if isinstance(argv, str) else argv[-1]
+        cmd = cmd[len(mark):] if cmd.startswith(mark) else cmd
         if cmd.startswith("df -B1 -P"):
-            return subprocess.CompletedProcess(argv, 0, "/dev/md0 1000 600 400 60% /export", "")
+            return subprocess.CompletedProcess(
+                argv, 0, f"{OUTPUT_MARK}\n/dev/md0 1000 600 400 60% /export", "")
         if cmd == "true":
-            return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 0, f"{OUTPUT_MARK}\n", "")
         return subprocess.CompletedProcess(argv, 1, "", "")
     monkeypatch.setattr(st.subprocess, "run", fake_run)
     st.StorageCollector({"storage_devices": [

@@ -445,7 +445,10 @@ def test_sizes_in_decimal_units(n, shown):
     assert _bytes_shown(n) == shown
 
 
-def test_cli_roles_shows_the_space(tmp_path):
+def test_cli_roles_shows_the_space(tmp_path, monkeypatch):
+    import nomad.cli as cli_mod
+    from datetime import datetime
+    monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 5, 22, 30))
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
                    '[console.labs.resources."carol$"]\n'

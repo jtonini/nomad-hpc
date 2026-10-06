@@ -116,6 +116,9 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
     if config_path is None:
         config_path = resolve_config_path()
     config_file = Path(config_path)
+    # The file `nomad lab` edits: this one, even if it doesn't exist yet or
+    # doesn't load -- never the packaged default the fallback below reads.
+    ctx.obj['config_target'] = str(config_file.expanduser())
     if config_file.exists():
         try:
             ctx.obj['config'] = load_config(config_file)
@@ -4811,7 +4814,28 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     sys.exit(code)
 
 
-def _machine_state(conn, kind, name):
+# A machine's latest record older than this: its collection has stopped
+# (collected every 5 minutes, merged into the hub every 20).
+STALE_AFTER_MINUTES = 60
+
+
+def _now():
+    """The time a record's age is judged by (tests set it)."""
+    from datetime import datetime
+    return datetime.now()
+
+
+def _stale(when, now=None):
+    """True when a record of ``when`` (ISO) is older than STALE_AFTER_MINUTES."""
+    from datetime import datetime, timedelta
+    try:
+        t = datetime.fromisoformat(str(when)[:19])
+    except ValueError:
+        return False
+    return (now or _now()) - t > timedelta(minutes=STALE_AFTER_MINUTES)
+
+
+def _machine_state(conn, kind, name, now=None):
     """How a lab's workstation or storage looks in the data, in a few words;
     None when it is not there at all."""
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -4823,6 +4847,8 @@ def _machine_state(conn, kind, name):
         if not row:
             return None
         status, when = row[0] or 'unknown', str(row[1])[:16]
+        if _stale(row[1], now):
+            return f"no report since {when} (it was {status} then)"
         if status in ('online', 'degraded'):
             return f"{status}, {when}"
         online = conn.execute("SELECT MAX(timestamp) FROM workstation_state WHERE hostname = ? "
@@ -4830,22 +4856,45 @@ def _machine_state(conn, kind, name):
         return (f"{status} at {when}; " +
                 (f"last online {str(online)[:16]}" if online else "never online"))
     host, _, export = name.partition(':')
-    if not export and 'storage_state' in tables:
-        t = conn.execute("SELECT MAX(timestamp) FROM storage_state WHERE hostname = ?",
-                         (host,)).fetchone()[0]
-        if t:
-            return f"storage server, last report {str(t)[:16]}"
+    if not export:
+        from nomad.config.access import server_state
+        s = server_state(conn, host)
+        if s is not None:
+            return _server_shown(s, now)
     if 'workstation_mount_state' in tables:
         where, args = (("source = ?", (name,)) if export else
                        ("source LIKE ?", (f"{name}:%",)))
         seen, ok = conn.execute(
             f"SELECT MAX(timestamp), MAX(CASE WHEN is_mounted = 1 AND is_responsive = 1 "
             f"THEN timestamp END) FROM workstation_mount_state WHERE {where}", args).fetchone()
+        if seen and _stale(seen, now):
+            return f"no report since {str(seen)[:16]}"
         if seen:
             return (f"mounted and responding, {str(ok)[:16]}" if ok and str(ok) >= str(seen)
                     else f"not responding at {str(seen)[:16]}" +
                     (f"; last responding {str(ok)[:16]}" if ok else ""))
     return None
+
+
+def _server_shown(s, now=None):
+    """A NAS the storage collector reads, in a few words: its state, space
+    and pools' health."""
+    when = s.when[:16]
+    if _stale(s.when, now):
+        return f"no report since {when} (it was {s.status} then)"
+    if s.status not in ('online', 'degraded'):
+        return (f"{s.status} at {when}; " +
+                (f"last online {s.last_online[:16]}" if s.last_online else "never online"))
+    text = f"{s.status}, {when}"
+    if s.total:
+        pct = s.used_pct
+        text += (f"; {pct}% used ({_bytes_shown(s.used)} of {_bytes_shown(s.total)}), "
+                 f"{_bytes_shown(s.free)} free")
+    from nomad.collectors.storage import BOOT_POOLS
+    pools = [(n, h) for n, h in s.pools if n not in BOOT_POOLS]
+    if pools:
+        text += "; " + ", ".join(f"pool {n} {h or '?'}" for n, h in pools)
+    return text
 
 
 def _bytes_shown(n):
@@ -4897,7 +4946,8 @@ def _storage_lines(conn, acc, names, mask):
     for i, server in enumerate(sorted(exports, key=lambda s: (shown(s), s)), 1):
         name, note = acc.servers.get(server, ('', ''))
         head = (f"storage server #{i}" if mask else
-                (f"{name} ({server})" if name else server) + (f", {note}" if note else ""))
+                (f"{name} ({server})" if name and name != server else server)
+                + (f", {note}" if note else ""))
         if '' in exports[server]:
             state = _machine_state(conn, 'storage', server) if conn is not None else None
             lines.append(f"    {head}: {state or missing}")
@@ -4980,7 +5030,7 @@ def console_roles(ctx, netid, db, mask):
     if db_path.exists():
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         exists, members = members_lookup(conn)
-        tagged = workstation_tags(conn)
+        tagged = workstation_tags(conn, now=_now())
     who = "this person" if mask else netid
     click.echo(f"\n{who}:")
     role = acc.role(netid)
@@ -5021,6 +5071,211 @@ def console_roles(ctx, netid, db, mask):
                    (f" and {others} lab members" if others else ""))
     if conn is not None:
         conn.close()
+
+
+@cli.group()
+def lab():
+    """A lab's machines and storage: what nomad collects for it, and what
+    its PI sees. Edits nomad.toml here (a backup first): each command shows
+    the change, and --apply writes it.
+
+    \b
+    nomad lab show [LAB]
+    nomad lab add-machine LAB HOST     a workstation collected here, tagged with the lab
+    nomad lab add-nas LAB HOST         a NAS collected here (its pools), listed as the lab's
+    nomad lab add-storage LAB SERVER[:/export]
+                                       storage the lab's machines mount, listed as the lab's
+    nomad lab remove LAB HOST
+
+    LAB is the PI's NetID (with group_pattern set) or the lab's group, e.g.
+    jdoe or jdoe$. A workstation's lab travels with its data, so add it
+    where it is collected; the storage listing and server names are read on
+    the Console's machine. See docs/config.md.
+    """
+
+
+def _lab_edit(ctx):
+    from nomad.config import get_default_config_path
+    from nomad.config.edit import TomlEdit
+    path = ctx.obj.get('config_target')
+    if not path or Path(path).expanduser().resolve() == get_default_config_path().resolve():
+        raise click.ClickException(
+            "no nomad.toml of yours to edit (only the packaged defaults); give it with -c, "
+            "e.g. nomad -c ~/.config/nomad/nomad.toml lab ...")
+    if not Path(path).expanduser().exists():
+        # A file holding only the lab's tables would replace the packaged
+        # defaults wherever nomad then reads it.
+        raise click.ClickException(
+            f"{path} doesn't exist; create it first (`nomad init`, or from "
+            "nomad.toml.example), then add labs to it")
+    return TomlEdit(path)
+
+
+def _lab_reach(host, nas=False):
+    """How HOST answers over ssh, in a few words (and its pools, for a NAS)."""
+    import socket
+    import subprocess
+    from nomad.collectors.workstation import OUTPUT_MARK, _after_mark
+    if host in ('localhost', '127.0.0.1', socket.gethostname(),
+                socket.gethostname().split('.')[0]):
+        return "this host: collected here, without ssh"
+    cmd = f"echo {OUTPUT_MARK}; echo ok" + ("; zpool list -H -o name,health" if nas else "")
+    try:
+        r = subprocess.run(["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                            host, cmd], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        r = None
+    out = _after_mark(r.stdout).splitlines() if r is not None else []
+    if not out or out[0].strip() != "ok":
+        return ("NOT reachable over ssh with a key now: it will be recorded as offline "
+                "until it is")
+    pools = [" ".join(line.split()) for line in out[1:] if line.strip()]
+    return "reachable over ssh" + (f"; pools: {', '.join(pools)}" if pools else
+                                   ("; no zpool answered (not ZFS?)" if nas else ""))
+
+
+def _lab_finish(edit, changes, apply, check, notes=()):
+    from nomad.config.labs import LabError  # noqa: F401
+    if not changes:
+        click.echo("Nothing to change: nomad.toml already says so.")
+        return
+    click.echo(f"{edit.path}:")
+    for c in changes:
+        click.echo(f"  + {c}")
+    for n in notes:
+        click.echo(f"  {n}")
+    if not apply:
+        click.echo("\nNothing changed. Run again with --apply to write it.")
+        return
+    try:
+        backup = edit.save(check)
+    except ValueError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    click.echo(f"\nWritten." + (f" Backup: {backup}" if backup else ""))
+
+
+def _lab_run(ctx, lab_name, action, check, apply, notes=()):
+    from nomad.config.labs import LabError, lab_group
+    edit = _lab_edit(ctx)
+    group = lab_group(edit.data, lab_name)
+    try:
+        changes = action(edit, group)
+    except LabError as e:
+        raise click.ClickException(str(e))
+    _lab_finish(edit, changes, apply, lambda d: check(d, group), notes)
+    return group
+
+
+@lab.command('show')
+@click.argument('lab_name', metavar='[LAB]', required=False)
+@click.pass_context
+def lab_show(ctx, lab_name):
+    """What nomad.toml here says about labs (or about one)."""
+    from nomad.config.labs import lab_group, summary
+    config = ctx.obj.get('config', {}) or {}
+    click.echo(f"{ctx.obj.get('config_path') or 'no config file'}:")
+    lines = summary(config, lab_group(config, lab_name) if lab_name else None)
+    for line in lines or ["  no labs here"]:
+        click.echo(f"  {line}")
+
+
+@lab.command('add-machine')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('host')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_add_machine(ctx, lab_name, host, apply):
+    """A workstation collected here, tagged with LAB (its PI sees it)."""
+    from nomad.config.labs import WS_SECTION, _entries, _list_path, add_machine
+
+    def check(d, group):
+        ws = _entries(d, _list_path(d, WS_SECTION, "workstations"))
+        return ([e for e in ws if e.get("hostname") == host.strip()]
+                == [{"hostname": host.strip(), "department": group}])
+    _lab_run(ctx, lab_name, lambda e, g: add_machine(e, g, host), check, apply,
+             [f"{host}: {_lab_reach(host)}"])
+
+
+@lab.command('add-nas')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('host')
+@click.option('--type', 'kind', type=click.Choice(['zfs', 'nfs']), default='zfs',
+              show_default=True, help='zfs: pool health and space; nfs: df of --path.')
+@click.option('--path', 'paths', multiple=True, help='An exported path, for df (type nfs).')
+@click.option('--name', help='The name the Console shows for it.')
+@click.option('--note', help='A note shown with it, e.g. "the lab NAS".')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_add_nas(ctx, lab_name, host, kind, paths, name, note, apply):
+    """A NAS collected here over ssh (the storage collector), listed as LAB's."""
+    import subprocess
+    from nomad.config.labs import ST_SECTION, WS_SECTION, _entries, _list_path, add_nas
+
+    def check(d, group):
+        nas = _entries(d, _list_path(d, ST_SECTION, "storage_devices"))
+        ws = _entries(d, _list_path(d, WS_SECTION, "workstations"))
+        listed = (((d.get("console") or {}).get("labs") or {}).get("resources") or {})
+        return (len([e for e in nas if e.get("hostname") == host.strip()]) == 1
+                and not any(e.get("hostname") == host.strip() for e in ws)
+                and host.strip() in (listed.get(group) or {}).get("storage", []))
+    notes = [f"{host}: {_lab_reach(host, nas=(kind == 'zfs'))}"]
+    try:
+        cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    except OSError:
+        cron = ""
+    runs = [line for line in cron.splitlines()
+            if "nomad" in line and " collect" in line and not line.lstrip().startswith("#")]
+    if runs and all("-C" in line and "storage" not in line for line in runs):
+        notes.append("cron here runs `nomad collect -C ...` without the storage collector; "
+                     "add `-C storage` to that line, e.g.:")
+        notes.append("  crontab -l | sed 's/collect -C workstation --once/collect -C "
+                     "workstation -C storage --once/' | crontab -")
+    elif not runs:
+        notes.append("no `nomad collect` in this host's crontab: the NAS is read only when "
+                     "`nomad collect -C storage --once` runs (every 5 minutes, say)")
+    _lab_run(ctx, lab_name,
+             lambda e, g: add_nas(e, g, host, kind, list(paths), name, note), check, apply,
+             notes)
+
+
+@lab.command('add-storage')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('target', metavar='SERVER[:/export]')
+@click.option('--name', help="The server's name in the Console.")
+@click.option('--note', help='A note shown with it, e.g. "community $HOME, all users".')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_add_storage(ctx, lab_name, target, name, note, apply):
+    """Storage LAB's machines mount, listed as LAB's (on the Console's machine)."""
+    from nomad.config.labs import add_storage
+
+    def check(d, group):
+        listed = (((d.get("console") or {}).get("labs") or {}).get("resources") or {})
+        return target in (listed.get(group) or {}).get("storage", [])
+    _lab_run(ctx, lab_name, lambda e, g: add_storage(e, g, target, name, note), check, apply)
+
+
+@lab.command('remove')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('host')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_remove(ctx, lab_name, host, apply):
+    """HOST out of LAB: no longer collected here, no longer listed."""
+    from nomad.config.labs import (ST_SECTION, WS_SECTION, _entries, _list_path,
+                                   _listing_groups, _resources, remove)
+
+    def check(d, group):
+        ws = _entries(d, _list_path(d, WS_SECTION, "workstations"))
+        nas = _entries(d, _list_path(d, ST_SECTION, "storage_devices"))
+        res = _resources(d, group)
+        # A NAS another lab still lists stays collected.
+        return (not any(e.get("hostname") == host for e in ws)
+                and (not any(e.get("hostname") == host for e in nas)
+                     or bool(_listing_groups(d, host)))
+                and not any(x == host or x.startswith(host + ":")
+                            for v in res.values() for x in v))
+    _lab_run(ctx, lab_name, lambda e, g: remove(e, g, host), check, apply)
 
 
 @cli.group()

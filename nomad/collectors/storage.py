@@ -197,13 +197,17 @@ def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
     A command that fails raises: an unreachable server used to come back as
     empty output, and was stored as a server with no storage.
     """
+    from nomad.collectors.workstation import OUTPUT_MARK, _after_mark
     env = None
-    if _is_local(host):
+    remote = not _is_local(host)
+    if not remote:
         argv, shell, env = cmd, True, tool_env()     # zpool, exportfs: /usr/sbin
     else:
         if not _HOST.match(host or ""):
             raise CollectionError(f"not a valid host name: {host!r}")
-        argv = ["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", host, cmd]
+        # The mark first: a login banner is not the command's output.
+        argv = ["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", host,
+                f"echo {OUTPUT_MARK}; {cmd}"]
         shell = False
     try:
         result = subprocess.run(argv, shell=shell, capture_output=True, text=True,
@@ -215,7 +219,7 @@ def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
     if result.returncode != 0:
         raise CollectionError(f"{cmd.split()[0]} failed on {host or 'localhost'} "
                               f"(exit {result.returncode}): {result.stderr.strip()[:120]}")
-    return result.stdout.strip()
+    return (_after_mark(result.stdout) if remote else result.stdout).strip()
 
 
 def parse_zpool_list(output: str) -> list[ZFSPool]:
@@ -243,6 +247,23 @@ def parse_zpool_list(output: str) -> list[ZFSPool]:
             except (ValueError, IndexError) as e:
                 logger.warning(f"Failed to parse zpool line: {line}, error: {e}")
     return pools
+
+
+# Pools that hold the operating system (TrueNAS SCALE, TrueNAS CORE, Ubuntu).
+BOOT_POOLS = frozenset({"boot-pool", "freenas-boot", "bpool"})
+
+
+def parse_zfs_roots(output: str) -> dict[str, tuple[int, int]]:
+    """'zfs list -Hp -o name,used,avail -d 0': pool -> (used, avail) bytes."""
+    roots = {}
+    for line in output.splitlines():
+        parts = line.split('\t')
+        if len(parts) >= 3 and '/' not in parts[0]:
+            try:
+                roots[parts[0]] = (int(parts[1]), int(parts[2]))
+            except ValueError:
+                continue
+    return roots
 
 
 def parse_zpool_status(output: str, pools: list[ZFSPool]) -> list[ZFSPool]:
@@ -461,11 +482,27 @@ class StorageCollector(BaseCollector):
         except CollectionError:
             pass
 
-        # Calculate totals from pools
+        # The space users have: each pool's root dataset (zfs list), which
+        # for RAIDZ leaves out the parity that zpool list's SIZE counts. A
+        # boot pool is the system's, not storage.
+        usable = {}
+        try:
+            usable = parse_zfs_roots(run_command('zfs list -Hp -o name,used,avail -d 0',
+                                                 hostname))
+        except CollectionError:
+            pass
         for pool in stats.pools:
-            stats.total_bytes += pool.size_bytes
-            stats.used_bytes += pool.allocated_bytes
-            stats.free_bytes += pool.free_bytes
+            if pool.name in BOOT_POOLS:
+                continue
+            if pool.name in usable:
+                used, avail = usable[pool.name]
+                stats.total_bytes += used + avail
+                stats.used_bytes += used
+                stats.free_bytes += avail
+            else:
+                stats.total_bytes += pool.size_bytes
+                stats.used_bytes += pool.allocated_bytes
+                stats.free_bytes += pool.free_bytes
 
         if stats.total_bytes > 0:
             stats.usage_pct = (stats.used_bytes / stats.total_bytes) * 100

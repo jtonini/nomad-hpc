@@ -275,16 +275,25 @@ def members_lookup(conn) -> tuple[Callable[[str], bool], Callable[[str], set]]:
     return (lambda g: bool(members_of(g))), members_of
 
 
-def workstation_tags(conn) -> Callable[[str], set]:
+# A machine no record of which is this recent is no longer collected (a
+# listed machine that doesn't answer still gets "offline" records), so it
+# no longer counts as its lab's.
+TAG_WINDOW = timedelta(days=2)
+
+
+def workstation_tags(conn, now: datetime | None = None) -> Callable[[str], set]:
     """group -> the workstations whose collector tags them with it: the
     ``department`` of each machine's latest record (a machine moved to another
-    lab follows its latest tag)."""
+    lab follows its latest tag), for machines with a record in the last
+    TAG_WINDOW."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_state)")}
+    since = ((now or datetime.now()) - TAG_WINDOW).isoformat()
     latest: dict[str, tuple] = {}
     if {"hostname", "timestamp", "department"} <= cols:
         # One pass: a per-host subquery over months of records is far slower.
         for host, when, dept in conn.execute(
-                "SELECT hostname, timestamp, department FROM workstation_state"):
+                "SELECT hostname, timestamp, department FROM workstation_state "
+                "WHERE timestamp >= ?", (since,)):
             if host not in latest or str(when) > latest[host][0]:
                 latest[host] = (str(when), dept)
     by_group: dict[str, set] = {}
@@ -448,6 +457,56 @@ def _one_run(conn, exports: tuple, upto: str):
     hosts = sorted(by_host, key=lambda h: (-len(by_host[h]), h))
     figures = {e: next(by_host[h][e] for h in hosts if e in by_host[h]) for e in exports}
     return when, figures
+
+
+@dataclass(frozen=True)
+class ServerState:
+    """A NAS the storage collector reads (storage_state): its latest record.
+    Sizes are None when it didn't answer; pools are (name, health)."""
+    status: str
+    when: str
+    total: int | None
+    used: int | None
+    free: int | None
+    pools: tuple
+    last_online: str | None
+
+    @property
+    def used_pct(self) -> int | None:
+        if self.used is None or self.free is None:
+            return None
+        return _pct(self.used, self.free)
+
+
+def server_state(conn, server: str) -> ServerState | None:
+    """The latest record of a NAS the storage collector reads, by the
+    hostname it is collected as; None when there is none."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(storage_state)")}
+    if not {"hostname", "timestamp", "status", "total_bytes", "used_bytes",
+            "free_bytes"} <= cols:
+        return None
+    row = conn.execute(
+        "SELECT timestamp, status, total_bytes, used_bytes, free_bytes"
+        + (", pools_json" if "pools_json" in cols else ", NULL")
+        + " FROM storage_state WHERE hostname = ? ORDER BY timestamp DESC LIMIT 1",
+        (server,)).fetchone()
+    if not row:
+        return None
+    when, status, total, used, free, pools_json = row
+    pools = ()
+    try:
+        import json
+        pools = tuple((p.get("name"), p.get("health")) for p in json.loads(pools_json or "[]")
+                      if isinstance(p, dict) and p.get("name"))
+    except (ValueError, TypeError):
+        pass
+    online = conn.execute(
+        "SELECT MAX(timestamp) FROM storage_state WHERE hostname = ? "
+        "AND status IN ('online', 'degraded')", (server,)).fetchone()[0]
+    sized = status in ("online", "degraded") and total
+    return ServerState(status or "unknown", str(when), total if sized else None,
+                       used if sized else None, free if sized else None, pools,
+                       None if online is None else str(online))
 
 
 def shared_free(conn, sizes: dict[str, ExportSize]) -> list[SharedFree]:
