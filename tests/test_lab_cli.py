@@ -324,6 +324,7 @@ def _hub(path, now_rows=True):
         ("2026-10-06T09:40:15", "labws", "pi3$", "online"),
         ("2026-10-06T07:00:00", "quiet", "pi3$", "online"),      # stopped reporting
         ("2026-10-01T09:00:00", "gone", "pi3$", "online"),       # long removed
+        ("2026-10-06T09:30:00", "nas2", "pi3$", "online"),       # a NAS, moved since
     ])
     c.execute("CREATE TABLE storage_state (timestamp TEXT, hostname TEXT, status TEXT, "
               "total_bytes INTEGER, used_bytes INTEGER, free_bytes INTEGER, pools_json TEXT)")
@@ -353,6 +354,8 @@ def test_a_pi_sees_the_nas_and_which_machines_stopped(tmp_path, monkeypatch):
     assert "    labws [tagged]: online, 2026-10-06T09:40" in out
     assert "    quiet [tagged]: no report since 2026-10-06T07:00 (it was online then)" in out
     assert "gone" not in out                     # no record in two days: not the lab's now
+    # nas2 was collected as a workstation before it was listed as storage.
+    assert "nas2 [tagged]" not in out
     # Usable space, pool health, the boot pool left out.
     assert ("    nas2, the lab NAS: online, 2026-10-06T09:40; 78% used "
             "(31.0 TB of 40.0 TB), 9.0 TB free; pool tank ONLINE") in out

@@ -132,6 +132,9 @@ class Access:
                 out[kind].update(names)
             if tagged is not None:
                 out["workstations"].update(tagged(g))
+        # A machine listed as storage is not also a workstation: a NAS once
+        # collected as a workstation keeps old records with the lab's tag.
+        out["workstations"] -= {s.partition(":")[0] for s in out["storage"]}
         return out
 
 
