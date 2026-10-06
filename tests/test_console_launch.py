@@ -580,3 +580,30 @@ def test_nomad_console_alone_is_launch(monkeypatch, saved_file):
     assert r.exit_code == 0, r.output
     assert "-J " in r.output and "@spydur.example.edu" in r.output
     assert "On your own computer, run:" in r.output
+
+
+# -- whose name goes in the laptop line -----------------------------------------
+
+@pytest.mark.parametrize("login, sudo_user, expected", [
+    ("cparish", None, "cparish"),          # logged in as herself, or sudo -u cparish
+    ("root", "jtonini", "jtonini"),        # sudo -i: the admin's own name
+    ("root", None, "NETID"),               # root logged in directly: nobody's NetID
+    ("root", "root", "NETID"),
+])
+def test_the_user_is_never_root(monkeypatch, login, sudo_user, expected):
+    monkeypatch.setattr(L.getpass, "getuser", lambda: login)
+    if sudo_user is None:
+        monkeypatch.delenv("SUDO_USER", raising=False)
+    else:
+        monkeypatch.setenv("SUDO_USER", sudo_user)
+    assert L._user() == expected
+
+
+def test_a_line_for_root_asks_for_the_netid(monkeypatch):
+    monkeypatch.setattr(L.getpass, "getuser", lambda: "root")
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    monkeypatch.delenv(L.ENV_LOGIN, raising=False)
+    lines = L.instructions(L.Target("mingus.richmond.edu"), login_host="adam.richmond.edu")
+    text = "\n".join(lines)
+    assert "-J NETID@adam.richmond.edu NETID@mingus.richmond.edu" in text
+    assert "(Put your NetID where it says NETID.)" in text

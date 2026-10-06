@@ -319,10 +319,17 @@ def stop(proc) -> None:
 # -- on a remote shell -------------------------------------------------------------
 
 def _user() -> str:
+    """The user name for ssh lines: the login name (under sudo -u, that
+    user's), but never root, which is nobody's NetID: then sudo's caller, or
+    NETID for the person to fill in."""
     try:
-        return getpass.getuser()
+        name = getpass.getuser()
     except Exception:
         return "NETID"
+    if name == "root":
+        caller = os.environ.get("SUDO_USER", "")
+        return caller if caller and caller != "root" else "NETID"
+    return name
 
 
 def browser_here(env=None, platform: str | None = None) -> bool:
@@ -367,6 +374,8 @@ def instructions(target: Target, login_host: str | None = None) -> list:
     if jump:
         lines.append(f"(If your computer reaches {target.host} directly, leave out "
                      f"\"-J {jump}\".)")
+    if "NETID@" in " ".join(words):
+        lines.append("(Put your NetID where it says NETID.)")
     return lines
 
 
