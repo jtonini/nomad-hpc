@@ -19,10 +19,13 @@ work. A viewer who leads a lab also sees its members: a PI. They lead the
 group named by ``group_pattern`` (when it exists) and any group listed for
 them in ``leads``. An empty ``group_pattern`` (the default) derives no labs
 from names, so a site that has not said how its groups work gets no lab view
-rather than a wrong one. A PI also sees the workstations and storage listed
-for their labs; on those machines, people outside the lab show as "another
-user" (``shown_name``). Nothing in the data says who owns a machine, so they
-are listed, not guessed.
+rather than a wrong one. A PI also sees their labs' workstations and storage;
+on those machines, people outside the lab show as "another user"
+(``shown_name``). A workstation belongs to a lab when the collector that
+monitors it tags it with the lab's group (``department`` in its
+``[[collectors.workstation.workstations]]`` entry, which reaches the hub with
+the data: ``workstation_tags``), or when it is listed here. Storage is listed
+here. Nothing is guessed from names.
 
 The file names people. The Console's users.json keeps only what is private or
 automatic: the break-glass password, and the record made at someone's first
@@ -90,9 +93,11 @@ class Access:
         """Everyone the file names: their access is the file's, not users.json's."""
         return set(self.admins) | set(self.operators) | set(self.leads)
 
-    def lab_groups(self, netid, group_exists: Callable[[str], bool] | None = None) -> list:
+    def lab_groups(self, netid, group_exists: Callable[[str], bool] | None = None,
+                   tagged: Callable[[str], set] | None = None) -> list:
         """The groups this person leads: their ``leads`` entry, then the group
-        ``group_pattern`` names for them if it exists (group_exists None: assume so)."""
+        ``group_pattern`` names for them if it exists (group_exists None: assume
+        so). A group with machines listed here or tagged with it exists."""
         n = _netid(netid)
         if not n:
             return []
@@ -100,19 +105,25 @@ class Access:
         if self.group_pattern:
             g = self.group_pattern.replace("{netid}", n)
             # A group the file lists resources for is one the site says exists.
-            if group_exists is None or group_exists(g) or g in self.resources:
+            if (group_exists is None or group_exists(g) or g in self.resources
+                    or (tagged is not None and tagged(g))):
                 groups.append(g)
         seen = set()
         return [g for g in groups if not (g in seen or seen.add(g))]
 
-    def lab_resources(self, netid, group_exists: Callable[[str], bool] | None = None) -> dict:
+    def lab_resources(self, netid, group_exists: Callable[[str], bool] | None = None,
+                      tagged: Callable[[str], set] | None = None) -> dict:
         """The workstations and storage of the labs this person leads:
-        {"workstations": set, "storage": set}. Admins and operators see every
-        machine anyway; this is what a PI's view adds."""
+        {"workstations": set, "storage": set}, from what is listed here and the
+        workstations tagged with each lab (``tagged``: group -> hostnames).
+        Admins and operators see every machine anyway; this is what a PI's
+        view adds."""
         out = {k: set() for k in RESOURCE_KINDS}
-        for g in self.lab_groups(netid, group_exists):
+        for g in self.lab_groups(netid, group_exists, tagged):
             for kind, names in self.resources.get(g, {}).items():
                 out[kind].update(names)
+            if tagged is not None:
+                out["workstations"].update(tagged(g))
         return out
 
 
@@ -215,6 +226,25 @@ def members_lookup(conn) -> tuple[Callable[[str], bool], Callable[[str], set]]:
         return cache[group]
 
     return (lambda g: bool(members_of(g))), members_of
+
+
+def workstation_tags(conn) -> Callable[[str], set]:
+    """group -> the workstations whose collector tags them with it: the
+    ``department`` of each machine's latest record (a machine moved to another
+    lab follows its latest tag)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_state)")}
+    latest: dict[str, tuple] = {}
+    if {"hostname", "timestamp", "department"} <= cols:
+        # One pass: a per-host subquery over months of records is far slower.
+        for host, when, dept in conn.execute(
+                "SELECT hostname, timestamp, department FROM workstation_state"):
+            if host not in latest or str(when) > latest[host][0]:
+                latest[host] = (str(when), dept)
+    by_group: dict[str, set] = {}
+    for host, (_, dept) in latest.items():
+        if isinstance(dept, str) and dept.strip():
+            by_group.setdefault(dept.strip(), set()).add(host)
+    return lambda group: set(by_group.get(group, ()))
 
 
 def visible_people(access: Access, netid, members_of: Callable[[str], Iterable[str]],

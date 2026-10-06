@@ -4802,25 +4802,41 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     sys.exit(code)
 
 
-def _last_seen(conn, kind, name):
-    """When a listed workstation or storage last appeared in the data, or None."""
+def _machine_state(conn, kind, name):
+    """How a lab's workstation or storage looks in the data, in a few words;
+    None when it is not there at all."""
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    queries = []
     if kind == 'workstations':
-        queries = [("workstation_state", "hostname = ?", (name,))]
-    else:
-        host, _, export = name.partition(':')
-        queries = [("storage_state", "hostname = ?", (host,))] if not export else []
-        queries.append(("workstation_mount_state",
-                        "source = ? OR source LIKE ?" if not export else "source = ?",
-                        (name, f"{name}:%") if not export else (name,)))
-    best = None
-    for table, where, args in queries:
-        if table in tables:
-            t = conn.execute(f"SELECT MAX(timestamp) FROM {table} WHERE {where}", args).fetchone()[0]
-            if t and (best is None or str(t) > str(best)):
-                best = t
-    return str(best)[:16] if best else None
+        if 'workstation_state' not in tables:
+            return None
+        row = conn.execute("SELECT status, timestamp FROM workstation_state WHERE hostname = ? "
+                           "ORDER BY timestamp DESC LIMIT 1", (name,)).fetchone()
+        if not row:
+            return None
+        status, when = row[0] or 'unknown', str(row[1])[:16]
+        if status in ('online', 'degraded'):
+            return f"{status}, {when}"
+        online = conn.execute("SELECT MAX(timestamp) FROM workstation_state WHERE hostname = ? "
+                              "AND status IN ('online', 'degraded')", (name,)).fetchone()[0]
+        return (f"{status} at {when}; " +
+                (f"last online {str(online)[:16]}" if online else "never online"))
+    host, _, export = name.partition(':')
+    if not export and 'storage_state' in tables:
+        t = conn.execute("SELECT MAX(timestamp) FROM storage_state WHERE hostname = ?",
+                         (host,)).fetchone()[0]
+        if t:
+            return f"storage server, last report {str(t)[:16]}"
+    if 'workstation_mount_state' in tables:
+        where, args = (("source = ?", (name,)) if export else
+                       ("source LIKE ?", (f"{name}:%",)))
+        seen, ok = conn.execute(
+            f"SELECT MAX(timestamp), MAX(CASE WHEN is_mounted = 1 AND is_responsive = 1 "
+            f"THEN timestamp END) FROM workstation_mount_state WHERE {where}", args).fetchone()
+        if seen:
+            return (f"mounted and responding, {str(ok)[:16]}" if ok and str(ok) >= str(seen)
+                    else f"not responding at {str(seen)[:16]}" +
+                    (f"; last responding {str(ok)[:16]}" if ok else ""))
+    return None
 
 
 @console.command('roles')
@@ -4840,7 +4856,8 @@ def console_roles(ctx, netid, db, mask):
     """
     import sqlite3
 
-    from nomad.config.access import access_from, members_lookup, visible_people
+    from nomad.config.access import (access_from, members_lookup, visible_people,
+                                     workstation_tags)
     config = ctx.obj.get('config', {}) or {}
     acc = access_from(config, log=False)
     show = (lambda names: f"{len(names)}") if mask else \
@@ -4865,15 +4882,16 @@ def console_roles(ctx, netid, db, mask):
         return
 
     db_path = Path(db).expanduser() if db else get_db_path(config)
-    exists = members = None
+    exists = members = tagged = None
     conn = None
     if db_path.exists():
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         exists, members = members_lookup(conn)
+        tagged = workstation_tags(conn)
     who = "this person" if mask else netid
     click.echo(f"\n{who}:")
     role = acc.role(netid)
-    labs = acc.lab_groups(netid, exists)
+    labs = acc.lab_groups(netid, exists, tagged)
     if role:
         line = role
     elif labs:
@@ -4891,12 +4909,14 @@ def console_roles(ctx, netid, db, mask):
         else:
             n = len(members(g))
             click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
-    res = acc.lab_resources(netid, exists)
+    res = acc.lab_resources(netid, exists, tagged)
+    listed = acc.lab_resources(netid, exists)
     for kind in ('workstations', 'storage'):
         for i, name in enumerate(sorted(res[kind]), 1):
             label = f"{kind[:-1] if kind.endswith('s') else kind} #{i}" if mask else name
-            seen = _last_seen(conn, kind, name) if conn is not None else None
-            click.echo(f"    {label}: " + (f"last reported {seen}" if seen else
+            how = "" if name in listed[kind] else " [tagged]"
+            state = _machine_state(conn, kind, name) if conn is not None else None
+            click.echo(f"    {label}{how}: " + (state or
                        ("not in the data" if conn is not None else "(no database)")))
     if role:
         click.echo("  sees individually: everyone")

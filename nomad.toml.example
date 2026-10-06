@@ -185,7 +185,9 @@ enabled = false
 interval = 300
 
 # List of workstations to monitor
-# Each workstation needs hostname and optional department
+# Each workstation needs hostname and optional department. A department that
+# is a lab's group (e.g. "NETID$") assigns the machine to that lab: its PI
+# sees it in the Console (see [console.labs]).
 [[workstations]]
 hostname = "ws-physics-01"
 department = "physics"

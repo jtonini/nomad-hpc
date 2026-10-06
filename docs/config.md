@@ -94,12 +94,17 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
   groups collector's data, and any group listed for them in `leads`.
   `group_pattern` is empty by default: a site that has not said how its groups
   work gets no lab view rather than a wrong one.
-- **A lab's machines:** a PI also sees the workstations and storage listed
-  for their labs under `[console.labs.resources."group"]`. On those machines,
-  people outside the lab appear as "another user". Nothing in the data says
-  who owns a machine, so they are listed rather than guessed. A storage entry
-  is a storage server's name, or one export (`server:/export`) as the
-  workstations mount it.
+- **A lab's machines:** a PI also sees their labs' workstations and storage.
+  On those machines, people outside the lab appear as "another user".
+  A workstation belongs to a lab when the collector that monitors it tags it
+  with the lab's group: `department = "NETID$"` in its
+  `[[collectors.workstation.workstations]]` entry, on the machine that
+  collects it. The tag reaches the hub with the data, so a workstation is
+  assigned once, where it is added. A machine moved to another lab follows its
+  latest tag. Workstations can also be listed under
+  `[console.labs.resources."group"]` (one not collected, say), and storage is
+  listed there: a storage server's name, or one export (`server:/export`) as
+  the workstations mount it. Nothing is guessed from names.
 - **Operator:** sees everything, changes no settings.
 - **Admin:** everything, settings included.
 
@@ -111,7 +116,9 @@ never guessed at.
 
 `nomad console roles` shows what the file grants, and anything wrong in it;
 `nomad console roles NETID` shows what that person would see, with each lab's
-size and when each of their machines last reported (`--db` for the database holding group membership, such as the hub's
+size, and whether each of their machines is online (and when it last was) or
+whether each storage export is mounted and responding; a machine known only by
+its tag is marked `[tagged]` (`--db` for the database holding group membership, such as the hub's
 combined database; `--mask` for counts only).
 
 ## Environment Variables

@@ -172,29 +172,76 @@ def test_people_outside_the_lab_are_another_user():
     assert shown_name("stranger", None) == "stranger"      # admins see everyone
 
 
+def _lab_db(path):
+    c = sqlite3.connect(path)
+    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
+    c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
+    c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT, department TEXT, "
+              "status TEXT)")
+    c.executemany("INSERT INTO workstation_state VALUES (?, ?, ?, ?)", [
+        ("2026-10-05T19:00:00", "adam", "chemistry", "online"),
+        ("2026-10-04T08:00:00", "eve", "carol$", "online"),
+        ("2026-10-05T19:00:00", "eve", "carol$", "offline"),
+        ("2026-10-01T08:00:00", "moved", "carol$", "online"),
+        ("2026-10-05T19:00:00", "moved", "physics$", "online"),     # retagged since
+        ("2026-10-05T19:00:00", "dead", "carol$", "offline"),
+    ])
+    c.execute("CREATE TABLE workstation_mount_state (timestamp TEXT, hostname TEXT, source TEXT, "
+              "is_mounted INTEGER, is_responsive INTEGER)")
+    c.executemany("INSERT INTO workstation_mount_state VALUES (?, ?, ?, ?, ?)", [
+        ("2026-10-05T18:00:00", "adam", "sarahvaughan:/export/parish", 1, 1),
+        ("2026-10-05T17:00:00", "adam", "nas2:/export/old", 1, 1),
+        ("2026-10-05T18:00:00", "adam", "nas2:/export/old", 1, 0),
+    ])
+    c.commit()
+    c.close()
+
+
+def test_workstations_tagged_by_their_collector(tmp_path):
+    from nomad.config.access import access_from, members_lookup, workstation_tags
+    _lab_db(tmp_path / "c.db")
+    c = sqlite3.connect(tmp_path / "c.db")
+    tagged = workstation_tags(c)
+    assert tagged("carol$") == {"eve", "dead"}        # "moved" follows its latest tag
+    assert tagged("physics$") == {"moved"}
+    a = access_from({"console": {"labs": {"group_pattern": "{netid}$"}}})
+    exists, _ = members_lookup(c)
+    # Listed nowhere in nomad.toml: the tags alone make carol$ a lab with machines.
+    assert a.lab_resources("carol", exists, tagged)["workstations"] == {"eve", "dead"}
+    # A lab known only by its tags still counts as one.
+    assert a.lab_groups("physics", lambda g: False, tagged) == ["physics$"]
+    c.close()
+
+
+def test_no_department_column_means_no_tags(tmp_path):
+    from nomad.config.access import workstation_tags
+    c = sqlite3.connect(tmp_path / "old.db")
+    c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT)")
+    assert workstation_tags(c)("carol$") == set()
+
+
 def test_cli_roles_shows_the_machines(tmp_path):
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
                    '[console.labs.resources."carol$"]\n'
-                   'workstations = ["adam", "ghost"]\nstorage = ["sarahvaughan"]\n')
+                   'workstations = ["adam", "ghost"]\n'
+                   'storage = ["sarahvaughan", "nas2:/export/old", "nowhere:/x"]\n')
     dbp = tmp_path / "combined.db"
-    c = sqlite3.connect(dbp)
-    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
-    c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
-    c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT)")
-    c.execute("INSERT INTO workstation_state VALUES ('2026-10-05T19:00:00', 'adam')")
-    c.execute("CREATE TABLE workstation_mount_state (timestamp TEXT, hostname TEXT, source TEXT)")
-    c.execute("INSERT INTO workstation_mount_state VALUES "
-              "('2026-10-05T18:00:00', 'adam', 'sarahvaughan:/export/parish')")
-    c.commit()
-    c.close()
+    _lab_db(dbp)
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles"])
-    assert "machines:  listed for 1 lab: 2 workstations, 1 storage" in r.output
+    assert "machines:  listed for 1 lab: 2 workstations, 3 storage" in r.output
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp)])
     assert r.exit_code == 0, r.output
-    assert "adam: last reported 2026-10-05T19:00" in r.output
-    assert "ghost: not in the data" in r.output
-    assert "sarahvaughan: last reported 2026-10-05T18:00" in r.output
+    out = r.output
+    assert "adam: online, 2026-10-05T19:00" in out
+    assert "eve [tagged]: offline at 2026-10-05T19:00; last online 2026-10-04T08:00" in out
+    assert "dead [tagged]: offline at 2026-10-05T19:00; never online" in out
+    assert "moved" not in out
+    assert "ghost: not in the data" in out
+    assert "sarahvaughan: mounted and responding, 2026-10-05T18:00" in out
+    assert ("nas2:/export/old: not responding at 2026-10-05T18:00; last responding "
+            "2026-10-05T17:00") in out
+    assert "nowhere:/x: not in the data" in out
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
                                  "--mask"])
-    assert "adam" not in r.output and "workstation #1: last reported" in r.output
+    assert "adam" not in r.output and "workstation #1: online" in r.output
