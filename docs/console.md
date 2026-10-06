@@ -85,12 +85,46 @@ prints the one line to run on your own computer, through the cluster:
 $ nomad console
 A browser started on spydur would not be on your screen. On your own computer, run:
 
-    ssh -N -L 8000:localhost:8000 -J NETID@spydur.example.edu NETID@console-host.example.edu
+    ssh -N nomad-console
 
-then open http://localhost:8000 and sign in with your NetID. ...
+It opens the Console in your browser; that window keeps it open, and Ctrl-C there closes it.
+
+The first time on that computer (Mac or Linux), set it up once there with:
+
+    bash <(ssh NETID@spydur.example.edu /usr/local/sw/bin/nomad console --key-setup)
+
+and send the line it prints to your research computing contact.
+
+Until then, or on Windows, this works with your password:
+
+    ssh -N -L 8000:localhost:8000 ... -J NETID@spydur.example.edu NETID@console-host.example.edu
+...
 ```
 
-Your own computer then needs nothing but ssh. Two names come from the
+Your own computer then needs nothing but ssh.
+
+### No password: a key for the Console
+
+`nomad console --key-setup` prints a short bash script; the line above runs
+it on the person's own computer, fetched over ssh from the cluster. It
+
+- makes a key just for the Console, `~/.ssh/nomad_console`;
+- tries the Console's machine directly: when it answers, the entry goes
+  straight there, otherwise through the cluster (and copies the key to the
+  person's own account there, asking their password once);
+- puts a `nomad-console` entry first in `~/.ssh/config`, keeping a copy of the
+  old file and everything that was in it, after a `Host *` line (ssh takes
+  the first value it finds for each setting); run again, it replaces its own
+  entry;
+- prints the public key, for whoever adds Console keys on the server (below).
+
+`ssh -N nomad-console` then opens the tunnel and, once it is up, the browser
+(`open` on a Mac, which keeps the key's passphrase in the Keychain;
+`xdg-open` on Linux). At a workstation's own screen, `nomad console` uses the
+key when there is one and otherwise says how to set it up.
+`NOMAD_CONSOLE_CONTACT` names who adds keys; `NOMAD_COMMAND` gives the
+shared `nomad` by its full path, since a command over ssh gets a shorter
+PATH than a login. Two names come from the
 environment, which a cluster's shared `nomad` command sets for everyone:
 `NOMAD_CONSOLE_HOST` (the machine that serves the Console) and
 `NOMAD_LOGIN_HOST` (the cluster, as people's computers reach it). `--here`
@@ -149,6 +183,26 @@ Before reloading sshd:
 On a machine joined to the campus directory (sssd), this lets anyone with a
 campus account open the Console without an account being created for them;
 the Console's own login then decides what each person sees.
+
+### Keys for those accounts
+
+They can't write anything on the machine, so their keys come from a folder
+the admin keeps, in a second block after the first, with the same `Match`:
+
+```
+Match Group *,!console-shell User *,!root
+    AuthorizedKeysFile /etc/ssh/nomad_keys/%u
+```
+
+`/etc/ssh/nomad_keys` is root's (mode 755), one file per account (644). Each
+key line starts with options that hold it to the tunnel even without the
+block above:
+
+```
+restrict,port-forwarding,permitopen="localhost:8000",permitopen="127.0.0.1:8000" ssh-ed25519 AAAA... nomad-console
+```
+
+A key in the account's own home is not read. Passwords keep working.
 
 ## Later: a web address
 

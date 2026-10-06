@@ -21,6 +21,11 @@ cluster. A site sets two names for that, in the environment (the shared
 
     NOMAD_CONSOLE_HOST   the machine that serves the Console (mingus.richmond.edu)
     NOMAD_LOGIN_HOST     this cluster, as people's computers reach it
+
+With no password: ``nomad console --key-setup`` prints a setup that a person
+runs once on their own computer (Mac or Linux); it makes a key just for the
+Console and an ssh entry, so that ``ssh -N nomad-console`` opens the tunnel
+and the browser. The server reads such keys from a folder its admin keeps.
 """
 from __future__ import annotations
 
@@ -49,6 +54,10 @@ READY = "NOMAD-TUNNEL-READY"
 SAVED = Path.home() / ".config" / "nomad" / "console_launch.json"
 ENV_HOST = "NOMAD_CONSOLE_HOST"
 ENV_LOGIN = "NOMAD_LOGIN_HOST"
+ENV_CONTACT = "NOMAD_CONSOLE_CONTACT"   # who adds Console keys (said by --key-setup)
+ENV_COMMAND = "NOMAD_COMMAND"          # this machine's nomad, as ssh would run it
+ALIAS = "nomad-console"                 # the ssh name --key-setup sets up
+KEY_NAME = "nomad_console"              # ~/.ssh/nomad_console, the Console's own key
 
 NO_SSH = (
     "No ssh command was found on this computer. On Windows 10 and 11, add "
@@ -166,10 +175,19 @@ def ssh_command(ssh: str, target: Target, local_port: int) -> list:
         # Bound to this computer only, whatever ~/.ssh/config says (GatewayPorts).
         "-L", f"127.0.0.1:{local_port}:localhost:{target.remote_port}",
     ]
+    key = key_path()
+    if key.is_file():
+        # The Console's own key (nomad console --key-setup): no password once
+        # it is in. Tried first; the usual keys and the password still work.
+        argv += ["-o", f"IdentityFile={key}"]
     if target.via:
         argv += ["-J", target.via]
     argv.append(target.destination)
     return argv
+
+
+def key_path() -> Path:
+    return Path.home() / ".ssh" / KEY_NAME
 
 
 def manual_command(target: Target, local_port: int) -> str:
@@ -351,11 +369,35 @@ def _short(host: str) -> str:
     return host.rsplit("@", 1)[-1].split(".", 1)[0].lower()
 
 
+def _here(login_host: str | None = None) -> str:
+    return login_host or os.environ.get(ENV_LOGIN) or socket.getfqdn()
+
+
+def nomad_command() -> str:
+    """This machine's nomad by its full path when known: a command over ssh
+    gets a shorter PATH than a login, which may not have it."""
+    cmd = os.environ.get(ENV_COMMAND, "").strip()
+    if cmd:
+        return cmd
+    arg0 = sys.argv[0] if sys.argv else ""
+    if os.path.basename(arg0) == "nomad" and os.path.isabs(arg0):
+        return arg0
+    return "nomad"
+
+
+def setup_line(login_host: str | None = None) -> str:
+    """What a person runs once on their own computer to set up the Console
+    key: this machine's nomad prints the setup, their computer runs it."""
+    here = _here(login_host).rsplit("@", 1)[-1]
+    return (f"bash <(ssh {_user()}@{here} {shlex.quote(nomad_command())} "
+            "console --key-setup)")
+
+
 def instructions(target: Target, login_host: str | None = None) -> list:
     """What to run on one's own computer, from a shell on a cluster."""
     user = _user()
     dest = target.destination if "@" in target.destination else f"{user}@{target.destination}"
-    here = login_host or os.environ.get(ENV_LOGIN) or socket.getfqdn()
+    here = _here(login_host)
     jump = None if _short(here) == _short(dest) else f"{user}@{here.rsplit('@', 1)[-1]}"
     port = target.remote_port
     # Once connected, ssh itself says so: a tunnel prints nothing otherwise,
@@ -372,10 +414,22 @@ def instructions(target: Target, login_host: str | None = None) -> list:
         f"A browser started on {_short(here)} would not be on your screen. "
         "On your own computer, run:",
         "",
+        f"    ssh -N {ALIAS}",
+        "",
+        "It opens the Console in your browser; that window keeps it open, and "
+        "Ctrl-C there closes it.",
+        "",
+        "The first time on that computer (Mac or Linux), set it up once there with:",
+        "",
+        "    " + setup_line(login_host),
+        "",
+        "and send the line it prints to " + _contact() + ".",
+        "",
+        "Until then, or on Windows, this works with your password:",
+        "",
         "    " + shlex.join(words),
         "",
-        f"then open http://localhost:{port} and sign in with your NetID. That window "
-        "keeps the tunnel open; Ctrl-C there closes it.",
+        f"then open http://localhost:{port} and sign in with your NetID.",
     ]
     if jump:
         lines.append(f"(If your computer reaches {target.host} directly, leave out "
@@ -383,6 +437,179 @@ def instructions(target: Target, login_host: str | None = None) -> list:
     if "NETID@" in " ".join(words):
         lines.append("(Put your NetID where it says NETID.)")
     return lines
+
+
+def _contact() -> str:
+    return (os.environ.get(ENV_CONTACT) or "").strip() or "your research computing contact"
+
+
+# -- the one-time setup on a person's own computer ----------------------------
+#
+# `nomad console --key-setup` prints this; the person's computer runs it:
+#     bash <(ssh NETID@workstation nomad console --key-setup)
+# It makes ~/.ssh/nomad_console, puts a "nomad-console" entry at the top of
+# ~/.ssh/config (ssh takes the first value it finds for each setting) and
+# prints the public key for whoever adds Console keys. `ssh -N nomad-console`
+# then opens the tunnel and the browser. Mac and Linux; the values come from
+# this machine and are checked before they are written into it.
+
+_KEY_SETUP = r"""#!/bin/bash
+# NOMAD Console: one-time setup on your own computer (Mac or Linux).
+# Printed by `nomad console --key-setup` on @@FROM@@.
+set -u
+NETID=@@NETID@@
+CONSOLE_HOST=@@CONSOLE@@
+VIA=@@VIA@@
+PORT=@@PORT@@
+CONTACT=@@CONTACT@@
+ALIAS=@@ALIAS@@
+KEY=$HOME/.ssh/@@KEY@@
+CFG=$HOME/.ssh/config
+URL=http://localhost:$PORT
+BEGIN="# NOMAD Console (added"
+TTY=/dev/tty
+[ -t 0 ] && TTY=/dev/stdin
+(exec < "$TTY") 2>/dev/null || TTY=/dev/null
+
+die() { echo "STOP: $*" >&2; exit 1; }
+command -v ssh >/dev/null && command -v ssh-keygen >/dev/null || die "ssh is not installed here"
+case "$NETID" in NETID|"") die "run this as yourself: the NetID it was printed for is not known" ;; esac
+mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+
+# 1. The key, for the Console only.
+if [ -f "$KEY" ]; then
+    echo "Using your Console key ($KEY)."
+else
+    echo "Making a key for the Console. A passphrase is a good idea (Enter twice for none)."
+    ssh-keygen -q -t ed25519 -f "$KEY" -C "nomad-console $NETID" < "$TTY" || die "ssh-keygen failed"
+fi
+
+# 2. Straight to the Console's machine, or through the workstation? A quick
+#    look: refused (no key yet) or the tunnel message both mean reachable.
+probe=$(ssh -o BatchMode=yes -o ConnectTimeout=6 -o IdentitiesOnly=yes -i "$KEY" \
+        -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR \
+        "$NETID@$CONSOLE_HOST" true < /dev/null 2>&1)
+if printf '%s' "$probe" | grep -q -i -E 'denied|tunnel only'; then
+    VIA=
+    echo "Your computer reaches $CONSOLE_HOST directly."
+elif [ -n "$VIA" ]; then
+    echo "Your computer does not reach $CONSOLE_HOST directly now; going through $VIA."
+else
+    die "your computer does not reach $CONSOLE_HOST now (on campus or the VPN?)"
+fi
+
+# 3. What opens the browser once the tunnel is up.
+if [ "$(uname -s)" = Darwin ]; then
+    OPEN="open $URL"
+    KEYCHAIN="    UseKeychain yes"
+else
+    OPEN="xdg-open $URL >/dev/null 2>&1 &"
+    KEYCHAIN=
+fi
+
+# 4. The ssh entry, first in ~/.ssh/config. An entry this setup wrote before
+#    is replaced; the rest of the file is kept as it was, after "Host *".
+rest=
+if [ -f "$CFG" ]; then
+    if grep -q "^$BEGIN" "$CFG"; then
+        rest=$(awk -v b="$BEGIN" '
+            !skip && index($0, b) == 1 { skip = 1; next }
+            skip == 1 && $0 == "Host *" { skip = 2; next }
+            skip != 1 { print }' "$CFG")
+    elif grep -q -E "^Host[[:space:]]+$ALIAS([[:space:]]|\$)" "$CFG"; then
+        die "~/.ssh/config already has a $ALIAS entry this setup did not write; remove it and run this again"
+    else
+        rest=$(cat "$CFG")
+    fi
+    cp -p "$CFG" "$CFG.bak-$ALIAS-$(date +%Y%m%d-%H%M%S)"
+fi
+{
+    echo "$BEGIN $(date +%F) by nomad console --key-setup)"
+    echo "Host $ALIAS"
+    echo "    HostName $CONSOLE_HOST"
+    echo "    User $NETID"
+    echo "    IdentityFile ~/.ssh/@@KEY@@"
+    echo "    IdentitiesOnly yes"
+    echo "    AddKeysToAgent yes"
+    if [ -n "$KEYCHAIN" ]; then echo "$KEYCHAIN"; fi
+    echo "    LocalForward $PORT localhost:$PORT"
+    echo "    ExitOnForwardFailure yes"
+    echo "    ServerAliveInterval 60"
+    echo "    PermitLocalCommand yes"
+    echo "    LocalCommand echo \"Tunnel open: $URL -- keep this window open, Ctrl-C closes it\"; $OPEN"
+    if [ -n "$VIA" ]; then
+        echo "    ProxyJump $ALIAS-via"
+        echo
+        echo "Host $ALIAS-via"
+        echo "    HostName $VIA"
+        echo "    User $NETID"
+        echo "    IdentityFile ~/.ssh/@@KEY@@"
+        echo "    IdentitiesOnly yes"
+        echo "    AddKeysToAgent yes"
+        if [ -n "$KEYCHAIN" ]; then echo "$KEYCHAIN"; fi
+    fi
+    echo
+    echo "Host *"
+    if [ -n "$rest" ]; then printf '%s\n' "$rest"; fi
+} > "$CFG.new" || die "could not write $CFG.new"
+chmod 600 "$CFG.new"
+if ! ssh -G -F "$CFG.new" "$ALIAS" >/dev/null 2>&1 || \
+   ! ssh -G -F "$CFG.new" some-other-host.invalid >/dev/null 2>&1; then
+    rm -f "$CFG.new"; die "the new ~/.ssh/config would not be valid; nothing changed"
+fi
+if [ -e "$CFG" ]; then
+    # Written through, so a ~/.ssh/config that is a link stays one.
+    cat "$CFG.new" > "$CFG" && rm -f "$CFG.new" || die "could not write $CFG"
+else
+    mv -f "$CFG.new" "$CFG"
+fi
+echo "~/.ssh/config: the $ALIAS entry is in place."
+
+# 5. Through the workstation: the key there too (your own account; your
+#    password, once).
+if [ -n "$VIA" ]; then
+    echo "Putting the key on $VIA for the hop through it (your password, once):"
+    ssh-copy-id -i "$KEY.pub" -o IdentitiesOnly=yes "$NETID@$VIA" < "$TTY" || \
+        echo "  That didn't work; run it again later: ssh-copy-id -i $KEY.pub $NETID@$VIA"
+fi
+
+echo
+if printf '%s' "$probe" | grep -q -i 'tunnel only'; then
+    echo "Your key is already in. Open the Console with:  ssh -N $ALIAS"
+else
+    echo "Send this one line to $CONTACT (it is safe to share):"
+    echo
+    cat "$KEY.pub"
+    echo
+    echo "Once it's in, open the Console with:  ssh -N $ALIAS"
+fi
+echo "(Your browser opens by itself; that window keeps the Console open, Ctrl-C closes it.)"
+"""
+
+
+def key_setup_script(target: Target, login_host: str | None = None,
+                     user: str | None = None, contact: str | None = None) -> str:
+    """The setup to run on a person's own computer (see _KEY_SETUP)."""
+    target.validate()
+    user = user or (target.destination.split("@", 1)[0] if "@" in target.destination
+                    else _user())
+    here = _here(login_host).rsplit("@", 1)[-1]
+    via = "" if _short(here) == _short(target.host) else here
+    for label, value in (("user", user), ("machine", target.host), ("workstation", via),
+                         ("this machine", here)):
+        if value and not all(c.isalnum() or c in "._-" for c in value):
+            raise LaunchError(f"That {label} name does not look right: {value!r}")
+    values = {
+        "@@FROM@@": here, "@@NETID@@": shlex.quote(user),
+        "@@CONSOLE@@": shlex.quote(target.host), "@@VIA@@": shlex.quote(via),
+        "@@PORT@@": str(target.remote_port),
+        "@@CONTACT@@": shlex.quote(contact or _contact()),
+        "@@ALIAS@@": ALIAS, "@@KEY@@": KEY_NAME,
+    }
+    out = _KEY_SETUP
+    for token, value in values.items():
+        out = out.replace(token, value)
+    return out
 
 
 # -- the whole thing ----------------------------------------------------------
@@ -415,6 +642,9 @@ def launch(target: Target, *, local_port: int | None = None, open_browser: bool 
     out(f"Opening a tunnel to the Console on {target.host}"
         + (f" through {target.via.rsplit('@', 1)[-1]}" if target.via else "")
         + "; type your password if asked.")
+    if not key_path().is_file():
+        out("(To skip the password next time:  "
+            f"bash <({shlex.quote(nomad_command())} console --key-setup))")
     _stop_requested.clear()
     previous = _catch_stop_signals()
     proc = None
@@ -497,9 +727,15 @@ def main(argv: list | None = None) -> int:
                    help="only print the ssh command")
     p.add_argument("--here", action="store_true",
                    help="open the tunnel and browser on this machine even over SSH")
+    p.add_argument("--key-setup", action="store_true",
+                   help="print the one-time setup for your own computer (a key, "
+                        "so the Console needs no password)")
     a = p.parse_args(argv)
     try:
         target = resolve(a.destination, a.via, a.remote_port)
+        if a.key_setup:
+            sys.stdout.write(key_setup_script(target))
+            return 0
         return launch(target, local_port=a.port, open_browser=not a.no_browser,
                       print_only=a.print_only, out=lambda m: print(m, flush=True),
                       here=True if a.here else None)

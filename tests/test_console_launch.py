@@ -551,16 +551,21 @@ def test_the_jump_is_this_cluster_by_the_name_users_reach_it_by(monkeypatch):
     monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
     monkeypatch.setattr(L, "_user", lambda: "carol")
     lines = L.instructions(L.Target("carol@mingus.example.edu"))
-    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS + " "
-                                "-J carol@spydur.example.edu carol@mingus.example.edu")
+    assert _long(lines) == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS + " "
+                            "-J carol@spydur.example.edu carol@mingus.example.edu")
     assert 'leave out "-J carol@spydur.example.edu"' in lines[-1]
 
 
 def test_no_jump_on_the_consoles_own_machine(monkeypatch):
     monkeypatch.setattr(L, "_user", lambda: "zeus")
     lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
-    assert lines[2].strip() == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS
-                                + " zeus@mingus.example.edu")
+    assert _long(lines) == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS
+                            + " zeus@mingus.example.edu")
+
+
+def _long(lines):
+    """The line that works with a password, without a key."""
+    return next(x.strip() for x in lines if x.strip().startswith("ssh -N -L"))
 
 
 # Once both logins succeed, ssh prints this itself: a tunnel is otherwise silent.
@@ -571,7 +576,7 @@ OPEN_SAYS = ("-o PermitLocalCommand=yes -o 'LocalCommand=echo Tunnel open: "
 def test_the_open_message_runs_through_a_shell_as_one_echo():
     import shlex
     lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
-    words = shlex.split(lines[2])
+    words = shlex.split(_long(lines))
     local = next(w for w in words if w.startswith("LocalCommand="))
     command = local.split("=", 1)[1]
     assert ";" not in command and "%" not in command and "&" not in command
@@ -603,8 +608,8 @@ def test_nomad_console_alone_is_launch(monkeypatch, saved_file):
 # -- whose name goes in the laptop line -----------------------------------------
 
 @pytest.mark.parametrize("login, sudo_user, expected", [
-    ("cparish", None, "cparish"),          # logged in as herself, or sudo -u cparish
-    ("root", "jtonini", "jtonini"),        # sudo -i: the admin's own name
+    ("pi1", None, "pi1"),                  # logged in as herself, or sudo -u pi1
+    ("root", "jdoe", "jdoe"),              # sudo -i: the admin's own name
     ("root", None, "NETID"),               # root logged in directly: nobody's NetID
     ("root", "root", "NETID"),
 ])
@@ -621,7 +626,7 @@ def test_a_line_for_root_asks_for_the_netid(monkeypatch):
     monkeypatch.setattr(L.getpass, "getuser", lambda: "root")
     monkeypatch.delenv("SUDO_USER", raising=False)
     monkeypatch.delenv(L.ENV_LOGIN, raising=False)
-    lines = L.instructions(L.Target("mingus.richmond.edu"), login_host="adam.richmond.edu")
+    lines = L.instructions(L.Target("console.example.edu"), login_host="labws1.example.edu")
     text = "\n".join(lines)
-    assert "-J NETID@adam.richmond.edu NETID@mingus.richmond.edu" in text
+    assert "-J NETID@labws1.example.edu NETID@console.example.edu" in text
     assert "(Put your NetID where it says NETID.)" in text

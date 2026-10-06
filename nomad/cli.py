@@ -4761,12 +4761,23 @@ def demo(jobs, days, seed, port, no_launch):
 # =============================================================================
 
 @cli.group(invoke_without_command=True)
+@click.option('--key-setup', is_flag=True,
+              help='Print the one-time setup for your own computer: a key just for '
+                   'the Console, so `ssh -N nomad-console` opens it with no password. '
+                   'Run it there with:  bash <(ssh NETID@THIS-MACHINE nomad console --key-setup)')
 @click.pass_context
-def console(ctx):
+def console(ctx, key_setup):
     """The NØMAÐ Console, the web interface.
 
     `nomad console` alone is `nomad console launch`.
     """
+    if key_setup:
+        from nomad.console.launch import LaunchError, key_setup_script, resolve
+        try:
+            click.echo(key_setup_script(resolve(None, None, None)), nl=False)
+        except LaunchError as e:
+            raise click.ClickException(str(e))
+        return
     if ctx.invoked_subcommand is None:
         ctx.invoke(console_launch)
 
