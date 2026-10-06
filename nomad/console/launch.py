@@ -389,8 +389,10 @@ def setup_line(login_host: str | None = None) -> str:
     """What a person runs once on their own computer to set up the Console
     key: this machine's nomad prints the setup, their computer runs it."""
     here = _here(login_host).rsplit("@", 1)[-1]
-    return (f"bash <(ssh {_user()}@{here} {shlex.quote(nomad_command())} "
-            "console --key-setup)")
+    # $( ), not <( ): a process substitution runs ssh in the background, where
+    # it cannot read the password from the keyboard and waits for ever.
+    return (f'bash -c "$(ssh {_user()}@{here} {shlex.quote(nomad_command())} '
+            'console --key-setup)"')
 
 
 def instructions(target: Target, login_host: str | None = None) -> list:
@@ -446,7 +448,7 @@ def _contact() -> str:
 # -- the one-time setup on a person's own computer ----------------------------
 #
 # `nomad console --key-setup` prints this; the person's computer runs it:
-#     bash <(ssh NETID@workstation nomad console --key-setup)
+#     bash -c "$(ssh NETID@workstation nomad console --key-setup)"
 # It makes ~/.ssh/nomad_console, puts a "nomad-console" entry at the top of
 # ~/.ssh/config (ssh takes the first value it finds for each setting) and
 # prints the public key for whoever adds Console keys. `ssh -N nomad-console`
@@ -644,7 +646,7 @@ def launch(target: Target, *, local_port: int | None = None, open_browser: bool 
         + "; type your password if asked.")
     if not key_path().is_file():
         out("(To skip the password next time:  "
-            f"bash <({shlex.quote(nomad_command())} console --key-setup))")
+            f'bash -c "$({shlex.quote(nomad_command())} console --key-setup)")')
     _stop_requested.clear()
     previous = _catch_stop_signals()
     proc = None

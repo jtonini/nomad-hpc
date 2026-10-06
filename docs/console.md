@@ -91,7 +91,7 @@ It opens the Console in your browser; that window keeps it open, and Ctrl-C ther
 
 The first time on that computer (Mac or Linux), set it up once there with:
 
-    bash <(ssh NETID@spydur.example.edu /usr/local/sw/bin/nomad console --key-setup)
+    bash -c "$(ssh NETID@spydur.example.edu /usr/local/sw/bin/nomad console --key-setup)"
 
 and send the line it prints to your research computing contact.
 
@@ -106,7 +106,9 @@ Your own computer then needs nothing but ssh.
 ### No password: a key for the Console
 
 `nomad console --key-setup` prints a short bash script; the line above runs
-it on the person's own computer, fetched over ssh from the cluster. It
+it on the person's own computer, fetched over ssh from the cluster (with
+`$( )`: in `bash <( )` ssh runs in the background and can't ask for the
+password). It
 
 - makes a key just for the Console, `~/.ssh/nomad_console`;
 - tries the Console's machine directly: when it answers, the entry goes

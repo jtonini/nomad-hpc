@@ -4764,7 +4764,7 @@ def demo(jobs, days, seed, port, no_launch):
 @click.option('--key-setup', is_flag=True,
               help='Print the one-time setup for your own computer: a key just for '
                    'the Console, so `ssh -N nomad-console` opens it with no password. '
-                   'Run it there with:  bash <(ssh NETID@THIS-MACHINE nomad console --key-setup)')
+                   'Run it there with:  bash -c "$(ssh NETID@THIS-MACHINE nomad console --key-setup)"')
 @click.pass_context
 def console(ctx, key_setup):
     """The NØMAÐ Console, the web interface.

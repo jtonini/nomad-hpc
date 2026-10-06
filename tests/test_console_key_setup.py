@@ -4,8 +4,8 @@
 `ssh -N nomad-console` on a person's own computer opens the tunnel and the
 browser with no password.
 
-The setup runs on their computer (bash <(ssh NETID@workstation nomad console
---key-setup)); here it runs with a fake ssh, in a home of its own.
+The setup runs on their computer (bash -c "$(ssh NETID@workstation nomad
+console --key-setup)"); here it runs with a fake ssh, in a home of its own.
 """
 from __future__ import annotations
 
@@ -77,8 +77,9 @@ def test_the_short_way_comes_first(monkeypatch):
     lines = L.instructions(CONSOLE, login_host="labws1.example.edu")
     assert lines[2].strip() == "ssh -N nomad-console"
     text = "\n".join(lines)
-    assert ("bash <(ssh jdoe@labws1.example.edu /opt/sw/bin/nomad console --key-setup)"
-            in text)
+    line = 'bash -c "$(ssh jdoe@labws1.example.edu /opt/sw/bin/nomad console --key-setup)"'
+    assert line in text
+    assert "<(" not in text           # ssh in a process substitution can't ask for a password
     assert "send the line it prints to the lab's admin." in text
     assert "ssh -N -L 8000:localhost:8000" in text          # still there, for Windows
 
@@ -256,3 +257,21 @@ def test_a_config_that_is_a_link_stays_one(tmp_path):
 def test_a_name_for_this_machine_a_shell_would_read_is_refused():
     with pytest.raises(L.LaunchError):
         L.key_setup_script(CONSOLE, login_host="console.example.edu\nrm -rf ~")
+
+
+@needs_ssh
+def test_the_setup_line_runs_ssh_in_the_foreground_and_the_setup(tmp_path):
+    """The printed line, run by a shell: ssh (here a fake that prints the
+    setup) in a command substitution, the setup run by bash -c."""
+    home, env, _ = _sandbox(tmp_path)
+    fake = tmp_path / "bin" / "ssh"
+    script = tmp_path / "setup.sh"
+    script.write_text(_script())
+    body = fake.read_text()
+    fake.write_text(body.replace("exit 0\n", "") +
+                    f'case "$*" in *--key-setup*) cat {script}; exit 0;; esac\nexit 0\n')
+    line = 'bash -c "$(ssh jdoe@labws1.example.edu nomad console --key-setup)"'
+    r = subprocess.run(["sh", "-c", line], env=env, capture_output=True, text=True,
+                       stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert "nomad-console entry is in place" in r.stdout
