@@ -111,7 +111,9 @@ note = "community $HOME, all users"
   listed there: a storage server's name, or one export (`server:/export`) as
   the workstations mount it. Nothing is guessed from names.
 - **Storage servers:** `[console.storage."SERVER"]` gives a server a `name`
-  and a `note`, shown wherever its exports are. SERVER is the server as the
+  and a `note`, shown wherever its exports are. When the storage collector
+  reads that server (under its address, or under that name, as an ssh
+  alias), its state, space and pools' health go on the server's line. SERVER is the server as the
   mounts name it, the part before the colon in `server:/export` (often an
   address). A server that everyone shares should say so in its note: its
   used space is everyone's, and would otherwise read as the lab's own.

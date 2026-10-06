@@ -475,3 +475,27 @@ def test_roles_show_the_labs_name(tmp_path, monkeypatch):
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "pi3", "--db", str(db),
                                  "--mask"])
     assert "Chem Lab" not in r.output and "lab #1: 1 members" in r.output
+
+
+def test_a_nas_read_by_name_is_the_server_its_mounts_name_by_address(tmp_path, monkeypatch):
+    # The lab's machines mount 10.0.0.43:/pool/cold; the storage collector
+    # reads the same box as "coldnas", the name [console.storage] gives it.
+    monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 6, 9, 45))
+    cfg = tmp_path / "nomad.toml"
+    cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
+                   '[console.labs.resources."pi3$"]\nstorage = ["10.0.0.43:/pool/cold"]\n\n'
+                   '[console.storage."10.0.0.43"]\nname = "coldnas"\nnote = "cold storage"\n')
+    db = tmp_path / "combined.db"
+    _hub(db)
+    c = sqlite3.connect(db)
+    c.execute("INSERT INTO storage_state VALUES ('2026-10-06T09:40:00', 'coldnas', 'online', "
+              "?, ?, ?, ?)", (176 * TB, 60 * TB, 116 * TB,
+                              json.dumps([{"name": "everything", "health": "ONLINE"}])))
+    c.commit()
+    c.close()
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "pi3", "--db", str(db)])
+    out = r.output
+    assert ("    coldnas (10.0.0.43), cold storage: online, 2026-10-06T09:40; 35% used "
+            "(60.0 TB of 176 TB), 116 TB free; pool everything ONLINE\n"
+            "      /pool/cold: not in the data") in out
+    assert out.split("\npi3:\n")[1].count("coldnas") == 1      # once in the lab's view

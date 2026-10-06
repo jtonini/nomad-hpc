@@ -4948,7 +4948,15 @@ def _storage_lines(conn, acc, names, mask):
         head = (f"storage server #{i}" if mask else
                 (f"{name} ({server})" if name and name != server else server)
                 + (f", {note}" if note else ""))
-        if '' in exports[server]:
+        # A NAS the storage collector reads, under this address or under the
+        # name [console.storage] gives it: its state goes on the heading.
+        nas = None
+        if conn is not None:
+            from nomad.config.access import server_state
+            nas = server_state(conn, server) or (server_state(conn, name) if name else None)
+        if nas is not None:
+            lines.append(f"    {head}: {_server_shown(nas)}")
+        elif '' in exports[server]:
             state = _machine_state(conn, 'storage', server) if conn is not None else None
             lines.append(f"    {head}: {state or missing}")
         else:
