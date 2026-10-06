@@ -333,6 +333,13 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # workstations = ["adam", "eve"]
 # storage = ["sarahvaughan"]           # a server, or "server:/export"
 
+# A storage server's name and a note, shown wherever its exports are. The
+# server as the mounts name it (often an address). Say when everyone shares
+# it, or its use reads as the lab's own.
+# [console.storage."10.0.0.28"]
+# name = "sarahvaughan"
+# note = "community $HOME, all users"
+
 # ─── Support ─────────────────────────────────────────────────────
 # Where people's questions go, e.g. the Console's "Contact support".
 [support]

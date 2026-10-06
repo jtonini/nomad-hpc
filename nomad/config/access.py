@@ -14,6 +14,10 @@
     workstations = ["adam", "eve"] # the lab's own machines
     storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 
+    [console.storage."10.0.0.28"]   # a storage server, as the mounts name it
+    name = "sarahvaughan"
+    note = "community $HOME, all users"
+
 Anyone the file does not name who signs in is a viewer: they see their own
 work. A viewer who leads a lab also sees its members: a PI. They lead the
 group named by ``group_pattern`` (when it exists) and any group listed for
@@ -25,7 +29,9 @@ on those machines, people outside the lab show as "another user"
 monitors it tags it with the lab's group (``department`` in its
 ``[[collectors.workstation.workstations]]`` entry, which reaches the hub with
 the data: ``workstation_tags``), or when it is listed here. Storage is listed
-here. Nothing is guessed from names.
+here. Nothing is guessed from names. ``[console.storage]`` gives a storage
+server a name and a note, shown wherever its exports are (``servers``): a
+server shared by everyone should say so, or its use reads as the lab's.
 
 The file names people. The Console's users.json keeps only what is private or
 automatic: the break-glass password, and the record made at someone's first
@@ -78,6 +84,7 @@ class Access:
     group_pattern: str = ""
     leads: dict = field(default_factory=dict)       # netid -> tuple of group names
     resources: dict = field(default_factory=dict)   # group -> {kind: tuple of names}
+    servers: dict = field(default_factory=dict)     # storage server -> (name, note)
     problems: tuple = ()                            # what in the file was ignored, and why
 
     def role(self, netid) -> str | None:
@@ -205,11 +212,50 @@ def access_from(config: dict | None, log: bool = True) -> Access:
         if any(kinds.values()):
             resources[group.strip()] = kinds
 
+    servers = _servers(console.get("storage"), problems)
+
     for p in problems if log else ():
         logger.warning("nomad.toml: %s", p)
     return Access(admins=frozenset(found["admin"]), operators=frozenset(found["operator"]),
                   group_pattern=pattern, leads=leads, resources=resources,
-                  problems=tuple(problems))
+                  servers=servers, problems=tuple(problems))
+
+
+_SERVER_KEYS = ("name", "note")
+
+
+def _servers(raw, problems: list) -> dict:
+    """[console.storage."SERVER"] name = ..., note = ...: SERVER -> (name, note).
+    SERVER is the server as the mounts name it (``server`` in server:/export)."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        problems.append('[console.storage] should hold one table per storage server, '
+                        'as [console.storage."ADDRESS"]; ignored')
+        return {}
+    servers = {}
+    for server, table in raw.items():
+        where = f'[console.storage."{server}"]'
+        s = server.strip()
+        if not s or ":" in s:
+            problems.append(f"{where}: a storage server, as the mounts name it (the part "
+                            "before the colon in server:/export); ignored")
+            continue
+        if not isinstance(table, dict):
+            problems.append(f'{where} should be a table (name = "...", note = "..."); ignored')
+            continue
+        values = {}
+        for key, value in table.items():
+            if key not in _SERVER_KEYS:
+                problems.append(f"{where} {key}: unknown; the settings are "
+                                f"{', '.join(_SERVER_KEYS)}")
+            elif not isinstance(value, str):
+                problems.append(f"{where} {key} should be text; ignored")
+            else:
+                values[key] = " ".join(value.split())
+        if values.get("name") or values.get("note"):
+            servers[s] = (values.get("name", ""), values.get("note", ""))
+    return servers
 
 
 def members_lookup(conn) -> tuple[Callable[[str], bool], Callable[[str], set]]:

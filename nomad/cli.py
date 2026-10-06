@@ -4872,6 +4872,57 @@ def _size_shown(size, state, label):
     return text
 
 
+def _storage_lines(conn, acc, names, mask):
+    """A lab's storage for `nomad console roles`, by server: a line naming
+    the server (its name and note from [console.storage]), then each listed
+    export of it, then the space together of exports that share their free
+    space (always of one server)."""
+    from nomad.config.access import export_sizes, shared_free
+    missing = "not in the data" if conn is not None else "(no database)"
+    sizes = export_sizes(conn, names) if conn is not None else {}
+    groups = shared_free(conn, sizes) if conn is not None else []
+    exports: dict[str, list] = {}
+    for n in names:
+        server, _, path = n.partition(':')
+        exports.setdefault(server, []).append(path)       # '' for the server itself
+
+    def shown(server):
+        return (acc.servers.get(server, ('', ''))[0] or server).lower()
+
+    lines = []
+    for i, server in enumerate(sorted(exports, key=lambda s: (shown(s), s)), 1):
+        name, note = acc.servers.get(server, ('', ''))
+        head = (f"storage server #{i}" if mask else
+                (f"{name} ({server})" if name else server) + (f", {note}" if note else ""))
+        if '' in exports[server]:
+            state = _machine_state(conn, 'storage', server) if conn is not None else None
+            lines.append(f"    {head}: {state or missing}")
+        else:
+            lines.append(f"    {head}:")
+        paths = sorted(p for p in exports[server] if p)
+        label = {f"{server}:{p}": (f"export #{j}" if mask else p)
+                 for j, p in enumerate(paths, 1)}
+        for full, shown_as in label.items():
+            state = _machine_state(conn, 'storage', full) if conn is not None else None
+            line = state or missing
+            if full in sizes:
+                line += _size_shown(sizes[full], state, lambda o: label.get(o, o))
+            lines.append(f"      {shown_as}: {line}")
+        # Exports of one pool: their space together, counted once.
+        for group in groups:
+            if group.exports[0].partition(':')[0] != server:
+                continue
+            pct = group.used_pct
+            newest = max(sizes[e].when for e in group.exports)
+            lines.append(f"      {' + '.join(label[e] for e in group.exports)}, together: "
+                         + (f"{pct}% used ({_bytes_shown(group.used)}), "
+                            if pct is not None else f"{_bytes_shown(group.used)} used, ")
+                         + f"{_bytes_shown(group.avail)} free"
+                         + ("" if group.when[:16] == newest[:16]
+                            else f" at {group.when[:16]}"))
+    return lines
+
+
 @console.command('roles')
 @click.argument('netid', required=False)
 @click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
@@ -4885,12 +4936,13 @@ def console_roles(ctx, netid, db, mask):
     nomad console roles NETID      what that person would see
 
     Roles and labs live in [console.roles] and [console.labs] of nomad.toml
-    on the machine that runs the Console; see docs/config.md.
+    on the machine that runs the Console, storage servers' names and notes in
+    [console.storage]; see docs/config.md.
     """
     import sqlite3
 
-    from nomad.config.access import (access_from, export_sizes, members_lookup,
-                                     shared_free, visible_people, workstation_tags)
+    from nomad.config.access import (access_from, members_lookup, visible_people,
+                                     workstation_tags)
     config = ctx.obj.get('config', {}) or {}
     acc = access_from(config, log=False)
     show = (lambda names: f"{len(names)}") if mask else \
@@ -4908,6 +4960,10 @@ def console_roles(ctx, netid, db, mask):
         click.echo(f"  machines:  listed for {len(acc.resources)} "
                    f"lab{'' if len(acc.resources) == 1 else 's'}: {nw} workstations, "
                    f"{ns} storage")
+    if acc.servers:
+        named = sorted(name or server for server, (name, _note) in acc.servers.items())
+        click.echo(f"  storage:   {len(named)} server{'' if len(named) == 1 else 's'} named"
+                   + ("" if mask else f" ({', '.join(named)})"))
     click.echo("  anyone else who signs in: viewer (their own work)")
     for p in acc.problems:
         click.echo(click.style(f"  ! {p}", fg='yellow'))
@@ -4944,28 +5000,14 @@ def console_roles(ctx, netid, db, mask):
             click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
     res = acc.lab_resources(netid, exists, tagged)
     listed = acc.lab_resources(netid, exists)
-    sizes = export_sizes(conn, res['storage']) if conn is not None else {}
-    for kind in ('workstations', 'storage'):
-        labels = {name: (f"{kind[:-1] if kind.endswith('s') else kind} #{i}" if mask else name)
-                  for i, name in enumerate(sorted(res[kind]), 1)}
-        for name, label in labels.items():
-            how = "" if name in listed[kind] else " [tagged]"
-            state = _machine_state(conn, kind, name) if conn is not None else None
-            line = state or ("not in the data" if conn is not None else "(no database)")
-            if kind == 'storage' and name in sizes:
-                line += _size_shown(sizes[name], state, lambda o: labels.get(o, o))
-            click.echo(f"    {label}{how}: {line}")
-        if kind == 'storage':
-            # Exports of one pool: their space together, counted once.
-            for group in shared_free(conn, sizes):
-                pct = group.used_pct
-                newest = max(sizes[e].when for e in group.exports)
-                click.echo(f"    {' + '.join(labels[e] for e in group.exports)}, together: "
-                           + (f"{pct}% used ({_bytes_shown(group.used)}), "
-                              if pct is not None else f"{_bytes_shown(group.used)} used, ")
-                           + f"{_bytes_shown(group.avail)} free"
-                           + ("" if group.when[:16] == newest[:16]
-                              else f" at {group.when[:16]}"))
+    for i, name in enumerate(sorted(res['workstations']), 1):
+        label = f"workstation #{i}" if mask else name
+        how = "" if name in listed['workstations'] else " [tagged]"
+        state = _machine_state(conn, 'workstations', name) if conn is not None else None
+        click.echo(f"    {label}{how}: " + (state or
+                   ("not in the data" if conn is not None else "(no database)")))
+    for line in _storage_lines(conn, acc, res['storage'], mask):
+        click.echo(line)
     if role:
         click.echo("  sees individually: everyone")
     elif members is not None:

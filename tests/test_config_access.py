@@ -238,10 +238,12 @@ def test_cli_roles_shows_the_machines(tmp_path):
     assert "dead [tagged]: offline at 2026-10-05T19:00; never online" in out
     assert "moved" not in out
     assert "ghost: not in the data" in out
-    assert "sarahvaughan: mounted and responding, 2026-10-05T18:00" in out
-    assert ("nas2:/export/old: not responding at 2026-10-05T18:00; last responding "
-            "2026-10-05T17:00") in out
-    assert "nowhere:/x: not in the data" in out
+    # Storage by server: a server listed alone carries its state on its line;
+    # its exports follow, indented.
+    assert "    sarahvaughan: mounted and responding, 2026-10-05T18:00" in out
+    assert "    nas2:\n      /export/old: not responding at 2026-10-05T18:00; last responding " \
+        "2026-10-05T17:00" in out
+    assert "    nowhere:\n      /x: not in the data" in out
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
                                  "--mask"])
     assert "adam" not in r.output and "workstation #1: online" in r.output

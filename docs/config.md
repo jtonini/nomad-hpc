@@ -85,6 +85,10 @@ leads = { NETID = ["chemlab$"] }   # exceptions and extra groups
 [console.labs.resources."NETID$"]
 workstations = ["adam", "eve"] # the lab's own machines
 storage = ["sarahvaughan"]     # its storage: a server, or server:/export
+
+[console.storage."10.0.0.28"]  # a storage server, as the mounts name it
+name = "sarahvaughan"
+note = "community $HOME, all users"
 ```
 
 - **Viewer:** anyone the file does not name who signs in. They see their own
@@ -105,6 +109,11 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
   `[console.labs.resources."group"]` (one not collected, say), and storage is
   listed there: a storage server's name, or one export (`server:/export`) as
   the workstations mount it. Nothing is guessed from names.
+- **Storage servers:** `[console.storage."SERVER"]` gives a server a `name`
+  and a `note`, shown wherever its exports are. SERVER is the server as the
+  mounts name it, the part before the colon in `server:/export` (often an
+  address). A server that everyone shares should say so in its note: its
+  used space is everyone's, and would otherwise read as the lab's own.
 - **Operator:** sees everything, changes no settings.
 - **Admin:** everything, settings included.
 
@@ -117,8 +126,8 @@ never guessed at.
 `nomad console roles` shows what the file grants, and anything wrong in it;
 `nomad console roles NETID` shows what that person would see, with each lab's
 size, and whether each of their machines is online (and when it last was) or
-whether each storage export is mounted and responding, with its space when the
-lab machines report it: percent used, used of total and free, in decimal units
+whether each storage export is mounted and responding, by server (with its
+name and note), with its space when the lab machines report it: percent used, used of total and free, in decimal units
 (those of `df -H`), and for exports of one pool "free space shared with ..."
 and a line with their space together (see docs/collectors.md, Workstation
 mounts); a machine known only by

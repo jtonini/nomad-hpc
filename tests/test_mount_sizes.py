@@ -449,7 +449,9 @@ def test_cli_roles_shows_the_space(tmp_path):
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
                    '[console.labs.resources."carol$"]\n'
-                   f'storage = ["{HOME}", "{SCRATCH}", "{LOGP}"]\n')
+                   f'storage = ["{HOME}", "{SCRATCH}", "{LOGP}"]\n\n'
+                   '[console.storage."nas"]\nname = "bigstore"\n'
+                   'note = "community $HOME, all users"\n')
     dbp = tmp_path / "combined.db"
     c = _sized_db(dbp, [
         ("2026-10-05T22:21:00", "adam", "/home", HOME, 1, 40 * TB, int(3.1 * TB),
@@ -465,23 +467,59 @@ def test_cli_roles_shows_the_space(tmp_path):
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp)])
     assert r.exit_code == 0, r.output
     out = r.output
-    # Sharing its free space, an export's total overlaps the other's: no "of".
-    assert (f"{HOME}: mounted and responding, 2026-10-05T22:21; 8% used (3.1 TB), "
-            f"36.9 TB free; free space shared with {SCRATCH}") in out
-    assert (f"{SCRATCH}: mounted and responding, 2026-10-05T22:21; 18% used (8.1 TB), "
-            f"36.9 TB free; free space shared with {HOME}") in out
-    # And their space together, the free space counted once.
-    assert f"    {SCRATCH} + {HOME}, together: 24% used (11.2 TB), 36.9 TB free" in out
-    # The last size read is older than the last sign of life: it says when.
-    assert (f"{LOGP}: mounted and responding, 2026-10-05T22:21; 12% used (1.0 TB of 9.0 TB), "
-            "8.0 TB free at 2026-10-05T21:00") in out
+    assert "  storage:   1 server named (bigstore)" in out
+    # By server, named and with its note, so a shared server's use isn't
+    # read as the lab's; its exports below, by path.
+    assert ("    bigstore (nas), community $HOME, all users:\n"
+            "      /mnt/everything/scratch: mounted and responding, 2026-10-05T22:21; "
+            "18% used (8.1 TB), 36.9 TB free; free space shared with "
+            "/mnt/everything/shared-home\n"
+            # Sharing its free space, an export's total overlaps the other's: no "of".
+            "      /mnt/everything/shared-home: mounted and responding, 2026-10-05T22:21; "
+            "8% used (3.1 TB), 36.9 TB free; free space shared with /mnt/everything/scratch\n"
+            # And their space together, the free space counted once.
+            "      /mnt/everything/scratch + /mnt/everything/shared-home, together: "
+            "24% used (11.2 TB), 36.9 TB free\n") in out
+    # A server not named shows as the mounts name it. The last size read is
+    # older than the last sign of life: it says when.
+    assert ("    nas2:\n      /mnt/data/projects: mounted and responding, 2026-10-05T22:21; "
+            "12% used (1.0 TB of 9.0 TB), 8.0 TB free at 2026-10-05T21:00") in out
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
                                  "--mask"])
-    assert "everything" not in r.output and "nas" not in r.output
-    # Sorted: nas2 (#1), scratch (#2), shared-home (#3).
-    assert "storage #3: mounted and responding, 2026-10-05T22:21; 8% used" in r.output
-    assert "free space shared with storage #2" in r.output
-    assert "    storage #2 + storage #3, together: 24% used (11.2 TB), 36.9 TB free" in r.output
+    masked = r.output
+    for secret in ("everything", "nas", "bigstore", "community", "projects"):
+        assert secret not in masked, secret
+    assert "  storage:   1 server named\n" in masked
+    assert ("    storage server #1:\n"
+            "      export #1: mounted and responding, 2026-10-05T22:21; 18% used") in masked
+    assert "free space shared with export #1" in masked
+    assert "      export #1 + export #2, together: 24% used (11.2 TB), 36.9 TB free" in masked
+    assert "    storage server #2:\n      export #1: mounted and responding" in masked
+
+
+@pytest.mark.parametrize("storage, problem", [
+    ({"nas:/x": {"name": "a"}}, "the part before the colon"),
+    ({"nas": "bigstore"}, "should be a table"),
+    ({"nas": {"name": 3}}, "name should be text"),
+    ({"nas": {"label": "x"}}, "label: unknown"),
+    ("nas", "one table per storage server"),
+])
+def test_wrong_storage_settings_are_said_and_left_out(storage, problem):
+    from nomad.config.access import access_from
+    a = access_from({"console": {"storage": storage}}, log=False)
+    assert a.servers == {}
+    assert any(problem in p for p in a.problems), a.problems
+
+
+def test_storage_names_and_notes():
+    from nomad.config.access import access_from
+    a = access_from({"console": {"storage": {
+        " 10.0.0.28 ": {"name": "sarahvaughan", "note": "community  $HOME,\nall users"},
+        "10.0.0.43": {"note": "cold storage"},
+        "empty": {}}}}, log=False)
+    assert a.servers == {"10.0.0.28": ("sarahvaughan", "community $HOME, all users"),
+                         "10.0.0.43": ("", "cold storage")}
+    assert a.problems == ()
 
 
 def test_sync_adds_the_size_columns_to_the_combined_database(tmp_path, monkeypatch):
