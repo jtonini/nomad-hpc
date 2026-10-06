@@ -4604,6 +4604,11 @@ def sync(ctx, config_file, output, dry_run):
             ("alerts", "source_site, timestamp"),
             ("jobs", "source_site, end_time"),
             ("jobs", "source_site, submit_time"),
+            # A lab's machines and storage (nomad console roles, the PI
+            # view): each machine's and each export's latest record.
+            ("workstation_state", "hostname, timestamp"),
+            ("workstation_mount_state", "source, timestamp"),
+            ("workstation_mount_state", "hostname, timestamp"),
         ]
         click.echo("  Indexing... ", nl=False)
         _built = 0
@@ -4839,6 +4844,34 @@ def _machine_state(conn, kind, name):
     return None
 
 
+def _bytes_shown(n):
+    """A size in decimal units, as disks are sold (``df -H``'s units),
+    rounded before the unit is chosen: 999,950 bytes is "1.0 MB"."""
+    units = ('B', 'kB', 'MB', 'GB', 'TB', 'PB')
+    for i, unit in enumerate(units):
+        value = n / 1000 ** i
+        shown = f"{value:.0f}" if i == 0 or round(value, 1) >= 100 else f"{value:.1f}"
+        if float(shown) < 1000 or unit == units[-1]:
+            return f"{shown} {unit}"
+
+
+def _size_shown(size, state, label):
+    """The size part of a storage line: "; 8% used (3.1 TB of 40.0 TB), 36.9
+    TB free", dated when older than the state's time. For an export that
+    shares its free space, no "of": its total overlaps the others'."""
+    pct = size.used_pct
+    used = _bytes_shown(size.used)
+    if not size.shares_free_with:
+        used += f" of {_bytes_shown(size.total)}"
+    text = (f"; {pct}% used ({used}), " if pct is not None else f"; {used} used, ")
+    text += f"{_bytes_shown(size.avail)} free"
+    if not state or size.when[:16] not in state:
+        text += f" at {size.when[:16]}"
+    if size.shares_free_with:
+        text += "; free space shared with " + ", ".join(label(o) for o in size.shares_free_with)
+    return text
+
+
 @console.command('roles')
 @click.argument('netid', required=False)
 @click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
@@ -4856,8 +4889,8 @@ def console_roles(ctx, netid, db, mask):
     """
     import sqlite3
 
-    from nomad.config.access import (access_from, members_lookup, visible_people,
-                                     workstation_tags)
+    from nomad.config.access import (access_from, export_sizes, members_lookup,
+                                     shared_free, visible_people, workstation_tags)
     config = ctx.obj.get('config', {}) or {}
     acc = access_from(config, log=False)
     show = (lambda names: f"{len(names)}") if mask else \
@@ -4911,13 +4944,28 @@ def console_roles(ctx, netid, db, mask):
             click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
     res = acc.lab_resources(netid, exists, tagged)
     listed = acc.lab_resources(netid, exists)
+    sizes = export_sizes(conn, res['storage']) if conn is not None else {}
     for kind in ('workstations', 'storage'):
-        for i, name in enumerate(sorted(res[kind]), 1):
-            label = f"{kind[:-1] if kind.endswith('s') else kind} #{i}" if mask else name
+        labels = {name: (f"{kind[:-1] if kind.endswith('s') else kind} #{i}" if mask else name)
+                  for i, name in enumerate(sorted(res[kind]), 1)}
+        for name, label in labels.items():
             how = "" if name in listed[kind] else " [tagged]"
             state = _machine_state(conn, kind, name) if conn is not None else None
-            click.echo(f"    {label}{how}: " + (state or
-                       ("not in the data" if conn is not None else "(no database)")))
+            line = state or ("not in the data" if conn is not None else "(no database)")
+            if kind == 'storage' and name in sizes:
+                line += _size_shown(sizes[name], state, lambda o: labels.get(o, o))
+            click.echo(f"    {label}{how}: {line}")
+        if kind == 'storage':
+            # Exports of one pool: their space together, counted once.
+            for group in shared_free(conn, sizes):
+                pct = group.used_pct
+                newest = max(sizes[e].when for e in group.exports)
+                click.echo(f"    {' + '.join(labels[e] for e in group.exports)}, together: "
+                           + (f"{pct}% used ({_bytes_shown(group.used)}), "
+                              if pct is not None else f"{_bytes_shown(group.used)} used, ")
+                           + f"{_bytes_shown(group.avail)} free"
+                           + ("" if group.when[:16] == newest[:16]
+                              else f" at {group.when[:16]}"))
     if role:
         click.echo("  sees individually: everyone")
     elif members is not None:

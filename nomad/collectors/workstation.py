@@ -41,6 +41,18 @@ DEFAULT_PACCT_PATH = "/var/account/pacct"
 # Mount monitoring probe. Same deployment pattern as the cgroup probe.
 WORKSTATION_MOUNT_PROBE_PATH = "/usr/local/lib/nomad/mount_probe.py"
 WORKSTATION_MOUNT_PROBE_FALLBACK = "/tmp/nomad_mount_probe.py"
+
+# The mount probe's sizes of the filesystem behind each mount (probe v2).
+MOUNT_SIZE_COLUMNS = ("total_bytes", "used_bytes", "avail_bytes")
+
+
+def _byte_count(value):
+    """A size from the probe as stored: a non-negative int that fits SQLite's
+    INTEGER, else None (a probe from before v2 sends none, and nothing else
+    is trusted)."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < 2 ** 63:
+        return None
+    return value
 COLLECTOR_VERSION = "1.0"
 
 
@@ -890,17 +902,21 @@ class WorkstationCollector(BaseCollector):
         # ---------------------------------------------------------------
         # Append-only time series, same as user_snapshots. No dedup needed
         # because we expect mount_probe to run per collection cycle.
+        # The sizes (migrations 15-17) only where the columns exist: a
+        # database not migrated yet still gets the rest.
+        mount_cols = {r[1] for r in cursor.execute(
+            "PRAGMA table_info(workstation_mount_state)")}
+        sizes = [c for c in MOUNT_SIZE_COLUMNS if c in mount_cols]
+        cols = ["timestamp", "hostname", "mountpoint", "fstype", "source",
+                "is_mounted", "is_responsive", "response_ms",
+                "collected_at", "probe_version", "collector_version"] + sizes
+        insert = (f"INSERT INTO workstation_mount_state ({', '.join(cols)}) "
+                  f"VALUES ({', '.join('?' * len(cols))})")
         for record in data:
             hostname = record.get('hostname')
             for m in record.get('mount_snapshots', []):
                 try:
-                    cursor.execute("""
-                        INSERT INTO workstation_mount_state (
-                            timestamp, hostname, mountpoint, fstype, source,
-                            is_mounted, is_responsive, response_ms,
-                            collected_at, probe_version, collector_version
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
+                    cursor.execute(insert, (
                         timestamp,
                         hostname,
                         m.get('mountpoint'),
@@ -912,7 +928,7 @@ class WorkstationCollector(BaseCollector):
                         m.get('collected_at'),
                         m.get('probe_version'),
                         COLLECTOR_VERSION,
-                    ))
+                    ) + tuple(_byte_count(m.get(c)) for c in sizes))
                 except sqlite3.OperationalError:
                     # workstation_mount_state table doesn't exist yet
                     # (migration v7 not applied on this DB). Skip

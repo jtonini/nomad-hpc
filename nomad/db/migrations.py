@@ -309,6 +309,34 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             send_failures   INTEGER NOT NULL DEFAULT 0
         );
     """),
+    # The size of the filesystem behind each mount, from the mount probe's
+    # statvfs() (df's numbers); NULL in rows from before, or when the mount
+    # did not answer. One column per migration (see 11-13).
+    # A database that lost the table (dropped by hand) gets it back first,
+    # rather than failing every `nomad collect` at this migration.
+    (15, "Add total_bytes to workstation_mount_state", """
+        CREATE TABLE IF NOT EXISTS workstation_mount_state (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp               DATETIME NOT NULL,
+            hostname                TEXT    NOT NULL,
+            mountpoint              TEXT    NOT NULL,
+            fstype                  TEXT,
+            source                  TEXT,
+            is_mounted              INTEGER NOT NULL,
+            is_responsive           INTEGER NOT NULL,
+            response_ms             REAL,
+            collected_at            INTEGER,
+            probe_version           TEXT,
+            collector_version       TEXT
+        );
+        ALTER TABLE workstation_mount_state ADD COLUMN total_bytes INTEGER;
+    """),
+    (16, "Add used_bytes to workstation_mount_state", """
+        ALTER TABLE workstation_mount_state ADD COLUMN used_bytes INTEGER;
+    """),
+    (17, "Add avail_bytes to workstation_mount_state", """
+        ALTER TABLE workstation_mount_state ADD COLUMN avail_bytes INTEGER;
+    """),
 ]
 
 

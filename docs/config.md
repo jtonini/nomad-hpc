@@ -117,7 +117,11 @@ never guessed at.
 `nomad console roles` shows what the file grants, and anything wrong in it;
 `nomad console roles NETID` shows what that person would see, with each lab's
 size, and whether each of their machines is online (and when it last was) or
-whether each storage export is mounted and responding; a machine known only by
+whether each storage export is mounted and responding, with its space when the
+lab machines report it: percent used, used of total and free, in decimal units
+(those of `df -H`), and for exports of one pool "free space shared with ..."
+and a line with their space together (see docs/collectors.md, Workstation
+mounts); a machine known only by
 its tag is marked `[tagged]` (`--db` for the database holding group membership, such as the hub's
 combined database; `--mask` for counts only).
 

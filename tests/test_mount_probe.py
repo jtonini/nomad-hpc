@@ -180,24 +180,26 @@ class TestCheckMountResponsive(unittest.TestCase):
 
     def test_healthy_mount_returns_quickly(self):
         # /tmp always exists and is fast to stat
-        ok, ms = mp._check_mount_responsive("/tmp", timeout_sec=3.0)
+        ok, ms, sizes = mp._check_mount_responsive("/tmp", timeout_sec=3.0)
         self.assertTrue(ok)
+        self.assertEqual(len(sizes), 3)          # total, used, avail (df's)
         self.assertLess(ms, 1000.0,
                         "stat on /tmp should return in <1s")
 
     def test_tmpdir_responsive(self):
         with tempfile.TemporaryDirectory() as d:
-            ok, ms = mp._check_mount_responsive(d, timeout_sec=3.0)
+            ok, ms, _sizes = mp._check_mount_responsive(d, timeout_sec=3.0)
             self.assertTrue(ok)
             self.assertLess(ms, 1000.0)
 
     def test_nonexistent_path_not_responsive(self):
         # os.stat raises ENOENT; we report as not responsive.
-        ok, ms = mp._check_mount_responsive(
+        ok, ms, sizes = mp._check_mount_responsive(
             "/nonexistent_path_that_will_never_exist_42",
             timeout_sec=3.0,
         )
         self.assertFalse(ok)
+        self.assertIsNone(sizes)
         # ms should be a non-negative number (<= timeout)
         self.assertGreaterEqual(ms, 0.0)
 
@@ -214,6 +216,7 @@ class TestProbe(unittest.TestCase):
         expected_keys = {
             "hostname", "mountpoint", "fstype", "source",
             "is_mounted", "is_responsive", "response_ms",
+            "total_bytes", "used_bytes", "avail_bytes",
             "collected_at", "probe_version",
         }
         for row in rows:

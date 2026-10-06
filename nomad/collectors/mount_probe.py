@@ -4,9 +4,12 @@
 Workstation mount probe for NØMAÐ.
 
 Reads /proc/mounts, filters to NFS mounts + non-system local mounts, and
-for each one runs an independent stat() with a strict wall-clock timeout.
-A dead NFS mount will hang stat() forever; the timeout catches that and
-reports the mount as unresponsive even though /proc/mounts still lists it.
+checks them all at once, each in its own thread: stat(), then statvfs() for
+the sizes, within a strict wall-clock timeout. A dead NFS mount hangs those
+calls, and no signal short of SIGKILL interrupts them (nfs(5)); a thread
+left hanging is abandoned, the mount reported as unresponsive even though
+/proc/mounts still lists it, and the script ends with os._exit(), which
+takes the stuck threads with it.
 
 Output: one JSON object per line on stdout. Each object corresponds to
 one mount. Non-interesting mounts (proc, sys, cgroup, tmpfs, etc.) are
@@ -16,7 +19,8 @@ Ship this file alongside cgroup_probe.py. Designed to run standalone as a
 script (`python3 mount_probe.py`) so the collector can scp it to remote
 hosts and invoke it over ssh, exactly like cgroup_probe.py.
 
-Python 3.6+. No third-party dependencies.
+Python 3.6+ (it runs on each workstation's own python3). No third-party
+dependencies.
 
 Schema (mirrors workstation_mount_state DB table):
 
@@ -29,21 +33,27 @@ Schema (mirrors workstation_mount_state DB table):
                           implemented in this minimal version)
     is_responsive:  int  (1 if stat() returned within the timeout)
     response_ms:    float (milliseconds stat() took, or timeout_ms on timeout)
+    total_bytes:    int  (size of the filesystem behind the mount, as df
+                          shows it; None when it did not answer)
+    used_bytes:     int  (df's "Used")
+    avail_bytes:    int  (df's "Avail": what users can still write)
     collected_at:   int  (unix timestamp)
-    probe_version:  str  ("1")
-"""
+    probe_version:  str  ("2"; "1" had no sizes)
 
-from __future__ import annotations
+For an NFS mount the sizes are the server's: the export's filesystem as the
+server reports it. On a ZFS server, exports that are datasets of one pool
+each report their own "used" but share the pool's free space.
+"""
 
 import json
 import os
-import signal
 import socket
 import sys
+import threading
 import time
 
 
-PROBE_VERSION = "1"
+PROBE_VERSION = "2"
 
 # Filesystem types that are definitely NOT user-facing storage.
 # These are either kernel-internal (cgroup, proc, sys) or local
@@ -72,14 +82,12 @@ SKIP_MOUNTPOINT_PREFIXES = (
 # Any NFS variant gets included regardless of mountpoint.
 NFS_FSTYPES = {"nfs", "nfs3", "nfs4", "cifs", "smb", "smb3"}
 
-# Default wall-clock timeout for a single stat() call, in seconds.
-# NFS clients use the filesystem's own RTO which can be tens of seconds;
-# 3s is aggressive but catches most "hanging" mounts without being jumpy.
+# Default wall-clock timeout for one mount's check (stat, then statvfs),
+# in seconds. NFS clients use the filesystem's own RTO which can be tens of
+# seconds; 3s is aggressive but catches most "hanging" mounts without being
+# jumpy. The mounts are checked at the same time, so a probe of several dead
+# mounts still ends after about one timeout.
 DEFAULT_STAT_TIMEOUT_SEC = 3.0
-
-
-class StatTimeout(Exception):
-    """Raised when stat() exceeds the wall-clock budget."""
 
 
 def _parse_proc_mounts():
@@ -139,46 +147,79 @@ def _is_interesting(source, mountpoint, fstype):
     return True
 
 
+class _Check(object):
+    """One mount's check, run in a daemon thread: stat(), then statvfs()."""
+
+    def __init__(self, mountpoint):
+        self.mountpoint = mountpoint
+        self.started = time.monotonic()
+        self.stat_ms = None          # set once stat() has answered
+        self.sizes = None
+        self.failed = False          # stat() raised (EACCES, ENOENT, ...)
+        self.finished = threading.Event()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        try:
+            self.thread.start()
+            self.started_ok = True
+        except RuntimeError:         # "can't start new thread": out of processes
+            self.started_ok = False
+
+    def _run(self):
+        try:
+            os.stat(self.mountpoint)
+            self.stat_ms = (time.monotonic() - self.started) * 1000.0
+            self.sizes = _sizes(os.statvfs(self.mountpoint))
+        except Exception:
+            if self.stat_ms is None:
+                self.failed = True
+        finally:
+            self.finished.set()
+
+    def result(self, timeout_sec):
+        """(is_responsive, response_ms, sizes) once it finished or its time
+        ran out; a thread still hanging then is abandoned. None when the
+        check could not start: nothing is known about the mount this run."""
+        if not self.started_ok:
+            return None
+        left = self.started + timeout_sec - time.monotonic()
+        self.finished.wait(max(left, 0))
+        stat_ms = self.stat_ms
+        if stat_ms is not None:      # stat() answered; sizes may not have
+            return True, stat_ms, (self.sizes if self.finished.is_set() else None)
+        if self.failed:
+            # Permission denied, ENOENT, etc. Mount exists per /proc/mounts
+            # but we can't access it: treat as unresponsive so it flags in
+            # the dashboard.
+            return False, (time.monotonic() - self.started) * 1000.0, None
+        return False, timeout_sec * 1000.0, None
+
+
 def _check_mount_responsive(mountpoint, timeout_sec):
     """Run stat() on a mountpoint with a hard wall-clock timeout.
 
-    Returns (is_responsive: bool, elapsed_ms: float).
-
-    Implementation uses SIGALRM (Unix). Cannot be called from
-    non-main threads. The collector invokes this probe in its own
-    subprocess, so that's fine.
+    Returns (is_responsive: bool, elapsed_ms: float, sizes), where sizes is
+    (total_bytes, used_bytes, avail_bytes) from statvfs() -- df's numbers --
+    or None. statvfs() runs only once stat() has answered, inside the same
+    timeout; a mount that stops answering between the two counts as
+    responsive (stat() answered) with no sizes. When no thread can be
+    started for the check, it runs here, without the timeout.
     """
-    def _handler(signum, frame):
-        raise StatTimeout()
+    check = _Check(mountpoint)
+    if check.started_ok:
+        return check.result(timeout_sec)
+    check._run()
+    if check.stat_ms is not None:
+        return True, check.stat_ms, check.sizes
+    return False, (time.monotonic() - check.started) * 1000.0, None
 
-    # Install alarm handler. Save previous handler to restore afterwards
-    # so repeated calls don't stack.
-    prev_handler = signal.signal(signal.SIGALRM, _handler)
-    # SIGALRM resolution is 1 second; use setitimer for sub-second precision.
-    signal.setitimer(signal.ITIMER_REAL, timeout_sec)
 
-    start = time.monotonic()
-    try:
-        os.stat(mountpoint)
-        elapsed_ms = (time.monotonic() - start) * 1000.0
-        return True, elapsed_ms
-    except StatTimeout:
-        elapsed_ms = timeout_sec * 1000.0
-        return False, elapsed_ms
-    except OSError as e:
-        # Permission denied, ENOENT, etc. Mount exists per /proc/mounts but
-        # we can't access it. That's still informative — report as
-        # responsive (stat returned) but include the error type in a
-        # future enhancement. For this minimal version: treat as
-        # unresponsive so it flags in the dashboard.
-        elapsed_ms = (time.monotonic() - start) * 1000.0
-        # Use a small negative sentinel to signal "error", but keep
-        # response_ms positive in output:
-        return False, elapsed_ms
-    finally:
-        # Cancel pending alarm and restore handler
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, prev_handler)
+def _sizes(st):
+    """(total, used, avail) bytes from a statvfs result, as df computes them;
+    None for a filesystem that reports no size (some pseudo and fuse ones)."""
+    if not st.f_blocks or not st.f_frsize:
+        return None
+    unit = st.f_frsize
+    return (st.f_blocks * unit, (st.f_blocks - st.f_bfree) * unit, st.f_bavail * unit)
 
 
 def probe(stat_timeout_sec=DEFAULT_STAT_TIMEOUT_SEC):
@@ -189,12 +230,19 @@ def probe(stat_timeout_sec=DEFAULT_STAT_TIMEOUT_SEC):
     hostname = socket.gethostname()
     collected_at = int(time.time())
 
-    for source, mountpoint, fstype, _options in _parse_proc_mounts():
-        if not _is_interesting(source, mountpoint, fstype):
+    # All at once: a dead server's mounts each hang their own thread.
+    checks = [(source, mountpoint, fstype, _Check(mountpoint))
+              for source, mountpoint, fstype, _options in _parse_proc_mounts()
+              if _is_interesting(source, mountpoint, fstype)]
+    for source, mountpoint, fstype, check in checks:
+        result = check.result(stat_timeout_sec)
+        if result is None:
+            # Not "not responding": unknown. Better no row than a false alarm.
+            print(f"{mountpoint}: not checked (no thread could be started)",
+                  file=sys.stderr)
             continue
-
-        is_responsive, response_ms = _check_mount_responsive(
-            mountpoint, stat_timeout_sec)
+        is_responsive, response_ms, sizes = result
+        total_bytes, used_bytes, avail_bytes = sizes or (None, None, None)
 
         yield {
             "hostname": hostname,
@@ -204,6 +252,9 @@ def probe(stat_timeout_sec=DEFAULT_STAT_TIMEOUT_SEC):
             "is_mounted": 1,
             "is_responsive": 1 if is_responsive else 0,
             "response_ms": round(response_ms, 2),
+            "total_bytes": total_bytes,
+            "used_bytes": used_bytes,
+            "avail_bytes": avail_bytes,
             "collected_at": collected_at,
             "probe_version": PROBE_VERSION,
         }
@@ -237,5 +288,21 @@ def main(argv=None):
     return 0
 
 
+def _run():
+    """As a script: a check still hanging must not keep the process (and the
+    collector's ssh session) open, so it ends with os._exit()."""
+    try:
+        code = main()
+    except SystemExit as e:
+        code = 0 if e.code is None else e.code if isinstance(e.code, int) else 1
+    except BaseException:
+        import traceback
+        traceback.print_exc()
+        code = 1
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _run()

@@ -154,6 +154,36 @@ nomad per-user --mask                # user and command names replaced, for shar
 
 Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
 
+## Workstation mounts
+
+Each `workstation` run also checks every mount on each machine (NFS, and
+local filesystems other than the system's own). A small probe goes over the
+same SSH connection to the machine's own `python3` (3.6 or later), so
+nothing is installed on the workstations. It checks all mounts at once, each
+in its own thread with a 3-second limit, and records whether `stat()`
+answered (`workstation_mount_state`: `is_responsive`, `response_ms`). A call
+on a dead NFS server cannot be interrupted, so a thread still waiting at the
+limit is abandoned, the mount recorded as not responding, and the probe ends
+anyway: a dead NAS costs one limit, and the other mounts are still reported.
+
+Since 1.7.24 it also records the size of the filesystem behind each mount,
+as `df` shows it: `total_bytes`, `used_bytes` and `avail_bytes` (what users
+can still write). These are empty for a mount that did not answer, and in
+rows from before 1.7.24. For an NFS mount they are the server's figures for
+that export, so the lab machines report their NAS's space without nomad
+reaching the NAS. "Used" is the whole export's, whoever wrote it.
+
+Exports that are datasets of one ZFS pool each report their own used space
+but share the pool's free space, and each one's total is its own used space
+plus that shared free space. So their totals overlap and must not be added
+up. When a machine reads the same free space (within 0.1%) for two exports
+of one server in one run, `nomad console roles` says "free space shared
+with ...", leaves out each one's total, and adds a line with their space
+together: their used space summed, the free space counted once.
+
+Only the collecting host needs 1.7.24 for the sizes; the hub's combined
+database gains the columns at its next sync.
+
 ## Storage servers
 
 ```toml

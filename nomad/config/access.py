@@ -36,6 +36,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,185 @@ def workstation_tags(conn) -> Callable[[str], set]:
         if isinstance(dept, str) and dept.strip():
             by_group.setdefault(dept.strip(), set()).add(host)
     return lambda group: set(by_group.get(group, ()))
+
+
+@dataclass(frozen=True)
+class ExportSize:
+    """An export's size as a lab machine mounting it last read it (the mount
+    probe's statvfs(), df's numbers), in bytes. ``used`` is the whole
+    export's, whoever wrote it. ``shares_free_with``: other exports of the
+    same server that a machine read the same free space for at the same
+    moment -- most likely datasets of one pool, whose free space is one and
+    must not be added up."""
+    when: str
+    host: str
+    total: int
+    used: int
+    avail: int
+    shares_free_with: tuple = ()
+
+    @property
+    def used_pct(self) -> int | None:
+        """Percent used as df shows it: used / (used + available), rounded up."""
+        return _pct(self.used, self.avail)
+
+
+def _pct(used: int, avail: int) -> int | None:
+    whole = used + avail
+    return None if whole <= 0 else -(-used * 100 // whole)
+
+
+@dataclass(frozen=True)
+class SharedFree:
+    """Exports that share their free space, as one collection run (``when``)
+    read them all: together they use ``used`` and have ``avail`` left."""
+    exports: tuple
+    used: int
+    avail: int
+    when: str
+
+    @property
+    def used_pct(self) -> int | None:
+        return _pct(self.used, self.avail)
+
+
+_SIZE_COLUMNS = {"source", "timestamp", "hostname", "is_responsive",
+                 "total_bytes", "used_bytes", "avail_bytes"}
+_SIZED = ("total_bytes IS NOT NULL AND used_bytes IS NOT NULL AND avail_bytes IS NOT NULL "
+          "AND is_responsive = 1")
+# Two statvfs() calls a probe makes a moment apart see a busy pool's free
+# space move a little: 0.1%, at most 1 GiB. Separate pools rarely come this
+# close; when they do, the free space is counted once -- less than there is,
+# never more.
+SHARED_FREE_TOLERANCE = 0.001
+SHARED_FREE_MAX_GAP = 2 ** 30
+
+
+def _same_free(a, b) -> bool:
+    return (a > 0 and b > 0 and
+            abs(a - b) <= min(max(a, b) * SHARED_FREE_TOLERANCE, SHARED_FREE_MAX_GAP))
+
+
+def export_sizes(conn, names: Iterable[str]) -> dict[str, ExportSize]:
+    """name -> its latest size, for each "server:/export" among ``names`` that
+    has one. A server named alone has no single size; a database from before
+    the sizes were collected (1.7.24) gives none.
+
+    Exports of one server count as sharing their free space when any machine
+    read the same free space (within SHARED_FREE_TOLERANCE) for them in one
+    run, at the time of either one's latest size; sharing holds both ways and
+    chains (A with B and B with C puts all three together).
+    """
+    wanted = sorted({n for n in names if isinstance(n, str) and n.partition(":")[2]})
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_mount_state)")}
+    if not wanted or not _SIZE_COLUMNS <= cols:
+        return {}
+    latest: dict[str, tuple] = {}
+    for source in wanted:
+        # One record per export, the latest (ties: by machine name); the
+        # hub indexes (source, timestamp) for this.
+        row = conn.execute(
+            "SELECT timestamp, hostname, total_bytes, used_bytes, avail_bytes "
+            f"FROM workstation_mount_state WHERE source = ? AND {_SIZED} "
+            "ORDER BY timestamp DESC, hostname LIMIT 1", (source,)).fetchone()
+        if row:
+            latest[source] = (str(row[0]),) + tuple(row[1:])
+
+    parent = {s: s for s in latest}
+
+    def top(s):
+        while parent[s] != s:
+            s = parent[s]
+        return s
+
+    by_server: dict[str, list] = {}
+    for source in latest:
+        by_server.setdefault(source.partition(":")[0], []).append(source)
+    for group in by_server.values():
+        if len(group) < 2:
+            continue
+        marks = ", ".join("?" * len(group))
+        for when in sorted({latest[s][0] for s in group}):
+            seen: dict[str, dict] = {}
+            for host, source, avail in conn.execute(
+                    "SELECT hostname, source, avail_bytes FROM workstation_mount_state "
+                    f"WHERE timestamp = ? AND source IN ({marks}) AND {_SIZED}",
+                    (when, *group)):
+                seen.setdefault(host, {})[source] = avail
+            for read in seen.values():
+                found = sorted(read)
+                for i, a in enumerate(found):
+                    for b in found[i + 1:]:
+                        if _same_free(read[a], read[b]):
+                            parent[top(a)] = top(b)
+
+    members: dict[str, list] = {}
+    for source in latest:
+        members.setdefault(top(source), []).append(source)
+    return {source: ExportSize(when, host, total, used, avail,
+                               tuple(sorted(set(members[top(source)]) - {source})))
+            for source, (when, host, total, used, avail) in latest.items()}
+
+
+def _one_run(conn, exports: tuple, upto: str):
+    """(timestamp, {export: (total, used, avail)}) of the latest run, at or
+    before ``upto`` and within a day of it, that read all of ``exports``;
+    None when there is none. Each export's figures come, where it can, from
+    the machine that read most of them (its reads were a moment apart)."""
+    marks = ", ".join("?" * len(exports))
+    when = upto
+    found = conn.execute(
+        "SELECT COUNT(DISTINCT source) FROM workstation_mount_state "
+        f"WHERE timestamp = ? AND source IN ({marks}) AND {_SIZED}",
+        (upto, *exports)).fetchone()[0]
+    if found < len(exports):
+        try:
+            since = (datetime.fromisoformat(upto[:19]) - timedelta(days=1)).isoformat()
+        except ValueError:
+            return None
+        row = conn.execute(
+            "SELECT timestamp FROM workstation_mount_state "
+            f"WHERE source IN ({marks}) AND {_SIZED} AND timestamp <= ? AND timestamp >= ? "
+            "GROUP BY timestamp HAVING COUNT(DISTINCT source) = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (*exports, upto, since, len(exports))).fetchone()
+        if row is None:
+            return None
+        when = str(row[0])
+    by_host: dict[str, dict] = {}
+    for host, source, total, used, avail in conn.execute(
+            "SELECT hostname, source, total_bytes, used_bytes, avail_bytes "
+            "FROM workstation_mount_state "
+            f"WHERE timestamp = ? AND source IN ({marks}) AND {_SIZED}",
+            (when, *exports)):
+        by_host.setdefault(host, {}).setdefault(source, (total, used, avail))
+    hosts = sorted(by_host, key=lambda h: (-len(by_host[h]), h))
+    figures = {e: next(by_host[h][e] for h in hosts if e in by_host[h]) for e in exports}
+    return when, figures
+
+
+def shared_free(conn, sizes: dict[str, ExportSize]) -> list[SharedFree]:
+    """The groups of exports that share their free space, each once, with
+    their space together as one run read them all (the latest such run, at
+    or before the oldest of their latest readings): used space summed, and
+    the free space counted once (the least read). Exports read with exactly
+    the same figures are one filesystem (a directory of an export, listed
+    too) and count once. A group no run read in full gets no line."""
+    groups, done = [], set()
+    for source in sorted(sizes):
+        size = sizes[source]
+        if not size.shares_free_with or source in done:
+            continue
+        exports = tuple(sorted((source,) + size.shares_free_with))
+        done.update(exports)
+        reading = _one_run(conn, exports, min(sizes[e].when for e in exports))
+        if reading is None:
+            continue
+        when, figures = reading
+        distinct = set(figures.values())
+        groups.append(SharedFree(exports, sum(used for _, used, _ in distinct),
+                                 min(avail for _, _, avail in distinct), when))
+    return groups
 
 
 def visible_people(access: Access, netid, members_of: Callable[[str], Iterable[str]],
