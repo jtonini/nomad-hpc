@@ -197,6 +197,28 @@ your score in each dimension; `--json` gives everything as JSON; admins can
 pass `--user`. With jobs but none measured, it says so instead of showing a
 score.
 
+Each suggested value says where it comes from: for memory and time, how many
+of the flagged jobs it fits ("fits what each of the 5 flagged jobs used, with
+a 2x safety buffer"; for one job, "fits what the flagged job used"); for
+cores and GPUs, how many flagged jobs needed it, from what they used.
+
+#### Workstation sessions
+
+Your workstation sessions of the last 7 days can add one piece of advice,
+listed first:
+
+- **Memory**: two or more sessions that used at least 80% of the
+  workstation's memory for 12 hours or more, or ten or more that used that
+  much at any length. Depending on the cluster's nodes it says to move to the
+  cluster (a node with at least twice the peak), that the workstation is the
+  right tool, or that the work is too big for both.
+- **Long computation**: sessions of 12 hours or more that kept at least half
+  the workstation's cores (and at least 2) busy on average, adding up to a
+  day or more. One long run counts. It says to run such work on the cluster,
+  with a batch script sized from the session: cores it kept busy, twice its
+  memory peak, and 1.5 times its length. A site without a cluster gets no
+  such advice.
+
 ## Setting Up Groups
 
 NØMAÐ uses Linux groups for course/lab membership. To track a class:

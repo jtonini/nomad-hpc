@@ -800,6 +800,11 @@ class SessionFingerprint:
     hostname: str
     session_epoch: int
     dimensions: dict[str, DimensionScore] = field(default_factory=dict)
+    # How hard the session computed: cores kept busy on average over its span
+    # (None when the snapshots don't say), the host's cores, and the span.
+    busy_cores: float | None = None
+    host_cores: int | None = None
+    span_hours: float | None = None
 
     @property
     def overall(self) -> float:
@@ -973,6 +978,18 @@ def score_duration_fit(session: dict, host_state: dict) -> DimensionScore:
     )
 
 
+def session_busy_cores(session: dict) -> float | None:
+    """Cores the session kept busy on average: CPU time between its first
+    and last snapshot (the user's slice counter, in microseconds) over the
+    wall time between them. None without two readings of the counter."""
+    last = session.get("cpu_usage_usec")
+    first = session.get("cpu_usage_usec_first")
+    span = session.get("span_hours")
+    if last is None or first is None or not span or span <= 0 or last < first:
+        return None
+    return (last - first) / 1e6 / (span * 3600)
+
+
 def score_session(session: dict, host_state: dict) -> SessionFingerprint:
     """
     Build a complete fingerprint for one workstation session.
@@ -990,6 +1007,9 @@ def score_session(session: dict, host_state: dict) -> SessionFingerprint:
             "memory_pressure": score_memory_pressure(session, host_state),
             "duration_fit":    score_duration_fit(session, host_state),
         },
+        busy_cores=session_busy_cores(session),
+        host_cores=host_state.get("cpu_count") or None,
+        span_hours=session.get("span_hours"),
     )
 
 

@@ -301,6 +301,7 @@ def _load_user_sessions(
               SELECT hostname, username, uid, session_epoch,
                      MAX(memory_peak_bytes) AS peak_memory_bytes,
                      MAX(cpu_usage_usec)    AS cpu_usage_usec,
+                     MIN(cpu_usage_usec)    AS cpu_usage_usec_first,
                      MIN(timestamp)         AS first_seen,
                      MAX(timestamp)         AS last_seen,
                      COUNT(*)               AS samples
@@ -311,7 +312,7 @@ def _load_user_sessions(
               GROUP BY hostname, username, uid, session_epoch
             )
             SELECT s.hostname, s.username, s.uid, s.session_epoch,
-                   s.peak_memory_bytes, s.cpu_usage_usec,
+                   s.peak_memory_bytes, s.cpu_usage_usec, s.cpu_usage_usec_first,
                    s.first_seen, s.last_seen, s.samples,
                    (julianday(s.last_seen) - julianday(s.first_seen)) * 24
                        AS span_hours,
@@ -342,6 +343,7 @@ def _split_session_fields(row: dict) -> tuple[dict, dict]:
         "session_epoch":     row.get("session_epoch"),
         "peak_memory_bytes": row.get("peak_memory_bytes"),
         "cpu_usage_usec":    row.get("cpu_usage_usec"),
+        "cpu_usage_usec_first": row.get("cpu_usage_usec_first"),
         "samples":           row.get("samples"),
         "span_hours":        row.get("span_hours"),
     }

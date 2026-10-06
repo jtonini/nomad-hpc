@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import math
 import statistics
 from collections import Counter
 from itertools import groupby
@@ -109,6 +110,14 @@ VERDICT_DURATION_FIT_MAX    = 30.0   # score <= 30 means span >= 12h
 VERDICT_MIN_SESSIONS        = 2      # pattern, not a one-off
 VERDICT_CHRONIC_MIN_SESSIONS = 10   # many pressured sessions (any duration) = chronic
 VERDICT_HEADROOM_MIN        = 2.0    # cluster tier must be >= 2x peak to fire Verdict A
+# Long compute without memory pressure: sessions of 12 h or more that kept at
+# least half the workstation's cores busy (and 2 or more), adding up to a day
+# or more in the window. One long run counts: a simulation left running for
+# three days is one session.
+VERDICT_COMPUTE_MIN_SPAN_HOURS  = 12.0
+VERDICT_COMPUTE_HOST_SHARE      = 0.5
+VERDICT_COMPUTE_MIN_CORES       = 2.0
+VERDICT_COMPUTE_MIN_TOTAL_HOURS = 24.0
 
 
 
@@ -518,12 +527,17 @@ def _aggregate_mode(suggestions: list[Suggestion]) -> tuple[float, str, str]:
     values = [s.suggested_value for s in suggestions]
     counter = Counter(values)
     modal_value, modal_count = counter.most_common(1)[0]
-    # Plain-language: describe WHY this value without a raw fraction that
-    # collides with the card's "N of M jobs flagged" count.
-    if modal_count == len(suggestions):
-        rationale = "every flagged job requested the same, so this fits them all"
+    # Each value is one job's own suggestion, from what it used. This used to
+    # read "the most common request across your flagged jobs": the value is
+    # what the jobs needed, not what they asked for.
+    n = len(suggestions)
+    if n == 1:
+        rationale = "what the flagged job needed, from what it used"
+    elif modal_count == n:
+        rationale = f"what each of the {n} flagged jobs needed, from what they used"
     else:
-        rationale = "the most common request across your flagged jobs"
+        rationale = (f"what {modal_count} of the {n} flagged jobs needed, "
+                     "from what they used")
     return modal_value, "mode", rationale
 
 
@@ -546,8 +560,18 @@ def _aggregate_quantile(
     target = p95 * buffer_factor
     suggested_value = rounder(target)
     pct_label = int(USAGE_QUANTILE * 100)
-    rationale = (f"covers {pct_label}% of your jobs with "
-                 f"{buffer_factor:g}x safety buffer")
+    # Say how many jobs the value actually fits. "covers 95% of your jobs"
+    # was printed for a single job, where a percentile means nothing.
+    n = len(usages)
+    fits = sum(1 for u in usages if u <= suggested_value)
+    buffer = f"with a {buffer_factor:g}x safety buffer"
+    if n == fits == 1:
+        rationale = f"fits what the flagged job used, {buffer}"
+    elif fits == n:
+        rationale = f"fits what each of the {n} flagged jobs used, {buffer}"
+    else:
+        rationale = (f"fits what {fits} of the {n} flagged jobs used, {buffer} "
+                     f"over the {pct_label}th percentile")
     return suggested_value, f"p{pct_label}_with_{buffer_factor:g}x_buffer", rationale
 
 
@@ -1069,7 +1093,8 @@ def _build_cluster_promotion_verdict(
                 continue
             chronic.append((fp, peak_b / 1024**3, host_b / 1024**3, span_h))
         if len(chronic) < VERDICT_CHRONIC_MIN_SESSIONS:
-            return None
+            # No memory story: maybe a compute one.
+            return _build_compute_verdict(fingerprints, cluster_capacities, db_path)
         qualifying = chronic
         reason = "chronic"
 
@@ -1127,6 +1152,109 @@ def _build_cluster_promotion_verdict(
         kind="verdict",
         context=context,
     )
+
+def _compute_sessions(fingerprints: list[SessionFingerprint]) -> list[SessionFingerprint]:
+    """Sessions of VERDICT_COMPUTE_MIN_SPAN_HOURS or more that kept at least
+    VERDICT_COMPUTE_HOST_SHARE of the host's cores (and
+    VERDICT_COMPUTE_MIN_CORES) busy on average."""
+    out = []
+    for fp in fingerprints:
+        if fp.busy_cores is None or not fp.host_cores or not fp.span_hours:
+            continue
+        if fp.span_hours < VERDICT_COMPUTE_MIN_SPAN_HOURS:
+            continue
+        if fp.busy_cores < max(VERDICT_COMPUTE_MIN_CORES,
+                               VERDICT_COMPUTE_HOST_SHARE * fp.host_cores):
+            continue
+        out.append(fp)
+    return out
+
+
+def _build_compute_verdict(
+    fingerprints: list[SessionFingerprint],
+    cluster_capacities: list[dict[str, Any]],
+    db_path: str | None = None,
+) -> Issue | None:
+    """Long, CPU-heavy workstation sessions without memory pressure: the
+    memory verdict never saw them. Fires when such sessions add up to
+    VERDICT_COMPUTE_MIN_TOTAL_HOURS in the window and there is a cluster to
+    move to (a workstation-only site gets nothing: there is nowhere better)."""
+    heavy = _compute_sessions(fingerprints)
+    hours = sum(fp.span_hours for fp in heavy)
+    if not heavy or hours < VERDICT_COMPUTE_MIN_TOTAL_HOURS or not cluster_capacities:
+        return None
+
+    headline = max(heavy, key=lambda fp: fp.busy_cores)
+    busy, host_cores = headline.busy_cores, headline.host_cores
+    longest = max(fp.span_hours for fp in heavy)
+    peaks = [(fp.dimensions.get("memory_pressure").raw or {}).get("peak_bytes", 0)
+             for fp in heavy if fp.dimensions.get("memory_pressure") is not None]
+    peak_gb = max(peaks, default=0) / 1024 ** 3
+
+    # Where to: the smallest node with room for twice the memory peak.
+    kind, target = _select_verdict_kind(max(peak_gb, 0.5), 0.0, cluster_capacities)
+    if kind != "promote" or target is None:
+        return None
+    partitions = (target.get("partitions") or "").split(",")
+    partition = next((p for p in partitions if p and p != "all"),
+                     partitions[0] if partitions else "")
+
+    cores = max(1, math.ceil(busy))
+    mem_gb = max(1, math.ceil(peak_gb * 2))
+    time_h = min(longest * 1.5, 7 * 24)
+    days, hh = int(time_h // 24), int(time_h % 24) + (1 if time_h % 1 else 0)
+    if hh == 24:
+        days, hh = days + 1, 0
+    time_str = f"{days}-{hh:02d}:00:00" if days else f"{hh:02d}:00:00"
+    snippet = "\n".join(
+        [f"#SBATCH --ntasks={cores}", f"#SBATCH --mem={mem_gb}G", f"#SBATCH --time={time_str}"]
+        + ([f"#SBATCH --partition={partition}"] if partition else []))
+
+    n = len(heavy)
+    runs = "one session" if n == 1 else f"{n} sessions"
+    detail = (
+        f"In your recent sessions, long computation ran for {hours:.0f} hours "
+        f"({runs}, the longest {longest:.0f} h), at its heaviest keeping about "
+        f"{busy:.0f} of {headline.hostname}'s {host_cores} cores busy. Work like "
+        f"this is what {target['cluster']} is for: a batch job keeps running "
+        f"through disconnects, reboots and other people's work, and the "
+        f"workstation stays usable for whoever sits at it."
+    )
+    wait_s = _load_partition_wait(db_path).get((target.get("cluster"), partition)) \
+        if db_path is not None else None
+    if wait_s is not None:
+        detail += f" Jobs there typically wait ~{_format_wait(wait_s / 3600)} to start."
+
+    context = {
+        "verdict": "promote",
+        "reason": "compute",
+        "busy_cores": round(busy, 1),
+        "host_cores": host_cores,
+        "compute_hours": round(hours, 1),
+        "peak_gb": peak_gb,
+        "host_gb": 0.0,
+        "span_hours": longest,
+        "session_count": n,
+        "target_cluster": target["cluster"],
+        "target_memory_gb": target["memory_gb"],
+        "target_partition": partition,
+        "headroom_ratio": None,
+        "sbatch_snippet": snippet,
+        "queue": None,
+    }
+    return Issue(
+        dimension="Cluster Recommended For Long Runs",
+        dimension_key="cluster_promotion",
+        affected_jobs=n,
+        total_applicable=len(fingerprints),
+        avg_score=0.0,
+        severity="medium",
+        trajectory="stable",
+        rationale=detail,
+        kind="verdict",
+        context=context,
+    )
+
 
 def user_insights(
     db_path: str,
