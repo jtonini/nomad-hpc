@@ -252,16 +252,34 @@ class ProcessAcctRecord:
 
 
 
+# Printed over ssh just before a command, so that what the login itself
+# prints first (a banner from a shell startup file that doesn't check for
+# an interactive shell) is not read as the command's output.
+OUTPUT_MARK = "__NOMAD_OUTPUT_BEGINS__"
+
+
+def _after_mark(out: str) -> str:
+    """The output after OUTPUT_MARK's line; all of it when there is none."""
+    head, mark, rest = out.partition(OUTPUT_MARK + "\n")
+    if mark:
+        return rest
+    if out.rstrip("\n").endswith(OUTPUT_MARK):      # a command with no output
+        return ""
+    return out
+
+
 def run_command(cmd: str, host: str | None = None, timeout: int = 30) -> str:
     """Run command locally or via SSH."""
-    if host and host not in ('localhost', '127.0.0.1', socket.gethostname()):
-        cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {host} '{cmd}'"
+    remote = bool(host and host not in ('localhost', '127.0.0.1', socket.gethostname()))
+    if remote:
+        cmd = f"ssh -o ConnectTimeout=10 -o BatchMode=yes {host} 'echo {OUTPUT_MARK}; {cmd}'"
 
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=timeout
         )
-        return result.stdout.strip()
+        out = _after_mark(result.stdout) if remote else result.stdout
+        return out.strip()
     except subprocess.TimeoutExpired:
         raise CollectionError(f"Command timed out: {cmd[:50]}...")
     except Exception as e:
@@ -305,13 +323,14 @@ def run_python_probe(
     """
     script = _load_probe_source(probe_name)
 
-    if host and host not in ('localhost', '127.0.0.1', socket.gethostname()):
+    remote = bool(host and host not in ('localhost', '127.0.0.1', socket.gethostname()))
+    if remote:
         argv = [
             "ssh",
             "-o", "ConnectTimeout=10",
             "-o", "BatchMode=yes",
             host,
-            "python3 -",
+            f"echo {OUTPUT_MARK}; python3 -",
         ]
     else:
         argv = ["python3", "-"]
@@ -338,7 +357,7 @@ def run_python_probe(
             f"{probe_name} on {host or 'local'} exited "
             f"{result.returncode}: {err[:200]}"
         )
-    return result.stdout.strip()
+    return (_after_mark(result.stdout) if remote else result.stdout).strip()
 
 
 def parse_uptime(output: str) -> tuple[int, float, float, float]:

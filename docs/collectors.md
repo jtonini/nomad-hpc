@@ -154,6 +154,17 @@ nomad per-user --mask                # user and command names replaced, for shar
 
 Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
 
+## Workstations over SSH
+
+`workstation` runs its commands and probes on each machine over SSH
+(`BatchMode`: a key, no password prompt), as the user `~/.ssh/config` gives
+for that host, and runs them directly on a machine listed under the
+collecting host's own name. Some lab machines print a banner on every login,
+interactive or not, from a shell startup file. Since 1.7.27 nomad prints a
+marker before each command and reads only what follows it, so such a banner
+is never read as the machine's figures. To keep the banner off
+non-interactive logins anyway, wrap it in `if [[ $- == *i* ]]; then ... fi`.
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and
