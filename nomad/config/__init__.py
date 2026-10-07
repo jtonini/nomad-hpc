@@ -9,6 +9,8 @@ CLI, the dashboard and the Console always read the same file the same way.
 import logging
 from pathlib import Path
 
+from nomad.config.problems import ConfigError
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG_PATHS = [
@@ -27,16 +29,23 @@ def get_default_config_path() -> Path:
     """Get path to packaged default config."""
     return Path(__file__).parent / 'default.toml'
 
-def read_toml(path: Path | str) -> dict:
-    """Parse one TOML file. Raises if it is missing or cannot be parsed.
+def read_toml(path: Path | str, strict: bool = False) -> dict:
+    """Parse one TOML file. Raises OSError if it can't be opened, and
+    ConfigError (a ValueError) if it can't be parsed: the line, and what is
+    wrong there in words ("`leads` is set twice in [console.labs] (first on
+    line 209)").
 
     The parser is tomllib (standard library from Python 3.11). On Python 3.10,
     or for a file that only the older `toml` package accepts, `toml` is used
     instead, so a config that worked before keeps working; the second case is
-    logged, since the file should be fixed.
+    logged, since the file should be fixed. strict=True: tomllib's answer only.
     """
+    from nomad.config.problems import describe_safely as describe, unreadable
     path = Path(path)
-    text = path.read_text(encoding='utf-8')
+    try:
+        text = path.read_text(encoding='utf-8')
+    except UnicodeDecodeError as exc:
+        raise unreadable(path, exc) from exc
     try:
         import tomllib
     except ModuleNotFoundError:          # Python 3.10
@@ -47,52 +56,91 @@ def read_toml(path: Path | str) -> dict:
             return tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
             first_error = exc
+            if strict:
+                raise describe(path, text, exc) from exc
     try:
         import toml
     except ModuleNotFoundError:
         if first_error is not None:
-            raise first_error
+            raise describe(path, text, first_error) from first_error
         raise
     try:
         data = toml.loads(text)
-    except Exception:
-        if first_error is not None:
-            raise first_error
-        raise
+    except Exception as exc:
+        err = first_error if first_error is not None else exc
+        raise describe(path, text, err) from err
     if first_error is not None:
-        logger.warning("%s is not valid TOML (%s); read it with the older toml "
-                       "parser instead. Please correct the file.", path, first_error)
+        logger.warning("%s; read with the older toml parser instead. Please correct "
+                       "the file.", describe(path, text, first_error))
     return data
 
 def load_config(path: Path | None = None) -> dict:
     """
     Load NØMAÐ configuration as a dict.
 
-    Resolution order:
+    Resolution order -- the first file that exists is the configuration:
       1. Explicit path argument
       2. ~/.config/nomad/nomad.toml
       3. /etc/nomad/nomad.toml
       4. packaged default (nomad/config/default.toml)
 
-    Returns an empty dict if no config is found and the packaged default
-    can't be read — never raises, so callers can rely on it as a soft
-    accessor for site policy. A file that exists but cannot be read is
-    logged and skipped.
+    Never raises, so callers can rely on it as a soft accessor for site
+    policy. A file that exists but can't be read is logged as an error and
+    NOT replaced by the next one (an /etc file behind a broken ~/.config one
+    may hold other roles and labs): only the packaged defaults are used, so
+    none of the site's settings apply -- which is what check_config() and
+    `nomad config check` report. Returns {} if even those can't be read.
     """
     candidates: list[Path] = []
     if path is not None:
         candidates.append(Path(path))
     candidates.extend(DEFAULT_CONFIG_PATHS)
-    candidates.append(get_default_config_path())
+    default = get_default_config_path()
+    candidates.append(default)
 
     for p in candidates:
         try:
-            if p.exists():
-                return read_toml(p)
-        except Exception as exc:
-            logger.warning("Skipping config %s: %s", p, exc)
+            if not p.exists():
+                continue
+        except OSError:
             continue
+        try:
+            return read_toml(p)
+        except Exception as exc:
+            # An error, not a note: everything the file says -- roles, labs,
+            # collectors -- is now off. check_config() says what to fix.
+            logger.error("Can't read config %s; none of its settings apply",
+                         exc if isinstance(exc, ConfigError) else f"{p}: {exc}")
+            if p != default:
+                try:
+                    return read_toml(default)
+                except Exception:
+                    pass
+            return {}
     return {}
+
+
+def check_config(path: Path | str | None = None) -> ConfigError | None:
+    """What is wrong with the nomad.toml nomad would read, or None when it
+    reads (or there is none). ``path``: that file; otherwise the first of
+    DEFAULT_CONFIG_PATHS that exists -- the one load_config() would read.
+
+    For anything that should say so out loud when the file is broken (the
+    CLI at start, `nomad config check`, the Console's pages): load_config()
+    itself never raises; for a file it can't read it uses only the packaged
+    defaults, so this is the file whose settings are then missing.
+    """
+    from nomad.config.problems import unreadable
+    p = Path(path).expanduser() if path else find_config()
+    if p is None or not p.exists():
+        return None
+    try:
+        read_toml(p)
+    except ConfigError as exc:
+        return exc
+    except OSError as exc:
+        return unreadable(p, exc)
+    return None
 
 def support_settings(config: dict) -> dict:
     """Where people's questions go: [support], with the older names in

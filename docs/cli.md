@@ -12,6 +12,7 @@
 | `nomad demo` | Demo mode with synthetic data |
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |
+| `nomad config check` | Does nomad.toml read? If not, the line and what is wrong ([Configuration](config.md)) |
 
 ## Educational Analytics
 

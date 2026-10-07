@@ -9,6 +9,34 @@ NØMAÐ uses TOML configuration files.
 | User | `~/.config/nomad/nomad.toml` |
 | System | `/etc/nomad/nomad.toml` |
 
+### When the file can't be read
+
+A file with a mistake in it is not read at all: nomad then runs with **none**
+of its settings (database, collectors, roles, labs), and the Console shows no
+PIs or labs. It is not replaced by the next file either (`/etc/nomad/nomad.toml`
+behind a broken `~/.config` one): only nomad's packaged defaults apply. So
+nomad says so instead of carrying on quietly:
+
+- every command prints, on stderr, which file and which line (when nobody is
+  at a terminal, as under cron, once an hour for the same problem);
+- `nomad syscheck` marks it ✗, and `nomad console roles` says the Console has
+  no labs until it is fixed;
+- `nomad lab` refuses to edit it.
+
+After editing the file by hand, check it:
+
+```
+$ nomad config check
+✗ /home/hpcadmin/.config/nomad/nomad.toml can't be read
+  line 211: `leads` is set twice in [console.labs] (first on line 209); keep one of them
+    209 | leads = { jdoe = ["pi1$"] }
+  > 211 | leads = {}
+```
+
+A key set twice in the same table (as above), or a table declared twice, is
+the usual cause. The exit status is 1 while the file can't be read, 0 once it
+does; the messages name keys and tables, never values from the file.
+
 ## Example Configuration
 ```toml
 # nomad.toml

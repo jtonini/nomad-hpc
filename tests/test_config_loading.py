@@ -35,14 +35,21 @@ def test_read_toml(tmp_path):
         nc.read_toml(bad)
 
 
-def test_load_config_skips_an_unreadable_file_and_says_so(tmp_path, config_paths, caplog):
+def test_an_unreadable_file_is_not_replaced_by_another_site_file(tmp_path, config_paths, caplog):
+    """A broken ~/.config file used to be skipped for /etc's, which may hold
+    other roles and labs. Now none of the site's settings apply -- only the
+    packaged defaults -- and it is an error naming the file and the line."""
     user, system = config_paths
     user.write_text("this is = = not toml\n")
     system.write_text('[support]\nemail = "hpc@example.edu"\n')
     with caplog.at_level(logging.WARNING, logger="nomad.config"):
         cfg = nc.load_config()
-    assert cfg == {"support": {"email": "hpc@example.edu"}}
-    assert "Skipping config" in caplog.text
+    assert "support" not in cfg
+    assert cfg == nc.read_toml(nc.get_default_config_path())
+    assert "Can't read config" in caplog.text and "line 1" in caplog.text
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
+    # What check_config() reports is the file load_config() gave up on.
+    assert nc.check_config().path == str(user)
 
 
 def test_user_config_wins_over_system(config_paths):

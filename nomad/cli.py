@@ -55,6 +55,36 @@ def load_config(config_path: Path) -> dict[str, Any]:
     return read_toml(config_path)
 
 
+def _config_warning_due(err) -> bool:
+    """At a terminal: always. Otherwise (cron mails every run's output) once
+    an hour for the same problem, and at once for a different one."""
+    if sys.stderr.isatty():
+        return True
+    import hashlib
+    import time
+    stamp = Path.home() / '.cache' / 'nomad' / 'config-warning'
+    key = hashlib.sha256(str(err).encode()).hexdigest()[:16]
+    try:
+        if (stamp.exists() and stamp.read_text().strip() == key
+                and time.time() - stamp.stat().st_mtime < 3600):
+            return False
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(key + "\n")
+    except OSError:
+        pass
+    return True
+
+
+def _warn_config_unreadable(err) -> None:
+    """One message on stderr: which file, which line, and what that means."""
+    if not _config_warning_due(err):
+        return
+    click.echo(click.style(f"nomad: can't read {err.path}", fg='red', bold=True)
+               + click.style(f" -- {err.short}", fg='red'), err=True)
+    click.echo("  Running WITHOUT it: none of its settings apply (database, collectors, "
+               "roles, labs). Details: nomad config check", err=True)
+
+
 def resolve_config_path() -> str:
     """Find config file: user path first, then system path (nomad.config)."""
     from nomad.config import DEFAULT_CONFIG_PATHS, find_config
@@ -119,13 +149,24 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
     # The file `nomad lab` edits: this one, even if it doesn't exist yet or
     # doesn't load -- never the packaged default the fallback below reads.
     ctx.obj['config_target'] = str(config_file.expanduser())
+    ctx.obj['config_error'] = None
     if config_file.exists():
         try:
             ctx.obj['config'] = load_config(config_file)
             ctx.obj['config_path'] = config_path
-        except Exception:
+        except Exception as exc:
+            from nomad.config import ConfigError
+            from nomad.config.problems import unreadable
             ctx.obj['config'] = {}
             ctx.obj['config_path'] = None
+            ctx.obj['config_error'] = (exc if isinstance(exc, ConfigError) else
+                                       unreadable(config_file, exc) if isinstance(exc, OSError)
+                                       else ConfigError(config_file, str(exc)))
+            # Out loud, on stderr (cron mails it; $(...) doesn't capture it):
+            # running on with none of the file's settings is otherwise silent.
+            # These commands say so themselves, in their own terms.
+            if ctx.invoked_subcommand not in ('config', 'console', 'lab', 'syscheck'):
+                _warn_config_unreadable(ctx.obj['config_error'])
     else:
         # No user/system config: fall back to the packaged default so shipped
         # defaults (e.g. [energy]) are honored instead of an empty config.
@@ -1239,6 +1280,12 @@ def syscheck(ctx: click.Context) -> None:
                         warnings += 1
             except Exception:
                 pass
+    elif ctx.obj.get('config_error') is not None:
+        err = ctx.obj['config_error']
+        click.echo(f"  {click.style('✗', fg='red')} Config can't be read: {err.path}")
+        click.echo(f"    {err.short}")
+        click.echo("    → Details: nomad config check (nothing in it applies until it reads)")
+        errors += 1
     else:
         expected = resolve_config_path()
         click.echo(f"  {click.style('✗', fg='red')} Config not found: {expected}")
@@ -5018,9 +5065,16 @@ def console_roles(ctx, netid, db, mask):
                                      workstation_tags)
     config = ctx.obj.get('config', {}) or {}
     acc = access_from(config, log=False)
+    err = ctx.obj.get('config_error')
+    if err is not None:
+        click.echo(click.style(f"! {err.path} can't be read -- {err.short}", fg='red'))
+        click.echo(click.style("  The Console reads the same file: until it is fixed nobody "
+                               "is a PI there, and no lab, role or storage name below "
+                               "applies.", fg='red'))
     show = (lambda names: f"{len(names)}") if mask else \
         (lambda names: f"{len(names)}" + (f" ({', '.join(sorted(names))})" if names else ""))
-    click.echo(f"Console access, from {ctx.obj.get('config_path') or 'no config file'}")
+    click.echo("Console access, from " + (ctx.obj.get('config_path') or (
+        f"nothing: {err.path} can't be read" if err is not None else 'no config file')))
     click.echo(f"  admin:     {show(acc.admins)}")
     click.echo(f"  operator:  {show(acc.operators)}")
     rule = f'group_pattern "{acc.group_pattern}"' if acc.group_pattern else \
@@ -5092,6 +5146,66 @@ def console_roles(ctx, netid, db, mask):
         conn.close()
 
 
+@cli.group('config')
+def config_group():
+    """nomad.toml: does it read, and if not, where it goes wrong.
+
+    \b
+    nomad config check              the file nomad reads here
+    nomad -c FILE config check      another file
+    """
+
+
+@config_group.command('check')
+@click.pass_context
+def config_check(ctx):
+    """Whether nomad.toml reads; if not, the line and what is wrong there.
+
+    A file that can't be read is not used at all: nomad runs with none of its
+    settings (database, collectors, roles, labs), and the Console shows no
+    PIs or labs. Exit status 1 then, 0 otherwise. Run it after editing the
+    file by hand.
+    """
+    from nomad.config import ConfigError, read_toml
+    from nomad.config.access import access_from
+    from nomad.config.problems import excerpt_lines, unreadable
+    target = Path(ctx.obj.get('config_target') or resolve_config_path()).expanduser()
+    if not target.exists():
+        click.echo(f"No nomad.toml at {target}: nomad uses its packaged defaults. "
+                   "Create one with `nomad init`.")
+        return
+    lenient = None
+    try:
+        data = read_toml(target, strict=True)
+    except (ConfigError, OSError) as exc:
+        err = exc if isinstance(exc, ConfigError) else unreadable(target, exc)
+        try:
+            lenient = read_toml(target) if isinstance(exc, ConfigError) else None
+        except (ConfigError, OSError):
+            lenient = None
+        if lenient is None:
+            click.echo(click.style(f"✗ {err.path} can't be read", fg='red', bold=True))
+            click.echo(f"  {err.short}")
+            for line in excerpt_lines(err):
+                click.echo(line)
+            click.echo("  Until it reads, nomad runs without it: none of its settings apply "
+                       "(database, collectors, roles, labs), and the Console shows no PIs "
+                       "or labs. Fix the file and run this again.")
+            ctx.exit(1)
+        click.echo(click.style(f"⚠ {err.path}: {err.short}", fg='yellow'))
+        for line in excerpt_lines(err):
+            click.echo(line)
+        click.echo("  nomad reads it anyway, with the older toml parser; please fix it.")
+        data = lenient
+    else:
+        click.echo(click.style(f"✓ {target} reads", fg='green'))
+    sections = sorted(k for k, v in data.items() if isinstance(v, dict))
+    if sections:
+        click.echo(f"  sections: {', '.join(sections)}")
+    for problem in access_from(data, log=False).problems:
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
+
+
 @cli.group()
 def lab():
     """A lab's machines and storage: what nomad collects for it, and what
@@ -5130,7 +5244,15 @@ def _lab_edit(ctx):
         raise click.ClickException(
             f"{path} doesn't exist; create it first (`nomad init`, or from "
             "nomad.toml.example), then add labs to it")
-    return TomlEdit(path)
+    edit = TomlEdit(path)
+    try:
+        edit.data
+    except Exception as exc:
+        from nomad.config.problems import describe_safely
+        err = describe_safely(edit.path, edit.text, exc)
+        raise click.ClickException(f"{err}. Fix that first (nomad config check); "
+                                   "nothing changed")
+    return edit
 
 
 def _lab_reach(host, nas=False):
@@ -5195,6 +5317,9 @@ def lab_show(ctx, lab_name):
     """What nomad.toml here says about labs (or about one)."""
     from nomad.config.labs import lab_group, summary
     config = ctx.obj.get('config', {}) or {}
+    if ctx.obj.get('config_error') is not None:
+        raise click.ClickException(f"{ctx.obj['config_error']}; no labs can be shown "
+                                   "until it reads (nomad config check)")
     click.echo(f"{ctx.obj.get('config_path') or 'no config file'}:")
     lines = summary(config, lab_group(config, lab_name) if lab_name else None)
     for line in lines or ["  no labs here"]:
