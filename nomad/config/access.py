@@ -275,21 +275,81 @@ def _servers(raw, problems: list) -> dict:
     return servers
 
 
+# A membership is current when its row was seen within this long of the
+# latest groups run for its site and cluster: every run stamps all it sees
+# with one time, so a row left behind stops being stamped. The grace covers
+# a failed or partial run; measuring from the latest run, not the clock,
+# means a collector that stopped, or a head node that doesn't answer,
+# freezes a lab instead of emptying it.
+MEMBER_WINDOW_DAYS = 2
+# A cluster whose latest run is this much older than its site's (renamed,
+# retired, the old default name "local") is no longer collected: its rows
+# stop counting rather than freeze for ever.
+CLUSTER_RETIRED_DAYS = 30
+
+
+def _membership_rows(conn) -> Callable[[str], list]:
+    """group -> [(username, current, has_account)] over group_membership,
+    every site together. has_account: True/False, None when not known
+    (rows from before nomad 1.7.41, or a lookup that failed)."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(group_membership)")}
+    if not cols:
+        return lambda group: []
+    site = "source_site" if "source_site" in cols else "NULL"
+    cluster = "cluster" if "cluster" in cols else "NULL"
+    stamp = "julianday(collected_at)" if "collected_at" in cols else "NULL"
+    account = "has_account" if "has_account" in cols else "NULL"
+    latest = {(s, c): t for s, c, t in conn.execute(
+        f"SELECT {site}, {cluster}, MAX({stamp}) FROM group_membership GROUP BY 1, 2")}
+    site_latest: dict = {}
+    for (s, _), t in latest.items():
+        if t is not None and (site_latest.get(s) is None or t > site_latest[s]):
+            site_latest[s] = t
+
+    def rows(group: str) -> list:
+        out = []
+        for user, s, c, t, acc in conn.execute(
+                f"SELECT username, {site}, {cluster}, {stamp}, {account} "
+                "FROM group_membership WHERE group_name = ?", (group,)):
+            top, site_top = latest.get((s, c)), site_latest.get(s)
+            current = (t is None or top is None
+                       or (t >= top - MEMBER_WINDOW_DAYS
+                           and (site_top is None or top >= site_top - CLUSTER_RETIRED_DAYS)))
+            out.append((user, current, None if acc is None else bool(acc)))
+        return out
+    return rows
+
+
 def members_lookup(conn) -> tuple[Callable[[str], bool], Callable[[str], set]]:
     """group_exists and members_of over a nomad database's group_membership
-    (the groups collector's), every site together."""
-    have = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='group_membership'")}
+    (the groups collector's), every site together. A member is someone the
+    group lists now (seen in its site's latest groups run, give or take
+    MEMBER_WINDOW_DAYS) who still has an account there: hand-kept group
+    files go on listing people whose accounts were deleted years ago."""
+    rows_of = _membership_rows(conn)
     cache: dict[str, set] = {}
 
     def members_of(group: str) -> set:
         if group not in cache:
-            cache[group] = ({r[0] for r in conn.execute(
-                "SELECT DISTINCT username FROM group_membership WHERE group_name = ?",
-                (group,))} if have else set())
+            cache[group] = {u for u, current, account in rows_of(group)
+                            if u and current and account is not False}
         return cache[group]
 
     return (lambda g: bool(members_of(g))), members_of
+
+
+def membership_counts(conn, group: str) -> dict:
+    """{"members": n, "former": n, "no_account": n} for ``group``: who
+    counts (as members_lookup), who the group no longer lists, and who it
+    lists without an account. Counts only, for what is shown to people."""
+    rows = _membership_rows(conn)(group)
+    _, members_of = members_lookup(conn)
+    members = members_of(group)
+    listed_now = {u for u, current, _ in rows if u and current}
+    everyone = {u for u, _, _ in rows if u}
+    return {"members": len(members),
+            "former": len(everyone - listed_now),
+            "no_account": len(listed_now - members)}
 
 
 # A machine no record of which is this recent is no longer collected (a

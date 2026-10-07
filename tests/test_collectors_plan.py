@@ -434,7 +434,8 @@ def test_workstation_clusters_without_an_ssh_account_read_membership_here(db, mo
         return "lab$:x:5001:ann,bob"
     monkeypatch.setattr(c, "_run_cmd", run_cmd)
     r = c.run()
-    assert calls == [None] and r.records_collected == 2
+    # The groups, then whether their members have accounts: both read here.
+    assert calls and set(calls) == {None} and r.records_collected == 2
 
 
 

@@ -125,7 +125,10 @@ note = "community $HOME, all users"
 - **PI:** a viewer who leads a lab also sees its members, one by one. They
   lead the group `group_pattern` names for them, when that group exists in the
   groups collector's data, and any group listed for them in `leads`
-  (`nomad lab lead LAB NETID` adds one, below).
+  (`nomad lab lead LAB NETID` adds one, below). Members are the people the
+  group lists now who still have an account; someone taken out of the group,
+  or whose account was deleted while a group file still names them, is not
+  one (see the groups collector).
   `group_pattern` is empty by default: a site that has not said how its groups
   work gets no lab view rather than a wrong one.
 - **A lab's machines:** a PI also sees their labs' workstations and storage.

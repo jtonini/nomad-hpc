@@ -8,7 +8,11 @@ and lightweight job accounting data for resource footprint
 and activity heatmap features.
 
 Tables created:
-    group_membership  - username, group_name, gid, cluster
+    group_membership  - username, group_name, gid, cluster, collected_at
+                        (this run's time on every row it saw), has_account
+                        (1: the name has an account where the group lives;
+                        0: none, in every run for two days; NULL: not known),
+                        account_missing_since (the first of those runs)
     job_accounting    - per-job resource usage with user info
 
 Configuration (nomad.toml):
@@ -73,12 +77,25 @@ class GroupCollector(BaseCollector):
 
     def _run_cmd(
         self,
-        cmd: str,
+        cmd,
         host: str = None,
         ssh_user: str = None,
         ssh_key: str = None,
+        ok_codes: tuple = (0,),
+        timeout: int = 30,
     ) -> str | None:
-        """Run a command locally or via SSH. Returns stdout or None."""
+        """Run a command locally or via SSH. Returns stdout or None.
+
+        ``cmd`` is a string, or a list of arguments (quoted for the remote
+        shell over SSH, passed as they are here). ``ok_codes``: exit
+        statuses that still mean "here is the output" (getent's 2 for
+        "some keys not found")."""
+        if isinstance(cmd, (list, tuple)):
+            import shlex
+            argv = list(cmd)
+            cmd = " ".join(shlex.quote(a) for a in argv)
+        else:
+            argv = cmd.split()
         if host:
             ssh_cmd = [
                 "ssh", "-o", "ConnectTimeout=5",
@@ -90,16 +107,16 @@ class GroupCollector(BaseCollector):
                         f"{ssh_user}@{host}" if ssh_user else host, cmd]
             full_cmd = ssh_cmd
         else:
-            full_cmd = cmd.split()
+            full_cmd = argv
 
         try:
             result = subprocess.run(
                 full_cmd,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
             )
-            if result.returncode == 0:
+            if result.returncode in ok_codes:
                 return result.stdout.strip()
             return None
         except Exception as e:
@@ -176,13 +193,62 @@ class GroupCollector(BaseCollector):
             return []
 
         records = self._parse_groups(output)
+        accounts = self._accounts({r['username'] for r in records},
+                                  host, ssh_user, ssh_key, cluster_name)
         for r in records:
             r['cluster'] = cluster_name
+            # Does the name still have an account here? A hand-kept
+            # /etc/group goes on listing people whose accounts were deleted
+            # years ago. None: not known (the lookup failed, or a name made
+            # only of digits, which getent would take for a UID).
+            name = r['username']
+            r['has_account'] = (None if accounts is None or name.isdigit()
+                                else name.lower() in accounts)
 
         logger.info(
             f"Collected {len(records)} group memberships"
             f" from {cluster_name}")
         return records
+
+    # Names per `getent passwd` call, and how long one call may take.
+    ACCOUNT_BATCH = 200
+    ACCOUNT_TIMEOUT = 120
+    # How long every run must find no account before a member has none: the
+    # grace a membership no longer listed gets too (MEMBER_WINDOW_DAYS).
+    ACCOUNT_GRACE_DAYS = 2
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now()
+
+    def _accounts(self, names, host=None, ssh_user=None, ssh_key=None,
+                  where: str = "") -> set | None:
+        """The names (lower-cased) that have an account where the groups were
+        read -- `getent passwd -- NAME...`, local files and the directory
+        alike -- or None when that can't be told (any batch failing). getent
+        says "not found" for a deleted account and for an unreachable
+        directory alike: store() waits ACCOUNT_GRACE_DAYS before believing
+        it."""
+        names = sorted(n for n in names if n and not n.isdigit())
+        found: set = set()
+        for i in range(0, len(names), self.ACCOUNT_BATCH):
+            # "--": a name that begins with "-" is a name, not an option.
+            out = self._run_cmd(["getent", "passwd", "--", *names[i:i + self.ACCOUNT_BATCH]],
+                                host, ssh_user, ssh_key, ok_codes=(0, 2),
+                                timeout=self.ACCOUNT_TIMEOUT)
+            if out is None:
+                logger.warning(f"Accounts of group members not looked up on "
+                               f"{where or host or 'this host'}: kept as last known")
+                return None
+            found.update(line.split(':', 1)[0].lower() for line in out.splitlines() if ':' in line)
+        if len(names) >= 10 and len(found) < len(names) / 2:
+            # Said, not acted on: an unreachable directory and a group file of
+            # long-gone people look the same here, and "no account" needs
+            # ACCOUNT_GRACE_DAYS of misses anyway.
+            logger.warning(f"{len(names) - len(found)} of {len(names)} group members have no "
+                           f"account on {where or host or 'this host'}: if that is new, check "
+                           "the directory (sssd)")
+        return found
 
     def _collect_accounting(
         self,
@@ -427,9 +493,17 @@ class GroupCollector(BaseCollector):
                 gid INTEGER,
                 cluster TEXT NOT NULL,
                 collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                has_account INTEGER,
+                account_missing_since TEXT,
                 PRIMARY KEY (username, group_name, cluster)
             )
         """)
+        # Databases from before 1.7.41: the columns, empty (not known) until
+        # runs fill them.
+        have = {r[1] for r in c.execute("PRAGMA table_info(group_membership)")}
+        for col, kind in (("has_account", "INTEGER"), ("account_missing_since", "TEXT")):
+            if col not in have:
+                c.execute(f"ALTER TABLE group_membership ADD COLUMN {col} {kind}")
         c.execute("""
             CREATE INDEX IF NOT EXISTS idx_grp_group
             ON group_membership(group_name)
@@ -472,15 +546,37 @@ class GroupCollector(BaseCollector):
         """)
 
         # ── Upsert group memberships ─────────────────────────────────
-        now = datetime.now().isoformat()
+        # has_account: 1 when the name has an account; 0 once every run for
+        # ACCOUNT_GRACE_DAYS found none (account_missing_since: the first of
+        # them) -- the same grace as a membership no longer listed, so a
+        # directory outage shorter than that takes no one out of a lab; not
+        # known this run: the last known answer stays.
+        known = {(u, g, cl): (acc, since) for u, g, cl, acc, since in c.execute(
+            "SELECT username, group_name, cluster, has_account, account_missing_since "
+            "FROM group_membership")}
+        moment = self._now()
+        now = moment.isoformat()
         for g in groups:
+            seen = g.get('has_account')
+            acc, since = known.get((g['username'], g['group_name'], g['cluster']), (None, None))
+            if seen is True:
+                acc, since = 1, None
+            elif seen is False:
+                since = since or now
+                try:
+                    missing = moment - datetime.fromisoformat(str(since))
+                except ValueError:
+                    since, missing = now, timedelta(0)
+                if missing >= timedelta(days=self.ACCOUNT_GRACE_DAYS):
+                    acc = 0
             c.execute("""
                 INSERT OR REPLACE INTO group_membership
-                (username, group_name, gid, cluster, collected_at)
-                VALUES (?, ?, ?, ?, ?)
+                (username, group_name, gid, cluster, collected_at, has_account,
+                 account_missing_since)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 g['username'], g['group_name'],
-                g['gid'], g['cluster'], now,
+                g['gid'], g['cluster'], now, acc, since,
             ))
 
         # ── Upsert job accounting ────────────────────────────────────

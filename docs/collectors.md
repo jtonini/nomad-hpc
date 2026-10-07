@@ -32,7 +32,7 @@ enabled = false
 
 An `enabled = [...]` list under `[collectors]`, which older example configs carried, is not read.
 
-`groups` reads membership with `getent group`: on the head node of each `[clusters]` entry (over SSH when it has a `host`), on the first reachable workstation of a `type = "workstations"` cluster with an `ssh_user`, and on this host otherwise. Job accounting needs `sacct` and is skipped without it.
+`groups` reads membership with `getent group`: on the head node of each `[clusters]` entry (over SSH when it has a `host`), on the first reachable workstation of a `type = "workstations"` cluster with an `ssh_user`, and on this host otherwise. Job accounting needs `sacct` and is skipped without it. On the same host it looks up each member with `getent passwd` and records whether they still have an account (`has_account`): a hand-kept `/etc/group` goes on listing people whose accounts were deleted long ago. "No account" needs every run for two days to find none (getent says the same for an unreachable directory), and a run where the lookup fails keeps the last known answer. Every run stamps what it saw with one time (`collected_at`), so a membership no longer listed stops being stamped. A lab's members are the people listed in their cluster's latest run (give or take two days, for a failed run; a cluster not collected for 30 days while its site goes on is retired) who have an account; `nomad console roles NETID` says how many are not counted, and why.
 
 `nomad collect -C disk,nfs` (or `-C disk -C nfs`) runs only those, if enabled. An unknown name is warned about and skipped; if no name is known, nothing runs and the command says so.
 

@@ -5061,8 +5061,8 @@ def console_roles(ctx, netid, db, mask):
     """
     import sqlite3
 
-    from nomad.config.access import (access_from, members_lookup, visible_people,
-                                     workstation_tags)
+    from nomad.config.access import (access_from, members_lookup, membership_counts,
+                                     visible_people, workstation_tags)
     config = ctx.obj.get('config', {}) or {}
     acc = access_from(config, log=False)
     err = ctx.obj.get('config_error')
@@ -5123,8 +5123,15 @@ def console_roles(ctx, netid, db, mask):
         if members is None:
             click.echo(f"    {name}: (no database at {db_path}: size unknown)")
         else:
-            n = len(members(g))
-            click.echo(f"    {name}: " + (f"{n} members" if n else "not in the groups data"))
+            counts = membership_counts(conn, g)
+            n = counts["members"]
+            left = [f"{counts['no_account']} without an account"] if counts["no_account"] else []
+            left += [f"{counts['former']} no longer listed"] if counts["former"] else []
+            if n or left:
+                click.echo(f"    {name}: {n} members"
+                           + (f" ({', '.join(left)}: not counted)" if left else ""))
+            else:
+                click.echo(f"    {name}: not in the groups data")
     res = acc.lab_resources(netid, exists, tagged)
     listed = acc.lab_resources(netid, exists)
     for i, name in enumerate(sorted(res['workstations']), 1):
