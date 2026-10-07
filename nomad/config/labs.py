@@ -10,6 +10,8 @@
     name LAB "NAME"        how the lab is shown ("Smith Lab")
     add-storage LAB SERVER[:/export]
                            storage the lab's machines mount, listed as the lab's
+    lead LAB NETID         NETID leads LAB too (a co-PI, a lab manager); with
+                           remove=True, no longer
     remove LAB HOST        out of all of these for that lab
 
 A workstation's lab travels with its data (the tag), so add-machine is done
@@ -31,6 +33,8 @@ WS_SECTION = ("collectors", "workstation")
 ST_SECTION = ("collectors", "storage")
 RESOURCES = ("console", "labs", "resources")
 NAMES = ("console", "storage")
+LABS = ("console", "labs")
+LEADS = LABS + ("leads",)
 
 
 class LabError(Exception):
@@ -70,7 +74,9 @@ def lab_group(config: dict, lab: str) -> str:
     lab = lab.strip()
     if lab.lower() == SHARED:
         return SHARED
-    pattern = (((config.get("console") or {}).get("labs") or {}).get("group_pattern") or "")
+    labs = (config.get("console") or {}).get("labs") if isinstance(config.get("console"), dict) else None
+    pattern = (labs.get("group_pattern") or "") if isinstance(labs, dict) else ""
+    pattern = pattern if isinstance(pattern, str) else ""
     if "$" in lab or "{netid}" not in pattern:
         return lab
     return pattern.strip().replace("{netid}", lab.lower())
@@ -282,13 +288,90 @@ def remove(edit: TomlEdit, group: str, host: str) -> list:
     return changes
 
 
+# A NetID as the Console signs people in: no domain, nothing a shell would read.
+_NETID = re.compile(r"^[a-z0-9_][a-z0-9._-]*$")
+
+
+def leads_of(data: dict) -> dict:
+    """{netid: [groups]} from [console.labs] leads, as access_from() reads it
+    (NetIDs lower-cased, a single group string taken as a list of one)."""
+    raw = _get(data, LEADS)
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for who, groups in raw.items():
+        if isinstance(groups, str):
+            groups = [groups]
+        if not isinstance(who, str) or not isinstance(groups, list):
+            continue
+        n = who.strip().lower()
+        for g in groups:
+            if isinstance(g, str) and g.strip() and g.strip() not in out.setdefault(n, []):
+                out[n].append(g.strip())
+    return out
+
+
+def _write_leads(edit: TomlEdit, new: dict) -> None:
+    """[console.labs.leads] holding ``new`` (gone when empty), right after
+    [console.labs]. An inline ``leads = {...}`` line there (nomad.toml.example
+    has ``leads = {}``) is replaced by the table; any other way of writing it
+    is left for a person."""
+    for i, table, k in reversed(edit.key_lines()):
+        if table == LABS and k == ("leads",):
+            try:
+                edit.remove_line(i)
+            except ValueError as e:
+                raise LabError(f"{e}; change leads by hand") from e
+    clash = edit.assigned(LEADS)
+    if clash:
+        raise LabError(f"leads is written as values in {edit.path.name} (line {clash[0] + 1}): "
+                       "write it as [console.labs.leads] or change it by hand")
+    edit.set_table(LEADS, new, after=LABS)
+
+
+def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> list:
+    """NETID leads GROUP too (or, remove=True, no longer) through
+    [console.labs] leads. Whom group_pattern already makes the PI is not
+    listed again."""
+    if group == SHARED:
+        raise LabError('"shared" is not a lab; give the PI\'s NetID or the lab\'s group')
+    n = netid.strip().lower()
+    if not _NETID.match(n):
+        raise LabError(f"{netid}: not a NetID (no domain, no @)")
+    current = leads_of(edit.data)
+    groups = list(current.get(n, []))
+    if remove:
+        if group not in groups:
+            return []
+        groups.remove(group)
+    else:
+        from nomad.config.access import access_from
+        acc = access_from(edit.data, log=False)
+        if group in groups or (acc.group_pattern
+                               and acc.group_pattern.replace("{netid}", n) == group):
+            return []
+        groups.append(group)
+    new: dict = {}
+    for who, gs in current.items():
+        if who != n:
+            new[who] = gs
+        elif groups:
+            new[who] = groups
+    if n not in current and groups:
+        new[n] = groups
+    _write_leads(edit, new)
+    return [f"{n} no longer leads {group}" if remove else f"{n} leads {group}"]
+
+
 def summary(config: dict, group: str | None = None) -> list:
     """What nomad.toml here says about labs, as lines."""
     ws = _entries(config, _list_path(config, WS_SECTION, "workstations"))
     nas = _entries(config, _list_path(config, ST_SECTION, "storage_devices"))
     res = _get(config, RESOURCES) or {}
     names = _get(config, NAMES) or {}
-    groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res))
+    led = leads_of(config)
+    groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res)
+                    | {g for gs in led.values() for g in gs})
     if group == SHARED:
         groups = []
     elif group:
@@ -311,6 +394,9 @@ def summary(config: dict, group: str | None = None) -> list:
             here = next((e for e in nas if e.get("hostname") == server), None)
             lines.append(f"  storage: {label}" + (f", {n['note']}" if n.get("note") else "")
                          + (f"; a NAS collected here ({here.get('type', 'zfs')})" if here else ""))
+        also = sorted(who for who, gs in led.items() if g in gs)
+        if also:
+            lines.append(f"  also led by: {', '.join(also)}")
         if lines[-1] in (f"{g}:", f"{shown} ({g}):"):
             lines.append("  nothing here")
     untagged = sorted(e.get("hostname") for e in ws if not e.get("department"))

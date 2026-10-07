@@ -124,7 +124,8 @@ note = "community $HOME, all users"
   work, and the aggregates (queues, capacity, storage) everyone sees.
 - **PI:** a viewer who leads a lab also sees its members, one by one. They
   lead the group `group_pattern` names for them, when that group exists in the
-  groups collector's data, and any group listed for them in `leads`.
+  groups collector's data, and any group listed for them in `leads`
+  (`nomad lab lead LAB NETID` adds one, below).
   `group_pattern` is empty by default: a site that has not said how its groups
   work gets no lab view rather than a wrong one.
 - **A lab's machines:** a PI also sees their labs' workstations and storage.
@@ -168,6 +169,7 @@ nomad lab add-nas LAB HOST [--name NAME] [--note "..."] [--type zfs|nfs] [--path
 nomad lab add-storage LAB SERVER[:/export] [--name NAME] [--note "..."]
                                         storage the lab's machines mount, listed as the lab's
 nomad lab name LAB "NAME"               how the lab is shown, e.g. "Smith Lab"
+nomad lab lead LAB NETID [--remove]     NETID leads LAB too (or no longer)
 nomad lab remove LAB HOST
 ```
 
@@ -188,6 +190,16 @@ with `"{netid}$"`), or the lab's group itself.
   to storage. It says whether cron on this host runs the storage collector.
 - **add-storage** goes on the Console's machine: an export the lab's machines
   mount, or a server, with an optional name and note for the server.
+- **lead** goes on the Console's machine: someone besides the PI who leads
+  the lab (a co-PI, a lab manager, a test account) sees its machines and,
+  one by one, its members. LAB may also be the lab's name as `nomad lab
+  show` prints it, and must be a lab nomad knows (listed machines or storage,
+  tagged workstations, or members in the groups data) unless `--new-group`
+  is given: a mistyped NetID could be another PI's lab. It writes
+  `[console.labs.leads]`; a `leads = {}` line in `[console.labs]`, as in
+  `nomad.toml.example`, becomes that table. Editing `leads` by hand risks
+  setting it twice, which makes the whole file unreadable. The PI
+  `group_pattern` names needs no entry.
 - **remove** takes a host out of a lab: no longer collected here, no longer
   listed.
 

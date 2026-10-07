@@ -5219,6 +5219,7 @@ def lab():
     nomad lab add-storage LAB SERVER[:/export]
                                        storage the lab's machines mount, listed as the lab's
     nomad lab name LAB "NAME"          how the lab is shown, e.g. "Smith Lab"
+    nomad lab lead LAB NETID           NETID leads LAB too (--remove: no longer)
     nomad lab remove LAB HOST
 
     For storage that is everyone's, LAB is "shared": add-nas shared HOST.
@@ -5253,6 +5254,54 @@ def _lab_edit(ctx):
         raise click.ClickException(f"{err}. Fix that first (nomad config check); "
                                    "nothing changed")
     return edit
+
+
+def _lab_known(config, group, config_path=None) -> bool:
+    """Is GROUP a lab nomad knows here: listed machines or storage, a
+    workstation tagged with it, a lead already, or members in the groups
+    data -- this host's database, or the hub's combined.db (in this
+    account's home, and in the home of whoever owns nomad.toml: under sudo
+    HOME is root's)? Anything unreadable just doesn't count."""
+    import sqlite3
+    import urllib.parse
+    from nomad.config.access import members_lookup, workstation_tags
+    from nomad.config.labs import (RESOURCES, WS_SECTION, _entries, _get, _list_path,
+                                   leads_of)
+    if group in (_get(config, RESOURCES) or {}):
+        return True
+    if any(e.get("department") == group
+           for e in _entries(config, _list_path(config, WS_SECTION, "workstations"))):
+        return True
+    if any(group in gs for gs in leads_of(config).values()):
+        return True
+    homes = [Path.home()]
+    try:
+        import pwd
+        if config_path is not None:
+            homes.append(Path(pwd.getpwuid(Path(config_path).stat().st_uid).pw_dir))
+    except (ImportError, KeyError, OSError):
+        pass
+    candidates = []
+    try:
+        candidates.append(get_db_path(config))
+    except Exception:
+        pass
+    candidates += [h / ".local" / "share" / "nomad" / "combined.db" for h in homes]
+    for db in candidates:
+        try:
+            if not db.exists():
+                continue
+            uri = "file:" + urllib.parse.quote(str(db)) + "?mode=ro"
+            conn = sqlite3.connect(uri, uri=True)
+            try:
+                exists, _ = members_lookup(conn)
+                if exists(group) or workstation_tags(conn)(group):
+                    return True
+            finally:
+                conn.close()
+        except Exception:
+            continue
+    return False
 
 
 def _lab_reach(host, nas=False):
@@ -5295,6 +5344,9 @@ def _lab_finish(edit, changes, apply, check, notes=()):
         backup = edit.save(check)
     except ValueError as e:
         raise click.ClickException(f"{e}; nothing changed")
+    except OSError as e:
+        raise click.ClickException(f"can't write {edit.path} ({e.strerror or e}); "
+                                   "nothing changed")
     click.echo(f"\nWritten." + (f" Backup: {backup}" if backup else ""))
 
 
@@ -5418,6 +5470,110 @@ def lab_name_cmd(ctx, lab_name, shown, apply):
         got = (_get(d, RESOURCES + (group,)) or {}).get("name")
         return got == (" ".join(shown.split()) or None)
     _lab_run(ctx, lab_name, lambda e, g: set_name(e, g, shown), check, apply)
+
+
+@lab.command('lead')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('netid')
+@click.option('--remove', is_flag=True, help='NETID no longer leads LAB.')
+@click.option('--new-group', is_flag=True,
+              help="LAB is a group nomad doesn't know yet (no machines, storage or members).")
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
+    """NETID leads LAB too (a co-PI, a lab manager, a test account): in the
+    Console they see LAB's machines and, one by one, its members. The PI
+    group_pattern names needs no entry. --remove: no longer.
+
+    LAB is the PI's NetID (with group_pattern), the lab's group, or its name
+    as `nomad lab show` prints it ("Smith Lab"); it must be a lab nomad knows
+    here -- listed machines or storage, tagged workstations, or members in
+    the groups data -- unless --new-group says otherwise: a mistyped NetID
+    could otherwise be another PI's lab.
+
+    Written as [console.labs.leads] (a `leads = {...}` line in
+    [console.labs] becomes that table), so nobody edits it by hand.
+    """
+    import copy
+    import re as _re
+    from nomad.config.access import access_from
+    from nomad.config.labs import SHARED, LabError, lab_group, leads_of, set_lead
+    edit = _lab_edit(ctx)
+    before = edit.data
+    acc = access_from(before, log=False)
+    direct = lab_group(before, lab_name)
+    group = direct
+    if "$" not in lab_name:
+        # A lab's name ("Smith Lab"), only when it can't mean anything else.
+        key = " ".join(lab_name.split()).lower()
+        named = sorted(g for g, shown in acc.lab_names.items()
+                       if " ".join(shown.split()).lower() == key)
+        if len(named) > 1:
+            raise click.ClickException(f"several labs are named {lab_name!r} "
+                                       f"({', '.join(named)}): give the group")
+        if named and named[0] != direct:
+            if direct and _lab_known(before, direct, edit.path):
+                raise click.ClickException(
+                    f"{lab_name!r} could be the lab named so ({named[0]}) or {direct}: "
+                    "give the group")
+            group = named[0]
+    if group == SHARED:
+        raise click.ClickException('"shared" is not a lab; give the PI\'s NetID, the lab\'s '
+                                   'group or its name')
+    if (not group or group.strip() in ("", "$")
+            or (not remove and _re.search(r"\s", group))):
+        raise click.ClickException(f"{lab_name!r}: not a lab here; give the PI's NetID, the "
+                                   "lab's group, or its name as `nomad lab show` prints it")
+    if not remove and not new_group and not _lab_known(before, group, edit.path):
+        raise click.ClickException(
+            f"{group} is not a lab nomad knows here: no machines or storage are listed for "
+            "it, no workstation is tagged with it, and the groups data has no members for "
+            "it. Check the spelling (nomad lab show), or give --new-group to add it anyway.")
+    n = netid.strip().lower()
+    by_pattern = bool(acc.group_pattern) and acc.group_pattern.replace("{netid}", n) == group
+
+    def without_leads(d):
+        d = copy.deepcopy(d)
+        console = d.get("console")
+        labs_t = console.get("labs") if isinstance(console, dict) else None
+        if isinstance(labs_t, dict):
+            labs_t.pop("leads", None)
+            if not labs_t:
+                console.pop("labs")
+        if isinstance(console, dict) and not console:
+            d.pop("console")
+        return d
+    try:
+        changes = set_lead(edit, group, netid, remove)
+    except LabError as e:
+        raise click.ClickException(str(e))
+    if not changes and by_pattern:
+        click.echo(f"Nothing to change: {n} leads {group} through group_pattern"
+                   + (", not leads; to stop that, the group itself must change."
+                      if remove else "."))
+        return
+    notes = []
+    if changes and not remove:
+        notes.append(f"In the Console {n} will see {acc.lab_label(group)}: its workstations "
+                     "and storage (My Lab), and each of its members on Trajectory, "
+                     "Recommendations and the job pages.")
+        if acc.role(n):
+            notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} "
+                         f"{acc.role(n)} here: they see everything anyway.")
+    if changes and remove and by_pattern:
+        notes.append(f"{n} still leads {group} through group_pattern.")
+    if changes and remove and acc.role(n):
+        notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} {acc.role(n)} "
+                     "here: they still see everything.")
+    if changes:
+        notes.append("The Console reads nomad.toml on every request: no restart.")
+
+    def check(d):
+        # The lead changed as asked, and nothing else in the file did.
+        got = leads_of(d).get(n, [])
+        return (((group not in got) if remove else (group in got))
+                and without_leads(d) == without_leads(before))
+    _lab_finish(edit, changes, apply, check, notes)
 
 
 @lab.command('remove')

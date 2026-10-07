@@ -499,3 +499,258 @@ def test_a_nas_read_by_name_is_the_server_its_mounts_name_by_address(tmp_path, m
             "(60.0 TB of 176 TB), 116 TB free; pool everything ONLINE\n"
             "      /pool/cold: not in the data") in out
     assert out.split("\npi3:\n")[1].count("coldnas") == 1      # once in the lab's view
+
+
+# --- nomad lab lead -------------------------------------------------------------
+
+HUB = '''[general]
+x = 1
+
+[console.labs]
+group_pattern = "{netid}$"
+leads = {}                     # e.g. { NETID = ["chemlab$"] }
+
+[console.labs.resources."pi1$"]
+name = "Smith Lab"
+workstations = ["labws1"]
+'''
+
+
+def lead(path, *args):
+    r = CliRunner().invoke(cli, ["-c", str(path), "lab", "lead", *args])
+    return r, r.output
+
+
+def test_a_lead_replaces_the_empty_inline_line_with_a_table(tmp_path):
+    """nomad init writes `leads = {}`; a second `leads` beside it once made the
+    whole file unreadable. The command turns it into [console.labs.leads]."""
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    r, out = lead(p, "pi1", "jdoe")
+    assert r.exit_code == 0 and "+ jdoe leads pi1$" in out and "Smith Lab (pi1$)" in out
+    assert p.read_text() == HUB                              # shown, not written
+    r, out = lead(p, "pi1", "JDoe", "--apply")
+    assert r.exit_code == 0 and "Written." in out
+    text = p.read_text()
+    assert "leads = {}" not in text
+    assert '[console.labs]\ngroup_pattern = "{netid}$"\n\n[console.labs.leads]\njdoe = ["pi1$"]\n' in text
+    assert labs.leads_of(loads(text)) == {"jdoe": ["pi1$"]}
+    from nomad.config.access import access_from
+    assert "pi1$" in access_from(loads(text), log=False).lab_groups("jdoe")
+    # Another lab for the same person, and another person: the table grows in place.
+    lead(p, "pi2$", "jdoe", "--apply", "--new-group")
+    lead(p, "pi1", "asmith", "--apply")
+    assert labs.leads_of(loads(p.read_text())) == {"jdoe": ["pi1$", "pi2$"], "asmith": ["pi1$"]}
+    assert p.read_text().count("[console.labs.leads]") == 1
+    out = CliRunner().invoke(cli, ["-c", str(p), "lab", "show", "pi1"]).output
+    assert "also led by: asmith, jdoe" in out
+
+
+def test_an_inline_table_with_leads_is_merged(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB.replace('leads = {}                     # e.g. { NETID = ["chemlab$"] }',
+                             'leads = { asmith = ["pi3$"] }'))
+    lead(p, "pi1", "jdoe", "--apply")
+    d = loads(p.read_text())
+    assert labs.leads_of(d) == {"asmith": ["pi3$"], "jdoe": ["pi1$"]}
+    assert "leads = {" not in p.read_text()
+
+
+def test_remove_and_nothing_to_change(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    lead(p, "pi1", "jdoe", "--apply")
+    r, out = lead(p, "pi1", "jdoe")
+    assert "Nothing to change" in out
+    r, out = lead(p, "pi1", "pi1")                       # the PI by group_pattern
+    assert "through group_pattern" in out and r.exit_code == 0
+    r, out = lead(p, "pi1", "pi1", "--remove")
+    assert "through group_pattern, not leads" in out
+    r, out = lead(p, "pi1", "jdoe", "--remove", "--apply")
+    assert "+ jdoe no longer leads pi1$" in out
+    assert "[console.labs.leads]" not in p.read_text()
+    assert labs.leads_of(loads(p.read_text())) == {}
+    r, out = lead(p, "pi1", "jdoe", "--remove")
+    assert "Nothing to change" in out
+
+
+def test_a_new_lead_without_a_labs_table_and_with_none_at_all(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text('[general]\nx = 1\n\n[console.labs.resources."pi1$"]\nname = "Smith Lab"\n')
+    lead(p, "pi1$", "jdoe", "--apply")
+    assert labs.leads_of(loads(p.read_text())) == {"jdoe": ["pi1$"]}
+
+
+@pytest.mark.parametrize("text", [
+    '[console.labs]\ngroup_pattern = "{netid}$"\nleads.asmith = ["pi3$"]\n',
+    '[console]\nlabs = { group_pattern = "{netid}$" }\n',
+    'console.labs.leads.asmith = ["pi3$"]\n[general]\nx = 1\n',
+    '[console.labs]\nleads = { asmith = [\n  "pi3$",\n] }\n',
+])
+def test_other_ways_of_writing_it_are_left_to_a_person(tmp_path, text):
+    p = tmp_path / "nomad.toml"
+    p.write_text(text)
+    r, out = lead(p, "pi1$", "jdoe", "--apply", "--new-group")
+    assert r.exit_code != 0 and "by hand" in out
+    assert p.read_text() == text
+
+
+@pytest.mark.parametrize("netid", ["jdoe@example.edu", "j doe", "-rf", ""])
+def test_only_netids(tmp_path, netid):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    r, out = lead(p, "pi1", netid, "--apply")
+    assert r.exit_code != 0 and p.read_text() == HUB
+
+
+def test_shared_is_not_a_lab(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    r, out = lead(p, "shared", "jdoe")
+    assert r.exit_code != 0 and '"shared" is not a lab' in out
+
+
+def test_a_lead_who_is_staff_is_told(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text('[console.roles]\noperator = ["jdoe"]\n\n' + HUB)
+    r, out = lead(p, "pi1", "jdoe")
+    assert "jdoe is an operator here" in out
+
+
+def test_nothing_but_leads_may_change(tmp_path):
+    """A line that only looks like `leads = {}` -- inside a multi-line string
+    under [console.labs] -- is not removed into a changed file."""
+    p = tmp_path / "nomad.toml"
+    text = ('[console.labs]\ngroup_pattern = "{netid}$"\nnote = """\nleads = {}\n"""\n'
+            '[console.labs.resources."pi1$"]\nname = "Smith Lab"\n')
+    p.write_text(text)
+    r, out = lead(p, "pi1", "jdoe", "--apply")
+    assert r.exit_code != 0 and p.read_text() == text
+
+
+# --- what the review found ------------------------------------------------------
+
+def test_a_lab_nomad_does_not_know_is_refused(tmp_path):
+    """LAB=smith with group_pattern is smith$: if another PI's NetID is smith,
+    a typo would show their lab. Only known labs, or --new-group."""
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    r, out = lead(p, "smith", "jdoe", "--apply")
+    assert r.exit_code != 0 and "smith$ is not a lab nomad knows here" in out
+    assert p.read_text() == HUB
+    r, out = lead(p, "smith", "jdoe", "--apply", "--new-group")
+    assert r.exit_code == 0 and labs.leads_of(loads(p.read_text())) == {"jdoe": ["smith$"]}
+
+
+def test_a_lab_known_from_the_groups_data(tmp_path):
+    db = tmp_path / "nomad.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT)")
+    c.execute("INSERT INTO group_membership VALUES ('student1', 'pi5$')")
+    c.commit()
+    c.close()
+    p = tmp_path / "nomad.toml"
+    p.write_text(f'[database]\npath = "{db}"\n\n' + HUB)
+    r, out = lead(p, "pi5", "jdoe", "--apply")
+    assert r.exit_code == 0, out
+    assert labs.leads_of(loads(p.read_text())) == {"jdoe": ["pi5$"]}
+
+
+def test_a_lab_by_its_name_and_names_that_are_no_lab(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    r, out = lead(p, "smith  lab", "jdoe", "--apply")
+    assert r.exit_code == 0 and labs.leads_of(loads(p.read_text())) == {"jdoe": ["pi1$"]}
+    for bad in ("", "a lab", "$"):
+        r, out = lead(p, bad, "asmith", "--apply", "--new-group")
+        assert r.exit_code != 0 and "not a lab here" in out, bad
+
+
+def test_files_with_nothing_else_under_console(tmp_path):
+    """Comparing what else changed once refused these: console.labs = {} is
+    no change from no [console] at all."""
+    for text in ('[general]\nx = 1\n', '[console.roles]\nadmin = ["root1"]\n'):
+        p = tmp_path / "nomad.toml"
+        p.write_text(text)
+        r, out = lead(p, "pi1$", "jdoe", "--apply", "--new-group")
+        assert r.exit_code == 0, out
+        r, out = lead(p, "pi1$", "jdoe", "--apply", "--remove")
+        assert r.exit_code == 0 and "no longer leads" in out, out
+        assert labs.leads_of(loads(p.read_text())) == {}
+
+
+def test_a_removed_lead_who_still_leads_is_told(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB.replace("leads = {}                     # e.g. { NETID = [\"chemlab$\"] }",
+                             'leads = { pi1 = ["pi1$"] }'))
+    r, out = lead(p, "pi1", "pi1", "--remove", "--apply")
+    assert "pi1 still leads pi1$ through group_pattern" in out
+
+
+def test_the_examples_comment_stays_with_its_line(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text('[console.labs]\ngroup_pattern = ""           # e.g. "{netid}$" where a group\n'
+                 '                             # is their NetID followed by $\n'
+                 'leads = {}\n\n# The lab workstations\n[console.labs.resources."pi1$"]\n'
+                 'name = "Smith Lab"\n')
+    lead(p, "pi1$", "jdoe", "--apply")
+    text = p.read_text()
+    assert ("# is their NetID followed by $\n\n[console.labs.leads]\njdoe = [\"pi1$\"]\n\n"
+            "# The lab workstations\n[console.labs.resources") in text, text
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "geteuid") or __import__("os").geteuid() != 0,
+                    reason="only root can give a file away")
+def test_written_as_root_the_file_keeps_its_owner(tmp_path):
+    import os
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    os.chown(p, 1000, 1000)
+    os.chmod(p, 0o640)
+    lead(p, "pi1", "jdoe", "--apply")
+    st = p.stat()
+    assert (st.st_uid, st.st_gid, st.st_mode & 0o777) == (1000, 1000, 0o640)
+
+
+def test_a_file_that_cannot_be_written_is_said_plainly(tmp_path, monkeypatch):
+    import shutil
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB)
+    def denied(*a, **k):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(shutil, "copy2", denied)
+    r, out = lead(p, "pi1", "jdoe", "--apply")
+    assert r.exit_code != 0 and "can't write" in out and "nothing changed" in out
+    assert p.read_text() == HUB
+
+
+def test_a_name_that_could_mean_two_labs_is_refused(tmp_path):
+    p = tmp_path / "nomad.toml"
+    p.write_text(HUB + '\n[console.labs.resources."pi9$"]\nname = "Smith Lab"\n'
+                 'workstations = ["labws9"]\n')
+    r, out = lead(p, "Smith Lab", "jdoe", "--apply")
+    assert r.exit_code != 0 and "several labs are named" in out and "pi1$, pi9$" in out
+    # A lab named like a PI whose own group nomad knows.
+    p.write_text(HUB + '\n[console.labs.resources."chem$"]\nname = "Pi1"\n'
+                 'workstations = ["chemws"]\n')
+    r, out = lead(p, "pi1", "jdoe", "--apply")
+    assert r.exit_code != 0 and "could be the lab named so (chem$) or pi1$" in out
+    assert labs.leads_of(loads(p.read_text())) == {}
+
+
+def test_odd_databases_and_settings_do_not_crash_the_check(tmp_path):
+    weird = tmp_path / "a?b#c%d"
+    weird.mkdir()
+    db = weird / "nomad.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT)")
+    c.execute("INSERT INTO group_membership VALUES ('student1', 'pi7$')")
+    c.commit()
+    c.close()
+    p = tmp_path / "nomad.toml"
+    p.write_text(f'[database]\npath = "{db}"\n\n' + HUB)
+    r, out = lead(p, "pi7", "jdoe", "--apply")
+    assert r.exit_code == 0, out                      # found despite ? # % in the path
+    p.write_text(HUB.replace("[general]\nx = 1\n", "[general]\ndata_dir = 5\n"))
+    r, out = lead(p, "pi8", "jdoe")
+    assert r.exit_code != 0 and "not a lab nomad knows" in out   # said, not a traceback

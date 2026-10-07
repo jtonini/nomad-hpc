@@ -180,14 +180,28 @@ class TomlEdit:
         at = old[0][0] + 1
         self.text = "".join(lines[:at]) + line + "".join(lines[at:])
 
-    def set_table(self, path: tuple, body: dict) -> None:
+    def set_table(self, path: tuple, body: dict, after: tuple | None = None) -> None:
         """Replace [path] where it is, with the keys given (removed when body
-        is empty); a new table goes at the end."""
+        is empty); a new table goes right after the [after] table when there
+        is one, else at the end."""
         lines, blocks = self._blocks()
         old = [b for b in blocks if b[2] == path and not b[3]]
         if not old:
-            if body:
+            if not body:
+                return
+            anchor = [b for b in blocks if after is not None and b[2] == after and not b[3]]
+            if not anchor:
                 self.append(table_text(path, body))
+                return
+            at = anchor[0][1]
+            # An indented comment right after the table's last line goes on
+            # that line ("group_pattern = ''   # e.g. ... / #   is their ...").
+            while at < len(lines) and lines[at][:1] in (" ", "\t") \
+                    and lines[at].lstrip().startswith("#"):
+                at += 1
+            head = "".join(lines[:at]).rstrip("\n")
+            tail = "".join(lines[at:]).lstrip("\n")
+            self.text = head + "\n\n" + table_text(path, body) + ("\n" + tail if tail else "")
             return
         start, end = old[0][0], old[0][1]
         rest = lines[end:]
@@ -195,6 +209,55 @@ class TomlEdit:
             rest = rest[1:]
         block = (table_text(path, body) + ("\n" if rest else "")) if body else ""
         self.text = "".join(lines[:start]) + block + "".join(rest)
+
+    def key_lines(self) -> list:
+        """[(line index, table path, key path)] for each line that sets a key:
+        ``leads = {}`` under [console.labs] is (n, ("console", "labs"),
+        ("leads",)). Lines of a value spread over several lines (an array, a
+        multi-line string) are not told apart from keys: callers refuse
+        rather than guess."""
+        from nomad.config.problems import _before_equals
+        out, table = [], ()
+        for i, line in enumerate(self.text.splitlines(keepends=True)):
+            m = _HEADER.match(line)
+            if m and line.lstrip().startswith("["):
+                table = key_path(m.group(2))
+                continue
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            left = _before_equals(line)
+            k = key_path(left.strip()) if left and left.strip() else ()
+            if k:
+                out.append((i, table, k))
+        return out
+
+    def assigned(self, path: tuple) -> list:
+        """Lines that set ``path``, a table above it, or a key inside it, as
+        values rather than under a [path] header of its own (``labs = {...}``
+        in [console], ``leads.jdoe = [...]`` in [console.labs]): a [path]
+        table would clash with any of them."""
+        hits = []
+        for i, table, k in self.key_lines():
+            if table[:len(path)] == path:          # in [path] or below it: its own
+                continue
+            full = table + k
+            n = min(len(full), len(path))
+            if full[:n] == path[:n]:
+                hits.append(i)
+        return hits
+
+    def remove_line(self, index: int) -> None:
+        """Remove one line; ValueError (nothing removed) if the file then
+        doesn't parse -- a value spread over several lines."""
+        lines = self.text.splitlines(keepends=True)
+        before = self.text
+        self.text = "".join(lines[:index] + lines[index + 1:])
+        try:
+            loads(self.text)
+        except DecodeError as e:
+            self.text = before
+            raise ValueError(f"line {index + 1} of {self.path.name} goes on over several "
+                             "lines") from e
 
     def save(self, check, stamp: str | None = None) -> Path | None:
         """Write the edit if it parses and check(data) holds; the backup's path
@@ -207,8 +270,11 @@ class TomlEdit:
             raise ValueError(f"{self.path} would not read back as intended")
         backup = None
         mode = 0o600
+        owner = None
         if self.path.exists():
-            mode = self.path.stat().st_mode & 0o777
+            st = self.path.stat()
+            mode = st.st_mode & 0o777
+            owner = (st.st_uid, st.st_gid)
             stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
             backup = self.path.with_name(f"{self.path.name}.bak-lab-{stamp}")
             n = 1
@@ -222,5 +288,15 @@ class TomlEdit:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(self.text)
         os.chmod(tmp, mode)
+        # And its owner: written as root, it must stay readable by the account
+        # that runs nomad and the Console. (Not root: chown fails, as before.)
+        if owner is not None and hasattr(os, "chown"):
+            try:
+                os.chown(tmp, *owner)
+            except OSError:
+                try:                     # not root: at least the group, if ours
+                    os.chown(tmp, -1, owner[1])
+                except OSError:
+                    pass
         os.replace(tmp, self.path)
         return backup
