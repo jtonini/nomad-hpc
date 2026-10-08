@@ -53,6 +53,7 @@ nav:
     - Interactive Sessions: interactive.md
     - Data Readiness: readiness.md
     - Diagnostics: diagnostics.md
+    - Usage Report: usage-report.md
     - Insight Engine: insights.md
     - System Dynamics: dynamics.md
     - Cloud Monitoring: cloud.md

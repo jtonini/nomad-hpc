@@ -5274,6 +5274,230 @@ def import_sacct(ctx, export, since, until, db, apply):
                    "see what the import itself would change: a number used twice in it, say.)")
 
 
+def _usage_db(ctx, db, need: bool = True):
+    """--db, else the hub's combined.db, else this host's database (None if
+    none exists and ``need`` is False)."""
+    if db:
+        p = Path(db).expanduser()
+        if not p.exists():
+            raise click.ClickException(f"no database at {p}")
+        return p
+    combined = Path.home() / '.local' / 'share' / 'nomad' / 'combined.db'
+    if combined.exists():
+        return combined
+    p = get_db_path(ctx.obj.get('config') or {})
+    if p.exists():
+        return p
+    if need:
+        raise click.ClickException(f"no database at {p} (give one with --db)")
+    return None
+
+
+def _usage_period(since, until):
+    try:
+        t1 = (datetime.fromisoformat(until) if until
+              else datetime.now().replace(hour=0, minute=0, second=0, microsecond=0))
+        t0 = datetime.fromisoformat(since) if since else t1 - timedelta(days=365)
+    except ValueError as e:
+        raise click.UsageError(f"dates are YYYY-MM-DD ({e})")
+    if t0 >= t1:
+        raise click.UsageError("--from must come before --to")
+    return t0, t1
+
+
+def _usage_site(ctx, db_path, cluster):
+    """The site to report on, and the name report.toml knows it by: --cluster;
+    else the hub database's one site; else, in a site's own database, the
+    cluster its node samples name, the database's file name (spydur.db), or
+    the cluster name in nomad.toml."""
+    from nomad.usage import sources
+    site, name = cluster, cluster
+    if db_path is not None:
+        conn = sources.open_db(db_path)
+        try:
+            known = sources.sites(conn)
+            if known and site is None:
+                if len(known) > 1:
+                    raise click.UsageError("this database holds several sites; choose one with --cluster "
+                                           f"({', '.join(known)})")
+                site = name = known[0]
+            if name is None:
+                name = sources.cluster_name(conn)
+        finally:
+            conn.close()
+        if name is None and Path(db_path).stem not in ('nomad', 'combined'):
+            name = Path(db_path).stem
+    if name is None:
+        from nomad.config import resolve_cluster_name
+        name = resolve_cluster_name(ctx.obj.get('config') or {})
+    return site, name
+
+
+def _usage_config(path, name):
+    """report.toml's settings for ``name``; an error when the file names its
+    clusters and this isn't one of them (a mistyped --cluster)."""
+    from nomad.usage import config as ucfg
+    try:
+        cfg = ucfg.load(path, name)
+    except ucfg.ReportConfigError as e:
+        raise click.ClickException(f"report.toml: {e}")
+    if cfg.path is not None and cfg.known_clusters and not cfg.section_found:
+        raise click.ClickException(f"{cfg.path} has no [report.clusters.{name}] (it has "
+                                   f"{', '.join(cfg.known_clusters)}): give --cluster, or add the section")
+    return cfg
+
+
+@cli.group('usage-report', invoke_without_command=True)
+@click.option('--from', 'since', metavar='YYYY-MM-DD', help='First day of the period (default: a year before --to).')
+@click.option('--to', 'until', metavar='YYYY-MM-DD',
+              help='End of the period, not included (default: today, so the period ends yesterday).')
+@click.option('--cluster', help='The site to report on (needed when the database holds several).')
+@click.option('--db', type=click.Path(dir_okay=False),
+              help="Database (default: the hub's combined.db if there is one, else this host's).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='Site settings (default: ~/.config/nomad/report.toml).')
+@click.option('--sacct', type=click.Path(exists=True, dir_okay=False),
+              help='Read jobs from an `sacct -P` export instead of the database (.gz too).')
+@click.option('--user-map', type=click.Path(exists=True, dir_okay=False),
+              help='CSV of user, department, school (section 12).')
+@click.option('--exclude-users', metavar='A,B', help="Accounts that are not people, added to report.toml's.")
+@click.option('--teaching', 'teaching_site', metavar='SITE', help='The teaching server\'s site (section 13).')
+@click.option('--format', 'fmt_', type=click.Choice(['md', 'json', 'both']), default='both', show_default=True)
+@click.option('--out', type=click.Path(file_okay=False), default='.', show_default=True,
+              help='Directory to write the report to.')
+@click.option('--min-cell', type=int, default=None,
+              help='Show counts of fewer than N people as "fewer than N" (for wider audiences).')
+@click.option('--guard-details', type=click.Path(dir_okay=False),
+              help='If the report would contain names, write them to this file (readable only by you).')
+@click.option('--allow', multiple=True, metavar='WORD',
+              help='A word the report may contain although a name in the data is spelled the same '
+                   '(repeat for several).')
+@click.pass_context
+def usage_report(ctx, since, until, cluster, db, report_config, sacct, user_map, exclude_users,
+                 teaching_site, fmt_, out, min_cell, guard_details, allow):
+    """The administrators' report: use, people, waits, GPUs, storage, capacity.
+
+    \b
+    nomad usage-report --from 2025-10-01 --to 2026-10-07 --cluster spydur
+    nomad usage-report init --cluster spydur      draft ~/.config/nomad/report.toml
+    nomad usage-report people --cluster spydur    the period's usernames, for a user map
+
+    Aggregates only: people are counted, never named, and a report that would
+    contain a username, group, job name or condo partition is not written.
+    Every figure is also in the JSON file with its source, period and kind
+    (measured, estimated, projected).
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from nomad.collectors.sacct_import import ExportError
+    from nomad.usage import guard, run, sources
+    t0, t1 = _usage_period(since, until)
+    db_path = _usage_db(ctx, db, need=sacct is None)
+    site, name = _usage_site(ctx, db_path, cluster)
+    cfg = _usage_config(report_config, name)
+    exclude = {u.strip() for u in (exclude_users or "").split(",") if u.strip()}
+    try:
+        report, data = run.build(cfg, t0, t1, db=db_path, site=site, sacct=Path(sacct) if sacct else None,
+                                 exclude=exclude, user_map=Path(user_map) if user_map else None,
+                                 teaching_site=teaching_site, min_cell=min_cell)
+    except (sources.SourceError, ExportError, OSError, sqlite3.DatabaseError) as e:
+        raise click.ClickException(str(e))
+    formats = ['md', 'json'] if fmt_ == 'both' else [fmt_]
+    try:
+        paths = run.write(report, data, Path(out), formats, allow=set(allow))
+    except guard.GuardError as e:
+        if guard_details:
+            try:
+                run.guard_details(e, Path(guard_details))
+            except OSError as err:
+                raise click.ClickException(f"{e}. {guard_details}: {err.strerror or err}")
+            raise click.ClickException(f"{e}. The names are in {guard_details}; a word that is not a "
+                                       "name can be let through with --allow WORD.")
+        raise click.ClickException(f"{e}. Add --guard-details FILE to see them (on this machine only).")
+    click.echo(f"{name}: usage report, {report.sections[0].period}")
+    if not cfg.has_tier_map:
+        click.echo("  (no tier map: every node is one tier; `nomad usage-report init` drafts report.toml)")
+    for s in report.sections:
+        click.echo(f"  {s.number:>2}. {s.title}: {s.finding}")
+    for p in paths:
+        click.echo(f"wrote {p}")
+
+
+@usage_report.command('init')
+@click.option('--cluster', help='The site (needed when the database holds several).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the report).")
+@click.option('--out', 'out_path', type=click.Path(dir_okay=False),
+              default='~/.config/nomad/report.toml', show_default=True)
+@click.option('--force', is_flag=True, help='Replace an existing file.')
+@click.pass_context
+def usage_report_init(ctx, cluster, db, out_path, force):
+    """Draft report.toml from the latest node samples: tiers by hardware,
+    partitions and their nodes. Edit it before the first report."""
+    from nomad.usage import draft, run, sources
+    db_path = _usage_db(ctx, db)
+    site, name = _usage_site(ctx, db_path, cluster)
+    target = Path(out_path).expanduser()
+    if target.exists() and not force:
+        raise click.ClickException(f"{target} exists (--force replaces it)")
+    conn = sources.open_db(db_path)
+    try:
+        text = draft.draft(conn, site, name)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    finally:
+        conn.close()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with run.private_file(target, overwrite=force) as f:
+            f.write(text)
+    except OSError as e:
+        raise click.ClickException(f"{target}: {e.strerror or e}")
+    click.echo(f"wrote {target} (readable only by you: it names partitions). Name the tiers, list the "
+               "institution's, then run `nomad usage-report`.")
+
+
+@usage_report.command('people')
+@click.option('--from', 'since', metavar='YYYY-MM-DD')
+@click.option('--to', 'until', metavar='YYYY-MM-DD')
+@click.option('--cluster', help='The site (needed when the database holds several).')
+@click.option('--db', type=click.Path(dir_okay=False))
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False))
+@click.option('--sacct', type=click.Path(exists=True, dir_okay=False))
+@click.option('--out', 'out_path', type=click.Path(dir_okay=False), required=True,
+              help='CSV to write (readable only by you).')
+@click.option('--force', is_flag=True, help='Replace an existing file.')
+@click.pass_context
+def usage_report_people(ctx, since, until, cluster, db, report_config, sacct, out_path, force):
+    """Write the period's usernames to a CSV (user, department, school) for
+    someone to fill in; pass it back with --user-map. Names stay in that file:
+    nothing is printed."""
+    import csv
+    from nomad.collectors.sacct_import import ExportError
+    from nomad.usage import run, sources
+    t0, t1 = _usage_period(since, until)
+    db_path = _usage_db(ctx, db, need=sacct is None)
+    site, name = _usage_site(ctx, db_path, cluster)
+    target = Path(out_path).expanduser()
+    if target.exists() and not force:
+        raise click.ClickException(f"{target} exists (--force replaces it)")
+    cfg = _usage_config(report_config, name)
+    try:
+        data = sources.load(cfg, t0, t1, db=db_path, site=site, sacct=Path(sacct) if sacct else None,
+                            keep_people=True)
+    except (sources.SourceError, ExportError, OSError, sqlite3.DatabaseError) as e:
+        raise click.ClickException(str(e))
+    try:
+        f = run.private_file(target, overwrite=force)
+    except OSError as e:
+        raise click.ClickException(f"{target}: {e.strerror or e}")
+    with f:
+        w = csv.writer(f)
+        w.writerow(["user", "department", "school"])
+        for u in data.people_names or []:
+            w.writerow([u, "", ""])
+    click.echo(f"wrote {target}: {len(data.people_names or [])} people (readable only by you).")
+
+
 @cli.group('config')
 def config_group():
     """nomad.toml: does it read, and if not, where it goes wrong.

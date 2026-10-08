@@ -132,6 +132,11 @@ def _is_time(value: str) -> bool:
         return False
 
 
+def open_export(path: str) -> Iterator[str]:
+    """The lines of an export, plain or gzipped."""
+    return _open(path)
+
+
 def _open(path: str) -> Iterator[str]:
     with open(path, "rb") as raw:
         magic = raw.read(2)
@@ -413,10 +418,22 @@ class Importer:
         return self.counts
 
 
+def quiet_collector() -> SlurmCollector:
+    """A SlurmCollector for its sacct parsing (and sacct calls), without the
+    start-up lines a collector run logs ("Initialized slurm collector")."""
+    log = logging.getLogger("nomad.collectors")
+    level = log.level
+    log.setLevel(logging.WARNING)
+    try:
+        return SlurmCollector({}, ":memory:")
+    finally:
+        log.setLevel(level)
+
+
 def import_export(conn: sqlite3.Connection, path: str, apply: bool) -> Counts:
     """Read an sacct export into the database (or count what would change).
     What was read before an error stays written (with --apply)."""
-    parser = SlurmCollector({}, ":memory:")
+    parser = quiet_collector()
     imp = Importer(conn, apply)
     try:
         for rec in read_export(_open(path)):
@@ -465,7 +482,7 @@ def import_from_sacct(conn: sqlite3.Connection, since: date, until: date, apply:
     """Ask sacct for every job of [since, until), a month at a time. Each
     month is committed before sacct is asked about the next; SacctStopped,
     with the counts so far, if sacct fails."""
-    collector = SlurmCollector({}, ":memory:")
+    collector = quiet_collector()
     imp = Importer(conn, apply)
     for a, b in month_windows(since, until):
         imp.commit()                        # nothing held while sacct answers
@@ -484,4 +501,4 @@ def import_from_sacct(conn: sqlite3.Connection, since: date, until: date, apply:
 
 
 __all__ = ["Counts", "ExportError", "Importer", "SacctStopped", "import_export",
-           "import_from_sacct", "month_windows", "read_export"]
+           "import_from_sacct", "month_windows", "quiet_collector", "read_export", "open_export"]

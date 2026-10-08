@@ -76,6 +76,26 @@ nomad import sacct --from 2025-10-01 [--to 2026-10-01] [--apply]
 
 See [Collectors](collectors.md) (and "Jobs from before nomad" there).
 
+## Usage Report
+
+```bash
+# The administrators' report for a period (Markdown and JSON)
+nomad usage-report --from 2025-10-01 --to 2026-10-07 --cluster c1 [--out DIR]
+
+# From an sacct export instead of nomad's job records
+nomad usage-report --sacct EXPORT --from 2025-10-01 --to 2026-10-07 --cluster c1
+
+# Draft the site settings (tiers, partitions) from nomad's node samples
+nomad usage-report init --cluster c1
+
+# The period's usernames, for a department/school map (--user-map)
+nomad usage-report people --cluster c1 --out users.csv
+```
+
+Options: `--config` (report.toml), `--db`, `--user-map`, `--exclude-users`,
+`--teaching SITE`, `--format md|json|both`, `--min-cell N`, `--guard-details FILE`, `--allow WORD`.
+See [Usage report](usage-report.md).
+
 ## Global Options
 
 | Option | Description |
