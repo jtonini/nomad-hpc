@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from nomad.hostlist import expand_hostlist
+
 # Try to import toml (fall back to tomllib in Python 3.11+)
 try:
     import tomllib
@@ -255,7 +257,7 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
 
                     for row in job_rows:
                         if row['node_list']:
-                            for node in row['node_list'].split(','):
+                            for node in expand_hostlist(row['node_list']):
                                 node = node.strip()
                                 if node not in job_stats:
                                     job_stats[node] = {'success': 0, 'failed': 0}

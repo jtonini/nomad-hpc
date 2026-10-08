@@ -16,7 +16,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
+from nomad.db.jobkeys import norm_time, place
+from nomad.hostlist import expand_hostlist
+
 from .base import BaseCollector, CollectionError, registry
+from .slurm import gpu_count
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +161,9 @@ class JobMetricsCollector(BaseCollector):
         self.min_runtime = config.get('min_runtime_seconds', 10)
         self.partitions = config.get('partitions', None)
 
-        # Track processed jobs to avoid duplicates
-        self._processed_jobs: set[str] = set()
+        # Track processed jobs to avoid duplicates: (job id, submit time), since
+        # Slurm gives numbers out again.
+        self._processed_jobs: set[tuple[str, str | None]] = set()
         self._load_processed_jobs()
 
         logger.info(f"JobMetricsCollector: lookback={self.lookback_hours}h "
@@ -169,9 +174,10 @@ class JobMetricsCollector(BaseCollector):
         try:
             with self.get_db_connection() as conn:
                 rows = conn.execute(
-                    "SELECT job_id FROM job_summary"
+                    "SELECT js.job_id, j.submit_time FROM job_summary js "
+                    "LEFT JOIN jobs j ON j.job_id = js.job_id"
                 ).fetchall()
-                self._processed_jobs = {row[0] for row in rows}
+                self._processed_jobs = {(row[0], norm_time(row[1])) for row in rows}
                 logger.debug(f"Loaded {len(self._processed_jobs)} processed jobs")
         except Exception as e:
             logger.debug(f"Could not load processed jobs: {e}")
@@ -279,7 +285,7 @@ class JobMetricsCollector(BaseCollector):
                     'type': 'job_metrics',
                     **job.to_dict()
                 })
-                self._processed_jobs.add(job.job_id)
+                self._processed_jobs.add((job.job_id, norm_time(job.submit_time)))
 
             # Distinguish between "sacct returned nothing" and "we filtered
             # everything out". Silent zero-result loops are how this bug hid
@@ -430,8 +436,9 @@ class JobMetricsCollector(BaseCollector):
 
     def _should_include(self, job: JobMetrics) -> bool:
         """Check if job should be included in collection."""
-        # Skip already processed
-        if job.job_id in self._processed_jobs:
+        # Skip already processed (the same number and submit time: a number
+        # Slurm gave out again is another job)
+        if (job.job_id, norm_time(job.submit_time)) in self._processed_jobs:
             return False
 
         # Skip very short jobs
@@ -615,16 +622,9 @@ class JobMetricsCollector(BaseCollector):
             if not value or value in ('', 'N/A'):
                 return 0
 
-            # ReqTRES format: cpu=4,mem=8G,gres/gpu=2 or gres/gpu:type=N
-            if 'gpu' in value.lower():
-                # Find gpu part
-                for part in value.split(','):
-                    if 'gpu' in part.lower():
-                        # Extract number after =
-                        if '=' in part:
-                            num = part.split('=')[-1]
-                            return int(num)
-            return 0
+            # ReqTRES format: cpu=4,mem=8G,gres/gpu=2 or gres/gpu:type=N;
+            # gres/gpumem and gres/gpuutil are not GPUs.
+            return gpu_count(value)
         except ValueError:
             return 0
 
@@ -644,7 +644,7 @@ class JobMetricsCollector(BaseCollector):
         """
         if not node_list or not start_time or not end_time:
             return None
-        nodes = [n.strip() for n in str(node_list).split(",") if n.strip()]
+        nodes = expand_hostlist(node_list)
         if not nodes:
             return None
         placeholders = ",".join("?" * len(nodes))
@@ -669,23 +669,56 @@ class JobMetricsCollector(BaseCollector):
                 if record.get('type') != 'job_metrics':
                     continue
 
-                # Update jobs table
+                # A number Slurm gave out again is a new job: the earlier one
+                # moves aside (nomad.db.jobkeys) instead of taking this one's
+                # outcome and metrics.
+                job_id = place(conn, record['job_id'], record['submit_time'],
+                               record['user_name'], record['job_name'])
+                if job_id is None:
+                    continue
+                wait = None
+                if record['submit_time'] and record['start_time']:
+                    wait = int((datetime.fromisoformat(record['start_time'])
+                                - datetime.fromisoformat(record['submit_time'])).total_seconds())
+                    if wait < 0:
+                        wait = None
+
+                # Update jobs table. The start is sacct's real one: a start
+                # stored from squeue while the job waited was an estimate.
                 conn.execute(
                     """
                     INSERT INTO jobs
                     (job_id, user_name, group_name, partition, job_name, state,
                      submit_time, start_time, end_time, exit_code,
                      req_cpus, req_mem_mb, req_gpus, req_time_seconds, runtime_seconds,
-                     node_list)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     node_list, wait_time_seconds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
+                        submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
                         state = excluded.state,
                         end_time = excluded.end_time,
                         exit_code = excluded.exit_code,
-                        runtime_seconds = excluded.runtime_seconds
+                        runtime_seconds = excluded.runtime_seconds,
+                        start_time = CASE
+                            WHEN excluded.start_time IS NULL THEN jobs.start_time
+                            WHEN julianday(excluded.start_time) < julianday(
+                                     COALESCE(excluded.submit_time, jobs.submit_time))
+                                THEN jobs.start_time
+                            ELSE excluded.start_time END,
+                        wait_time_seconds = CASE
+                            WHEN excluded.start_time IS NULL
+                                 OR COALESCE(excluded.submit_time, jobs.submit_time) IS NULL
+                                THEN jobs.wait_time_seconds
+                            WHEN julianday(excluded.start_time) < julianday(
+                                     COALESCE(excluded.submit_time, jobs.submit_time))
+                                THEN jobs.wait_time_seconds
+                            ELSE CAST(ROUND((julianday(excluded.start_time) - julianday(
+                                     COALESCE(excluded.submit_time, jobs.submit_time)))
+                                     * 86400) AS INTEGER)
+                            END
                     """,
                     (
-                        record['job_id'],
+                        job_id,
                         record['user_name'],
                         record['group_name'],
                         record['partition'],
@@ -701,6 +734,7 @@ class JobMetricsCollector(BaseCollector):
                         record['timelimit_seconds'],
                         record['elapsed_seconds'],
                         record.get('node_list'),
+                        wait,
                     )
                 )
 
@@ -720,7 +754,7 @@ class JobMetricsCollector(BaseCollector):
                         feature_vector = excluded.feature_vector
                     """,
                     (
-                        record['job_id'],
+                        job_id,
                         record['avg_cpu_percent'],
                         (record['max_rss_mb'] or 0) / 1024,
                         record['avg_cpu_percent'],

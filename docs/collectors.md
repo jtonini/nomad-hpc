@@ -80,6 +80,54 @@ success. Those rows (`COMPLETED`, an end time without a `T`) are looked up in
 `sacct` too, 200 a run, and become `UNKNOWN` (end time moved to local) if
 `sacct` no longer has them.
 
+From `sacct` (1.7.42) each job also gets `account`, `alloc_tres` (what Slurm
+allocated, e.g. `cpu=6,gres/gpu:a40=1,gres/gpu=1,mem=32G,node=1`),
+`alloc_gpus` (the GPUs in it: `gres/gpu` and `gres/gpu:TYPE`, never
+`gres/gpumem` or `gres/gpuutil`), and two parts of its working directory:
+`work_root`, the first (`/home`, `/scratch`), and `work_tail`, the last two
+(`proj/run1`). The whole path is not kept. `squeue` doesn't report these;
+what `sacct` stored stays.
+
+`node_list` is kept as Slurm writes it, in range form (`n[01-04,07]`). Code
+that needs the nodes themselves reads it with `nomad.hostlist.expand_hostlist`
+(or `node_in`); splitting on commas or matching with LIKE misses ranges.
+
+### Job numbers that come back
+
+Slurm reuses job numbers: after its counter restarts (an outage that loses
+its state) or wraps at `MaxJobId`, number 4711 is a new job. Before 1.7.42 the
+new job's state, nodes and times were written onto the stored row, under the
+earlier job's user, partition, name and submit time. Now, when a job arrives
+whose number is stored with another submit time, and the stored job is
+another job (another user or job name, or it ended more than 30 days before,
+or it is still marked active but was submitted more than its time limit plus
+30 days before -- a year without a limit -- as rows left RUNNING by an outage
+that lost Slurm's state are), the earlier job moves aside to
+`NUMBER@SUBMIT-TIME` (`4711@2026-03-01T10:00:00`; `~2` and so on if that is
+taken) in every table with a job id (`jobs`, `job_summary`, `job_metrics`,
+`job_similarity`, ...), and the number is the new job's. Rows in those
+tables dated (`submit_time` or `timestamp`) from the new job's submission on
+stay: they were written for the new job. A job moved aside while still marked
+active becomes `UNKNOWN`. A requeued job (same user and name) stays one job,
+and its submit time follows Slurm's (a requeue gets a new one). See
+`nomad.db.jobkeys.place`.
+
+### Start times
+
+`squeue` reports a pending job's start as Slurm's *estimate*. It is never
+stored (before 16 Sep 2026 it was, and when the job's outcome then came from
+`job_metrics`, which did not update the start, the estimate stayed, with a
+wait to match). `job_metrics` now takes `sacct`'s real start. Once per
+database, finished jobs whose start disagrees with end − runtime by more than
+two minutes are looked up in `sacct` and, when `sacct`'s job is the same job,
+stored as `sacct` has it (no start for a job cancelled before it ran); those
+`sacct` no longer has are corrected to end − runtime only when their start is
+impossible (after the end, or before submission). At most 1,000 are looked
+up a run, so a backlog takes several runs; how far it got is kept in
+`config` (`repair.job_start_times.after`), and when done, what was done is
+recorded under `repair.job_start_times`. Rows from before 1.7.19 with an
+assumed end time are left to the outcome lookups above.
+
 ## Disks
 
 `disk` reads each of `filesystems` with `df` every run. Each reading also

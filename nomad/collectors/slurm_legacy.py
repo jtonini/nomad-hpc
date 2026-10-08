@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from nomad.db.jobkeys import place
+
 from .base import BaseCollector, CollectionError, registry
 
 logger = logging.getLogger(__name__)
@@ -408,6 +410,11 @@ class SlurmCollector(BaseCollector):
                     )
 
                 elif record_type == 'job':
+                    # A number Slurm gave out again is a new job (nomad.db.jobkeys).
+                    job_id = place(conn, record['job_id'], record['submit_time'],
+                                   record['user_name'], record['job_name'])
+                    if job_id is None:
+                        continue
                     # Upsert job data
                     conn.execute(
                         """
@@ -425,7 +432,7 @@ class SlurmCollector(BaseCollector):
                             runtime_seconds = excluded.runtime_seconds
                         """,
                         (
-                            record['job_id'],
+                            job_id,
                             record['user_name'],
                             record['group_name'],
                             record['partition'],

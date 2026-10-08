@@ -19,6 +19,8 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from nomad.hostlist import like_clause, node_in
+
 # Import existing analysis tools
 try:
     from nomad.analysis.derivatives import AlertLevel, DerivativeAnalyzer, analyze_disk_trend
@@ -94,15 +96,27 @@ def get_recent_jobs(db_path: str, cluster: str, node_name: str, limit: int = 20)
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("""
-            SELECT job_id, user_name, job_name, state, exit_code, 
-                   start_time, end_time, runtime_seconds, failure_reason
-            FROM jobs 
-            WHERE cluster = ? AND node_list LIKE ?
-            ORDER BY end_time DESC LIMIT ?
-        """, (cluster, f"%{node_name}%", limit)).fetchall()
+        # node_list is Slurm's range form ("cn[01-04]"): LIKE narrows the
+        # rows down to lists that name the node or use ranges, and the node
+        # itself is checked on the expanded list.
+        where, pats = like_clause("node_list", node_name)
+        cur = conn.execute(f"""
+            SELECT job_id, user_name, job_name, state, exit_code,
+                   start_time, end_time, runtime_seconds, failure_reason, node_list
+            FROM jobs
+            WHERE cluster = ? AND {where}
+            ORDER BY end_time DESC
+        """, (cluster, *pats))
+        out = []
+        for r in cur:
+            if node_in(node_name, r["node_list"]):
+                job = dict(r)
+                job.pop("node_list", None)
+                out.append(job)
+                if len(out) >= limit:
+                    break
         conn.close()
-        return [dict(r) for r in rows]
+        return out
     except Exception as e:
         logger.error(f"Error getting recent jobs: {e}")
         return []

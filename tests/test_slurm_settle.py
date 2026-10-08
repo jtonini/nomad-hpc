@@ -104,6 +104,11 @@ class FakeSlurm:
 def site(tmp_path, monkeypatch):
     db = tmp_path / "site.db"
     ensure_database(Path(db))
+    # The once-per-database repair of stored start times has its own tests
+    # (test_job_identity.py); these jobs' made-up times would set it off.
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO config (key, value) VALUES (?, 'done in the fixture')",
+                  (S._STARTS_REPAIRED,))
 
     def run(fake, config=None):
         col = SlurmCollector(config or {}, str(db))

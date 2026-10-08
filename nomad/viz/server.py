@@ -21,6 +21,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
+from nomad.hostlist import expand_hostlist, like_clause, node_in
+
+
+def _top_users_on(node_name, rows, limit=5):
+    """The users with most jobs on node_name, from (username, node_list) rows
+    (node lists in Slurm's range form; LIKE only narrowed them down)."""
+    from collections import Counter
+    counts = Counter(r['username'] for r in rows if node_in(node_name, r['node_list']))
+    return [{"user": u, "jobs": n} for u, n in counts.most_common(limit)]
+
 # Try to import toml (fall back to tomllib in Python 3.11+)
 try:
     import tomllib
@@ -440,7 +450,7 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
 
                     for row in job_rows:
                         if row['node_list']:
-                            for node in row['node_list'].split(','):
+                            for node in expand_hostlist(row['node_list']):
                                 node = node.strip()
                                 if node not in job_stats:
                                     job_stats[node] = {'success': 0, 'failed': 0, 'running': 0, 'pending': 0}
@@ -480,34 +490,28 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                     # Get top users for this node from job_accounting or jobs table
                     top_users = []
                     try:
-                        user_rows = conn.execute("""
-                            SELECT username, COUNT(*) as job_count
+                        where, pats = like_clause("node_list", node_name)
+                        user_rows = conn.execute(f"""
+                            SELECT username, node_list
                             FROM job_accounting
-                            WHERE node_list LIKE ?
+                            WHERE {where}
                             AND (end_time > datetime('now', '-1 day')
                                  OR end_time IS NULL)
-                            GROUP BY username
-                            ORDER BY job_count DESC
-                            LIMIT 5
-                        """, (f'%{node_name}%',)).fetchall()
-                        if user_rows:
-                            top_users = [{"user": r['username'], "jobs": r['job_count']} for r in user_rows]
+                        """, pats).fetchall()
+                        top_users = _top_users_on(node_name, user_rows)
                     except:
                         pass
                     if not top_users:
                         try:
-                            user_rows = conn.execute("""
-                                SELECT user_name as username, COUNT(*) as job_count
+                            where, pats = like_clause("node_list", node_name)
+                            user_rows = conn.execute(f"""
+                                SELECT user_name as username, node_list
                                 FROM jobs
-                                WHERE node_list LIKE ?
+                                WHERE {where}
                                 AND (state = 'RUNNING' OR state = 'PENDING'
                                      OR end_time > datetime('now', '-1 day'))
-                                GROUP BY user_name
-                                ORDER BY job_count DESC
-                                LIMIT 5
-                            """, (f'%{node_name}%',)).fetchall()
-                            if user_rows:
-                                top_users = [{"user": r['username'], "jobs": r['job_count']} for r in user_rows]
+                            """, pats).fetchall()
+                            top_users = _top_users_on(node_name, user_rows)
                         except:
                             pass
 
@@ -653,8 +657,7 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                         """).fetchall()
 
                         for row in job_rows:
-                            if row['node_list']:
-                                node = row['node_list'].strip()
+                            for node in expand_hostlist(row['node_list']):
                                 if node not in job_stats:
                                     job_stats[node] = {'success': 0, 'failed': 0, 'running': 0, 'pending': 0, 'failures': {}}
                                 if row['state'] == 'COMPLETED':

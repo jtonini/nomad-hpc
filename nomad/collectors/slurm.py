@@ -19,12 +19,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from nomad.db.jobkeys import ACTIVE_STATES, ensure_job_columns, place, same_job, stored_job
+
 from .base import BaseCollector, CollectionError, registry
 
 logger = logging.getLogger(__name__)
 
-SACCT_FORMAT = ("JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,ReqMem,"
-                "ReqTRES,Timelimit,Elapsed,Submit,Start,End,ExitCode")
+# WorkDir last: a '|' in a path then only lengthens the last field.
+SACCT_FORMAT_BASE = ("JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,ReqMem,"
+                     "ReqTRES,Timelimit,Elapsed,Submit,Start,End,ExitCode")
+SACCT_FORMAT = SACCT_FORMAT_BASE + ",Account,AllocTRES,WorkDir"
+_BASE_FIELDS, _ALL_FIELDS = 16, 19
 
 # Jobs looked up by number in sacct per run: those that left the queue, and
 # older records whose outcome was assumed rather than read (see
@@ -32,11 +37,21 @@ SACCT_FORMAT = ("JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,Req
 LOOKUP_BATCH = 200
 LOOKUP_MAX = 1000           # at most this many a run; the rest wait for the next
 
-# States of a job that has not ended. squeue shows them; sacct shows them for
-# jobs it still has as running.
-ACTIVE_STATES = ('RUNNING', 'PENDING', 'COMPLETING', 'CONFIGURING', 'SUSPENDED',
-                 'REQUEUED', 'REQUEUE_HOLD', 'REQUEUE_FED', 'RESIZING', 'SIGNALING',
-                 'STAGE_OUT', 'STOPPED', 'RESV_DEL_HOLD', 'SPECIAL_EXIT', 'EXPEDITING')
+# States of a job that has not ended (ACTIVE_STATES, from nomad.db.jobkeys):
+# squeue shows them; sacct shows them for jobs it still has as running.
+# Of those, the states of a job that has not started (again): squeue's start
+# time for them is Slurm's estimate, never a start.
+NOT_STARTED = ('PENDING', 'REQUEUED', 'REQUEUE_HOLD', 'REQUEUE_FED', 'RESV_DEL_HOLD')
+
+# A finished job's start, end and elapsed time agree (end = start + elapsed);
+# a stored start further than this from end - elapsed is not the real one.
+START_TOLERANCE = 120       # seconds
+# Recorded in the config table once stored start times have been repaired,
+# and how far the repair has got (it looks up at most LOOKUP_MAX jobs a run).
+_STARTS_REPAIRED = 'repair.job_start_times'
+_STARTS_CURSOR = 'repair.job_start_times.after'
+# A batch sacct fails on this many runs in a row is repaired without sacct.
+_STARTS_TRIES = 3
 
 # An end time written by SQLite's datetime('now') (UTC, a space, no 'T'): the
 # mark of an outcome assumed by versions before 1.7.19. Every time read from
@@ -61,9 +76,11 @@ _JOB_UPSERT = """
      node_list, submit_time, start_time, end_time, exit_code,
      exit_signal, failure_reason,
      req_cpus, req_mem_mb, req_gpus, req_time_seconds,
-     runtime_seconds, wait_time_seconds)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     runtime_seconds, wait_time_seconds,
+     account, alloc_tres, alloc_gpus, work_root, work_tail)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(job_id) DO UPDATE SET
+        submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
         state = excluded.state,
         node_list = excluded.node_list,
         start_time = excluded.start_time,
@@ -72,12 +89,43 @@ _JOB_UPSERT = """
         exit_signal = excluded.exit_signal,
         failure_reason = excluded.failure_reason,
         runtime_seconds = excluded.runtime_seconds,
-        wait_time_seconds = excluded.wait_time_seconds
+        wait_time_seconds = excluded.wait_time_seconds,
+        account = COALESCE(excluded.account, jobs.account),
+        alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
+        alloc_gpus = COALESCE(excluded.alloc_gpus, jobs.alloc_gpus),
+        work_root = COALESCE(excluded.work_root, jobs.work_root),
+        work_tail = COALESCE(excluded.work_tail, jobs.work_tail)
 """
 _JOB_FIELDS = ('job_id', 'user_name', 'group_name', 'partition', 'job_name', 'state',
                'node_list', 'submit_time', 'start_time', 'end_time', 'exit_code',
                'exit_signal', 'failure_reason', 'req_cpus', 'req_mem_mb', 'req_gpus',
-               'req_time_seconds', 'runtime_seconds', 'wait_time_seconds')
+               'req_time_seconds', 'runtime_seconds', 'wait_time_seconds',
+               'account', 'alloc_tres', 'alloc_gpus', 'work_root', 'work_tail')
+
+
+def gpu_count(tres) -> int:
+    """GPUs in a TRES string ('cpu=6,gres/gpu:tesla_a40=1,gres/gpu=1,mem=32G'):
+    the gres/gpu total, or the typed counts (gres/gpu:TYPE) added up when the
+    total isn't there. gres/gpumem and gres/gpuutil are not GPUs."""
+    total, typed = None, 0
+    for part in str(tres or '').split(','):
+        key, _, value = part.strip().partition('=')
+        if not value.isdigit():
+            continue
+        if key == 'gres/gpu':
+            total = int(value)
+        elif key.startswith('gres/gpu:'):
+            typed += int(value)
+    return total if total is not None else typed
+
+
+def work_dir_parts(path) -> tuple[str | None, str | None]:
+    """(first part, last two parts) of a working directory:
+    '/home/u/proj/run1' -> ('/home', 'proj/run1'). The whole path is never kept."""
+    parts = [p for p in str(path or '').strip().split('/') if p]
+    if not parts or not str(path).strip().startswith('/'):
+        return None, None
+    return '/' + parts[0], '/'.join(parts[-2:])
 
 
 def _state_word(state) -> str:
@@ -130,6 +178,12 @@ class JobInfo:
     req_time_seconds: int | None
     runtime_seconds: int | None
     wait_time_seconds: int | None = None
+    # From sacct only (None from squeue: what is stored stays).
+    account: str | None = None
+    alloc_tres: str | None = None
+    alloc_gpus: int | None = None
+    work_root: str | None = None
+    work_tail: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +206,11 @@ class JobInfo:
             'req_time_seconds': self.req_time_seconds,
             'runtime_seconds': self.runtime_seconds,
             'wait_time_seconds': self.wait_time_seconds,
+            'account': self.account,
+            'alloc_tres': self.alloc_tres,
+            'alloc_gpus': self.alloc_gpus,
+            'work_root': self.work_root,
+            'work_tail': self.work_tail,
         }
 
 
@@ -297,6 +356,7 @@ class SlurmCollector(BaseCollector):
         """Collect SLURM queue and job data."""
         data = []
         self._squeue_ids = None
+        self._sacct_failed = False
 
         # Collect queue state
         if self.collect_queue:
@@ -370,13 +430,27 @@ class SlurmCollector(BaseCollector):
     def _sacct(self, *selection: str) -> list[JobInfo]:
         """sacct, one line per job (no steps), parsed. Raises on failure."""
         # ExitCode gives exit_status:signal.
-        result = subprocess.run(
-            ['sacct', '-n', '-P', '-X', *selection, f'--format={SACCT_FORMAT}'],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        fmt = getattr(self, '_sacct_format', SACCT_FORMAT)
+        try:
+            result = subprocess.run(
+                ['sacct', '-n', '-P', '-X', *selection, f'--format={fmt}'],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            self._sacct_failed = True
+            raise
+        if (result.returncode != 0 and fmt != SACCT_FORMAT_BASE
+                and 'invalid field' in (result.stderr or '').lower()):
+            # A Slurm without Account, AllocTRES or WorkDir in sacct: the
+            # rest still works, without those columns.
+            logger.warning(f"sacct rejects a field ({result.stderr.strip()[:120]}); "
+                           f"reading jobs without Account, AllocTRES and WorkDir")
+            self._sacct_format = SACCT_FORMAT_BASE
+            return self._sacct(*selection)
         if result.returncode != 0:
+            self._sacct_failed = True
             raise CollectionError(f"sacct failed: {result.stderr}")
         jobs = []
         for line in result.stdout.splitlines():
@@ -402,8 +476,8 @@ class SlurmCollector(BaseCollector):
     def _parse_sacct_job(self, line: str) -> JobInfo | None:
         """Parse a single sacct output line into JobInfo."""
         try:
-            parts = line.split('|')
-            if len(parts) < 16:
+            parts = self._fields(line.split('|'))
+            if parts is None:
                 return None
 
             job_id = parts[0].strip()
@@ -428,6 +502,14 @@ class SlurmCollector(BaseCollector):
 
             # Parse ExitCode (format: "exit_status:signal")
             exit_code, exit_signal = self._parse_exit_code(parts[15])
+
+            # Account, AllocTRES, WorkDir (WorkDir last: a '|' in it joins back).
+            account = alloc_tres = alloc_gpus = work_root = work_tail = None
+            if len(parts) >= 19:
+                account = parts[16].strip() or None
+                alloc_tres = parts[17].strip() or None
+                alloc_gpus = gpu_count(alloc_tres) if alloc_tres else None
+                work_root, work_tail = work_dir_parts('|'.join(parts[18:]))
 
             # Compute failure reason
             failure_reason = compute_failure_reason(state, exit_code, exit_signal)
@@ -458,11 +540,44 @@ class SlurmCollector(BaseCollector):
                 req_time_seconds=time_limit,
                 runtime_seconds=runtime,
                 wait_time_seconds=wait_time,
+                account=account,
+                alloc_tres=alloc_tres,
+                alloc_gpus=alloc_gpus,
+                work_root=work_root,
+                work_tail=work_tail,
             )
 
         except Exception as e:
             logger.debug(f"Failed to parse sacct line: {line} - {e}")
             return None
+
+    def _fields(self, parts: list[str]) -> list[str] | None:
+        """sacct's fields with any '|' inside JobName or WorkDir put back.
+
+        Submit, Start and End (fields 12-14) must read as times (or Unknown/
+        None); when they don't where they should, the extra '|' was in the
+        job name, and the name takes those pieces back. Any that remain belong
+        to WorkDir, the last field. None when the line can't be read.
+        """
+        if len(parts) < _BASE_FIELDS:
+            return None
+        expected = _ALL_FIELDS if len(parts) >= _ALL_FIELDS else _BASE_FIELDS
+        extra = len(parts) - expected
+
+        def times_at(i: int) -> bool:
+            return all(self._parse_datetime(parts[j]) is not None
+                       or parts[j].strip() in ('', 'Unknown', 'None', 'N/A')
+                       for j in (i, i + 1, i + 2))
+        if extra > 0 and not times_at(12):
+            for k in range(1, extra + 1):
+                if times_at(12 + k):
+                    parts = parts[:4] + ['|'.join(parts[4:5 + k])] + parts[5 + k:]
+                    break
+            else:
+                return None
+        elif not times_at(12):
+            return None
+        return parts
 
     def _parse_exit_code(self, value: str) -> tuple[int | None, int | None]:
         """
@@ -617,6 +732,11 @@ class SlurmCollector(BaseCollector):
             submit_time = self._parse_datetime(parts[12])
             start_time = self._parse_datetime(parts[13])
 
+            # For a job that has not started, squeue's start is Slurm's
+            # estimate: past or future, it is not a start.
+            if _state_word(state) in NOT_STARTED:
+                start_time = None
+
             # Compute wait time for running jobs
             start_time = self._sane_start(start_time, submit_time)
             wait_time = None
@@ -690,16 +810,10 @@ class SlurmCollector(BaseCollector):
             if not value or value == 'N/A':
                 return 0
 
-            # ReqTRES format: comma-separated key=value pairs
+            # ReqTRES format: comma-separated key=value pairs (gres/gpu=2,
+            # gres/gpu:a100=2); gres/gpumem and gres/gpuutil are not GPUs.
             if '=' in value:
-                for part in value.split(','):
-                    if 'gpu' in part.lower():
-                        # gres/gpu=2 or gres/gpu:a100=2
-                        try:
-                            return int(part.split('=')[-1])
-                        except ValueError:
-                            continue
-                return 0
+                return gpu_count(value)
 
             # Legacy ReqGRES format: gpu:N or gpu:type:N
             if 'gpu' in value.lower():
@@ -790,6 +904,7 @@ class SlurmCollector(BaseCollector):
         timestamp = datetime.now().isoformat()
 
         with self.get_db_connection() as conn:
+            ensure_job_columns(conn)
             for record in data:
                 record_type = record.get('type')
 
@@ -810,7 +925,13 @@ class SlurmCollector(BaseCollector):
                     )
 
                 elif record_type == 'job':
-                    # Upsert job data with exit_signal, failure_reason, wait_time
+                    # Where it goes: a number Slurm gave out again is a new
+                    # job, and the earlier one moves aside (nomad.db.jobkeys).
+                    job_id = place(conn, record['job_id'], record['submit_time'],
+                                   record['user_name'], record['job_name'])
+                    if job_id is None:
+                        continue
+                    record['job_id'] = job_id
                     conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
 
             # Committed before sacct is asked about anything, so the database
@@ -820,6 +941,11 @@ class SlurmCollector(BaseCollector):
                 self._settle_ended_jobs(conn, data)
             except Exception as e:
                 logger.warning(f"Failed to settle ended jobs: {e}")
+            conn.commit()
+            try:
+                self._repair_start_times(conn)
+            except Exception as e:
+                logger.warning(f"Failed to repair stored start times: {e}")
 
             conn.commit()
             logger.debug(f"Stored {len(data)} SLURM records")
@@ -888,6 +1014,7 @@ class SlurmCollector(BaseCollector):
                 # Its outcome; or, for a row marked UNKNOWN or assumed, sacct
                 # saying it is still active, which puts it back as it is.
                 record = job.to_dict()
+                record['job_id'] = job_id
                 conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
                 settled += 1
             elif fresh:
@@ -909,6 +1036,139 @@ class SlurmCollector(BaseCollector):
             logger.info(f"Jobs that left the queue or had an assumed outcome: "
                         f"{settled} settled from sacct, {unknown} marked {UNKNOWN}, "
                         f"{dropped} pending array ranges dropped")
+
+    def _repair_start_times(self, conn) -> None:
+        """Once per database: correct start times that can't be real.
+
+        Until 16 Sep 2026 squeue's ESTIMATED start for a pending job was
+        stored as its start, and before 1.7.19 the outcome of other people's
+        jobs often came from job_metrics, which never touched the start: so
+        some finished jobs kept the estimate, with a wait to match. A
+        finished job's end is its start plus its elapsed time; a stored start
+        further than START_TOLERANCE from end - runtime is looked up in sacct
+        and, when sacct's job is this job (nomad.db.jobkeys.same_job), stored
+        as sacct has it -- no start at all for a job that never started.
+        Jobs sacct no longer has keep their start unless it is impossible
+        (after the end or before submission); then it becomes end - runtime,
+        or none for a job cancelled before it ran. At most LOOKUP_MAX jobs
+        are looked up a run, in job id order, and the place reached is kept
+        in config, so a large backlog is done over several runs and a failed
+        lookup costs only that run. When nothing is left, it is noted in
+        config, and jobs whose gap is real (suspended for a while) are not
+        asked about again. Pre-1.7.19 rows with an assumed (UTC) end are left
+        to _settle_ended_jobs.
+        """
+        conn.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, "
+                     "value TEXT NOT NULL, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)")
+
+        def get(key):
+            row = conn.execute("SELECT value FROM config WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+
+        def put(key, value):
+            conn.execute("INSERT OR REPLACE INTO config (key, value, updated_at) "
+                         "VALUES (?, ?, ?)",
+                         (key, value, datetime.now().isoformat(timespec='seconds')))
+
+        if get(_STARTS_REPAIRED) is not None:
+            return
+        if getattr(self, '_sacct_failed', False):
+            return      # sacct is failing this run: nothing done, no try counted
+        after = get(_STARTS_CURSOR) or ''
+        marks = ','.join('?' * len(ACTIVE_STATES))
+        rows = conn.execute(
+            f"SELECT job_id, submit_time, start_time, end_time, runtime_seconds, state, "
+            f"user_name, job_name FROM jobs "
+            f"WHERE job_id > ? AND start_time IS NOT NULL AND end_time IS NOT NULL "
+            f"AND runtime_seconds IS NOT NULL AND state NOT IN ({marks}, ?) "
+            f"AND NOT ({_ASSUMED_END}) "
+            f"AND (julianday(start_time) > julianday(end_time) "
+            f"  OR julianday(start_time) < julianday(submit_time) "
+            f"  OR ABS((julianday(end_time) - julianday(start_time)) * 86400.0 "
+            f"         - runtime_seconds) > ?) "
+            f"ORDER BY job_id",
+            (after, *ACTIVE_STATES, UNKNOWN, START_TOLERANCE)).fetchall()
+        counts = dict(zip(('sacct', 'runtime', 'left'),
+                          (int(x) for x in (get(_STARTS_CURSOR + '.counts') or '0,0,0').split(','))))
+        looked = 0
+        i = 0
+        while i < len(rows):
+            # The next batch: up to LOOKUP_BATCH rows that sacct can be asked about.
+            batch = []
+            j = i
+            while j < len(rows) and len(batch) < LOOKUP_BATCH:
+                if _LOOKUP_ID.match(str(rows[j]['job_id'])):
+                    batch.append(str(rows[j]['job_id']))
+                j += 1
+            if batch and looked + len(batch) > LOOKUP_MAX:
+                break           # enough for this run
+            found: dict[str, JobInfo] = {}
+            if batch:
+                # Nothing uncommitted while sacct answers: other writers wait
+                # on a locked database only as long as one batch's updates.
+                conn.commit()
+                try:
+                    for job in self._sacct('-j', ','.join(batch)):
+                        found[str(job.job_id)] = job
+                except (CollectionError, subprocess.TimeoutExpired, OSError) as e:
+                    tries = int(get(_STARTS_CURSOR + '.failures') or 0) + 1
+                    if tries < _STARTS_TRIES:
+                        put(_STARTS_CURSOR + '.failures', str(tries))
+                        logger.warning(f"Start-time repair: sacct lookup failed ({e}); "
+                                       f"next run carries on")
+                        break
+                    logger.warning(f"Start-time repair: sacct failed on these jobs "
+                                   f"{tries} runs running ({e}); repaired without it")
+                looked += len(batch)
+            for r in rows[i:j]:
+                counts[self._repair_one(conn, r, found.get(str(r['job_id'])))] += 1
+            put(_STARTS_CURSOR, str(rows[j - 1]['job_id']))
+            put(_STARTS_CURSOR + '.counts', f"{counts['sacct']},{counts['runtime']},{counts['left']}")
+            put(_STARTS_CURSOR + '.failures', '0')
+            conn.commit()
+            i = j
+        if i >= len(rows):
+            note = (f"{counts['sacct']} from sacct, {counts['runtime']} from end - runtime, "
+                    f"{counts['left']} left as they were, of "
+                    f"{counts['sacct'] + counts['runtime'] + counts['left']}")
+            put(_STARTS_REPAIRED, note)
+            if sum(counts.values()):
+                logger.info(f"Stored start times that could not be real: {note}")
+
+    def _repair_one(self, conn, r, job: JobInfo | None) -> str:
+        """Repair one stored row; 'sacct', 'runtime' or 'left'."""
+        job_id = str(r['job_id'])
+        stored = stored_job(conn, job_id)
+        if (job is not None and job.end_time is not None and stored is not None
+                and same_job(stored, job.submit_time, job.user_name, job.job_name)
+                and (job.submit_time is None or r['submit_time'] is None
+                     or job.submit_time.isoformat() >= str(r['submit_time']).replace(' ', 'T')[:19])):
+            record = job.to_dict()
+            record['job_id'] = job_id
+            conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
+            return 'sacct'
+        try:
+            start = datetime.fromisoformat(str(r['start_time']).replace(' ', 'T')[:19])
+            end = datetime.fromisoformat(str(r['end_time']).replace(' ', 'T')[:19])
+            submit = (datetime.fromisoformat(str(r['submit_time']).replace(' ', 'T')[:19])
+                      if r['submit_time'] else None)
+        except ValueError:
+            return 'left'
+        if not (start > end or (submit is not None and start < submit)):
+            return 'left'
+        runtime = int(r['runtime_seconds'])
+        if runtime <= 0 and _state_word(r['state']) == 'CANCELLED':
+            # Cancelled before it ran: it has no start and no wait.
+            conn.execute("UPDATE jobs SET start_time = NULL, wait_time_seconds = NULL "
+                         "WHERE job_id = ?", (job_id,))
+            return 'runtime'
+        start = end - timedelta(seconds=runtime)
+        if submit is not None and start < submit:
+            start = submit
+        wait = int((start - submit).total_seconds()) if submit is not None else None
+        conn.execute("UPDATE jobs SET start_time = ?, wait_time_seconds = ? WHERE job_id = ?",
+                     (start.isoformat(), wait, job_id))
+        return 'runtime'
 
     def get_queue_history(
         self,

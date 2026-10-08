@@ -29,6 +29,8 @@ from datetime import datetime, timedelta
 from .carbon import CarbonIntensity, resolve_intensity
 from .waste import JobEnergyRow, WasteBreakdown, compute_waste, MODE_PHYSICAL
 
+from nomad.hostlist import expand_hostlist
+
 
 # ── Hardware power references (estimate fallback / allocated valuation) ────
 GPU_TDP_WATTS: dict[str, float] = {
@@ -238,7 +240,10 @@ def _median_interval_hours(rows, default_sec: float = 60.0) -> float:
 def _job_gpu_tdp(conn: sqlite3.Connection, node_list: str | None) -> float:
     if not node_list:
         return DEFAULT_GPU_TDP_WATTS
-    first = node_list.split(",")[0].strip()
+    nodes = expand_hostlist(node_list)
+    if not nodes:
+        return DEFAULT_GPU_TDP_WATTS
+    first = nodes[0]
     row = conn.execute(
         "SELECT gpu_name FROM gpu_stats WHERE node_name = ? LIMIT 1", (first,)
     ).fetchone()
