@@ -16,6 +16,7 @@ enabled = false
 | `disk` | on | every host | `df` | `filesystems` |
 | `slurm` | on | Slurm head node | `squeue`, `sacct` | `queue_state`, `jobs` |
 | `job_metrics` | on | Slurm head node | `sacct` | `jobs`, `job_summary` |
+| `slurm_usage` | where `slurm` runs | Slurm head node | `sreport` | `cluster_usage` |
 | `iostat` | on | every host | `iostat` (sysstat) | `iostat_device`, `iostat_cpu` |
 | `mpstat` | on | every host | `mpstat` (sysstat) | `mpstat_summary`, `mpstat_core` |
 | `vmstat` | on | every host | `vmstat` | `vmstat` |
@@ -141,6 +142,73 @@ up a run, so a backlog takes several runs; how far it got is kept in
 `config` (`repair.job_start_times.after`), and when done, what was done is
 recorded under `repair.job_start_times`. Rows from before 1.7.19 with an
 assumed end time are left to the outcome lookups above.
+
+### Jobs from before nomad: `nomad import sacct`
+
+nomad's job history starts when it was installed, and Slurm deletes its own
+job records after `PurgeJobAfter`. An export taken in time, or `sacct` itself
+for the months it still holds, fills that in, on the head node, into that
+site's database:
+
+```
+nomad import sacct /var/tmp/sacct_all.psv.gz          # what would change
+nomad import sacct /var/tmp/sacct_all.psv.gz --apply
+nomad import sacct --from 2025-10-01 --apply          # ask sacct, a month at a time
+```
+
+An export is any `sacct -P` output with its header line (`sacct -a -X -P -o ALL
+-S DATE`; not `-n`), plain or gzipped; fields are read by name. A record spread
+over lines (a field with newlines) is put back together: a line that reads as
+a record, or starts with one far enough to show a job id, starts a record, any
+other line goes on the one before. A `|` inside free-text fields (submit line,
+job name, working directory, comments) is put back where the other fields read
+as they should. Job steps and pending array ranges are skipped.
+
+A job already stored only gets what it lacks (account, allocation, working
+directory, a partition instead of a list, a failure reason job_metrics left
+at 0). Its outcome changes only when nomad had none -- stored as running,
+pending or `UNKNOWN`, or an outcome assumed before 1.7.19 -- and the records
+show it ended; a stored outcome is never mixed with another. A job the records
+show running or pending, and nomad doesn't have, goes in as `UNKNOWN` with no
+end (an export is a snapshot). Numbers Slurm gave out again are kept apart (an
+older job as `NUMBER@SUBMIT-TIME`). Importing the same export twice changes
+nothing. The import commits every half second and gives way a moment after
+each commit, so the collectors writing the same database get in; with
+`--from`, each month is committed before sacct is asked about the next, and if
+sacct fails part way the months before stay written and the command says
+where it stopped. The database must exist (`nomad collect` makes it). Without
+`--apply` it is opened read-only and the counts say what would change, by
+month submitted (not counting what the import itself would change, such as a
+number used twice in the export).
+
+## Usage history (sreport)
+
+`slurm_usage` keeps Slurm's monthly usage totals in `cluster_usage`, one row
+per cluster, month and TRES (`cpu`, and `gres/gpu` where GPUs are
+accounted): hours allocated, down, planned down, idle, planned (held for
+waiting jobs; "Reserved" in older Slurm) and reported. Slurm usually keeps
+these for good (`PurgeUsageAfter=NONE`) after the job records are gone, so
+they are the long view of load. It runs where the `slurm` collector does,
+unless `[collectors.slurm_usage] enabled` says otherwise.
+
+Each run asks `sreport -P -t hours -T cpu,gres/gpu cluster utilization` for at
+most `months_per_run` (24) months, newest first: this month and last month
+again every `refresh_hours` (6) until a month has been over two days
+(`settled`), and further back to the cluster's start or `since = "YYYY-MM"`.
+The start is where Slurm has had nothing for three months in a row *and*
+nothing at all before them (one question about everything earlier, so a long
+outage isn't taken for it); it is kept in `config` as
+`slurm_usage.nothing_before`. Which months were asked, with which TRES and
+when, is in `cluster_usage_asked`; `cluster_usage` holds only what Slurm
+reported. A Slurm that says it doesn't account GPUs is asked for `cpu` alone
+from then on (`slurm_usage.cpu_only`); any other sreport error fails the run
+and the next tries again. A timeout ends the run without retries. A setting
+that doesn't read is warned about and its default used. Where two hosts report
+the same cluster, read one of them (the rows are the same).
+
+Allocated, idle and planned are shares of the time nodes were up (reported −
+down); down is a share of all reported time. Never add `cpu` and `gres/gpu`
+rows together.
 
 ## Disks
 

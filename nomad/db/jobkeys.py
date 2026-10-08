@@ -184,49 +184,63 @@ def move_aside(conn: sqlite3.Connection, job_id: str, new_id: str, before=None,
     return moved
 
 
-def place(conn: sqlite3.Connection, job_id, submit_time, user_name=None,
-          job_name=None) -> str | None:
-    """The job id to write this job record under.
+def decide(conn: sqlite3.Connection, job_id, submit_time, user_name=None,
+           job_name=None) -> tuple[str, str | None]:
+    """Where a job record goes, without writing anything: (kind, id).
 
-    - No stored row with this number, or the stored row is this job: the
-      number itself.
-    - The stored row is another, older job: that job moves aside to
-      ``aside_id`` (every table), and the number itself is returned.
-    - The stored row is another, newer job (a record from the past, such as
-      an imported history): this record's own ``aside_id``.
-    - The stored row is this same job, seen later than this record: None --
-      keep what is stored, drop the record.
+    - ``("new", number)``: no stored row has the number.
+    - ``("same", number)``: the stored row is this job (seen again, or
+      requeued); the record updates it.
+    - ``("stale", None)``: the stored row is this same job, seen later than
+      this record; keep what is stored.
+    - ``("older", aside)``: another, newer job holds the number (this is a
+      record from the past, such as an imported history); it goes under its
+      own ``NUMBER@SUBMIT``.
+    - ``("move", aside)``: another, older job holds the number; that job moves
+      to ``aside`` (or merges there, if it is already kept there) and the
+      record takes the number. ``aside`` is None when no id is free.
     """
     if not job_id:
-        return job_id
+        return "new", job_id
     job_id = str(job_id)
     submit = norm_time(submit_time)
-    if submit is None:
-        return job_id
     stored = stored_job(conn, job_id)
     if stored is None:
-        return job_id
+        return "new", job_id
     stored_submit = norm_time(stored["submit_time"])
-    if stored_submit is None or stored_submit == submit:
-        return job_id
+    if submit is None or stored_submit is None or stored_submit == submit:
+        return "same", job_id
     if same_job(stored, submit, user_name, job_name):
-        return job_id if submit > stored_submit else None
+        return ("same", job_id) if submit > stored_submit else ("stale", None)
     if submit < stored_submit:
-        return _free_id(conn, aside_id(job_id, submit), submit, user_name, job_name)
-    new_id = _free_id(conn, aside_id(job_id, stored_submit), stored_submit,
-                      stored["user_name"], stored["job_name"])
-    if new_id is not None and stored_job(conn, new_id) is not None:
+        return "older", _free_id(conn, aside_id(job_id, submit), submit, user_name, job_name)
+    return "move", _free_id(conn, aside_id(job_id, stored_submit), stored_submit,
+                            stored["user_name"], stored["job_name"])
+
+
+def place(conn: sqlite3.Connection, job_id, submit_time, user_name=None,
+          job_name=None) -> str | None:
+    """The job id to write this job record under (see ``decide``), after
+    moving an older, different job out of the way. None: don't write it --
+    the stored row is this same job seen later, or no id was free."""
+    kind, where = decide(conn, job_id, submit_time, user_name, job_name)
+    if kind in ("new", "same", "stale", "older"):
+        return where
+    job_id = str(job_id)
+    stored_submit = norm_time(stored_job(conn, job_id)["submit_time"])
+    submit = norm_time(submit_time)
+    if where is not None and stored_job(conn, where) is not None:
         # The earlier job is already kept there (stored twice): one copy.
-        _merge_into(conn, job_id, new_id, before=submit, old_submit=stored_submit)
-        logger.info(f"job {job_id}: the earlier job was already kept as {new_id}")
+        _merge_into(conn, job_id, where, before=submit, old_submit=stored_submit)
+        logger.info(f"job {job_id}: the earlier job was already kept as {where}")
         return job_id
-    if new_id is None or not move_aside(conn, job_id, new_id, before=submit,
-                                        old_submit=stored_submit):
+    if where is None or not move_aside(conn, job_id, where, before=submit,
+                                       old_submit=stored_submit):
         logger.warning(f"job {job_id}: could not move the earlier job aside; "
                        f"this record is not stored")
         return None
     logger.info(f"job {job_id}: the number came back for a new job; "
-                f"the earlier job is kept as {new_id}")
+                f"the earlier job is kept as {where}")
     return job_id
 
 
@@ -285,5 +299,5 @@ def _merge_into(conn: sqlite3.Connection, job_id: str, kept_id: str, before=None
     conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
 
 
-__all__ = ["ACTIVE_STATES", "JOB_COLUMNS", "aside_id", "ensure_job_columns", "id_tables",
-           "move_aside", "norm_time", "place", "same_job", "stored_job"]
+__all__ = ["ACTIVE_STATES", "JOB_COLUMNS", "aside_id", "decide", "ensure_job_columns",
+           "id_tables", "move_aside", "norm_time", "place", "same_job", "stored_job"]

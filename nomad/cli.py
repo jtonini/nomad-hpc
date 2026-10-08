@@ -5154,6 +5154,126 @@ def console_roles(ctx, netid, db, mask):
         conn.close()
 
 
+@cli.group('import')
+def import_group():
+    """Load data nomad didn't collect itself.
+
+    \b
+    nomad import sacct EXPORT              jobs from a `sacct -P` export (.gz too)
+    nomad import sacct --from 2025-10-01   jobs Slurm still holds, a month at a time
+    Nothing is written without --apply.
+    """
+
+
+@import_group.command('sacct')
+@click.argument('export', required=False, type=click.Path(exists=True, dir_okay=False))
+@click.option('--from', 'since', metavar='YYYY-MM-DD',
+              help='Ask sacct for the jobs from this day on.')
+@click.option('--to', 'until', metavar='YYYY-MM-DD',
+              help='...up to this day (default: tomorrow).')
+@click.option('--db', type=click.Path(), help="Database (default: this host's).")
+@click.option('--apply', is_flag=True, help='Write. Without it, only say what would change.')
+@click.pass_context
+def import_sacct(ctx, export, since, until, db, apply):
+    """Slurm job records nomad didn't collect, from an export or from sacct.
+
+    EXPORT is the output of `sacct -P` with its header line, e.g.
+    `sacct -a -X -P -o ALL -S 2025-10-01`, plain or gzipped; any fields, in
+    any order. With --from, sacct is asked directly, a month at a time, for
+    jobs it still holds (it deletes them after PurgeJobAfter).
+
+    A job already stored only gets what it lacks (account, allocation,
+    working directory, ...); a job stored as running or pending that the
+    records show ended takes its outcome. Job numbers Slurm gave out again
+    are kept apart (an older job as NUMBER@SUBMIT-TIME). Run it on the head
+    node, into that site's database; `nomad sync` carries it to the hub.
+    """
+    from datetime import date, timedelta
+    from nomad.collectors import sacct_import as si
+    if bool(export) == bool(since):
+        raise click.UsageError("give an EXPORT file or --from, not both")
+    if until and not since:
+        raise click.UsageError("--to goes with --from")
+    try:
+        start = date.fromisoformat(since) if since else None
+        end = date.fromisoformat(until) if until else date.today() + timedelta(days=1)
+    except ValueError as e:
+        raise click.UsageError(f"dates are YYYY-MM-DD ({e})")
+    if start and start >= end:
+        raise click.UsageError("--from must come before --to")
+
+    import urllib.parse
+    db_path = Path(db).expanduser() if db else get_db_path(ctx.obj['config'])
+    if not db_path.exists():
+        raise click.ClickException(f"no database at {db_path} (nomad collect makes it; "
+                                   f"or give the right one with --db)")
+    if apply:
+        from nomad.db import ensure_database
+        ensure_database(db_path)
+        conn = sqlite3.connect(str(db_path), timeout=30)
+    else:
+        conn = sqlite3.connect(f"file:{urllib.parse.quote(str(db_path))}?mode=ro",
+                               uri=True, timeout=30)
+    source = export if export else f"sacct, {start} to {end}"
+    click.echo(f"nomad import sacct: {source} -> {db_path}"
+               + ("" if apply else " (dry run: nothing is written)"))
+    stopped = None
+    try:
+        if export:
+            counts = si.import_export(conn, export, apply)
+        else:
+            try:
+                counts = si.import_from_sacct(
+                    conn, start, end, apply,
+                    progress=lambda m, n: click.echo(f"  {m:%Y-%m}: {n:,} jobs from sacct"))
+            except si.SacctStopped as e:
+                counts, stopped = e.counts, e
+    except si.ExportError as e:
+        raise click.ClickException(f"{export}: {e}")
+    except Exception as e:
+        raise click.ClickException(f"import stopped: {e}"
+                                   + (" (what was read before it is written)" if apply else ""))
+    finally:
+        conn.close()
+
+    c = counts
+    skipped = [f"{c.steps:,} job steps", f"{c.unreadable:,} unreadable"]
+    if c.ranges:
+        skipped.append(f"{c.ranges:,} pending array ranges")
+    if c.repeats:
+        skipped.append(f"{c.repeats:,} repeated")
+    click.echo(f"  records read             {c.records:>9,}   ({', '.join(skipped)})")
+    span = f"   submitted {c.first} to {c.last}" if c.first else ""
+    click.echo(f"  jobs added               {c.new:>9,}{span}")
+    if c.unknown:
+        click.echo(f"    of which UNKNOWN       {c.unknown:>9,}   (running or pending in the "
+                   f"records: no outcome to vouch for)")
+    if c.older:
+        click.echo(f"    of which kept apart    {c.older:>9,}   (their number is a newer "
+                   f"job's: stored as NUMBER@SUBMIT-TIME)")
+    if c.moved:
+        click.echo(f"    earlier jobs moved     {c.moved:>9,}   (an older job had the number)")
+    click.echo(f"  already stored           {c.same + c.stale:>9,}   ({c.filled:,} given "
+               f"something they lacked; {c.ended:,} given their outcome)")
+    if c.no_place:
+        click.echo(f"  not stored (no free id)  {c.no_place:>9,}")
+    if c.months:
+        click.echo("  jobs added, by month submitted:")
+        for m in sorted(c.months):
+            click.echo(f"    {m}  {c.months[m]:>8,}")
+    if stopped is not None:
+        raise click.ClickException(
+            f"{stopped}; "
+            + ("the months before it are written" if apply else "nothing was written"))
+    if export and not c.records:
+        raise click.ClickException("no records in the export")
+    if c.records and c.unreadable == c.records:
+        raise click.ClickException("no record could be read: is this an sacct -P export?")
+    if not apply:
+        click.echo("Nothing was written. Run again with --apply to write. (A dry run doesn't "
+                   "see what the import itself would change: a number used twice in it, say.)")
+
+
 @cli.group('config')
 def config_group():
     """nomad.toml: does it read, and if not, where it goes wrong.

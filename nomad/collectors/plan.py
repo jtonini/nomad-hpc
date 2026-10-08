@@ -51,6 +51,8 @@ SPECS: tuple[Spec, ...] = (
          ("squeue", "sacct"), (), ("queue_state", "jobs")),
     Spec("job_metrics", "job_metrics", "JobMetricsCollector", True, "Slurm head node",
          ("sacct",), (), ("jobs", "job_summary")),
+    Spec("slurm_usage", "slurm_usage", "SlurmUsageCollector", True,
+         "Slurm head node (runs where slurm does)", ("sreport",), (), ("cluster_usage",)),
     Spec("iostat", "iostat", "IOStatCollector", True, "every host (sysstat)",
          ("iostat",), (), ("iostat_device", "iostat_cpu")),
     Spec("mpstat", "mpstat", "MPStatCollector", True, "every host (sysstat)",
@@ -131,15 +133,21 @@ def plan(config: dict) -> list[Planned]:
     """Every collector nomad has, whether it runs here, and why."""
     from nomad.config import resolve_cluster_name
     out = []
+    decided: dict[str, bool] = {}
     for spec in SPECS:
         cfg, where = _section(config, spec.name)
         warnings = []
         if "enabled" in cfg:
             enabled = bool(cfg["enabled"])
             why = f"{'enabled' if enabled else 'disabled'} in {where}"
+        elif spec.name == "slurm_usage" and "slurm" in decided:
+            # Slurm's monthly totals belong where its jobs are read.
+            enabled = decided["slurm"]
+            why = f"{'on' if enabled else 'off'}, as the slurm collector is"
         else:
             enabled = spec.default_on
             why = "on by default" if enabled else f"off unless enabled in {where}"
+        decided[spec.name] = enabled
 
         key = _MOVED_LISTS.get(spec.name)
         if key and not cfg.get(key) and config.get(key):
@@ -197,8 +205,12 @@ def build(config: dict, db_path: Path, only=()) -> tuple[list, list[Planned]]:
         except (ImportError, AttributeError) as e:
             logger.warning(f"{p.name}: cannot load ({e})")
             continue
-        if p.name == "cloud":
-            collectors.append(cls(p.config, db_path=str(db_path)))
-        else:
-            collectors.append(cls(p.config, db_path))
+        try:
+            if p.name == "cloud":
+                collectors.append(cls(p.config, db_path=str(db_path)))
+            else:
+                collectors.append(cls(p.config, db_path))
+        except Exception as e:
+            # One collector's settings must not stop the others.
+            logger.warning(f"{p.name}: cannot start ({e})")
     return collectors, planned

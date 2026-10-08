@@ -492,82 +492,73 @@ class SlurmCollector(BaseCollector):
         return found
 
     def _parse_sacct_job(self, line: str) -> JobInfo | None:
-        """Parse a single sacct output line into JobInfo."""
+        """Parse a single sacct output line (SACCT_FORMAT, or its base part) into JobInfo."""
         try:
             parts = self._fields(line.split('|'))
             if parts is None:
                 return None
-
-            job_id = parts[0].strip()
-            # Skip job steps (contain '.')
-            if '.' in job_id:
-                return None
-
-            user_name = parts[1].strip()
-            group_name = parts[2].strip() or None
-            partition = parts[3].strip()
-            job_name = parts[4].strip()
-            state = parts[5].strip()
-            node_list = parts[6].strip() or None
-            req_cpus = self._parse_int(parts[7])
-            req_mem_mb = self._parse_memory(parts[8])
-            req_gpus = self._parse_gpus(parts[9])
-            time_limit = self._parse_time(parts[10])
-            runtime = self._parse_time(parts[11])
-            submit_time = self._parse_datetime(parts[12])
-            start_time = self._parse_datetime(parts[13])
-            end_time = self._parse_datetime(parts[14])
-
-            # Parse ExitCode (format: "exit_status:signal")
-            exit_code, exit_signal = self._parse_exit_code(parts[15])
-
-            # Account, AllocTRES, WorkDir (WorkDir last: a '|' in it joins back).
-            account = alloc_tres = alloc_gpus = work_root = work_tail = None
-            if len(parts) >= 19:
-                account = parts[16].strip() or None
-                alloc_tres = parts[17].strip() or None
-                alloc_gpus = gpu_count(alloc_tres) if alloc_tres else None
-                work_root, work_tail = work_dir_parts('|'.join(parts[18:]))
-
-            # Compute failure reason
-            failure_reason = compute_failure_reason(state, exit_code, exit_signal)
-
-            # Compute wait time
-            start_time = self._sane_start(start_time, submit_time)
-            wait_time = None
-            if submit_time and start_time:
-                wait_time = int((start_time - submit_time).total_seconds())
-
-            return JobInfo(
-                job_id=job_id,
-                user_name=user_name,
-                group_name=group_name,
-                partition=partition,
-                job_name=job_name,
-                state=state,
-                node_list=node_list,
-                submit_time=submit_time,
-                start_time=start_time,
-                end_time=end_time,
-                exit_code=exit_code,
-                exit_signal=exit_signal,
-                failure_reason=failure_reason,
-                req_cpus=req_cpus,
-                req_mem_mb=req_mem_mb,
-                req_gpus=req_gpus,
-                req_time_seconds=time_limit,
-                runtime_seconds=runtime,
-                wait_time_seconds=wait_time,
-                account=account,
-                alloc_tres=alloc_tres,
-                alloc_gpus=alloc_gpus,
-                work_root=work_root,
-                work_tail=work_tail,
-            )
-
+            names = SACCT_FORMAT.split(',')
+            if len(parts) >= _ALL_FIELDS:
+                parts = parts[:_ALL_FIELDS - 1] + ['|'.join(parts[_ALL_FIELDS - 1:])]
+            else:
+                # The base format (a Slurm that rejects the newer fields), or a
+                # line that only reads that far: those fields and no more.
+                names, parts = names[:_BASE_FIELDS], parts[:_BASE_FIELDS]
+            return self.job_from_fields(dict(zip(names, parts)))
         except Exception as e:
             logger.debug(f"Failed to parse sacct line: {line} - {e}")
             return None
+
+    def job_from_fields(self, f: dict[str, str]) -> JobInfo | None:
+        """A JobInfo from sacct fields by name (JobID, User, ... as in
+        SACCT_FORMAT; Account, AllocTRES and WorkDir may be missing). Job
+        steps ('123.batch') give None. Used for sacct's own output and for
+        an export read by its header (nomad import sacct)."""
+        def get(name: str) -> str:
+            return (f.get(name) or '').strip()
+
+        job_id = get('JobID')
+        if not job_id or '.' in job_id:
+            return None
+        state = get('State')
+        submit_time = self._parse_datetime(get('Submit'))
+        start_time = self._parse_datetime(get('Start'))
+        end_time = self._parse_datetime(get('End'))
+        exit_code, exit_signal = self._parse_exit_code(get('ExitCode'))
+        alloc_tres = get('AllocTRES') or None
+        work_root, work_tail = work_dir_parts(f.get('WorkDir'))
+
+        start_time = self._sane_start(start_time, submit_time)
+        wait_time = None
+        if submit_time and start_time:
+            wait_time = int((start_time - submit_time).total_seconds())
+
+        return JobInfo(
+            job_id=job_id,
+            user_name=get('User'),
+            group_name=get('Group') or None,
+            partition=get('Partition'),
+            job_name=(f.get('JobName') or '').strip(),
+            state=state,
+            node_list=get('NodeList') or None,
+            submit_time=submit_time,
+            start_time=start_time,
+            end_time=end_time,
+            exit_code=exit_code,
+            exit_signal=exit_signal,
+            failure_reason=compute_failure_reason(state, exit_code, exit_signal),
+            req_cpus=self._parse_int(get('AllocCPUS')),
+            req_mem_mb=self._parse_memory(get('ReqMem')),
+            req_gpus=self._parse_gpus(get('ReqTRES')),
+            req_time_seconds=self._parse_time(get('Timelimit')),
+            runtime_seconds=self._parse_time(get('Elapsed')),
+            wait_time_seconds=wait_time,
+            account=get('Account') or None,
+            alloc_tres=alloc_tres,
+            alloc_gpus=gpu_count(alloc_tres) if alloc_tres else None,
+            work_root=work_root,
+            work_tail=work_tail,
+        )
 
     def _fields(self, parts: list[str]) -> list[str] | None:
         """sacct's fields with any '|' inside JobName or WorkDir put back.

@@ -68,9 +68,13 @@ nomad collectors
 
 # On the hub: how every site's collectors ran in the last 7 days
 nomad collectors --db ~/.local/share/nomad/combined.db
+
+# Jobs from before nomad (or not collected): an sacct export, or sacct itself
+nomad import sacct EXPORT [--apply]
+nomad import sacct --from 2025-10-01 [--to 2026-10-01] [--apply]
 ```
 
-See [Collectors](collectors.md).
+See [Collectors](collectors.md) (and "Jobs from before nomad" there).
 
 ## Global Options
 

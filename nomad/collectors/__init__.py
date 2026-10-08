@@ -24,6 +24,7 @@ from .mpstat import MPStatCollector
 from .nfs import NFSCollector
 from .node_state import NodeStateCollector
 from .slurm import SlurmCollector
+from .slurm_usage import SlurmUsageCollector
 from .storage import StorageCollector
 from .vmstat import VMStatCollector
 from .workstation import WorkstationCollector
@@ -39,6 +40,7 @@ __all__ = [
     'registry',
     'DiskCollector',
     'SlurmCollector',
+    'SlurmUsageCollector',
     'JobMetricsCollector',
     'IOStatCollector',
     'MPStatCollector',
