@@ -55,7 +55,7 @@ it didn't measure.
 | 3 | Who uses what: people per partition class, per-node utilization, people per node | job records; node samples |
 | 4 | Waits: share of core-hours that waited more than a day, by month submitted; people who waited; median wait per class | job records |
 | 5 | Held vs used: cores allocated and node load; CPU time used by jobs | node samples; job metrics |
-| 6 | Memory: requested and peak used, per class | job metrics; job records |
+| 6 | Memory: requested and peak used, per partition class; the largest peak each node class has held | job metrics; job records |
 | 7 | GPUs: GPU-hours as a share of card-hours, card activity, GPU-hours and people by application | job records; GPU samples |
 | 8 | What runs: job lengths, multi-node work, core-hours by application | job records |
 | 9 | Storage: highest use per month, growth since the last cleanup, when full | filesystem samples |
@@ -83,10 +83,18 @@ memory peaks larger than any node), and the assumptions.
   period that started after it count in the month they were submitted.
 - **People** are those with a job that ran or waited in the period. A job
   that never ran and has no end counts only if it was submitted in the
-  period (or, still waiting, at most 30 days before it).
-- **A job's class** for memory, waits and per-node figures is the tier all
-  its nodes belong to, whatever partition it was submitted to. "Who uses
-  what" counts people by the partitions they submitted to.
+  period (or, still waiting, at most 30 days before it). In an export, a
+  pending array range (one row for tasks not yet started) is one waiting
+  job; nomad doesn't store those rows.
+- **More than one class** counts node classes (the tiers, GPU, condo);
+  overlay partitions span classes and aren't one.
+- **A job's class** for waits, job lengths and per-node figures is the tier
+  all its nodes belong to, whatever partition it was submitted to. "Who
+  uses what", CPU time used and memory requested and used go by the
+  partition a job ran in (submitted to several: overlay), so that many small
+  jobs sent through an overlay partition don't hide a tier's own work. The
+  memory section also gives each node class's largest peak, every job on
+  its nodes counted: that is what a node of the class has had to hold.
 - **Partition classes** come from the nodes each partition holds (one tier:
   that tier; several: overlay; only condo nodes: condo), unless report.toml
   says otherwise.
@@ -107,7 +115,9 @@ memory peaks larger than any node), and the assumptions.
   allocation (read from sacct's full format: an export, or nomad 1.7.42
   on). Elsewhere "no limit" and "not recorded" look alike.
 - **Storage growth** is the slope of each month's highest use after the
-  last fall of more than 5% (a cleanup). Decimal terabytes.
+  last fall of more than 5% (a cleanup). The time to full starts from the
+  filesystem's last reading of the period, since a month's highest can be a
+  spike cleaned up days later; both are shown. Decimal terabytes.
 - **Practical capacity** = cores × weight × hours × 75%: above that, queues
   form. Growth rates default to the lowest year-over-year growth, the
   compound rate and the highest, over the full years of Slurm's totals.

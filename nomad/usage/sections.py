@@ -26,6 +26,7 @@ JOB_METRICS = "NØMAÐ job metrics (job_summary)"
 GPU_SAMPLES = "NØMAÐ GPU samples (gpu_stats)"
 FS_SAMPLES = "NØMAÐ filesystem samples (filesystems)"
 WAIT_HOURS = 24.0
+FULL_SHARE = 0.98          # a filesystem this full is full now, not "full in 0.0 months"
 
 
 class Ctx:
@@ -102,6 +103,15 @@ def _not_measured(s: Section, why: str) -> Section:
     s.status = NOT_MEASURED
     s.finding = f"Not measured: {why}"
     return s
+
+
+def _pclass(j) -> str:
+    """The class of the partition a job ran in; submitted to several, overlay."""
+    return j.pclasses[0] if len(j.pclasses) == 1 else (OVERLAY if j.pclasses else OTHER)
+
+
+def _pclass_order(ctx: Ctx) -> list[str]:
+    return list(dict.fromkeys([*ctx.tiers, OVERLAY, CONDO, OTHER]))
 
 
 # 1 -----------------------------------------------------------------------------------
@@ -319,7 +329,8 @@ def s03_who(ctx: Ctx) -> Section:
             by_class[gpu_label].add(j.user)
             classes_of[j.user].add(gpu_label)
     overlay_only = sum(1 for u in by_class.get(OVERLAY, ()) if classes_of[u] == {OVERLAY})
-    several = sum(1 for ks in classes_of.values() if len(ks) > 1)
+    # Node classes only: overlay partitions span classes, they aren't one.
+    several = sum(1 for ks in classes_of.values() if len(ks - {OVERLAY, OTHER}) > 1)
     table = []
     for t in ctx.tiers:
         nodes = d.tier_nodes([t])
@@ -514,9 +525,8 @@ def s05_held(ctx: Ctx) -> Section:
     eff_rows = []
     by_class = defaultdict(list)
     for j in measured:
-        k = j.pclasses[0] if len(j.pclasses) == 1 else (OVERLAY if j.pclasses else OTHER)
-        by_class[k].append((j.cpu_pct, j.cpus, j.elapsed))
-    for k in [*ctx.tiers, OVERLAY, CONDO, OTHER]:
+        by_class[_pclass(j)].append((j.cpu_pct, j.cpus, j.elapsed))
+    for k in _pclass_order(ctx):
         rows = by_class.pop(k, None)
         if not rows:
             continue
@@ -582,45 +592,100 @@ def s06_memory(ctx: Ctx) -> Section:
     jobs = [j for j in jobs if not (ceiling and j.peak_mem_gb > ceiling)]
     if not jobs:
         return _not_measured(s, "no job in the period has a measured memory peak (NØMAÐ job metrics).")
-    rows = []
-    worst = None
-    for t in ctx.tiers:
-        js = [j for j in jobs if j.tier == t]
-        if not js:
-            continue
+
+    def stats(js):
         req = [j.req_mem_mb / 1024 for j in js if j.req_mem_mb]
         peaks = [j.peak_mem_gb for j in js]
         mreq = sum(req) / len(req) if req else float("nan")
         mpeak = sum(peaks) / len(peaks)
-        big = sum(1 for p in peaks if p > 512) / len(peaks)
-        over_tb = sum(1 for r in req if r > 1024) / len(req) if req else float("nan")
-        ratio = mreq / mpeak if mpeak and req else float("nan")
-        for key, label, v, unit in (("requested_gb", "mean memory requested", mreq, "GB"),
-                                    ("peak_gb", "mean peak used", mpeak, "GB"),
-                                    ("largest_peak_gb", "largest peak", max(peaks), "GB"),
-                                    ("share_over_512gb", "share of jobs peaking above 512 GB", big, "share"),
-                                    ("share_requesting_over_1tb", "share of jobs requesting more than 1 TB", over_tb,
-                                     "share"),
-                                    ("request_to_use", "mean requested ÷ mean peak", ratio, "times")):
-            s.fact(f"{key}.{t}", f"{t}: {label}", v, unit, n=len(js))
-        rows.append([t, fmt.num(len(js)), fmt.gb(mreq), fmt.gb(mpeak), fmt.gb(max(peaks)), fmt.pct(big, 1),
-                     fmt.pct(over_tb, 1), (f"{ratio:.0f}×" if not fmt.missing(ratio) else "–")])
-        if not fmt.missing(ratio) and (worst is None or ratio > worst[1]):
-            worst = (t, ratio, mreq, mpeak)
-    s.tables.append(Table("Memory requested and used, jobs with a measured peak",
-                          ["Node class", "Jobs", "Mean requested", "Mean peak used", "Largest peak",
+        return {"requested_gb": mreq, "peak_gb": mpeak, "largest_peak_gb": max(peaks),
+                "share_over_512gb": sum(1 for p in peaks if p > 512) / len(peaks),
+                "share_requesting_over_1tb": sum(1 for r in req if r > 1024) / len(req) if req else float("nan"),
+                "request_to_use": mreq / mpeak if mpeak and req else float("nan")}
+
+    labels = {"requested_gb": ("mean memory requested", "GB"), "peak_gb": ("mean peak used", "GB"),
+              "largest_peak_gb": ("largest peak", "GB"),
+              "share_over_512gb": ("share of jobs peaking above 512 GB", "share"),
+              "share_requesting_over_1tb": ("share of jobs requesting more than 1 TB", "share"),
+              "request_to_use": ("mean requested ÷ mean peak", "times")}
+
+    # Where jobs were submitted: the class of the partition each ran in, as
+    # in section 5. Overlay partitions are their own row; their jobs run on
+    # any class's nodes and would otherwise swamp each tier's own work.
+    by_class = defaultdict(list)
+    for j in jobs:
+        by_class[_pclass(j)].append(j)
+    rows, per = [], {}
+    for k in _pclass_order(ctx):
+        js = by_class.pop(k, None)
+        if not js:
+            continue
+        st = per[k] = stats(js)
+        for key, (label, unit) in labels.items():
+            s.fact(f"{key}.{k}", f"{k} partitions: {label}", st[key], unit, n=len(js))
+        r = st["request_to_use"]
+        rows.append([k, fmt.num(len(js)), fmt.gb(st["requested_gb"]), fmt.gb(st["peak_gb"]),
+                     fmt.gb(st["largest_peak_gb"]), fmt.pct(st["share_over_512gb"], 1),
+                     fmt.pct(st["share_requesting_over_1tb"], 1), (f"{r:.0f}×" if not fmt.missing(r) else "–")])
+    s.tables.append(Table("Memory requested and used, by partition class, jobs with a measured peak",
+                          ["Partition class", "Jobs", "Mean requested", "Mean peak used", "Largest peak",
                            "Jobs peaking > 512 GB", "Jobs requesting > 1 TB", "Requested ÷ used"], rows,
                           note="Peaks from NØMAÐ job metrics; requests from Slurm (GB = 1,024 MB). A job counts in "
-                               "a class when all its nodes are in it."))
+                               "the class of the partition it ran in, as in section 5 (several partitions: "
+                               "overlay)."))
+
+    # What the nodes had to hold: every job on a class's nodes, whatever
+    # partition it came through. This is what sizes a node's memory.
+    nrows = []
+    for t in ctx.tiers:
+        js = [j for j in jobs if j.tier == t]
+        if not js:
+            continue
+        st = stats(js)
+        for key in ("peak_gb", "largest_peak_gb", "share_over_512gb"):
+            label, unit = labels[key]
+            s.fact(f"node.{key}.{t}", f"{t} nodes: {label}", st[key], unit, n=len(js))
+        mems = sorted({d.nodes[n].memory_mb for n in d.tier_nodes([t]) if n in d.nodes and d.nodes[n].memory_mb})
+        mem = fmt.span(mems[0] / 1024, mems[-1] / 1024, fmt.gb) if mems else "–"
+        nrows.append([t, fmt.num(len(js)), mem, fmt.gb(st["peak_gb"]), fmt.gb(st["largest_peak_gb"]),
+                      fmt.pct(st["share_over_512gb"], 1)])
+    if nrows:
+        s.tables.append(Table("Memory used on each node class, every job on its nodes",
+                              ["Node class", "Jobs", "Memory per node", "Mean peak used", "Largest peak",
+                               "Jobs peaking > 512 GB"], nrows,
+                              note="A job counts in a node class when all its nodes are in it, whatever partition "
+                                   "it was submitted to. The largest peak is what a node of the class has had to "
+                                   "hold."))
     s.fact("jobs_measured", "jobs with a measured memory peak", len(jobs), "jobs")
-    if worst:
-        s.finding = (f"Jobs request far more memory than they use: on the {worst[0]} nodes the average job "
-                     f"requested {fmt.gb(worst[2])} and peaked at {fmt.gb(worst[3])}, {worst[1]:.0f} times less.")
+
+    inst = {k: v for k, v in per.items() if k in ctx.inst_tiers and not fmt.missing(v["request_to_use"])}
+    pool = inst or {k: v for k, v in per.items() if not fmt.missing(v["request_to_use"])}
+    if pool:
+        worst = max(pool, key=lambda k: pool[k]["request_to_use"])
+        w = pool[worst]
+        lo = min(v["request_to_use"] for v in pool.values())
+        where = "the institutional tiers' partitions" if inst else "the partitions"
+        if len(pool) > 1 and round(lo) != round(w["request_to_use"]):
+            s.finding = (f"Jobs request far more memory than they use: in {where} the mean request is "
+                         f"{lo:.0f}–{w['request_to_use']:.0f} times the mean peak ({worst}: "
+                         f"{fmt.gb(w['requested_gb'])} requested, {fmt.gb(w['peak_gb'])} used)")
+        else:
+            s.finding = (f"Jobs request far more memory than they use: in the {worst} partitions the average job "
+                         f"requested {fmt.gb(w['requested_gb'])} and peaked at {fmt.gb(w['peak_gb'])}, "
+                         f"{w['request_to_use']:.0f} times less")
+        big = {k: v for k, v in (inst or per).items()
+               if not fmt.missing(v["share_requesting_over_1tb"]) and v["share_requesting_over_1tb"] >= 0.1}
+        if big:
+            k = max(big, key=lambda k: big[k]["share_requesting_over_1tb"])
+            s.finding += (f"; {fmt.pct(big[k]['share_requesting_over_1tb'])} of the {k} partitions' jobs requested "
+                          "more than 1 TB")
+        s.finding += "."
     else:
-        s.finding = f"{len(jobs)} jobs have a measured memory peak; requests are not recorded for them."
+        s.finding = f"{fmt.num(len(jobs))} jobs have a measured memory peak; requests are not recorded for them."
     if impossible:
-        s.notes.append(f"{len(impossible)} peaks larger than any node's memory were left out (an accounting "
-                       "artefact, not a measurement).")
+        one = len(impossible) == 1
+        s.notes.append(f"{fmt.plural(len(impossible), 'peak')} larger than any node's memory "
+                       f"{'was' if one else 'were'} left out (an accounting artefact, not a measurement).")
     return s
 
 
@@ -740,6 +805,14 @@ def s07_gpus(ctx: Ctx) -> Section:
             if j.submit:
                 month_people[calcs.month_key(j.submit)].add(j.user)
     s.fact("gpu_people", "people in GPU partitions or asking for GPUs", len(gpu_people), "people", people=True)
+    if g0 is not None:
+        early = {j.user for j in d.jobs if j.gpu_request and (j.submit or j.start) and (j.submit or j.start) < g0}
+        if early:
+            s.fact("gpu_people_asking_before_accounting", "people who asked for GPUs before Slurm accounted them",
+                   len(early), "people", people=True)
+            s.notes.append(f"{ctx.pp(len(early))} people asked for GPUs before {fmt.day(g0)}: those requests "
+                           "are in NØMAÐ's records of the queue, not in Slurm's accounting, so a count from "
+                           "Slurm's records alone misses them.")
     counts = [len(month_people[m]) for m in ctx.full_months]
     if counts:
         s.fact("gpu_people_per_month_min", "people in GPU partitions or asking for GPUs, lowest month",
@@ -847,52 +920,72 @@ def s09_storage(ctx: Ctx) -> Section:
     s = _section(9, "storage", "Storage", ctx, source=FS_SAMPLES)
     if not d.filesystems:
         return _not_measured(s, "no filesystem samples in this database (the disk collector).")
-    rows, findings = [], []
+    rows, findings, full_now = [], [], []
     first = min(r[0] for v in d.filesystems.values() for r in v)
     last = max(r[0] for v in d.filesystems.values() for r in v)
     s.period = f"{fmt.month(first)} – {fmt.month(last)}"
+    peaked = []
     for raw, months in sorted(d.filesystems.items(), key=lambda kv: d.fs_labels.get(kv[0], kv[0])):
         path = d.fs_labels.get(raw, raw)
         series = [(m, used) for m, used, _, _ in months]
         cap = months[-1][2]
-        used = months[-1][1]
+        peak = months[-1][1]
+        lu, lt, lwhen = d.fs_latest.get(raw, (peak, cap, months[-1][3]))
+        cap = lt or cap
         g, since, cleanup = calcs.storage_growth(series)
-        full_in = calcs.months_to_full(cap, used, g)
+        # From where the filesystem stood at the end of the period: a month's
+        # highest reading can be a spike that was cleaned up days later.
+        full_in = calcs.months_to_full(cap, lu, g)
         when = None
-        if not math.isinf(full_in) and months[-1][3] is not None:
-            when = months[-1][3] + timedelta(days=full_in * 30.4375)
+        if not math.isinf(full_in) and lwhen is not None:
+            when = lwhen + timedelta(days=full_in * 30.4375)
         for m, u, tot, _ in months:
             s.fact(f"monthly_max_used.{path}.{m}", f"{path}, {m}: highest use", u, "bytes")
         s.fact(f"capacity.{path}", f"{path}: capacity", cap, "bytes")
-        s.fact(f"used.{path}", f"{path}: highest use in {months[-1][0]}", used, "bytes")
-        s.fact(f"used_share.{path}", f"{path}: share full", used / cap if cap else float("nan"), "share")
+        s.fact(f"used.{path}", f"{path}: highest use in {months[-1][0]}", peak, "bytes")
+        s.fact(f"latest_used.{path}", f"{path}: use at the last reading of the period", lu, "bytes",
+               note=f"read {fmt.day(lwhen)}" if lwhen else "")
+        share = lu / cap if cap else float("nan")
+        peak_share = peak / cap if cap else float("nan")
+        s.fact(f"used_share.{path}", f"{path}: share full at the last reading of the period", share, "share")
         s.fact(f"growth_per_month.{path}", f"{path}: growth per month since {since}", g, "bytes/month",
                kind=ESTIMATED, note=f"slope of the monthly highest use from {since}"
                                     + (f", after the cleanup of {cleanup}" if cleanup else ""))
-        s.fact(f"months_to_full.{path}", f"{path}: months until full at that rate", full_in, "months",
-               kind=PROJECTED)
+        s.fact(f"months_to_full.{path}", f"{path}: months until full at that rate, from the last reading",
+               full_in, "months", kind=PROJECTED)
         if cleanup:
             s.fact(f"cleanup_month.{path}", f"{path}: month of the last cleanup", cleanup, "month")
-        rows.append([path, fmt.tb(cap), fmt.tb(used), fmt.pct(used / cap if cap else float("nan")),
+        is_full = not fmt.missing(share) and share >= FULL_SHARE
+        if is_full:
+            full_now.append((path, share, lwhen))
+        elif not fmt.missing(peak_share) and peak_share >= FULL_SHARE:
+            peaked.append((path, peak_share, months[-1][0], share, lwhen))
+        rows.append([path, fmt.tb(cap), f"{fmt.tb(peak)} ({fmt.pct(peak_share)})",
+                     f"{fmt.tb(lu)} ({fmt.pct(share)})" + (f", {fmt.day(lwhen)}" if lwhen else ""),
                      (fmt.tb(g) + "/month") if not fmt.missing(g) else "–",
                      fmt.month(since) if since else "–",
-                     (f"{full_in:.1f} months" if not math.isinf(full_in) else "not filling"),
-                     (fmt.month(calcs.month_key(when), long=True) if when else "–")])
-        if not fmt.missing(g) and g > 0 and not math.isinf(full_in):
-            findings.append((full_in, path, g, since, used / cap if cap else None, when, cleanup))
+                     ("full now" if is_full else f"{full_in:.1f} months" if not math.isinf(full_in)
+                      else "not filling"),
+                     ("–" if is_full else fmt.month(calcs.month_key(when), long=True) if when else "–")])
+        if not is_full and not fmt.missing(g) and g > 0 and not math.isinf(full_in):
+            findings.append((full_in, path, g, since, share, when, cleanup))
     s.tables.append(Table("Filesystems: highest use per month, growth since the last cleanup",
-                          ["Filesystem", "Capacity", "Used (latest month)", "Full", "Growth", "Since",
-                           "Full in", "Around"], rows,
+                          ["Filesystem", "Capacity", "Highest, latest month", "Last reading", "Growth",
+                           "Since", "Full in", "Around"], rows,
                           note="Decimal terabytes (1 TB = 10¹² bytes; df -h shows TiB). Growth is the slope of "
-                               "each month's highest use after the last fall of more than 5% (a cleanup)."))
+                               "each month's highest use after the last fall of more than 5% (a cleanup). A "
+                               "month's highest reading can be a short spike: \"Full in\" starts from the last "
+                               "reading of the period."))
+    parts = [f"{p} is {fmt.pct(sh)} full" + (f" ({fmt.day(w)})" if w else "") for p, sh, w in full_now]
+    parts += [f"{p} reached {fmt.pct(pk)} full in {fmt.month(m)} and was at {fmt.pct(sh)}"
+              + (f" on {fmt.day(w)}" if w else "") for p, pk, m, sh, w in peaked]
     if findings:
         full_in, path, g, since, share, when, cleanup = min(findings)
-        s.finding = (f"{path} has grown {fmt.tb(g)} a month since {fmt.month(since)}"
+        parts.append(f"{path} has grown {fmt.tb(g)} a month since {fmt.month(since)}"
                      + (", after a cleanup," if cleanup else "")
                      + f" and is {fmt.pct(share)} full: full in about {full_in:.1f} months"
-                     + (f", around {fmt.month(calcs.month_key(when), long=True)}." if when else "."))
-    else:
-        s.finding = "No filesystem is growing towards full at its recent rate."
+                     + (f", around {fmt.month(calcs.month_key(when), long=True)}" if when else ""))
+    s.finding = ("; ".join(parts) + ".") if parts else "No filesystem is growing towards full at its recent rate."
     return s
 
 
@@ -989,9 +1082,11 @@ def s10_reliability(ctx: Ctx) -> Section:
                source=NODE_SAMPLES)
         s.fact("outage_hours", "hours of whole-cluster outages", out_h, "hours", source=NODE_SAMPLES)
         if d.outages:
-            months_out = sorted({calcs.month_key(a) for a, _ in d.outages})
-            s.notes.append(f"{len(d.outages)} whole-cluster outage(s), {out_h:.0f} hours in all, in "
-                           f"{', '.join(fmt.month(m) for m in months_out)}.")
+            months_out = ", ".join(fmt.month(m) for m in sorted({calcs.month_key(a) for a, _ in d.outages}))
+            seen = f"{out_h:,.0f} hours in all" if out_h >= 1 else "under an hour in all"
+            s.notes.append(f"{fmt.plural(len(d.outages), 'whole-cluster outage')} in the node samples "
+                           f"({months_out}), {seen}. Nodes aren't sampled while NØMAÐ itself is down, so "
+                           "Slurm's down hours above are the better measure of how long.")
     s.finding = (parts[0][0].upper() + parts[0][1:] + ("; " + parts[1] if len(parts) > 1 else "") + ".") if parts else \
         "Node samples only: see the table."
     return s
@@ -1021,8 +1116,8 @@ def s11_policy(ctx: Ctx, s01: Section, s06: Section) -> Section:
         rows.append(["Jobs with no time limit", fmt.pct(sj), fmt.pct(sc)])
         parts.append(f"{fmt.pct(sj)} of jobs ran with no time limit")
         if len(known) < len(jobs):
-            s.notes.append(f"Time limits are known for {len(known)} of {len(jobs)} jobs that ran (the rest came "
-                           "from records without one).")
+            s.notes.append(f"Time limits are known for {fmt.num(len(known))} of {fmt.num(len(jobs))} jobs that ran "
+                           "(the rest came from records without one).")
     rooted = [j for j in jobs if j.work_root]
     if rooted:
         home = [j for j in rooted if j.work_root == "/home"]
@@ -1034,7 +1129,8 @@ def s11_policy(ctx: Ctx, s01: Section, s06: Section) -> Section:
         rows.append(["Jobs running from /home", fmt.pct(sj), fmt.pct(sc)])
         parts.append(f"{fmt.pct(sj)} ran from /home rather than scratch")
         if len(rooted) < len(jobs):
-            s.notes.append(f"Working directories are known for {len(rooted)} of {len(jobs)} jobs that ran.")
+            s.notes.append(f"Working directories are known for {fmt.num(len(rooted))} of {fmt.num(len(jobs))} jobs "
+                           "that ran.")
     if ctx.gpu_nodes:
         a = max(ctx.gpu_start, d.t0) if ctx.gpu_start else None
         if a is not None:
@@ -1057,9 +1153,9 @@ def s11_policy(ctx: Ctx, s01: Section, s06: Section) -> Section:
         s.notes.append("Condo nodes are reserved for their owners: their lower utilization reflects policy, "
                        "not a lack of demand.")
     ratios = [(f.id.split(".")[-1], f.value) for f in s06.facts
-              if f.id.startswith("s06.request_to_use.") and f.value is not None]
+              if f.id.startswith("s06.request_to_use.") and not fmt.missing(f.value)]
     if ratios:
-        rows.append(["Memory requested ÷ used, by node class",
+        rows.append(["Memory requested ÷ used, by partition class",
                      ", ".join(f"{t} {v:.0f}×" for t, v in ratios), ""])
     s.tables.append(Table("Indicators that argue for no-cost changes", ["Indicator", "Jobs (or value)",
                                                                         "Core-hours"], rows))
@@ -1197,7 +1293,7 @@ def s14_capacity(ctx: Ctx, s01: Section, s02: Section) -> Section:
     cols = ["Capacity line", "Practical core-hours a year"] + (
         [f"Passed at {fmt.pct(rates[r])} ({r})" for r in ("low", "central", "high")] if rates else [])
     s.tables.append(Table("Practical capacity and the year demand passes it", cols, rows,
-                          note=f"Practical capacity = cores × weight × {cap.hours_per_year:.0f} h × "
+                          note=f"Practical capacity = cores × weight × {cap.hours_per_year:,.0f} h × "
                                f"{fmt.pct(cap.practical)}: above that, queues form. Demand starts at "
                                f"{fmt.millions(base)} core-hours in {base_year}."))
     if rates:
@@ -1296,7 +1392,9 @@ def set_aside(ctx: Ctx, report: Report) -> None:
         elif what == "start corrected":
             note = "a start after the end, before the submission, or off end − elapsed: taken from end − elapsed"
         elif what == "never started":
-            note = "no wait, no core-hours; counted among people"
+            note = "no wait, no core-hours; counted among people" + (
+                f"; {fmt.num(d.pending_ranges)} of them are pending array ranges (one row for many waiting "
+                "tasks)" if d.pending_ranges else "")
         report.set_aside.append(SetAside(f"jobs {what}" if not what.startswith(("memory", "unreadable"))
                                          else what, n, note))
 

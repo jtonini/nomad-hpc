@@ -159,6 +159,8 @@ class Data:
     node_memory_mb_max: float | None = None
     seen_nodes: set[str] = field(default_factory=set)
     fs_labels: dict[str, str] = field(default_factory=dict)   # filesystem -> label shown
+    # filesystem -> (used, total, when) of its last reading before the period's end
+    fs_latest: dict[str, tuple[float, float, datetime | None]] = field(default_factory=dict)
     # node -> (first sample, last sample) in the period
     node_spans: dict[str, tuple[datetime, datetime]] = field(default_factory=dict)
     people_names: list[str] | None = None     # only for `nomad usage-report people`
@@ -168,6 +170,7 @@ class Data:
     gpu_first_alloc: datetime | None = None   # the first job with GPUs in its allocation, any time
     gpus_from_request: int = 0                # jobs whose GPUs come from the request (no allocation recorded)
     usage_clusters: int = 0                   # Slurm clusters in the monthly totals, when added together
+    pending_ranges: int = 0                   # pending array ranges in an export (one waiting job each)
 
     def safe_label(self, text) -> str:
         """A label from the data (a filesystem, a session type) with any
@@ -704,7 +707,9 @@ def _jobs_from_export(path: Path, builder: _Builder) -> None:
             continue
         row = job.to_dict()
         if "[" in str(row.get("job_id")):
-            continue                    # a pending array range, not a job
+            # A pending array range: one row for tasks that haven't started.
+            # It counts as one waiting job (its person was waiting).
+            builder.d.pending_ranges += 1
         builder.add(row)
 
 
@@ -788,6 +793,13 @@ def _filesystems(conn, data: Data) -> None:
             continue
         data.filesystems.setdefault(path, []).append(
             (month, float(used or 0), float(total or 0), parse_time(last)))
+    # Each filesystem's last reading before the period's end: a month's
+    # highest reading can be a spike that was cleaned up days later.
+    for path, used, total, last in conn.execute(
+            "SELECT path, used_bytes, total_bytes, MAX(timestamp) FROM filesystems "
+            f"WHERE timestamp < ?{where} GROUP BY path", [data.t1.isoformat()] + args):
+        if path in data.filesystems:
+            data.fs_latest[path] = (float(used or 0), float(total or 0), parse_time(last))
     data.fs_labels = data.labels(data.filesystems)
 
 

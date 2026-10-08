@@ -209,6 +209,56 @@ def test_memory(site, cfg):
     assert fact(report, "s06.jobs_measured") == 3
 
 
+def test_memory_by_partition_class(site, cfg):
+    # Small jobs through the overlay partition land on the basic nodes: they
+    # are not the basic partition's work, but the basic nodes held them.
+    c = sqlite3.connect(site)
+    for i in range(6):
+        J(c, f"3{i}", "carol", "all", "cn02", 1, "2026-01-15T00:00:00", "2026-01-15T00:00:00", 1, mem_mb=1024)
+        c.execute("INSERT INTO job_summary (job_id, avg_cpu_percent, peak_memory_gb) VALUES (?,?,?)",
+                  (f"3{i}", 90.0, 0.5))
+    J(c, "40", "alice", "short", "cn03", 10, "2026-01-16T00:00:00", "2026-01-16T00:00:00", 2,
+      mem_mb=2 * 1024 * 1024)
+    c.execute("INSERT INTO job_summary (job_id, avg_cpu_percent, peak_memory_gb) VALUES ('40', 10.0, 200.0)")
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    assert fact(report, "s06.requested_gb.basic") == pytest.approx((64 + 128 + 32 + 2048) / 4)
+    assert fact(report, "s06.share_requesting_over_1tb.basic") == pytest.approx(0.25)
+    assert fact(report, "s06.requested_gb.overlay") == pytest.approx(1.0)
+    assert fact(report, "s06.request_to_use.overlay") == pytest.approx(2.0)
+    # The nodes' view: every job on the basic nodes.
+    assert fact(report, "s06.node.peak_gb.basic") == pytest.approx((4 + 8 + 2 + 200 + 6 * 0.5) / 10)
+    assert fact(report, "s06.node.largest_peak_gb.basic") == pytest.approx(200)
+    sec = next(s for s in report.sections if s.number == 6)
+    assert sec.finding.startswith("Jobs request far more memory than they use: in the basic partitions")
+    assert "25% of the basic partitions' jobs requested more than 1 TB" in sec.finding
+    md = render.markdown(report)
+    assert "| basic | 10 | 256 GB |" in md
+    assert "by partition class | basic 11×, overlay 2×" in md
+
+
+def test_short_outage_and_large_counts(site, cfg):
+    c = sqlite3.connect(site)
+    for ts, st in (("2026-01-15T00:10:00", "down*"), ("2026-01-15T00:15:00", "mixed")):
+        for n, parts in NODES.items():
+            c.execute("INSERT INTO node_state (timestamp, node_name, cluster, state, cpus_total, cpus_alloc, "
+                      "cpu_load, memory_total_mb, partitions, gres) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                      (ts, n, "c1", st, 10, 0, 0.0, 256 * 1024, parts, "(null)"))
+    for i in range(1200):
+        J(c, f"9{i:04d}", "alice", "short", "cn01", 1, "2026-01-21T00:00:00", "2026-01-21T00:00:00", 0.01,
+          rt=60, tres=None, root="/scratch" if i % 2 else None)
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    assert fact(report, "s10.outages") == 1
+    sec = next(s for s in report.sections if s.number == 10)
+    assert "1 whole-cluster outage in the node samples (Jan 2026), under an hour in all." in sec.notes[0]
+    md = render.markdown(report)
+    assert "outage(s)" not in md
+    assert "Working directories are known for 603 of 1,207 jobs" in md
+
+
 def test_gpus(site, cfg):
     report, _ = build(site, cfg)
     assert fact(report, "s07.cards") == 4
@@ -414,6 +464,8 @@ def test_sacct_export_reads_like_the_database(tmp_path, cfg):
     assert fact(report, "s01.institutional_core_hours") == pytest.approx(100 + 40 + 40)
     assert fact(report, "s07.gpu_hours") == pytest.approx(20)
     assert data.excluded_jobs == 1
+    # Dave's pending array range is one waiting job.
+    assert data.pending_ranges == 1 and data.set_aside["never started"] == 2
     status = {s.number: s.status for s in report.sections}
     assert status[5] == "not measured" and status[2] == "not measured"   # no database: no samples, no totals
     run.write(report, data, tmp_path / "o", ["md", "json"])
@@ -760,3 +812,51 @@ def test_node_days_over_the_samples_only(site, cfg):
     assert fact(report, "s10.node_days_down.basic") == pytest.approx(10, abs=1.05)
     sec = next(s for s in report.sections if s.number == 10)
     assert any("node samples cover" in t.note for t in sec.tables)
+
+
+def test_storage_already_full(site, cfg):
+    c = sqlite3.connect(site)
+    for m, used in (("2026-01", 15.0e12), ("2026-02", 16.5e12)):
+        c.execute("INSERT INTO filesystems (path, total_bytes, used_bytes, available_bytes, used_percent, timestamp) "
+                  "VALUES (?,?,?,?,?,?)", ("/home", 16.5e12, used, 16.5e12 - used, 100, f"{m}-15T12:00:00"))
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    sec = next(s for s in report.sections if s.number == 9)
+    assert sec.finding.startswith("/home is 100% full (15 Feb 2026); /scratch has grown 10.0 TB a month")
+    assert "0.0 months" not in render.markdown(report)
+
+
+def test_storage_spike_then_cleanup(site, cfg):
+    c = sqlite3.connect(site)
+    for t, used in (("2026-01-15T12:00:00", 12.0e12), ("2026-02-10T12:00:00", 16.5e12),
+                    ("2026-02-20T12:00:00", 12.7e12)):
+        c.execute("INSERT INTO filesystems (path, total_bytes, used_bytes, available_bytes, used_percent, timestamp) "
+                  "VALUES (?,?,?,?,?,?)", ("/home", 16.5e12, used, 16.5e12 - used, used / 16.5e12 * 100, t))
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    sec = next(s for s in report.sections if s.number == 9)
+    assert sec.finding.startswith("/home reached 100% full in Feb 2026 and was at 77% on 20 Feb 2026")
+    assert fact(report, "s09.used_share./home") == pytest.approx(12.7 / 16.5)
+    # Growth from the monthly highest (4.5 TB a month), the time to full from the last reading.
+    assert fact(report, "s09.months_to_full./home") == pytest.approx((16.5 - 12.7) / 4.5)
+
+
+def test_several_classes_are_node_classes(site, cfg):
+    add_job(site, "95", "alice", "all", "cn01", 1, "2026-01-08T00:00:00", "2026-01-08T00:00:00", 1)
+    report, _ = build(site, cfg)
+    assert fact(report, "s03.people_several_classes") == 1        # bob (basic and GPU); alice's overlay doesn't count
+
+
+def test_gpu_requests_before_accounting(site, cfg):
+    add_job(site, "96", "ivy", "all", "cn01", 1, "2026-01-08T00:00:00", "2026-01-08T00:00:00", 1, gpus=0)
+    c = sqlite3.connect(site)
+    c.execute("UPDATE jobs SET req_gpus = 1 WHERE job_id = '96'")
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    assert fact(report, "s07.gpu_people") == 2
+    assert fact(report, "s07.gpu_people_asking_before_accounting") == 1
+    sec = next(s for s in report.sections if s.number == 7)
+    assert any("not in Slurm's accounting" in n for n in sec.notes)
