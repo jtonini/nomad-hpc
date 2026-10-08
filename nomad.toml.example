@@ -83,7 +83,7 @@ interval = 60   # Every minute
 # Path to SLURM commands (if not in PATH)
 # slurm_bin_path = "/usr/bin"
 
-# Partitions to monitor (empty = all)
+# Partitions in the queue snapshot (empty = all); jobs come from every partition
 partitions = []
 
 # Job age limit for history queries (days)

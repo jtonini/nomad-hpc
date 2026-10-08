@@ -181,7 +181,7 @@ class JobMonitor:
         """Get list of running job IDs."""
         try:
             result = subprocess.run(
-                ['squeue', '-h', '-t', 'R', '-o', '%i'],
+                ['squeue', '-a', '-h', '-t', 'R', '-o', '%i'],
                 capture_output=True,
                 text=True,
                 timeout=10,

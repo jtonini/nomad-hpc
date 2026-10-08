@@ -42,6 +42,7 @@ LOOKUP_MAX = 1000           # at most this many a run; the rest wait for the nex
 # Of those, the states of a job that has not started (again): squeue's start
 # time for them is Slurm's estimate, never a start.
 NOT_STARTED = ('PENDING', 'REQUEUED', 'REQUEUE_HOLD', 'REQUEUE_FED', 'RESV_DEL_HOLD')
+_WAITING = ', '.join(f"'{state}'" for state in NOT_STARTED)
 
 # A finished job's start, end and elapsed time agree (end = start + elapsed);
 # a stored start further than this from end - elapsed is not the real one.
@@ -70,7 +71,12 @@ _LOOKUP_ID = re.compile(r'^\d+(_\d+)?(\+\d+)?$')
 # Slurm state: its outcome is unknown, and no success or failure count takes it.
 UNKNOWN = 'UNKNOWN'
 
-_JOB_UPSERT = """
+# A job's partition is where it runs. A job submitted to several partitions
+# shows the list ("a,b") while it waits -- again after a requeue -- and the one
+# it runs in once it starts. A list replaces a single partition only from a
+# pending record: an ended job reported with its list (cancelled after a
+# requeue) keeps the partition it ran in.
+_JOB_UPSERT = f"""
     INSERT INTO jobs
     (job_id, user_name, group_name, partition, job_name, state,
      node_list, submit_time, start_time, end_time, exit_code,
@@ -81,6 +87,14 @@ _JOB_UPSERT = """
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(job_id) DO UPDATE SET
         submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
+        partition = CASE
+            WHEN COALESCE(excluded.partition, '') = '' THEN jobs.partition
+            WHEN instr(excluded.partition, ',') > 0
+                 AND COALESCE(jobs.partition, '') <> ''
+                 AND instr(jobs.partition, ',') = 0
+                 AND UPPER(COALESCE(excluded.state, '')) NOT IN ({_WAITING})
+                THEN jobs.partition
+            ELSE excluded.partition END,
         state = excluded.state,
         node_list = excluded.node_list,
         start_time = excluded.start_time,
@@ -319,7 +333,8 @@ class SlurmCollector(BaseCollector):
     Collector for SLURM job and queue data.
     
     Configuration options:
-        partitions: List of partitions to monitor (default: all)
+        partitions: Partitions in the queue snapshot, queue_state (default: all).
+            Jobs are recorded from every partition.
         job_history_days: Days of job history to collect (default: 7)
         collect_queue: Whether to collect queue state (default: True)
         collect_jobs: Whether to collect job details (default: True)
@@ -338,19 +353,25 @@ class SlurmCollector(BaseCollector):
     def __init__(self, config: dict[str, Any], db_path: str):
         super().__init__(config, db_path)
 
-        # None or [] = all ("empty = all", as the example config says).
+        # None or [] = all ("empty = all", as the example config says). It
+        # limits the queue snapshot (queue_state) only: jobs are recorded from
+        # every partition, since a job history with some partitions missing
+        # makes every count about jobs wrong, and overlapping partitions
+        # (one over the whole cluster, another over some of its nodes) are
+        # told apart by node later, not by leaving jobs out.
         self.partitions = config.get('partitions') or None
         self.job_history_days = config.get('job_history_days', 7)
         self.collect_queue = config.get('collect_queue', True)
         self.collect_jobs = config.get('collect_jobs', True)
         self.collect_completed = config.get('collect_completed', True)
-        # Every job id squeue listed in this run, before any partition filter;
+        # Every job id squeue listed in this run (all partitions, hidden ones too);
         # None when squeue did not answer, and then nothing can be concluded
         # about jobs that seem gone.
         self._squeue_ids: set[str] | None = None
         self._listed: set[str] = set()
 
-        logger.info(f"SlurmCollector monitoring partitions: {self.partitions or 'all'}")
+        logger.info(f"SlurmCollector: jobs from every partition; queue snapshot of "
+                    f"{', '.join(map(str, self.partitions)) if self.partitions else 'all partitions'}")
 
     def collect(self) -> list[dict[str, Any]]:
         """Collect SLURM queue and job data."""
@@ -414,10 +435,7 @@ class SlurmCollector(BaseCollector):
         try:
             # --allusers: without it sacct shows a non-root user only their own
             # jobs, and every other job would go unaccounted for.
-            jobs = [job for job in self._sacct('--allusers',
-                                               f'--starttime=now-{self.job_history_days}days')
-                    # Filter by partition if configured
-                    if self.partitions is None or job.partition in self.partitions]
+            jobs = self._sacct('--allusers', f'--starttime=now-{self.job_history_days}days')
             logger.debug(f"Collected {len(jobs)} completed jobs from sacct")
             return jobs
 
@@ -617,7 +635,7 @@ class SlurmCollector(BaseCollector):
         try:
             # Get all jobs grouped by partition and state
             result = subprocess.run(
-                ['squeue', '-h', '-o', '%P|%t'],
+                ['squeue', '-a', '-h', '-o', '%P|%t'],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -680,7 +698,7 @@ class SlurmCollector(BaseCollector):
             format_str = "%i|%u|%g|%P|%j|%T|%N|%C|%m|%b|%l|%M|%V|%S"
 
             result = subprocess.run(
-                ['squeue', '-h', '-o', format_str],
+                ['squeue', '-a', '-h', '-o', format_str],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -695,14 +713,12 @@ class SlurmCollector(BaseCollector):
                 if not line.strip():
                     continue
                 # Every listed job counts as still there, whether or not its
-                # line parses or its partition is one we follow.
+                # line parses.
                 listed.add(line.split('|', 1)[0].strip())
 
                 job = self._parse_job_line(line)
                 if job:
-                    # Filter by partition if configured
-                    if self.partitions is None or job.partition in self.partitions:
-                        jobs.append(job)
+                    jobs.append(job)
 
             self._listed = listed
             return jobs

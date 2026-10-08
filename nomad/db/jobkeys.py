@@ -233,14 +233,17 @@ def place(conn: sqlite3.Connection, job_id, submit_time, user_name=None,
 def stored_job(conn: sqlite3.Connection, job_id) -> dict | None:
     """The stored row of ``job_id`` as same_job() wants it, or None."""
     try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
-        limit = "req_time_seconds" if "req_time_seconds" in cols else "NULL"
-        start = "start_time" if "start_time" in cols else "NULL"
         row = conn.execute(
-            f"SELECT submit_time, user_name, job_name, state, end_time, {limit}, {start} "
-            f"FROM jobs WHERE job_id = ?", (str(job_id),)).fetchone()
+            "SELECT submit_time, user_name, job_name, state, end_time, req_time_seconds, "
+            "start_time FROM jobs WHERE job_id = ?", (str(job_id),)).fetchone()
     except sqlite3.OperationalError:
-        return None
+        # A jobs table without those columns (an old or hand-made one).
+        try:
+            row = conn.execute(
+                "SELECT submit_time, user_name, job_name, state, end_time, NULL, NULL "
+                "FROM jobs WHERE job_id = ?", (str(job_id),)).fetchone()
+        except sqlite3.OperationalError:
+            return None
     if row is None:
         return None
     return dict(zip(("submit_time", "user_name", "job_name", "state", "end_time",

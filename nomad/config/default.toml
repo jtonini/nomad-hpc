@@ -33,7 +33,7 @@ filesystems = ["/", "/home", "/scratch", "/localscratch"]
 quota_enabled = false
 
 [collectors.slurm]
-# SLURM partition to monitor (empty = all)
+# Partitions in the queue snapshot (empty = all); jobs come from every partition
 partitions = []
 
 [collectors.gpu]

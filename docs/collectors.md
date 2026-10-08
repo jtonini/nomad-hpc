@@ -62,7 +62,21 @@ Commands are looked for on the PATH and in `/usr/sbin`, `/sbin`, `/usr/local/sbi
 The `slurm` collector reads running and pending jobs from `squeue` and every
 user's jobs of the last `job_history_days` (7) from `sacct --allusers`
 (without it, `sacct` run by anyone but root shows only that account's own
-jobs). `partitions` limits both to the partitions listed; empty means all.
+jobs). `squeue` is run with `-a`, so hidden partitions and partitions the
+collector's account can't submit to are seen too. Jobs are recorded from every
+partition. `partitions` limits the queue snapshot (`queue_state`, pending and
+running counts per partition) to the partitions listed, and the old dashboard
+(`nomad dashboard`) shows those partitions' nodes; empty means all. Before 1.7.43 it limited the jobs too,
+and the setup wizard lists the partitions `sinfo` shows, which leaves out hidden
+ones: jobs in the partitions left out reached `jobs` only through
+`job_metrics` (finished, at least 10 seconds, a few states) and so every count
+about jobs was short. Partitions that share nodes don't count a job twice: a
+job runs in one partition, and questions about hardware go by the nodes in its
+node list. A job submitted to several partitions is stored with the list
+Slurm shows (`a,b`) while it waits, again after a requeue, and with the one it
+runs in once it starts; an ended job reported with its list keeps the
+partition it ran in. Jobs older than `job_history_days` from partitions that
+were left out before 1.7.43 stay as `job_metrics` recorded them.
 
 A job that ended between two runs leaves `squeue`; if that run's `sacct`
 pull did not report it, it is looked up in `sacct` by number, and the answer

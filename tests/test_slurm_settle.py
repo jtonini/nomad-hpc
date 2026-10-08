@@ -352,3 +352,85 @@ def test_community_export_leaves_unknown_out(site):
     add_job(site.db, "1", "COMPLETED", exit_code=0)
     add_job(site.db, "2", "UNKNOWN", failure_reason=None)
     assert [j["job_id"] for j in load_jobs_from_db(Path(site.db))] == ["1"]
+
+
+
+# -- partitions (1.7.43) -------------------------------------------------------
+
+def test_jobs_come_from_every_partition_the_list_limits_the_queue_snapshot(site):
+    """A partition list (the setup wizard writes the partitions sinfo shows)
+    limits queue_state only; jobs of other partitions are recorded too."""
+    fake = site.run(FakeSlurm(queue=[("1001", "RUNNING", "a"), ("1002", "PENDING", "b"),
+                                     ("1003", "PENDING", "a,b")],
+                              history=[("9", "COMPLETED", "2026-10-05T08:00:00", "0:0")]),
+                    config={"partitions": ["a"]})
+    assert {r for r in ("1001", "1002", "1003", "9") if job(site.db, r) is not None} == {
+        "1001", "1002", "1003", "9"}
+    assert job(site.db, "1002")["partition"] == "b"
+    assert job(site.db, "9")["partition"] == "basic"        # the sacct pull's partition
+    c = sqlite3.connect(site.db)
+    snapshot = {r[0] for r in c.execute("SELECT partition FROM queue_state")}
+    c.close()
+    assert snapshot == {"a"}
+
+
+def test_a_job_submitted_to_several_partitions_shows_where_it_runs(site):
+    site.run(FakeSlurm(queue=[("1003", "PENDING", "a,b")]))
+    assert job(site.db, "1003")["partition"] == "a,b"
+    site.run(FakeSlurm(queue=[("1003", "RUNNING", "b")]))
+    assert job(site.db, "1003")["partition"] == "b"
+    # Requeued: waiting again, for any of its partitions.
+    site.run(FakeSlurm(queue=[("1003", "PENDING", "a,b")]))
+    assert job(site.db, "1003")["partition"] == "a,b"
+
+
+def upsert(db, job_id, partition, state):
+    """One record through the slurm collector's upsert."""
+    rec = {f: None for f in S._JOB_FIELDS}
+    rec.update(job_id=job_id, user_name="u", partition=partition, state=state,
+               submit_time="2026-10-05T09:00:00", failure_reason=0, req_cpus=1,
+               req_mem_mb=1, req_gpus=0)
+    with sqlite3.connect(db) as c:
+        S.ensure_job_columns(c)
+        c.execute(S._JOB_UPSERT, tuple(rec[f] for f in S._JOB_FIELDS))
+
+
+@pytest.mark.parametrize("steps, final", [
+    ([("b", "RUNNING"), ("a,b", "CANCELLED by 1")], "b"),      # ended with its list: ran in b
+    ([("b", "RUNNING"), ("a,b", "REQUEUED")], "a,b"),
+    ([("b", "RUNNING"), ("c", "RUNNING")], "c"),                # moved (scontrol update)
+    ([("b", "RUNNING"), (None, "RUNNING")], "b"),
+    ([("b", "RUNNING"), ("", "COMPLETED")], "b"),
+    ([("", "PENDING"), ("a,b", "PENDING")], "a,b"),             # nothing stored yet
+    ([("", "PENDING"), ("a,b", "CANCELLED")], "a,b"),
+    ([("a,b", "PENDING"), ("a,c", "PENDING")], "a,c"),
+])
+def test_the_stored_partition(site, steps, final):
+    for partition, state in steps:
+        upsert(site.db, "77", partition, state)
+    assert job(site.db, "77")["partition"] == final
+
+
+def test_squeue_sees_hidden_partitions(site):
+    calls = []
+
+    class Seen(FakeSlurm):
+        def __call__(self, argv, **kw):
+            calls.append(argv)
+            return super().__call__(argv, **kw)
+    site.run(Seen(queue=[("1001", "RUNNING", "hidden")]))
+    squeues = [a for a in calls if a[0] == "squeue"]
+    assert squeues and all("-a" in a for a in squeues)
+
+
+def test_a_job_in_a_partition_not_listed_gets_its_outcome(site):
+    add_job(site.db, "1005", "RUNNING", submit=SUBMIT)
+    site.run(FakeSlurm(queue=[("1006", "RUNNING", "a")],
+                       known={"1005": ("TIMEOUT", "2026-10-05T11:00:00", "0:15")}),
+             config={"partitions": ["a"]})
+    assert job(site.db, "1005")["state"] == "TIMEOUT"
+
+
+def test_a_partition_list_that_isnt_text_does_not_stop_the_collector(site):
+    site.run(FakeSlurm(queue=[("1007", "RUNNING", "2024")]), config={"partitions": [2024]})
+    assert job(site.db, "1007")["state"] == "RUNNING"

@@ -1271,7 +1271,7 @@ def syscheck(ctx: click.Context) -> None:
         config_partitions = config.get('collectors', {}).get('slurm', {}).get('partitions', [])
         if config_partitions:
             try:
-                result = subprocess.run(['sinfo', '-h', '-o', '%P'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['sinfo', '-a', '-h', '-o', '%P'], capture_output=True, text=True, timeout=5)
                 slurm_partitions = [p.strip().rstrip('*') for p in result.stdout.strip().split('\n') if p.strip()]
 
                 for p in config_partitions:
@@ -2019,7 +2019,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             return None
 
     def detect_partitions(host=None, ssh_user=None, ssh_key=None):
-        out = run_cmd("sinfo -h -o %P", host, ssh_user, ssh_key)
+        out = run_cmd("sinfo -a -h -o %P", host, ssh_user, ssh_key)
         if out:
             return [line.strip().rstrip('*')
                     for line in out.split('\n') if line.strip()]
@@ -2078,7 +2078,8 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     click.echo(f"    {i}) {p}")
                 click.echo()
                 use_all = click.confirm(
-                    "  Monitor all of these partitions?",
+                    "  Show all of these partitions in the queue view?"
+                    " (jobs are recorded from every partition)",
                     default=True)
                 if use_all:
                     chosen = detected
