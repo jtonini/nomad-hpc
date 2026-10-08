@@ -117,7 +117,9 @@ memory peaks larger than any node), and the assumptions.
 - **Storage growth** is the slope of each month's highest use after the
   last fall of more than 5% (a cleanup). The time to full starts from the
   filesystem's last reading of the period, since a month's highest can be a
-  spike cleaned up days later; both are shown. Decimal terabytes.
+  spike cleaned up days later; both are shown. When the last reading is
+  more than 5% below the latest month's highest, that highest was a spike
+  and is left out of the slope. Decimal terabytes.
 - **Practical capacity** = cores × weight × hours × 75%: above that, queues
   form. Growth rates default to the lowest year-over-year growth, the
   compound rate and the highest, over the full years of Slurm's totals.

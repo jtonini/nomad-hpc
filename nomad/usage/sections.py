@@ -27,6 +27,7 @@ GPU_SAMPLES = "NØMAÐ GPU samples (gpu_stats)"
 FS_SAMPLES = "NØMAÐ filesystem samples (filesystems)"
 WAIT_HOURS = 24.0
 FULL_SHARE = 0.98          # a filesystem this full is full now, not "full in 0.0 months"
+SPIKE_DROP = 0.05          # last reading this far below the month's highest: that highest was a spike
 
 
 class Ctx:
@@ -932,12 +933,18 @@ def s09_storage(ctx: Ctx) -> Section:
         peak = months[-1][1]
         lu, lt, lwhen = d.fs_latest.get(raw, (peak, cap, months[-1][3]))
         cap = lt or cap
-        g, since, cleanup = calcs.storage_growth(series)
-        # From where the filesystem stood at the end of the period: a month's
-        # highest reading can be a spike that was cleaned up days later.
-        full_in = calcs.months_to_full(cap, lu, g)
+        # A latest month whose highest the last reading has fallen well below
+        # held a spike, cleaned up within the month: it says nothing about
+        # growth, so the slope comes from the months before it.
+        spike = bool(peak) and lu is not None and (peak - lu) / peak > SPIKE_DROP
+        g, since, cleanup = calcs.storage_growth(series[:-1] if spike else series)
+        upto = (series[-2][0] if len(series) > 1 else None) if spike else months[-1][0]
+        span = (f"from {fmt.month(since)} to {fmt.month(upto)}" if spike and since and upto
+                else f"since {fmt.month(since)}" if since else "")
+        # From where the filesystem stood at the end of the period.
+        full_in = calcs.months_to_full(cap, lu, g) if not fmt.missing(g) else float("nan")
         when = None
-        if not math.isinf(full_in) and lwhen is not None:
+        if not fmt.missing(full_in) and lwhen is not None:
             when = lwhen + timedelta(days=full_in * 30.4375)
         for m, u, tot, _ in months:
             s.fact(f"monthly_max_used.{path}.{m}", f"{path}, {m}: highest use", u, "bytes")
@@ -949,12 +956,19 @@ def s09_storage(ctx: Ctx) -> Section:
         peak_share = peak / cap if cap else float("nan")
         s.fact(f"used_share.{path}", f"{path}: share full at the last reading of the period", share, "share")
         s.fact(f"growth_per_month.{path}", f"{path}: growth per month since {since}", g, "bytes/month",
-               kind=ESTIMATED, note=f"slope of the monthly highest use from {since}"
-                                    + (f", after the cleanup of {cleanup}" if cleanup else ""))
+               kind=ESTIMATED, note=f"slope of the monthly highest use from {since} to {upto}"
+                                    + (f", after the cleanup of {cleanup}" if cleanup else "")
+                                    + (f"; {months[-1][0]}'s highest left out, a spike cleaned up by the last "
+                                       "reading" if spike else ""))
         s.fact(f"months_to_full.{path}", f"{path}: months until full at that rate, from the last reading",
                full_in, "months", kind=PROJECTED)
         if cleanup:
             s.fact(f"cleanup_month.{path}", f"{path}: month of the last cleanup", cleanup, "month")
+        if spike:
+            s.notes.append(f"{path}: the highest reading of {fmt.month(months[-1][0])} ({fmt.tb(peak)}) had fallen "
+                           f"to {fmt.tb(lu)} by {fmt.day(lwhen) if lwhen else 'the last reading'}. A spike says "
+                           "nothing about growth, so " + (f"its growth is the slope {span}." if not fmt.missing(g)
+                                                          else "its growth isn't measured: too few months before it."))
         is_full = not fmt.missing(share) and share >= FULL_SHARE
         if is_full:
             full_now.append((path, share, lwhen))
@@ -963,28 +977,40 @@ def s09_storage(ctx: Ctx) -> Section:
         rows.append([path, fmt.tb(cap), f"{fmt.tb(peak)} ({fmt.pct(peak_share)})",
                      f"{fmt.tb(lu)} ({fmt.pct(share)})" + (f", {fmt.day(lwhen)}" if lwhen else ""),
                      (fmt.tb(g) + "/month") if not fmt.missing(g) else "–",
-                     fmt.month(since) if since else "–",
-                     ("full now" if is_full else f"{full_in:.1f} months" if not math.isinf(full_in)
-                      else "not filling"),
+                     (f"{fmt.month(since)} – {fmt.month(upto)}" if spike else fmt.month(since)) if since and upto
+                     else "–",
+                     ("full now" if is_full else "–" if fmt.missing(full_in) else "not filling"
+                      if math.isinf(full_in) else f"{full_in:.1f} months"),
                      ("–" if is_full else fmt.month(calcs.month_key(when), long=True) if when else "–")])
-        if not is_full and not fmt.missing(g) and g > 0 and not math.isinf(full_in):
-            findings.append((full_in, path, g, since, share, when, cleanup))
+        if not is_full and not fmt.missing(g) and g > 0 and not fmt.missing(full_in):
+            findings.append((full_in, path, g, span, share, when, cleanup))
     s.tables.append(Table("Filesystems: highest use per month, growth since the last cleanup",
                           ["Filesystem", "Capacity", "Highest, latest month", "Last reading", "Growth",
                            "Since", "Full in", "Around"], rows,
                           note="Decimal terabytes (1 TB = 10¹² bytes; df -h shows TiB). Growth is the slope of "
                                "each month's highest use after the last fall of more than 5% (a cleanup). A "
                                "month's highest reading can be a short spike: \"Full in\" starts from the last "
-                               "reading of the period."))
+                               "reading of the period, and a latest month whose highest that reading is more "
+                               "than 5% below is left out of the growth."))
+    def around(when):
+        return f", around {fmt.month(calcs.month_key(when), long=True)}" if when else ""
+
+    proj = {f[1]: f for f in findings}
     parts = [f"{p} is {fmt.pct(sh)} full" + (f" ({fmt.day(w)})" if w else "") for p, sh, w in full_now]
-    parts += [f"{p} reached {fmt.pct(pk)} full in {fmt.month(m)} and was at {fmt.pct(sh)}"
-              + (f" on {fmt.day(w)}" if w else "") for p, pk, m, sh, w in peaked]
-    if findings:
-        full_in, path, g, since, share, when, cleanup = min(findings)
-        parts.append(f"{path} has grown {fmt.tb(g)} a month since {fmt.month(since)}"
+    for p, pk, m, sh, w in peaked:
+        part = f"{p} reached {fmt.pct(pk)} full in {fmt.month(m)} and was at {fmt.pct(sh)}" + \
+            (f" on {fmt.day(w)}" if w else "")
+        if p in proj:
+            full_in, _, g, span, _, when, _ = proj[p]
+            part += (f", full in about {full_in:.1f} months at the {fmt.tb(g)} a month it grew {span}"
+                     + around(when))
+        parts.append(part)
+    others = sorted(f for f in findings if f[1] not in {p for p, *_ in peaked})
+    if others:
+        full_in, path, g, span, share, when, cleanup = others[0]
+        parts.append(f"{path} has grown {fmt.tb(g)} a month {span}"
                      + (", after a cleanup," if cleanup else "")
-                     + f" and is {fmt.pct(share)} full: full in about {full_in:.1f} months"
-                     + (f", around {fmt.month(calcs.month_key(when), long=True)}" if when else ""))
+                     + f" and is {fmt.pct(share)} full: full in about {full_in:.1f} months" + around(when))
     s.finding = ("; ".join(parts) + ".") if parts else "No filesystem is growing towards full at its recent rate."
     return s
 

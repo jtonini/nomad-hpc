@@ -837,10 +837,36 @@ def test_storage_spike_then_cleanup(site, cfg):
     c.close()
     report, _ = build(site, cfg)
     sec = next(s for s in report.sections if s.number == 9)
-    assert sec.finding.startswith("/home reached 100% full in Feb 2026 and was at 77% on 20 Feb 2026")
+    assert sec.finding.startswith("/home reached 100% full in Feb 2026 and was at 77% on 20 Feb 2026;")
     assert fact(report, "s09.used_share./home") == pytest.approx(12.7 / 16.5)
-    # Growth from the monthly highest (4.5 TB a month), the time to full from the last reading.
-    assert fact(report, "s09.months_to_full./home") == pytest.approx((16.5 - 12.7) / 4.5)
+    # February's highest was a spike: with one month before it, growth isn't measured.
+    assert fact(report, "s09.growth_per_month./home") is None
+    assert any("too few months before it" in n for n in sec.notes)
+    assert "| /home | 16.5 TB | 16.5 TB (100%) | 12.7 TB (77%), 20 Feb 2026 | – |" in render.markdown(report)
+
+
+def test_storage_spike_left_out_of_growth(site, cfg):
+    # /home grew 0.5 TB a month, then spiked to full in February and was
+    # cleaned up: the growth is November to January's, not the spike's.
+    c = sqlite3.connect(site)
+    for t, used in (("2025-11-15T12:00:00", 11.0e12), ("2025-12-15T12:00:00", 11.5e12),
+                    ("2026-01-15T12:00:00", 12.0e12), ("2026-02-10T12:00:00", 16.5e12),
+                    ("2026-02-20T12:00:00", 12.7e12)):
+        c.execute("INSERT INTO filesystems (path, total_bytes, used_bytes, available_bytes, used_percent, timestamp) "
+                  "VALUES (?,?,?,?,?,?)", ("/home", 16.5e12, used, 16.5e12 - used, used / 16.5e12 * 100, t))
+    c.commit()
+    c.close()
+    report, _ = build(site, cfg)
+    assert fact(report, "s09.growth_per_month./home") == pytest.approx(0.5e12)
+    assert fact(report, "s09.months_to_full./home") == pytest.approx((16.5 - 12.7) / 0.5)
+    sec = next(s for s in report.sections if s.number == 9)
+    assert sec.finding.startswith(
+        "/home reached 100% full in Feb 2026 and was at 77% on 20 Feb 2026, full in about 7.6 months at the "
+        "0.5 TB a month it grew from Nov 2025 to Jan 2026, around October 2026; /scratch has grown 10.0 TB a "
+        "month since Dec 2025, after a cleanup, and is")
+    assert sec.finding.count("/home") == 1
+    assert any("A spike says nothing about growth" in n for n in sec.notes)
+    assert "| Nov 2025 – Jan 2026 | 7.6 months |" in render.markdown(report)
 
 
 def test_several_classes_are_node_classes(site, cfg):
