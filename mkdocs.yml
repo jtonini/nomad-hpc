@@ -54,6 +54,7 @@ nav:
     - Data Readiness: readiness.md
     - Diagnostics: diagnostics.md
     - Usage Report: usage-report.md
+    - Actions: actions.md
     - Insight Engine: insights.md
     - System Dynamics: dynamics.md
     - Cloud Monitoring: cloud.md

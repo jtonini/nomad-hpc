@@ -7729,6 +7729,11 @@ def ref(topic_parts):
 from nomad.dev.cli_commands import dev
 cli.add_command(dev)
 
+# Actions the Console can start, on the hub or through a site's agent.
+from nomad.actions.cli import actions_group, agent_group  # noqa: E402
+cli.add_command(actions_group)
+cli.add_command(agent_group)
+
 # =============================================================================
 # COMMUNITY COMMANDS
 # =============================================================================

@@ -96,6 +96,20 @@ Options: `--config` (report.toml), `--db`, `--user-map`, `--exclude-users`,
 `--teaching SITE`, `--format md|json|both`, `--min-cell N`, `--guard-details FILE`, `--allow WORD`.
 See [Usage report](usage-report.md).
 
+## Actions
+
+```bash
+# The catalog of commands the Console may start, on the hub or a site
+nomad actions list [--json]
+nomad actions run NAME [--site SITE | --here] [-p NAME=VALUE ...] [--json]
+
+# The hub's key for reaching sites, and on each site, letting it run the agent only
+nomad actions key
+nomad agent install-key 'ssh-ed25519 AAAA... nomad-actions@hub' [--from PATTERN] [--apply]
+```
+
+See [Actions](actions.md).
+
 ## Global Options
 
 | Option | Description |
