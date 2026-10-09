@@ -1,0 +1,66 @@
+# report.toml for `nomad usage-report` (default path ~/.config/nomad/report.toml).
+# Every name here is invented. A real file is site data: keep it off any
+# public repository. `nomad usage-report init` drafts one from nomad's data.
+
+[report]
+# Accounts that are not people, for every cluster (added to each cluster's).
+exclude_users = ["root"]
+# min_cell = 5          # counts of fewer than 5 people print as "fewer than 5"
+
+[report.clusters.c1]
+# Node tiers, as Slurm node lists. A node belongs to one tier.
+tiers = { basic = "n[01-08]", medium = "n[09-13]", large = "n[14-15]", gpu = "g[01-03]", condo = "c[01-12]" }
+# The institution's tiers; the others count as condo (lab-owned) nodes.
+institutional_tiers = ["basic", "medium", "large", "gpu"]
+# Cores and GPUs per node. Default: from nomad's node samples in the period.
+# (Python 3.10's TOML reader: no comma inside a key of an inline table.)
+cores_per_node = { "n[01-15]" = 52, "g[01-03]" = 52, "c[01-12]" = 52 }
+gpus_per_node = { "g01" = 2, "g[02-03]" = 8 }
+exclude_users = ["installer"]
+# When Slurm began accounting GPUs (AccountingStorageTRES with gres/gpu).
+# Default: the first job with GPUs in its allocation.
+gpu_accounting_start = "2026-08-13T10:48:00"
+# Section 4's nodes. Default: the institutional tiers without GPUs.
+wait_tiers = ["basic", "medium", "large"]
+# Partition classes. By default each partition is classed by its nodes
+# (one tier: that tier; several: overlay; only condo nodes: condo).
+# Set them here where that is wrong, or for partitions no node lists now.
+partition_classes = { short = "basic", single13 = "medium" }
+# The same, in the lists of the October 2026 handoff:
+# tier_partitions = { basic = "basic", medium = "medium" }
+# gpu_partitions = ["gpus"]
+# overlay_partitions = ["all", "cpunodes"]
+unlisted_partitions = "condo"     # partitions found nowhere above
+storage_paths = ["/home", "/scratch"]   # section 9 (default: every filesystem)
+
+[report.clusters.c1.capacity]     # or [report.capacity] for every cluster
+practical = 0.75                  # above this share of all core-hours, queues form
+core_weight = 1.45                # a new-generation core = 1.45 of today's
+core_weight_range = [1.3, 1.6]
+base = "clipped"                  # or "whole": each job of the period counted whole
+# growth = { low = 0.20, central = 0.26, high = 0.34 }   # default: from Slurm's totals
+planned = [ { label = "new nodes", cores = 896, weight = 1.45 } ]
+horizon_years = 10
+
+# Section 7: what runs on the GPUs. The job name is tried first, then the
+# last two parts of the working directory; the first family that matches wins.
+[[report.clusters.c1.gpu_families]]
+name = "molecular dynamics"
+regex = "gmx|gromacs|amber|namd"
+
+[[report.clusters.c1.gpu_families]]
+name = "machine learning"
+regex = "train|finetune|torch|cnn"
+
+[[report.clusters.c1.gpu_families]]
+name = "tests and interactive"
+regex = "bash|test|jupyter"
+
+# Section 8: what runs on every node class (default: the GPU families).
+[[report.clusters.c1.families]]
+name = "quantum chemistry"
+regex = "vasp|qchem|gaussian|orca"
+
+[[report.clusters.c1.families]]
+name = "molecular dynamics"
+regex = "gmx|gromacs|amber|namd|lammps"

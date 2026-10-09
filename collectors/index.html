@@ -1,0 +1,2483 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Lightweight HPC monitoring, visualization, and predictive analytics">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/collectors/">
+      
+      
+        <link rel="prev" href="../config/">
+      
+      
+        <link rel="next" href="../dashboard/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Collectors - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#collectors" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Collectors
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dashboard/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Technical
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#which-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#is-it-working" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is it working?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#job-numbers-that-come-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job numbers that come back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#start-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start times
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jobs-from-before-nomad-nomad-import-sacct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs from before nomad: nomad import sacct
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-history-sreport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage history (sreport)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#heavy-use-of-login-nodes-per_user" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Heavy use of login nodes (per_user)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workstations-over-ssh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workstations over SSH
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workstation-mounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workstation mounts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ROADMAP.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#which-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which run
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#is-it-working" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Is it working?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jobs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Jobs">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#job-numbers-that-come-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job numbers that come back
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#start-times" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start times
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#jobs-from-before-nomad-nomad-import-sacct" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jobs from before nomad: nomad import sacct
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-history-sreport" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage history (sreport)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#disks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Disks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nfs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NFS
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Network
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#heavy-use-of-login-nodes-per_user" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Heavy use of login nodes (per_user)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workstations-over-ssh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workstations over SSH
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workstation-mounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workstation mounts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage-servers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage servers
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="collectors">Collectors<a class="headerlink" href="#collectors" title="Permanent link">&para;</a></h1>
+<p><code>nomad collect</code> (usually <code>nomad collect --once</code> from cron, every 5 minutes) runs the collectors this host's <code>nomad.toml</code> turns on. Each writes its own tables; <code>nomad sync</code> copies every site's tables to the hub.</p>
+<h2 id="which-run">Which run<a class="headerlink" href="#which-run" title="Permanent link">&para;</a></h2>
+<p>Each collector is turned on or off in its own table:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[collectors.nfs]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Collector</th>
+<th>Default</th>
+<th>Where it belongs</th>
+<th>Needs</th>
+<th>Writes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>disk</code></td>
+<td>on</td>
+<td>every host</td>
+<td><code>df</code></td>
+<td><code>filesystems</code></td>
+</tr>
+<tr>
+<td><code>slurm</code></td>
+<td>on</td>
+<td>Slurm head node</td>
+<td><code>squeue</code>, <code>sacct</code></td>
+<td><code>queue_state</code>, <code>jobs</code></td>
+</tr>
+<tr>
+<td><code>job_metrics</code></td>
+<td>on</td>
+<td>Slurm head node</td>
+<td><code>sacct</code></td>
+<td><code>jobs</code>, <code>job_summary</code></td>
+</tr>
+<tr>
+<td><code>slurm_usage</code></td>
+<td>where <code>slurm</code> runs</td>
+<td>Slurm head node</td>
+<td><code>sreport</code></td>
+<td><code>cluster_usage</code></td>
+</tr>
+<tr>
+<td><code>iostat</code></td>
+<td>on</td>
+<td>every host</td>
+<td><code>iostat</code> (sysstat)</td>
+<td><code>iostat_device</code>, <code>iostat_cpu</code></td>
+</tr>
+<tr>
+<td><code>mpstat</code></td>
+<td>on</td>
+<td>every host</td>
+<td><code>mpstat</code> (sysstat)</td>
+<td><code>mpstat_summary</code>, <code>mpstat_core</code></td>
+</tr>
+<tr>
+<td><code>vmstat</code></td>
+<td>on</td>
+<td>every host</td>
+<td><code>vmstat</code></td>
+<td><code>vmstat</code></td>
+</tr>
+<tr>
+<td><code>node_state</code></td>
+<td>on</td>
+<td>Slurm head node</td>
+<td><code>scontrol</code></td>
+<td><code>node_state</code></td>
+</tr>
+<tr>
+<td><code>gpu</code></td>
+<td>on</td>
+<td>hosts with NVIDIA GPUs, or a head node reaching GPU nodes over SSH</td>
+<td><code>nvidia-smi</code> (DCGM if present)</td>
+<td><code>gpu_stats</code>, <code>gpu_health</code></td>
+</tr>
+<tr>
+<td><code>nfs</code></td>
+<td>on</td>
+<td>hosts that mount NFS (client side)</td>
+<td><code>nfsiostat</code> (nfs-utils, in <code>/usr/sbin</code>)</td>
+<td><code>nfs_stats</code></td>
+</tr>
+<tr>
+<td><code>groups</code></td>
+<td>on</td>
+<td>every site</td>
+<td><code>getent</code>; <code>sacct</code> for job accounting</td>
+<td><code>group_membership</code>, <code>job_accounting</code></td>
+</tr>
+<tr>
+<td><code>interactive</code></td>
+<td>off</td>
+<td>hosts running RStudio or Jupyter</td>
+<td>—</td>
+<td><code>interactive_sessions</code>, <code>interactive_summary</code></td>
+</tr>
+<tr>
+<td><code>workstation</code></td>
+<td>off</td>
+<td>a hub reaching workstations over SSH</td>
+<td><code>ssh</code></td>
+<td><code>workstation_state</code>, <code>workstation_user_snapshot</code>, ...</td>
+</tr>
+<tr>
+<td><code>per_user</code></td>
+<td>off</td>
+<td>login nodes, shared interactive hosts</td>
+<td>Python <code>psutil</code></td>
+<td><code>per_user_sample</code>, <code>per_user_alert</code>, <code>per_user_daily</code></td>
+</tr>
+<tr>
+<td><code>storage</code></td>
+<td>off</td>
+<td>a host reaching ZFS/NFS servers over SSH</td>
+<td><code>ssh</code></td>
+<td><code>storage_state</code></td>
+</tr>
+<tr>
+<td><code>network_perf</code></td>
+<td>off</td>
+<td>any host; tests paths that start there</td>
+<td><code>ping</code>; <code>iperf3</code> for throughput</td>
+<td><code>network_perf</code></td>
+</tr>
+<tr>
+<td><code>cloud.aws</code></td>
+<td>off</td>
+<td>sites with AWS resources</td>
+<td>Python <code>boto3</code></td>
+<td><code>cloud_metrics</code></td>
+</tr>
+</tbody>
+</table>
+<p>An <code>enabled = [...]</code> list under <code>[collectors]</code>, which older example configs carried, is not read.</p>
+<p><code>groups</code> reads membership with <code>getent group</code>: on the head node of each <code>[clusters]</code> entry (over SSH when it has a <code>host</code>), on the first reachable workstation of a <code>type = "workstations"</code> cluster with an <code>ssh_user</code>, and on this host otherwise. Job accounting needs <code>sacct</code> and is skipped without it. On the same host it looks up each member with <code>getent passwd</code> and records whether they still have an account (<code>has_account</code>): a hand-kept <code>/etc/group</code> goes on listing people whose accounts were deleted long ago. "No account" needs every run for two days to find none (getent says the same for an unreachable directory), and a run where the lookup fails keeps the last known answer. Every run stamps what it saw with one time (<code>collected_at</code>), so a membership no longer listed stops being stamped. A lab's members are the people listed in their cluster's latest run (give or take two days, for a failed run; a cluster not collected for 30 days while its site goes on is retired) who have an account; <code>nomad console roles NETID</code> says how many are not counted, and why.</p>
+<p><code>nomad collect -C disk,nfs</code> (or <code>-C disk -C nfs</code>) runs only those, if enabled. An unknown name is warned about and skipped; if no name is known, nothing runs and the command says so.</p>
+<h2 id="is-it-working">Is it working?<a class="headerlink" href="#is-it-working" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>nomad<span class="w"> </span>collectors
+</code></pre></div>
+<p>On a site, lists every collector: on or off and why, what it needs that this host lacks, and how its runs went over the last 7 days (from <code>collection_log</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>  nfs           on   on by default
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>                     needs: nfsiostat
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>                     2,016 runs, never any data, last 2026-10-01T07:20
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>                     nfsiostat not installed (nfs-utils)
+</code></pre></div>
+<p>On the hub, <code>nomad collectors --db ~/.local/share/nomad/combined.db</code> shows each site's collectors and marks those that run but collect nothing.</p>
+<p>A collector that runs but has nothing to collect logs why — <code>nfsiostat not installed</code>, <code>no NFS mounts on this host</code>, <code>no NVIDIA GPU here</code>, <code>psutil not installed: nothing collected</code>, <code>no network_tests configured</code> — in <code>collection_log.error_message</code> of a successful run. Before 1.7.13 these logged "success, 0 records" (or, for <code>groups</code> and <code>per_user</code>, "1 records" whatever they held), which looked like a working collector. A command that isn't installed fails the run at once with the reason, without retrying.</p>
+<p>Commands are looked for on the PATH and in <code>/usr/sbin</code>, <code>/sbin</code>, <code>/usr/local/sbin</code> and <code>/usr/local/bin</code>: cron's PATH is only <code>/usr/bin:/bin</code>, and nfs-utils installs <code>nfsiostat</code> in <code>/usr/sbin</code>.</p>
+<h2 id="jobs">Jobs<a class="headerlink" href="#jobs" title="Permanent link">&para;</a></h2>
+<p>The <code>slurm</code> collector reads running and pending jobs from <code>squeue</code> and every
+user's jobs of the last <code>job_history_days</code> (7) from <code>sacct --allusers</code>
+(without it, <code>sacct</code> run by anyone but root shows only that account's own
+jobs). <code>squeue</code> is run with <code>-a</code>, so hidden partitions and partitions the
+collector's account can't submit to are seen too. Jobs are recorded from every
+partition. <code>partitions</code> limits the queue snapshot (<code>queue_state</code>, pending and
+running counts per partition) to the partitions listed, and the old dashboard
+(<code>nomad dashboard</code>) shows those partitions' nodes; empty means all. Before 1.7.43 it limited the jobs too,
+and the setup wizard lists the partitions <code>sinfo</code> shows, which leaves out hidden
+ones: jobs in the partitions left out reached <code>jobs</code> only through
+<code>job_metrics</code> (finished, at least 10 seconds, a few states) and so every count
+about jobs was short. Partitions that share nodes don't count a job twice: a
+job runs in one partition, and questions about hardware go by the nodes in its
+node list. A job submitted to several partitions is stored with the list
+Slurm shows (<code>a,b</code>) while it waits, again after a requeue, and with the one it
+runs in once it starts; an ended job reported with its list keeps the
+partition it ran in. Jobs older than <code>job_history_days</code> from partitions that
+were left out before 1.7.43 stay as <code>job_metrics</code> recorded them.</p>
+<p>A job that ended between two runs leaves <code>squeue</code>; if that run's <code>sacct</code>
+pull did not report it, it is looked up in <code>sacct</code> by number, and the answer
+is taken only if its submit time matches (Slurm reuses job numbers after its
+counter restarts). When <code>sacct</code> cannot account for the job yet, it is marked
+<code>UNKNOWN</code>: it has ended, its outcome is not known, it has no exit code or
+failure reason, and no success or failure count includes it. The next <code>sacct</code>
+pull corrects it. A pending array range (<code>123_[5-10]</code>) that left the queue is
+dropped, since each of its tasks has a row of its own. Nothing is concluded
+about any job in a run where <code>squeue</code> did not answer.</p>
+<p>Before 1.7.19 such jobs were marked <code>COMPLETED</code>, with an end time in UTC
+where every other job time is local, so a failed job could count as a
+success. Those rows (<code>COMPLETED</code>, an end time without a <code>T</code>) are looked up in
+<code>sacct</code> too, 200 a run, and become <code>UNKNOWN</code> (end time moved to local) if
+<code>sacct</code> no longer has them.</p>
+<p>From <code>sacct</code> (1.7.42) each job also gets <code>account</code>, <code>alloc_tres</code> (what Slurm
+allocated, e.g. <code>cpu=6,gres/gpu:a40=1,gres/gpu=1,mem=32G,node=1</code>),
+<code>alloc_gpus</code> (the GPUs in it: <code>gres/gpu</code> and <code>gres/gpu:TYPE</code>, never
+<code>gres/gpumem</code> or <code>gres/gpuutil</code>), and two parts of its working directory:
+<code>work_root</code>, the first (<code>/home</code>, <code>/scratch</code>), and <code>work_tail</code>, the last two
+(<code>proj/run1</code>). The whole path is not kept. <code>squeue</code> doesn't report these;
+what <code>sacct</code> stored stays.</p>
+<p><code>node_list</code> is kept as Slurm writes it, in range form (<code>n[01-04,07]</code>). Code
+that needs the nodes themselves reads it with <code>nomad.hostlist.expand_hostlist</code>
+(or <code>node_in</code>); splitting on commas or matching with LIKE misses ranges.</p>
+<h3 id="job-numbers-that-come-back">Job numbers that come back<a class="headerlink" href="#job-numbers-that-come-back" title="Permanent link">&para;</a></h3>
+<p>Slurm reuses job numbers: after its counter restarts (an outage that loses
+its state) or wraps at <code>MaxJobId</code>, number 4711 is a new job. Before 1.7.42 the
+new job's state, nodes and times were written onto the stored row, under the
+earlier job's user, partition, name and submit time. Now, when a job arrives
+whose number is stored with another submit time, and the stored job is
+another job (another user or job name, or it ended more than 30 days before,
+or it is still marked active but was submitted more than its time limit plus
+30 days before -- a year without a limit -- as rows left RUNNING by an outage
+that lost Slurm's state are), the earlier job moves aside to
+<code>NUMBER@SUBMIT-TIME</code> (<code>4711@2026-03-01T10:00:00</code>; <code>~2</code> and so on if that is
+taken) in every table with a job id (<code>jobs</code>, <code>job_summary</code>, <code>job_metrics</code>,
+<code>job_similarity</code>, ...), and the number is the new job's. Rows in those
+tables dated (<code>submit_time</code> or <code>timestamp</code>) from the new job's submission on
+stay: they were written for the new job. A job moved aside while still marked
+active becomes <code>UNKNOWN</code>. A requeued job (same user and name) stays one job,
+and its submit time follows Slurm's (a requeue gets a new one). See
+<code>nomad.db.jobkeys.place</code>.</p>
+<h3 id="start-times">Start times<a class="headerlink" href="#start-times" title="Permanent link">&para;</a></h3>
+<p><code>squeue</code> reports a pending job's start as Slurm's <em>estimate</em>. It is never
+stored (before 16 Sep 2026 it was, and when the job's outcome then came from
+<code>job_metrics</code>, which did not update the start, the estimate stayed, with a
+wait to match). <code>job_metrics</code> now takes <code>sacct</code>'s real start. Once per
+database, finished jobs whose start disagrees with end − runtime by more than
+two minutes are looked up in <code>sacct</code> and, when <code>sacct</code>'s job is the same job,
+stored as <code>sacct</code> has it (no start for a job cancelled before it ran); those
+<code>sacct</code> no longer has are corrected to end − runtime only when their start is
+impossible (after the end, or before submission). At most 1,000 are looked
+up a run, so a backlog takes several runs; how far it got is kept in
+<code>config</code> (<code>repair.job_start_times.after</code>), and when done, what was done is
+recorded under <code>repair.job_start_times</code>. Rows from before 1.7.19 with an
+assumed end time are left to the outcome lookups above.</p>
+<h3 id="jobs-from-before-nomad-nomad-import-sacct">Jobs from before nomad: <code>nomad import sacct</code><a class="headerlink" href="#jobs-from-before-nomad-nomad-import-sacct" title="Permanent link">&para;</a></h3>
+<p>nomad's job history starts when it was installed, and Slurm deletes its own
+job records after <code>PurgeJobAfter</code>. An export taken in time, or <code>sacct</code> itself
+for the months it still holds, fills that in, on the head node, into that
+site's database:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>nomad import sacct /var/tmp/sacct_all.psv.gz          # what would change
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>nomad import sacct /var/tmp/sacct_all.psv.gz --apply
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>nomad import sacct --from 2025-10-01 --apply          # ask sacct, a month at a time
+</code></pre></div>
+<p>An export is any <code>sacct -P</code> output with its header line (<code>sacct -a -X -P -o ALL
+-S DATE</code>; not <code>-n</code>), plain or gzipped; fields are read by name. A record spread
+over lines (a field with newlines) is put back together: a line that reads as
+a record, or starts with one far enough to show a job id, starts a record, any
+other line goes on the one before. A <code>|</code> inside free-text fields (submit line,
+job name, working directory, comments) is put back where the other fields read
+as they should. Job steps and pending array ranges are skipped.</p>
+<p>A job already stored only gets what it lacks (account, allocation, working
+directory, a partition instead of a list, a failure reason job_metrics left
+at 0). Its outcome changes only when nomad had none -- stored as running,
+pending or <code>UNKNOWN</code>, or an outcome assumed before 1.7.19 -- and the records
+show it ended; a stored outcome is never mixed with another. A job the records
+show running or pending, and nomad doesn't have, goes in as <code>UNKNOWN</code> with no
+end (an export is a snapshot). Numbers Slurm gave out again are kept apart (an
+older job as <code>NUMBER@SUBMIT-TIME</code>). Importing the same export twice changes
+nothing. The import commits every half second and gives way a moment after
+each commit, so the collectors writing the same database get in; with
+<code>--from</code>, each month is committed before sacct is asked about the next, and if
+sacct fails part way the months before stay written and the command says
+where it stopped. The database must exist (<code>nomad collect</code> makes it). Without
+<code>--apply</code> it is opened read-only and the counts say what would change, by
+month submitted (not counting what the import itself would change, such as a
+number used twice in the export).</p>
+<h2 id="usage-history-sreport">Usage history (sreport)<a class="headerlink" href="#usage-history-sreport" title="Permanent link">&para;</a></h2>
+<p><code>slurm_usage</code> keeps Slurm's monthly usage totals in <code>cluster_usage</code>, one row
+per cluster, month and TRES (<code>cpu</code>, and <code>gres/gpu</code> where GPUs are
+accounted): hours allocated, down, planned down, idle, planned (held for
+waiting jobs; "Reserved" in older Slurm) and reported. Slurm usually keeps
+these for good (<code>PurgeUsageAfter=NONE</code>) after the job records are gone, so
+they are the long view of load. It runs where the <code>slurm</code> collector does,
+unless <code>[collectors.slurm_usage] enabled</code> says otherwise.</p>
+<p>Each run asks <code>sreport -P -t hours -T cpu,gres/gpu cluster utilization</code> for at
+most <code>months_per_run</code> (24) months, newest first: this month and last month
+again every <code>refresh_hours</code> (6) until a month has been over two days
+(<code>settled</code>), and further back to the cluster's start or <code>since = "YYYY-MM"</code>.
+The start is where Slurm has had nothing for three months in a row <em>and</em>
+nothing at all before them (one question about everything earlier, so a long
+outage isn't taken for it); it is kept in <code>config</code> as
+<code>slurm_usage.nothing_before</code>. Which months were asked, with which TRES and
+when, is in <code>cluster_usage_asked</code>; <code>cluster_usage</code> holds only what Slurm
+reported. A Slurm that says it doesn't account GPUs is asked for <code>cpu</code> alone
+from then on (<code>slurm_usage.cpu_only</code>); any other sreport error fails the run
+and the next tries again. A timeout ends the run without retries. A setting
+that doesn't read is warned about and its default used. Where two hosts report
+the same cluster, read one of them (the rows are the same).</p>
+<p>Allocated, idle and planned are shares of the time nodes were up (reported −
+down); down is a share of all reported time. Never add <code>cpu</code> and <code>gres/gpu</code>
+rows together.</p>
+<h2 id="disks">Disks<a class="headerlink" href="#disks" title="Permanent link">&para;</a></h2>
+<p><code>disk</code> reads each of <code>filesystems</code> with <code>df</code> every run. Each reading also
+fits the readings of the last <code>forecast_window_hours</code> (default 6) with a
+straight line and stores the fill rate and when the filesystem will be full
+(<code>fill_rate_bytes_per_day</code>, <code>days_until_full</code>); a disk that will be full
+soon raises a <code>disk_forecast</code> alert (see <code>docs/alerts.md</code>).</p>
+<h2 id="nfs">NFS<a class="headerlink" href="#nfs" title="Permanent link">&para;</a></h2>
+<p>On a host that mounts NFS, each run reads <code>nfsiostat 5 2</code> and keeps the second report: what each mount did in those 5 seconds (<code>sample_seconds</code> in <code>[collectors.nfs]</code>). The first report averages everything since the share was mounted. Per mount: operations, read and write rates, and round-trip and execution times and retransmissions weighted over reads and writes — empty (NULL) for a mount with no reads or writes in the sample, rather than 0 ms. A host that mounts nothing says "no NFS mounts on this host"; turn nfs off there.</p>
+<h2 id="network">Network<a class="headerlink" href="#network" title="Permanent link">&para;</a></h2>
+<p>Latency and packet loss from this host to the hosts you list, every run (ten pings, about two seconds per path):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[collectors.network_perf]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">[[collectors.network_perf.network_tests]]</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">dest</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"nas1"</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">path_type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"switch"</span>
+</code></pre></div>
+<ul>
+<li>Each path starts on the host that runs it. A <code>source</code> naming another host (by name or address) is skipped, and the run says so; list that path in the other host's config.</li>
+<li>A path with no reply at all is stored as <code>unreachable</code>.</li>
+<li><strong>Throughput</strong> is off unless <code>throughput = true</code>. It then runs at most once per <code>throughput_interval</code> (3600 s) per path — checked against the table, so it holds under cron — for <code>iperf_duration</code> seconds with <code>iperf3</code>, which needs <code>iperf3 -s</code> running on the destination. Without iperf3, or when no <code>iperf3 -s</code> answers, it times an SSH copy of 50 MB, which encryption may limit below what the network carries; if that fails too, no throughput is stored (never a 0).</li>
+</ul>
+<h2 id="heavy-use-of-login-nodes-per_user">Heavy use of login nodes (per_user)<a class="headerlink" href="#heavy-use-of-login-nodes-per_user" title="Permanent link">&para;</a></h2>
+<p>On a login node or another host people share, <code>per_user</code> says who used it heavily, with what, and for how long. Turn it on there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[collectors.per_user]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</code></pre></div>
+<p>Each run (every 5 minutes from cron) reads every process and averages its CPU and I/O over the 5 minutes since the previous run, from counters that run left in <code>per_user_state</code>. A process seen for the first time gets its average since it started; if that is above a rule's threshold, the next reading confirms it is still busy, and the flag is dated from the process's start — a process that has run flat out for two days is flagged as such five minutes after per_user is turned on. Where systemd puts each user's logins in a slice (<code>user-&lt;uid&gt;.slice</code>, cgroup v2 or v1 with CPU accounting), it also reads each user's CPU there, which counts processes that started and ended between two readings — a parallel <code>make</code>, a loop starting short programs. Work of another account inside a user's slice (<code>sudo</code>, <code>su</code>), and nomad's own when its cron session runs in its account's slice, is not counted as that user's.</p>
+<p>What it keeps:</p>
+<ul>
+<li><strong>A sample</strong> (<code>per_user_sample</code>, with the command line) only for a process above a floor: <code>floor_cpu_percent</code> (10), <code>floor_memory_gb</code> (2) or <code>floor_io_mb_per_s</code> (10). Idle shells and daemons leave no row. Raw samples are deleted after <code>sample_retention_days</code> (30; 0 keeps them), a batch of 100,000 per run.</li>
+<li><strong>Flags</strong> (<code>per_user_alert</code>), kept. One row per episode — a process (or a user's processes together) above a rule's threshold without a break — and rule, written once the condition has held for the rule's duration and updated every run while it goes on: <code>last_seen</code>, <code>sustained_for_seconds</code>, <code>occurrences</code> (readings), and the episode's peaks.</li>
+<li><strong>Daily totals</strong> (<code>per_user_daily</code>), kept: for each user, host and day (local date), CPU seconds used, time busy (the user's processes together above the CPU floor), peaks of CPU and memory, and I/O where readable. An interval is added to the day it ends; one longer than two hours (the collector was stopped) is left out.</li>
+</ul>
+<p>The rules (a duration is a minimum: readings come every 5 minutes, so a 2-minute CPU rule fires on the first 5-minute average above it):</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Over</th>
+<th>Condition</th>
+<th>Severity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cpu_10pct_5min</code></td>
+<td>one process</td>
+<td>CPU ≥ 10% of a core for 5 min</td>
+<td>informational</td>
+</tr>
+<tr>
+<td><code>cpu_50pct_2min</code></td>
+<td>one process</td>
+<td>CPU ≥ 50% for 2 min</td>
+<td>actionable</td>
+</tr>
+<tr>
+<td><code>memory_4gb_10min</code></td>
+<td>one process</td>
+<td>resident memory ≥ 4 GB for 10 min</td>
+<td>informational</td>
+</tr>
+<tr>
+<td><code>memory_16gb_2min</code></td>
+<td>one process</td>
+<td>≥ 16 GB for 2 min</td>
+<td>actionable</td>
+</tr>
+<tr>
+<td><code>user_cpu_200pct_10min</code></td>
+<td>a user's processes</td>
+<td>together ≥ 2 cores for 10 min</td>
+<td>actionable</td>
+</tr>
+<tr>
+<td><code>user_memory_32gb_10min</code></td>
+<td>a user's processes</td>
+<td>together ≥ 32 GB for 10 min</td>
+<td>actionable</td>
+</tr>
+<tr>
+<td><code>io_50mbs_10min</code></td>
+<td>one process</td>
+<td>reads + writes ≥ 50 MB/s for 10 min</td>
+<td>informational</td>
+</tr>
+</tbody>
+</table>
+<p>A user's memory is the resident memory of their processes added up, so memory that forked workers share counts once for each.</p>
+<p><code>[[collectors.per_user.rules]]</code> tables replace them (see <code>nomad.toml.example</code>). System accounts (uid below <code>min_uid</code>), <code>users</code>, <code>user_commands</code> and processes started from <code>parent_paths</code> are never flagged; they are stored, marked, when above the floor.</p>
+<p>I/O is what a process read and wrote through system calls — files on any filesystem, NFS included, pipes and sockets — so a large copy to NFS or a transfer through the host shows. Reading another user's I/O counters, and the executable path that <code>parent_paths</code> matches, needs root: run as another account, only that account's own processes have them. For a script run by an interpreter (<code>python3 /usr/local/sw/backup/backup.py</code>), <code>parent_paths</code> and <code>user_commands</code> also match the script, read from the command line, which needs no root: <code>user_commands = [["backupuser", "backup.py"]]</code>.</p>
+<p>If <code>/proc</code> is mounted with <code>hidepid</code>, an account other than root sees only its own processes; the run says so (<code>nomad collectors</code>).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>nomad<span class="w"> </span>per-user<span class="w">                       </span><span class="c1"># this host's database</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>nomad<span class="w"> </span>per-user<span class="w"> </span>--db<span class="w"> </span>~/.local/share/nomad/combined.db<span class="w"> </span>--days<span class="w"> </span><span class="m">30</span><span class="w">   </span><span class="c1"># every site, on the hub</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>nomad<span class="w"> </span>per-user<span class="w"> </span>--mask<span class="w">                </span><span class="c1"># user and command names replaced, for sharing</span>
+</code></pre></div>
+<p>Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (<code>!</code> actionable, <code>i</code> informational), and its peaks.</p>
+<h2 id="workstations-over-ssh">Workstations over SSH<a class="headerlink" href="#workstations-over-ssh" title="Permanent link">&para;</a></h2>
+<p><code>workstation</code> runs its commands and probes on each machine over SSH
+(<code>BatchMode</code>: a key, no password prompt), as the user <code>~/.ssh/config</code> gives
+for that host, and runs them directly on a machine listed under the
+collecting host's own name. Some lab machines print a banner on every login,
+interactive or not, from a shell startup file. Since 1.7.27 nomad prints a
+marker before each command and reads only what follows it, so such a banner
+is never read as the machine's figures. To keep the banner off
+non-interactive logins anyway, wrap it in <code>if [[ $- == *i* ]]; then ... fi</code>.</p>
+<h2 id="workstation-mounts">Workstation mounts<a class="headerlink" href="#workstation-mounts" title="Permanent link">&para;</a></h2>
+<p>Each <code>workstation</code> run also checks every mount on each machine (NFS, and
+local filesystems other than the system's own). A small probe goes over the
+same SSH connection to the machine's own <code>python3</code> (3.6 or later), so
+nothing is installed on the workstations. It checks all mounts at once, each
+in its own thread with a 3-second limit, and records whether <code>stat()</code>
+answered (<code>workstation_mount_state</code>: <code>is_responsive</code>, <code>response_ms</code>). A call
+on a dead NFS server cannot be interrupted, so a thread still waiting at the
+limit is abandoned, the mount recorded as not responding, and the probe ends
+anyway: a dead NAS costs one limit, and the other mounts are still reported.</p>
+<p>Since 1.7.24 it also records the size of the filesystem behind each mount,
+as <code>df</code> shows it: <code>total_bytes</code>, <code>used_bytes</code> and <code>avail_bytes</code> (what users
+can still write). These are empty for a mount that did not answer, and in
+rows from before 1.7.24. For an NFS mount they are the server's figures for
+that export, so the lab machines report their NAS's space without nomad
+reaching the NAS. "Used" is the whole export's, whoever wrote it.</p>
+<p>Exports that are datasets of one ZFS pool each report their own used space
+but share the pool's free space, and each one's total is its own used space
+plus that shared free space. So their totals overlap and must not be added
+up. When two exports of one server are read with the same free space
+(within 0.1%, at most 1 GiB) in one run, whether by the same lab machine or
+by two (an export mounted on a single machine is read by no other),
+<code>nomad console roles</code> says "free space shared with ...", leaves out each
+one's total, and adds a line with their space together: their used space
+summed, the free space counted once. Exports on different server addresses
+are never put together, even if the same NAS answers on both.</p>
+<p>Only the collecting host needs 1.7.24 for the sizes; the hub's combined
+database gains the columns at its next sync.</p>
+<h2 id="storage-servers">Storage servers<a class="headerlink" href="#storage-servers" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[collectors.storage]</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="k">[[collectors.storage.storage_devices]]</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">hostname</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"nas1"</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"zfs"</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="k">[[collectors.storage.storage_devices]]</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">hostname</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"nfs-home"</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"nfs"</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="n">paths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"/export/home"</span><span class="p">]</span>
+</code></pre></div>
+<p>Reached over SSH with <code>BatchMode</code> (a key, no password prompt) unless <code>hostname</code> is this host. <code>type = "zfs"</code> reads pool health and capacity: the space users have, from each pool's root dataset (<code>zfs list</code>), so RAIDZ parity isn't counted as it is in <code>zpool list</code>, and a boot pool (<code>boot-pool</code>, <code>freenas-boot</code>, <code>bpool</code>) isn't counted at all. It works on TrueNAS CORE (FreeBSD) as on Linux. Any type reads NFS exports and connected clients. A login banner is skipped, as for workstations. <code>nomad lab add-nas</code> adds a NAS (see docs/config.md). Without ZFS, capacity comes only from the <code>paths</code> listed (df) — never from the server's root disk. An unreachable server is stored as <code>offline</code> with its capacity unknown (NULL), not as an empty server.</p>
+<p><code>[[storage_devices]]</code> and <code>[[network_tests]]</code> at the top level of <code>nomad.toml</code>, where older examples put them, are still read, with a warning to move them.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
