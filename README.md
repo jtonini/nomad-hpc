@@ -4,7 +4,7 @@
 
 # NØMAÐ-HPC
 
-**NØde Monitoring And Diagnostics** — Lightweight HPC monitoring, visualization, and predictive analytics.
+**NØde Monitoring And Ðiagnostics** — Lightweight HPC monitoring, visualization, and predictive analytics.
 
 > *"Travels light, adapts to its environment, and doesn't need permanent infrastructure."*
 

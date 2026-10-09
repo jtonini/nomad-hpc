@@ -133,7 +133,7 @@ def _get_version():
 @click.option('-v', '--verbose', is_flag=True, help='Enable debug logging')
 @click.pass_context
 def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
-    """NØMAÐ - NØde Monitoring And Diagnostics
+    """NØMAÐ - NØde Monitoring And Ðiagnostics
     
     Lightweight HPC monitoring and prediction tool.
     """
@@ -1328,7 +1328,7 @@ def version(ctx: click.Context) -> None:
     """Show version information."""
     # The installed package's version -- the same one `nomad --version` prints.
     click.echo(f"NØMAÐ v{_get_version()}")
-    click.echo("NØde Monitoring And Diagnostics")
+    click.echo("NØde Monitoring And Ðiagnostics")
 
 
 @cli.command()
