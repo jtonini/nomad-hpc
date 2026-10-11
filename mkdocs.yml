@@ -55,6 +55,7 @@ nav:
     - Diagnostics: diagnostics.md
     - Usage Report: usage-report.md
     - Actions: actions.md
+    - Facts: facts.md
     - Insight Engine: insights.md
     - System Dynamics: dynamics.md
     - Cloud Monitoring: cloud.md

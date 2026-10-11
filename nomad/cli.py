@@ -7734,6 +7734,10 @@ from nomad.actions.cli import actions_group, agent_group  # noqa: E402
 cli.add_command(actions_group)
 cli.add_command(agent_group)
 
+# What the Console's /api/v1 answers: sites, a person, a lab.
+from nomad.facts.cli import facts_group  # noqa: E402
+cli.add_command(facts_group)
+
 # =============================================================================
 # COMMUNITY COMMANDS
 # =============================================================================

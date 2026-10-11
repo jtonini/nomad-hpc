@@ -110,6 +110,18 @@ nomad agent install-key 'ssh-ed25519 AAAA... nomad-actions@hub' [--from PATTERN]
 
 See [Actions](actions.md).
 
+## Facts
+
+What the Console's `/api/v1` answers, on the command line ([details](facts.md)).
+
+```bash
+nomad facts sites                 # every site now, and its jobs (last 30 days)
+nomad facts me NETID              # one person's work
+nomad facts lab NETID             # the labs NETID leads, taken together
+nomad facts sites --json          # the data itself
+nomad facts me NETID --mask       # without the NetID, for sharing
+```
+
 ## Global Options
 
 | Option | Description |
