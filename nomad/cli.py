@@ -3868,114 +3868,12 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
 
 
 
-def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None):
-    """Pull a remote SQLite database using .backup for atomic snapshot.
-
-    Returns True on success, False on failure.
-
-    Tries SQLite .backup first (handles WAL correctly). Falls back to
-    direct scp if sqlite3 is unavailable on the remote.
-
-    Snapshot is created in /tmp on the remote, then scp'd locally,
-    then deleted from the remote regardless of outcome.
-    """
-    import os
-    import subprocess as sp
-    import time as _t
-    import logging
-    logger = logging.getLogger("nomad.sync")
-
-    pid = os.getpid()
-    remote_snap = f"/tmp/nomad_sync_{pid}.db"
-
-    def _ssh(cmd, timeout=30):
-        ssh_args = ["ssh", "-o", "ConnectTimeout=10",
-                    "-o", "BatchMode=yes"]
-        if ssh_key:
-            ssh_args += ["-i", ssh_key]
-        ssh_args += [f"{user}@{host}", cmd]
-        return sp.run(ssh_args, capture_output=True,
-                      text=True, timeout=timeout)
-
-    def _scp(remote_path, local_path, timeout=120):
-        scp_args = ["scp", "-o", "ConnectTimeout=10",
-                    "-o", "BatchMode=yes"]
-        if ssh_key:
-            scp_args += ["-i", ssh_key]
-        scp_args += [f"{user}@{host}:{remote_path}", str(local_path)]
-        return sp.run(scp_args, capture_output=True,
-                      text=True, timeout=timeout)
-
-    # Try .backup first
-    backup_used = False
-    try:
-        # Check sqlite3 binary exists on remote
-        check = _ssh("command -v sqlite3 >/dev/null && echo OK || echo MISSING",
-                     timeout=10)
-        if check.returncode == 0 and "OK" in check.stdout:
-            # Use .backup to make atomic snapshot
-            backup_cmd = (f"sqlite3 {remote_db} \".backup {remote_snap}\" "
-                          f"&& chmod 600 {remote_snap}")
-            # .backup fails while that site's collector is mid-write
-            # ("database is locked"). The write window is seconds, so retry
-            # rather than giving up — the alternative path (scp of the live
-            # database) is known to produce a corrupt copy.
-            backup_result = None
-            for _attempt in range(3):
-                backup_result = _ssh(backup_cmd, timeout=180)
-                if backup_result.returncode == 0:
-                    break
-                if "locked" not in (backup_result.stderr or "").lower():
-                    break
-                logger.info(
-                    f".backup on {host} hit a lock, retrying in 15s "
-                    f"(attempt {_attempt + 1}/3)")
-                _ssh(f"rm -f {remote_snap}", timeout=10)
-                _t.sleep(15)
-            if backup_result is not None and backup_result.returncode == 0:
-                # scp the snapshot
-                scp_result = _scp(remote_snap, local_copy)
-                # Always cleanup remote snapshot
-                _ssh(f"rm -f {remote_snap}", timeout=10)
-                if scp_result.returncode == 0:
-                    return True
-                logger.warning(
-                    f"scp of snapshot failed: {scp_result.stderr.strip()[:200]}")
-            else:
-                logger.warning(
-                    f".backup failed on {host}: "
-                    f"{backup_result.stderr.strip()[:200]}")
-                # Cleanup any partial snapshot
-                _ssh(f"rm -f {remote_snap}", timeout=10)
-            backup_used = True  # We tried, but it failed
-        else:
-            logger.info(
-                f"sqlite3 not available on {host}, falling back to scp")
-    except Exception as e:
-        logger.warning(f"backup attempt failed: {e}")
-
-    # Direct scp of the live database is only safe when the remote has no
-    # sqlite3 at all. Using it after a FAILED .backup means copying a database
-    # that is actively being written — which produces a file that looks
-    # complete and is malformed. Fail cleanly instead; the caller can fall back
-    # to a verified cached copy.
-    if backup_used:
-        logger.warning(
-            f"snapshot unavailable on {host} — refusing to scp a live "
-            f"database (that would risk a corrupt copy)")
-        return False
-
-    logger.info(f"Falling back to direct scp for {host}")
-    try:
-        scp_result = _scp(remote_db, local_copy)
-        if scp_result.returncode == 0:
-            return True
-        logger.warning(
-            f"scp fallback failed: {scp_result.stderr.strip()[:200]}")
-    except Exception as e:
-        logger.warning(f"scp fallback exception: {e}")
-
-    return False
+def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None, why=None):
+    """Copy a site's database to the hub as a consistent snapshot; True when
+    ``local_copy`` is a complete new copy, False with it untouched (and the
+    reason appended to ``why``). See nomad.db.pull."""
+    from nomad.db.pull import pull
+    return pull(user, host, remote_db, local_copy, ssh_key, why=why)
 
 
 def _load_hub_config(config_file_override=None):
@@ -4029,6 +3927,7 @@ def _load_hub_config(config_file_override=None):
             'sites': sites,
             'output_db': data.get('output_db'),
             'sync_interval_minutes': data.get('sync_interval_minutes'),
+            'alert_after_minutes': data.get('alert_after_minutes'),
             'source': str(path),
         }
 
@@ -4065,6 +3964,7 @@ def _load_hub_config(config_file_override=None):
             'output_db': nomad_hub_data.get('output_db'),
             'sync_interval_minutes': nomad_hub_data.get(
                 'sync_interval_minutes'),
+            'alert_after_minutes': nomad_hub_data.get('alert_after_minutes'),
             'source': f"{nomad_toml} [hub]",
         }
 
@@ -4089,6 +3989,7 @@ def _load_hub_config(config_file_override=None):
             'sites': sites,
             'output_db': data.get('output_db'),
             'sync_interval_minutes': data.get('sync_interval_minutes'),
+            'alert_after_minutes': data.get('alert_after_minutes'),
             'source': f"{sync_toml} (deprecated)",
         }
 
@@ -4291,6 +4192,9 @@ def sync(ctx, config_file, output, dry_run):
     # data IS present (so the completeness guard is satisfied), but it is
     # ageing — which is exactly what a quiet-source check needs to know.
     from_cache = set()
+    # Why a site's live pull failed (for sync_sites.error, the summary and
+    # the alert), whether or not its cached copy stood in.
+    pull_errors = {}
     for site in sites:
         name = site.get('name', 'unknown')
         host = site.get('host')
@@ -4303,8 +4207,11 @@ def sync(ctx, config_file, output, dry_run):
         # Use SQLite .backup for atomic snapshot to fix corruption from
         # WAL mid-write during scp. Falls back to direct scp.
         try:
+            _why = []
             ok = _pull_via_backup(
-                user, host, remote_db, local_copy, ssh_key)
+                user, host, remote_db, local_copy, ssh_key, why=_why)
+            if not ok:
+                pull_errors[name] = _why[-1] if _why else "pull failed (see log)"
             if ok:
                 for suffix in ["-wal", "-shm"]:
                     stale = Path(str(local_copy) + suffix)
@@ -4318,8 +4225,10 @@ def sync(ctx, config_file, output, dry_run):
                 _used_cache = _fall_back_to_cache(name, local_copy, pulled)
                 if not _used_cache:
                     click.echo(click.style(
-                        "FAILED (see log)", fg="red"))
+                        "FAILED, no cached copy to fall back on", fg="red"))
+                click.echo(f"      why: {pull_errors[name]}")
         except Exception as e:
+            pull_errors[name] = f"{type(e).__name__}: {e}"
             _used_cache = _fall_back_to_cache(name, local_copy, pulled)
             if not _used_cache:
                 click.echo(click.style(f"ERROR: {e}", fg="red"))
@@ -4329,6 +4238,12 @@ def sync(ctx, config_file, output, dry_run):
         click.echo(click.style(
             "  No databases pulled. Check SSH connectivity.",
             fg="red"))
+        try:
+            _sync_alerts(combined_path, pull_errors, cache_dir,
+                         after=hub_cfg.get('alert_after_minutes'),
+                         blocked="no site could be pulled")
+        except Exception as _alert_err:      # never let an alert stop a sync
+            logging.getLogger("nomad.sync").warning(f"sync alert not sent: {_alert_err}")
         return
 
     click.echo()
@@ -4601,7 +4516,7 @@ def sync(ctx, config_file, output, dry_run):
             # e.g. a cluster whose headnode is down for maintenance — even when
             # that site merged fine from its cached copy. That both hid the
             # site and mis-based the completeness guard on it.
-            _all_sites = sorted(set(site_configs) | set(merge_results))
+            _all_sites = sorted(set(site_configs) | set(merge_results) | set(pull_errors))
             for sname in _all_sites:
                 smeta = site_configs.get(sname) or {}
                 _res = merge_results.get(sname, {})
@@ -4617,9 +4532,12 @@ def sync(ctx, config_file, output, dry_run):
                      smeta.get('cluster_type'), now,
                      _merged,
                      _res.get("records", 0),
-                     _res.get("error"),
+                     pull_errors.get(sname) or _res.get("error"),
                      'cache' if sname in from_cache else 'live',
-                     now if _merged else _prior_success.get(sname))
+                     # the last LIVE pull: data merged from the cached copy
+                     # is only as recent as that copy
+                     now if (_merged and sname not in from_cache)
+                     else _prior_success.get(sname))
                 )
             combined.commit()
         except Exception:
@@ -4711,7 +4629,10 @@ def sync(ctx, config_file, output, dry_run):
 
     _now_merged = sum(1 for r in merge_results.values() if r["merged"])
 
+    _blocked = None          # why combined.db was not replaced, if it wasn't
     if _prev_merged and _now_merged < _prev_merged:
+        _blocked = (f"merged {_now_merged} site(s), the published one has "
+                    f"{_prev_merged}")
         click.echo()
         click.echo(click.style(
             f"  Merged {_now_merged} site(s) but the existing combined.db has "
@@ -4720,6 +4641,10 @@ def sync(ctx, config_file, output, dry_run):
             if not _r["merged"]:
                 click.echo(click.style(
                     f"    {_s} FAILED: {_r['error']}", fg="red"))
+        for _s, _why in sorted(pull_errors.items()):
+            if _s not in from_cache:
+                click.echo(click.style(
+                    f"    {_s}: pull failed, no cached copy: {_why}", fg="red"))
         click.echo(click.style(
             "  The current combined.db is left intact; fix the failing "
             "site(s) and re-run.", fg="yellow"))
@@ -4728,6 +4653,7 @@ def sync(ctx, config_file, output, dry_run):
         except Exception:
             pass
     elif total_records == 0:
+        _blocked = "the merge produced no records"
         click.echo()
         click.echo(click.style(
             "  Sync produced 0 records — not replacing existing combined.db",
@@ -4740,6 +4666,7 @@ def sync(ctx, config_file, output, dry_run):
         try:
             _os.replace(str(combined_tmp_path), str(combined_path))
         except Exception as swap_err:
+            _blocked = f"replacing it failed: {swap_err}"
             click.echo()
             click.echo(click.style(
                 f"  Atomic swap failed: {swap_err}",
@@ -4754,12 +4681,22 @@ def sync(ctx, config_file, output, dry_run):
         "  ══════════════════════════════════════", fg="cyan"))
     _ok = [s for s, r in merge_results.items() if r["merged"]]
     _bad = [(s, r["error"]) for s, r in merge_results.items() if not r["merged"]]
-    if _bad:
+    # A site whose pull failed is either missing (no cached copy) or merged
+    # from its cached copy, and so as old as that copy: say so either way.
+    _missing = [(s, w) for s, w in sorted(pull_errors.items()) if s not in from_cache]
+    _cached = [(s, w) for s, w in sorted(pull_errors.items()) if s in from_cache]
+    if _bad or _missing or _cached:
         click.echo(click.style(
-            f"  Done: {len(_ok)} of {len(pulled)} site(s) merged",
+            f"  Done: {len(_ok)} of {len(sites)} site(s) merged"
+            + (f", {len(_cached)} from a cached copy" if _cached else ""),
             fg="yellow", bold=True))
         for _s, _err in _bad:
             click.echo(click.style(f"    {_s} FAILED: {_err}", fg="red"))
+        for _s, _why in _missing:
+            click.echo(click.style(f"    {_s}: not pulled: {_why}", fg="red"))
+        for _s, _why in _cached:
+            click.echo(click.style(
+                f"    {_s}: from its cached copy (live pull failed: {_why})", fg="yellow"))
     else:
         click.echo(click.style(
             f"  Done: {len(_ok)} site(s) merged", fg="green", bold=True))
@@ -4772,6 +4709,156 @@ def sync(ctx, config_file, output, dry_run):
     click.echo(f"    nomad status --db {combined_path}")
     click.echo(f"    nomad dashboard --db {combined_path}")
     click.echo()
+    _failing = dict(pull_errors)
+    for _s, _err in _bad:
+        _failing.setdefault(_s, f"merge failed: {_err}")
+    try:
+        _sync_alerts(combined_path, _failing, cache_dir,
+                     after=hub_cfg.get('alert_after_minutes'), blocked=_blocked)
+    except Exception as _alert_err:          # never let an alert stop a sync
+        logging.getLogger("nomad.sync").warning(f"sync alert not sent: {_alert_err}")
+
+
+def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,
+                 now=None, config=None):
+    """Raise an alert for each site that has not synced for a while, and for
+    the hub when its combined database has not been replaced for as long.
+
+    A site that kept failing used to leave every page showing old data with
+    nothing said anywhere but the hub's sync log. Now, once a site's last
+    live pull is ``alert_after_minutes`` old (in the hub's settings, [hub]
+    in nomad.toml or the sync file; 120 by default): a warning, critical
+    after a day, with the reason. So is the hub's own combined.db when it has
+    not been replaced for that long (a merge that keeps failing, or the
+    completeness guard holding back a build that left a site out).
+
+    Each is sent once, again when it becomes critical, then every
+    ``[alerts] reminder_hours`` (24) while it lasts; a site that syncs again
+    is forgotten, so its next failure is news. That is kept in a small file
+    beside the hub's cached copies, so it holds whether or not the hub's
+    nomad.toml names a database for alert_state. Returns what was sent.
+    """
+    import os
+    import socket
+    if config is None:
+        from nomad.config import load_config
+        config = load_config() or {}
+    hub = config.get("hub") if isinstance(config.get("hub"), dict) else {}
+    try:
+        after = float(after if after is not None else hub.get("alert_after_minutes", 120))
+    except (TypeError, ValueError):
+        after = 120.0
+    alerts_cfg = config.get("alerts") if isinstance(config.get("alerts"), dict) else {}
+    try:
+        reminder = float(alerts_cfg.get("reminder_hours", 24))
+    except (TypeError, ValueError):
+        reminder = 24.0
+    now = now or datetime.now()
+    combined_path = Path(combined_path)
+
+    last = {}
+    try:
+        conn = sqlite3.connect(f"file:{combined_path}?mode=ro", uri=True)
+        last = dict(conn.execute("SELECT name, last_success FROM sync_sites").fetchall())
+        conn.close()
+    except Exception:
+        pass
+
+    def parse(when):
+        try:
+            return datetime.fromisoformat(str(when)) if when else None
+        except ValueError:
+            return None
+
+    def age_text(minutes):
+        hours = minutes / 60
+        return f"{hours:.0f} h" if hours < 48 else f"{hours / 24:.0f} days"
+
+    due = []      # (key, subject, severity, message, details)
+    for name, why in sorted(failing.items()):
+        # The last live pull: what the combined DB says, or the cached copy's
+        # own time (a complete copy is the only thing that replaces it).
+        times = [t for t in (parse(last.get(name)),) if t]
+        if cache_dir is not None:
+            try:
+                times.append(datetime.fromtimestamp(
+                    (Path(cache_dir) / f"{name}.db").stat().st_mtime))
+            except OSError:
+                pass
+        since = max(times) if times else None
+        minutes = (now - since).total_seconds() / 60 if since else None
+        if minutes is not None and minutes < after:
+            continue
+        if minutes is None:
+            severity, age = "warning", "never synced"
+        else:
+            severity = "critical" if minutes >= 24 * 60 else "warning"
+            age = f"not synced for {age_text(minutes)}"
+        due.append((f"site:{name}", name, severity,
+                    f"Site {name}: {age}; the hub shows its data as of its last pull. "
+                    f"Why: {why}",
+                    {"metric": "pull", "site": name,
+                     "last_success": since.isoformat() if since else None, "reason": why}))
+    if blocked:
+        # When the published build was made: its own record of it (the file's
+        # time could be moved by anything else writing to it).
+        built = None
+        try:
+            conn = sqlite3.connect(f"file:{combined_path}?mode=ro", uri=True)
+            built = parse(conn.execute("SELECT MAX(synced_at) FROM sync_sites").fetchone()[0])
+            conn.close()
+        except Exception:
+            pass
+        if built is None:
+            try:
+                built = datetime.fromtimestamp(combined_path.stat().st_mtime)
+            except OSError:
+                built = None
+        minutes = (now - built).total_seconds() / 60 if built else None
+        if minutes is not None and minutes >= after:
+            due.append(("hub:combined", "combined.db",
+                        "critical" if minutes >= 24 * 60 else "warning",
+                        f"The hub's combined database has not been replaced for "
+                        f"{age_text(minutes)}: every page shows data from then. "
+                        f"Why: {blocked}",
+                        {"metric": "combined", "reason": blocked}))
+
+    stamp = (Path(cache_dir) if cache_dir is not None else combined_path.parent) / "sync_alerts.json"
+    try:
+        sent = json.loads(stamp.read_text())
+        if not isinstance(sent, dict):
+            sent = {}
+    except (OSError, ValueError):
+        sent = {}
+    order = {"warning": 1, "critical": 2}
+    from nomad.alerts.dispatcher import send_alert
+    host = socket.gethostname().split(".")[0]
+    raised, keep = [], {}
+    for key, subject, severity, message, details in due:
+        prev = sent.get(key) if isinstance(sent.get(key), dict) else None
+        when = parse(prev.get("sent")) if prev else None
+        if (prev is None or order.get(severity, 0) > order.get(prev.get("severity"), 0)
+                or when is None or (now - when).total_seconds() >= reminder * 3600):
+            result = send_alert(severity, "sync", message, host=host, subject=subject,
+                                details=details, config=config)
+            raised.append({"site": subject, "severity": severity, "message": message})
+            # Remembered as sent unless every way of sending failed (a mail
+            # relay down): then it is tried again at the next run.
+            if not result or any(result.values()):
+                keep[key] = {"severity": severity, "sent": now.isoformat()}
+            elif prev is not None:
+                keep[key] = prev
+        else:
+            keep[key] = prev
+    # Anything not due now has recovered (or is not yet due): forgotten.
+    try:
+        if keep or sent:
+            tmp = stamp.with_name(f"{stamp.name}.{os.getpid()}")
+            tmp.write_text(json.dumps(keep, indent=1))
+            os.replace(tmp, stamp)
+    except OSError:
+        pass
+    return raised
 
 
 @cli.command()

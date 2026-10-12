@@ -331,6 +331,30 @@ nomad dashboard --db ~/.local/share/nomad/combined.db
 */10 * * * * /path/to/nomad sync 2>/dev/null
 ```
 
+How a site's database reaches the hub, and what happens when it doesn't:
+
+* Each site writes a consistent snapshot of its database (SQLite's
+  `.backup`, safe while its collectors keep writing) **beside the database**,
+  or in `/tmp` when there is no room there, and the hub copies it. A login
+  node's `/tmp` is often a few GB shared by everyone, smaller than the
+  database. When there is room in neither, the reason says so ("no room for
+  a snapshot: the database is 6.0 GB; …").
+* The snapshot is always removed afterwards; any left by a run that died
+  are removed after two hours. Time limits follow the database's size.
+* The copy replaces the hub's cached copy of that site only once it is
+  complete. When a site's pull fails, its cached copy stands in (marked as
+  such in `sync_sites`, its `last_success` left at the last live pull), so
+  one site's trouble doesn't hold back the others.
+* A site whose last live pull is older than `alert_after_minutes` (120 by
+  default) raises a `sync` alert through the hub's `[alerts]` settings:
+  a warning, critical after a day, with the reason, then reminders while it
+  lasts:
+
+```toml
+[hub]
+alert_after_minutes = 120
+```
+
 ---
 
 ## Configuration Reference
