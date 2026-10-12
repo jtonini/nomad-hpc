@@ -216,6 +216,9 @@ class GroupCollector(BaseCollector):
     # How long every run must find no account before a member has none: the
     # grace a membership no longer listed gets too (MEMBER_WINDOW_DAYS).
     ACCOUNT_GRACE_DAYS = 2
+    # A membership unseen this long and listed again starts over (first_seen):
+    # past the grace in which it still counts as current.
+    MEMBERSHIP_GAP_DAYS = 7
 
     @staticmethod
     def _now() -> datetime:
@@ -501,7 +504,8 @@ class GroupCollector(BaseCollector):
         # Databases from before 1.7.41: the columns, empty (not known) until
         # runs fill them.
         have = {r[1] for r in c.execute("PRAGMA table_info(group_membership)")}
-        for col, kind in (("has_account", "INTEGER"), ("account_missing_since", "TEXT")):
+        for col, kind in (("has_account", "INTEGER"), ("account_missing_since", "TEXT"),
+                          ("first_seen", "TEXT")):
             if col not in have:
                 c.execute(f"ALTER TABLE group_membership ADD COLUMN {col} {kind}")
         c.execute("""
@@ -551,14 +555,41 @@ class GroupCollector(BaseCollector):
         # them) -- the same grace as a membership no longer listed, so a
         # directory outage shorter than that takes no one out of a lab; not
         # known this run: the last known answer stays.
-        known = {(u, g, cl): (acc, since) for u, g, cl, acc, since in c.execute(
-            "SELECT username, group_name, cluster, has_account, account_missing_since "
-            "FROM group_membership")}
+        # first_seen: when this membership was first seen -- since 1.11, so
+        # a course's new students can be told from last year's, who stay
+        # in a group nobody prunes. A membership no longer listed for
+        # MEMBERSHIP_GAP_DAYS and listed again is a new one (a student
+        # taking a second course with the same instructor). Memberships
+        # recorded before 1.11 keep NULL: not known.
+        known = {(u, g, cl): (acc, since, first, last)
+                 for u, g, cl, acc, since, first, last in c.execute(
+                     "SELECT username, group_name, cluster, has_account, account_missing_since, "
+                     "first_seen, collected_at FROM group_membership")}
         moment = self._now()
         now = moment.isoformat()
+
+        def when(value):
+            try:
+                return datetime.fromisoformat(str(value).replace(" ", "T"))
+            except (TypeError, ValueError):
+                return None
+        # The previous run, per cluster: a membership missing from runs that
+        # happened (not one the collector was simply not running for).
+        previous: dict = {}
+        for (_u, _g, cl), (_a, _s, _f, last) in known.items():
+            t = when(last)
+            if t and (cl not in previous or t > previous[cl]):
+                previous[cl] = t
         for g in groups:
             seen = g.get('has_account')
-            acc, since = known.get((g['username'], g['group_name'], g['cluster']), (None, None))
+            row = known.get((g['username'], g['group_name'], g['cluster']))
+            acc, since, first, last = row if row else (None, None, None, None)
+            if row is None:
+                first = now
+            else:
+                t, prev = when(last), previous.get(g['cluster'])
+                if t and prev and prev - t >= timedelta(days=self.MEMBERSHIP_GAP_DAYS):
+                    first = now
             if seen is True:
                 acc, since = 1, None
             elif seen is False:
@@ -572,11 +603,11 @@ class GroupCollector(BaseCollector):
             c.execute("""
                 INSERT OR REPLACE INTO group_membership
                 (username, group_name, gid, cluster, collected_at, has_account,
-                 account_missing_since)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                 account_missing_since, first_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 g['username'], g['group_name'],
-                g['gid'], g['cluster'], now, acc, since,
+                g['gid'], g['cluster'], now, acc, since, first,
             ))
 
         # ── Upsert job accounting ────────────────────────────────────

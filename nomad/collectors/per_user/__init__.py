@@ -8,6 +8,7 @@ from .collector import (
 )
 from .rules import (
     DEFAULT_RULES,
+    INTERACTIVE_RULES,
     Reading,
     Rule,
     advance,
@@ -30,7 +31,7 @@ __all__ = [
     "COLLECTOR_VERSION", "PerUserCollector", "PerUserConfig", "ProcessSnapshot",
     "read_user_slices",
     # Rules
-    "DEFAULT_RULES", "Reading", "Rule", "advance", "fires", "parse_rules", "step",
+    "DEFAULT_RULES", "INTERACTIVE_RULES", "Reading", "Rule", "advance", "fires", "parse_rules", "step",
     # Ancestry/whitelist
     "AncestryResult", "ProcessInfo", "WhitelistConfig", "WhitelistMatch",
     "match_whitelist", "walk_ancestry",

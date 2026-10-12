@@ -62,7 +62,7 @@ from .privileged import (
     can_walk_fds_of_other_users,
     walk_fds,
 )
-from .rules import DEFAULT_RULES, GB, MB, Reading, advance, parse_rules
+from .rules import DEFAULT_RULES, GB, INTERACTIVE_RULES, MB, Reading, advance, parse_rules
 from .state import RUN_KEY, Held, StateRow, alert_key, make_session_id
 
 logger = logging.getLogger(__name__)
@@ -118,9 +118,11 @@ class PerUserConfig:
             ),
             min_uid=wl_dict.get("min_uid", 1000),
         )
-        rules = DEFAULT_RULES
+        # The rules for the host's role; any written out in the settings win.
+        role_rules = INTERACTIVE_RULES if d.get("role") == "interactive" else DEFAULT_RULES
+        rules = role_rules
         if d.get("rules"):
-            rules = parse_rules(d["rules"]) or DEFAULT_RULES
+            rules = parse_rules(d["rules"]) or role_rules
         return cls(
             enabled=d.get("enabled", True),
             role=d.get("role", "headnode"),

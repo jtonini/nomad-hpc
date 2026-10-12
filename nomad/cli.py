@@ -4310,8 +4310,8 @@ def sync(ctx, config_file, output, dry_run):
     SKIP_TABLES = {
         'schema_version', 'schema_migrations',
         'sqlite_sequence', 'config',
-        # per_user's counters from one run to the next: local working state.
-        'per_user_state',
+        # Counters and cursors from one run to the next: local working state.
+        'per_user_state', 'interactive_state', 'oom_state',
     }
 
     # Build to a temp path so a failed or interrupted sync doesn't destroy

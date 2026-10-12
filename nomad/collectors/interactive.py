@@ -10,7 +10,9 @@ Works standalone on Python 3.6+ or integrates with NØMAÐ framework.
 
 import logging
 import os
+import re
 import subprocess
+import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -46,22 +48,129 @@ def get_process_memory(pid):
         return {'rss_mb': 0, 'vms_mb': 0}
 
 
-def get_process_start_time(pid):
-    """Get process start time from /proc/[pid]/stat."""
+def _stat_fields(pid):
+    """/proc/<pid>/stat after "(comm)" (a name may hold spaces and ")"):
+    index 0 is field 3 (state), 11-14 utime, stime, cutime, cstime, 19
+    starttime."""
+    try:
+        with open(f'/proc/{pid}/stat') as f:
+            return f.read().rsplit(')', 1)[1].split()
+    except Exception:
+        return None
+
+
+def get_process_cpu_ticks(pid, children=True):
+    """CPU used so far by the process, in clock ticks, and (``children``)
+    by the children it has waited for: forked workers that ended."""
+    fields = _stat_fields(pid)
+    try:
+        return float(sum(int(fields[i]) for i in ((11, 12, 13, 14) if children else (11, 12))))
+    except Exception:
+        return None
+
+
+_NAMES = {}
+
+
+def user_name(uid):
+    """The account name for a uid. ps aux cuts names longer than 8
+    characters ("abcdefgh+"), which then match no group or roster."""
+    if uid not in _NAMES:
+        try:
+            import pwd
+            _NAMES[uid] = pwd.getpwuid(int(uid)).pw_name
+        except Exception:
+            _NAMES[uid] = str(uid)
+    return _NAMES[uid]
+
+
+_SERVERS = ('jupyter-lab', 'jupyter-notebook', 'jupyterhub-singleuser', 'jupyter-labhub',
+            'jupyter-server', 'jupyter-singleuser')
+_SERVER_MODULES = ('jupyterhub.singleuser', 'jupyter_server', 'jupyterlab', 'notebook',
+                   'jupyterlab.labhubapp')
+
+
+_PYTHON = re.compile(r'^(python|pypy)[0-9.]*$')
+
+
+def _python_runs(words):
+    """What a Python command line runs: ('module', name), ('script', path),
+    or None (-c, or nothing). Options before it are skipped, -X and -W with
+    their value (python -Xfrozen_modules=off -m ipykernel_launcher, which
+    ipykernel writes into kernel specs on Python 3.11 and later; python3 -s
+    /usr/bin/jupyter-notebook, a distribution's script)."""
+    i = 1
+    while i < len(words):
+        w = words[i]
+        if w == '--':
+            return ('script', words[i + 1]) if i + 1 < len(words) else None
+        if w.startswith('--'):
+            i += 1
+            continue
+        if w.startswith('-') and len(w) > 1:
+            for j in range(1, len(w)):
+                c = w[j]
+                if c in 'mcXW':
+                    value = w[j + 1:]
+                    if not value:
+                        i += 1
+                        value = words[i] if i < len(words) else ''
+                    if c == 'm':
+                        return ('module', value)
+                    if c == 'c':
+                        return None
+                    break
+            i += 1
+            continue
+        return ('script', w)
+    return None
+
+
+def session_type(cmdline):
+    """Which kind of interactive session a command line is, or None: by the
+    program it runs (or the script or module Python runs), not by a word
+    anywhere in it -- "pip install ipykernel" or "tail rsession.log" is not
+    a session."""
+    words = cmdline.split()
+    if not words:
+        return None
+    names = [os.path.basename(words[0]).lower()]
+    module = None
+    if _PYTHON.match(names[0]):
+        runs = _python_runs(words)
+        if runs and runs[0] == 'module':
+            module = runs[1].lower()
+        elif runs:
+            names.append(os.path.basename(runs[1]).lower())
+    if 'rsession' in names:
+        return 'RStudio'
+    if (module or '').startswith('ipykernel') or any(n.startswith('ipykernel') for n in names):
+        return 'Jupyter (Python)'
+    if names[0] in ('r', 'r.exe') and 'irkernel' in cmdline.lower():
+        return 'Jupyter (R)'
+    if any(n in _SERVERS for n in names) or module in _SERVER_MODULES:
+        return 'Jupyter Server'
+    return None
+
+
+def _start(fields):
+    """When the process started: (ISO local time, unix seconds)."""
     try:
         with open('/proc/stat') as f:
             for line in f:
                 if line.startswith('btime'):
                     boot_time = int(line.split()[1])
                     break
-        with open(f'/proc/{pid}/stat') as f:
-            stat = f.read().split()
-            starttime_ticks = int(stat[21])
         clk_tck = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
-        start_seconds = boot_time + (starttime_ticks / clk_tck)
-        return datetime.fromtimestamp(start_seconds).isoformat()
-    except:
-        return None
+        start_seconds = boot_time + (int(fields[19]) / clk_tck)
+        return datetime.fromtimestamp(start_seconds).isoformat(), start_seconds
+    except Exception:
+        return None, None
+
+
+def get_process_start_time(pid):
+    """Get process start time from /proc/[pid]/stat."""
+    return _start(_stat_fields(pid) or [])[0]
 
 
 def calc_age_hours(start_time):
@@ -76,55 +185,103 @@ def calc_age_hours(start_time):
         return None
 
 
+# Set when the last call could not list processes (so no "nobody is on"
+# is concluded from it).
+LAST_FAILED = False
+
+
 def collect_sessions(server_id='local'):
-    """Collect RStudio and Jupyter session info from running processes."""
-    sessions = []
+    """RStudio and Jupyter sessions, one per session: a process a session
+    forked (a multiprocessing pool, R's mclapply) keeps its parent's command
+    line and is folded into it -- its memory and CPU added to the session's --
+    rather than counted as a session of its own. A kernel is its own session,
+    apart from the server that started it."""
+    global LAST_FAILED
+    LAST_FAILED = False
+    procs = {}
     try:
         ps_output = subprocess.check_output(
-            ['ps', 'aux'],
+            ['ps', '-eo', 'uid=,pid=,ppid=,pcpu=,pmem=,args='],
             universal_newlines=True,
             stderr=subprocess.DEVNULL
         )
-        for line in ps_output.strip().split('\n')[1:]:
-            parts = line.split(None, 10)
-            if len(parts) < 11:
-                continue
-            cmdline = parts[10].lower()
-            if 'rsession' in cmdline:
-                session_type = 'RStudio'
-            elif 'ipykernel' in cmdline:
-                session_type = 'Jupyter (Python)'
-            elif 'irkernel' in cmdline:
-                session_type = 'Jupyter (R)'
-            elif 'jupyter-lab' in cmdline or 'jupyter-notebook' in cmdline:
-                session_type = 'Jupyter Server'
-            else:
-                continue
-            user = parts[0]
-            pid = int(parts[1])
-            cpu_pct = float(parts[2])
-            mem_pct = float(parts[3])
-            mem_info = get_process_memory(pid)
-            start_time = get_process_start_time(pid)
-            age_hours = calc_age_hours(start_time)
-            is_idle = cpu_pct < 1.0
-            sessions.append({
-                'timestamp': datetime.now().isoformat(),
-                'server_id': server_id,
-                'session_type': session_type,
-                'user': user,
-                'pid': pid,
-                'cpu_percent': cpu_pct,
-                'mem_percent': mem_pct,
-                'mem_mb': mem_info['rss_mb'],
-                'mem_virtual_mb': mem_info['vms_mb'],
-                'start_time': start_time,
-                'age_hours': age_hours,
-                'is_idle': is_idle
-            })
     except Exception as e:
+        LAST_FAILED = True
         logger.warning(f"Failed to collect sessions: {e}")
-    return sessions
+        return []
+    now = datetime.now()
+    for line in ps_output.strip().split('\n'):
+        parts = line.split(None, 5)
+        if len(parts) < 6:
+            continue
+        kind = session_type(parts[5])
+        if kind is None:
+            continue
+        try:
+            pid, ppid = int(parts[1]), int(parts[2])
+            cpu_pct, mem_pct = float(parts[3]), float(parts[4])
+        except ValueError:
+            continue
+        fields = _stat_fields(pid) or []
+        start_time, start_epoch = _start(fields)
+        mem_info = get_process_memory(pid)
+        procs[pid] = {
+            'uid': parts[0], 'ppid': ppid, 'kind': kind, 'cpu_percent': cpu_pct,
+            'mem_percent': mem_pct, 'mem_mb': mem_info['rss_mb'],
+            'mem_virtual_mb': mem_info['vms_mb'], 'start_time': start_time,
+            'start_epoch': start_epoch,
+            # A Jupyter server's children are kernels, sessions of their own:
+            # the CPU of one it has shut down (and waited for) is that
+            # kernel's, already counted, not the server's.
+            'cpu_ticks': get_process_cpu_ticks(pid, children=(kind != 'Jupyter Server')),
+        }
+
+    def root(pid):
+        seen = set()
+        while True:
+            p = procs[pid]
+            parent = procs.get(p['ppid'])
+            if (parent is None or parent['uid'] != p['uid'] or parent['kind'] != p['kind']
+                    or p['ppid'] in seen):
+                return pid
+            seen.add(pid)
+            pid = p['ppid']
+
+    sessions = {}
+    for pid in sorted(procs):
+        r = root(pid)
+        p = procs[pid]
+        s = sessions.get(r)
+        if s is None:
+            top = procs[r]
+            age = (time.time() - top['start_epoch']) if top['start_epoch'] else None
+            s = sessions[r] = {
+                'timestamp': now.isoformat(),
+                'server_id': server_id,
+                'session_type': top['kind'],
+                'user': user_name(top['uid']),
+                'pid': r,
+                'cpu_percent': 0.0, 'mem_percent': 0.0, 'mem_mb': 0.0, 'mem_virtual_mb': 0.0,
+                'start_time': top['start_time'],
+                'age_hours': round(age / 3600, 1) if age is not None else None,
+                'age_seconds': age,
+                'cpu_ticks': 0.0,
+                'processes': 0,
+            }
+        s['processes'] += 1
+        s['cpu_percent'] += p['cpu_percent']
+        s['mem_percent'] += p['mem_percent']
+        s['mem_mb'] = round(s['mem_mb'] + p['mem_mb'], 1)
+        s['mem_virtual_mb'] = round(s['mem_virtual_mb'] + p['mem_virtual_mb'], 1)
+        if s['cpu_ticks'] is not None:
+            s['cpu_ticks'] = None if p['cpu_ticks'] is None else s['cpu_ticks'] + p['cpu_ticks']
+    out = []
+    for s in sessions.values():
+        # ps's %CPU is each process's average over its whole life; the daily
+        # totals judge idleness from the CPU counters between runs.
+        s['is_idle'] = s['cpu_percent'] < 1.0
+        out.append(s)
+    return out
 
 
 def build_summary(sessions, idle_hours=24, memory_hog_mb=4096):
@@ -304,9 +461,31 @@ if HAS_FRAMEWORK:
             self.memory_hog_mb = config.get('memory_hog_mb', DEFAULT_MEMORY_HOG_MB)
             self.max_idle_sessions = config.get('max_idle_sessions', DEFAULT_MAX_IDLE_SESSIONS)
             self.server_id = config.get('server_id', 'local')
+            # Raw snapshots kept this many days (0: all); the daily totals
+            # (interactive_daily) are kept regardless.
+            self.sample_retention_days = int(config.get('sample_retention_days', 0) or 0)
 
         def collect(self):
-            return collect_sessions(self.server_id)
+            sessions = collect_sessions(self.server_id)
+            if LAST_FAILED:
+                self.note = "could not list processes (ps failed): this run is not counted"
+            elif not sessions:
+                # Nobody on: nothing to store, but the time between runs must
+                # stay known (else the next session's first interval looks
+                # like a gap). Not when ps itself failed: that is not nobody.
+                self._daily([])
+            return sessions
+
+        def _daily(self, sessions):
+            from nomad.collectors import interactive_daily
+            try:
+                clk = float(os.sysconf(os.sysconf_names['SC_CLK_TCK']))
+            except (ValueError, KeyError, OSError):
+                clk = 100.0
+            with self.get_db_connection() as conn:
+                interactive_daily.update(conn, sessions, datetime.now(), self.server_id, clk)
+                interactive_daily.prune(conn, self.sample_retention_days, datetime.now())
+                conn.commit()
 
         def store(self, data):
             if not data:
@@ -334,6 +513,7 @@ if HAS_FRAMEWORK:
                       summary['jupyter_r_sessions'], summary['stale_sessions'],
                       summary['memory_hog_sessions']))
                 conn.commit()
+            self._daily(data)
 
         def get_report(self):
             return get_report(self.server_id, self.idle_session_hours,

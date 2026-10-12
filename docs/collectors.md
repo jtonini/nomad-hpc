@@ -24,16 +24,17 @@ enabled = false
 | `gpu` | on | hosts with NVIDIA GPUs, or a head node reaching GPU nodes over SSH | `nvidia-smi` (DCGM if present) | `gpu_stats`, `gpu_health` |
 | `nfs` | on | hosts that mount NFS (client side) | `nfsiostat` (nfs-utils, in `/usr/sbin`) | `nfs_stats` |
 | `groups` | on | every site | `getent`; `sacct` for job accounting | `group_membership`, `job_accounting` |
-| `interactive` | off | hosts running RStudio or Jupyter | — | `interactive_sessions`, `interactive_summary` |
+| `interactive` | off | hosts running RStudio or Jupyter | — | `interactive_sessions`, `interactive_summary`, `interactive_daily` |
 | `workstation` | off | a hub reaching workstations over SSH | `ssh` | `workstation_state`, `workstation_user_snapshot`, ... |
 | `per_user` | off | login nodes, shared interactive hosts | Python `psutil` | `per_user_sample`, `per_user_alert`, `per_user_daily` |
+| `oom` | off | shared hosts without per-user memory limits (login nodes, interactive servers) | `journalctl`, and reading the kernel's messages | `oom_kills` |
 | `storage` | off | a host reaching ZFS/NFS servers over SSH | `ssh` | `storage_state` |
 | `network_perf` | off | any host; tests paths that start there | `ping`; `iperf3` for throughput | `network_perf` |
 | `cloud.aws` | off | sites with AWS resources | Python `boto3` | `cloud_metrics` |
 
 An `enabled = [...]` list under `[collectors]`, which older example configs carried, is not read.
 
-`groups` reads membership with `getent group`: on the head node of each `[clusters]` entry (over SSH when it has a `host`), on the first reachable workstation of a `type = "workstations"` cluster with an `ssh_user`, and on this host otherwise. Job accounting needs `sacct` and is skipped without it. On the same host it looks up each member with `getent passwd` and records whether they still have an account (`has_account`): a hand-kept `/etc/group` goes on listing people whose accounts were deleted long ago. "No account" needs every run for two days to find none (getent says the same for an unreachable directory), and a run where the lookup fails keeps the last known answer. Every run stamps what it saw with one time (`collected_at`), so a membership no longer listed stops being stamped. A lab's members are the people listed in their cluster's latest run (give or take two days, for a failed run; a cluster not collected for 30 days while its site goes on is retired) who have an account; `nomad console roles NETID` says how many are not counted, and why.
+`groups` reads membership with `getent group`: on the head node of each `[clusters]` entry (over SSH when it has a `host`), on the first reachable workstation of a `type = "workstations"` cluster with an `ssh_user`, and on this host otherwise. Job accounting needs `sacct` and is skipped without it. On the same host it looks up each member with `getent passwd` and records whether they still have an account (`has_account`): a hand-kept `/etc/group` goes on listing people whose accounts were deleted long ago. "No account" needs every run for two days to find none (getent says the same for an unreachable directory), and a run where the lookup fails keeps the last known answer. Every run stamps what it saw with one time (`collected_at`), so a membership no longer listed stops being stamped. `first_seen` says when a membership was first seen (since 1.11; earlier ones are empty, not known): a course's students this term can be told from earlier terms' in a group nobody prunes. A membership missing from the runs for a week and listed again starts over (a student back for another course); one the collector simply did not run for keeps its date. A lab's members are the people listed in their cluster's latest run (give or take two days, for a failed run; a cluster not collected for 30 days while its site goes on is retired) who have an account; `nomad console roles NETID` says how many are not counted, and why.
 
 `nomad collect -C disk,nfs` (or `-C disk -C nfs`) runs only those, if enabled. An unknown name is warned about and skipped; if no name is known, nothing runs and the command says so.
 
@@ -283,6 +284,47 @@ nomad per-user --mask                # user and command names replaced, for shar
 ```
 
 Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
+
+## Interactive servers (RStudio, JupyterHub)
+
+On a server people use through RStudio Server or JupyterHub, `interactive` records each session every run (`interactive_sessions`: who, which kind, its memory) and keeps each person's day in small totals, kept for good (`interactive_daily`, one row per day, server, person and kind):
+
+- `sessions` open that day (one running across midnight counts on both days), and `session_seconds`, the time they were open (two notebooks for an hour are two session-hours);
+- `busy_seconds` of that time, when a session used CPU (at least 2% of one core between two runs), out of `cpu_measured_seconds`, and `cpu_seconds` used;
+- `mem_mb_seconds`, memory held over time (/ 3.6e6 is GB-hours), and `peak_mem_mb`, the most one session held.
+
+A session is a process tree: an RStudio session (`rsession`), a Jupyter kernel (`ipykernel`, IRkernel), or a person's Jupyter server (`jupyterhub-singleuser`, `jupyter-lab`, ...), with the workers it forked that kept its command line (R's `mclapply`, Python's `multiprocessing` with fork) folded in: their memory and CPU are the session's. A kernel is a session of its own, apart from the server that started it, so a person with JupyterLab open and two notebooks has three. Programs are told by what runs (for Python, the module or script after any interpreter options: `python -Xfrozen_modules=off -m ipykernel_launcher`), not by a word anywhere in the command line: `pip install ipykernel` is not a session. So that a person's time is not counted once per session, each person also has a row of kind `(any)`: `session_seconds` there is the time they had at least one session open, `busy_seconds` the time at least one was busy, memory and CPU their sessions' together, `peak_mem_mb` the most they held at once, and `sessions` all their sessions that day, of every kind (JupyterLab and two notebooks: 3). Counts of people and hours come from `(any)`; the other rows say which kinds.
+
+CPU is read from each process's own counter at every run (`interactive_state`, this host's working state, not synced): `ps`'s %CPU is an average over a process's whole life, so it calls a notebook idle that is busy now after a day of nothing. A session's counter includes the workers it has finished with; workers started another way (`multiprocessing` with spawn, `subprocess`) are not part of the session while they run, and their CPU is counted when they end and the session collects them. Not for a Jupyter server: the children it collects are kernels, whose CPU was counted as theirs. Memory is resident memory added up over a session's processes, so pages forked workers share count once per worker. The time between two runs is measured on the system clock, not local time (the change to or from daylight time adds or loses no hour) and goes to the day of the later run; a gap over two hours (the collector was stopped) adds no time, and a run that could not list processes is not taken for nobody being on. Accounts are named from their uid (`ps aux` shortens names over 8 characters, which then match no group).
+
+```toml
+[interactive]
+enabled = true
+server_id = "web1"
+sample_retention_days = 0   # raw snapshots kept this many days (0: all); the daily totals are always kept
+```
+
+On such a server, `per_user` with `role = "interactive"` keeps its daily per-person totals (CPU and memory for everyone, terminal users included) without the login-node rules, which would flag every busy notebook. Its rules there flag one person holding a large share of the machine for long:
+
+```toml
+[collectors.per_user]
+enabled = true
+role = "interactive"
+```
+
+| Rule | Over | Condition | Severity |
+|---|---|---|---|
+| `interactive_user_cpu_800pct_30min` | a user's processes | together ≥ 8 cores for 30 min | informational |
+| `interactive_user_memory_64gb_30min` | a user's processes | together ≥ 64 GB for 30 min | informational |
+
+## Out-of-memory kills (oom)
+
+Without per-user memory limits, one person's work can use up a shared host's memory; the kernel then kills a process to free some -- often someone else's notebook in the middle of a lab, who sees only a dead kernel. `oom` records each kill from the kernel's messages in the journal (`journalctl _TRANSPORT=kernel`, every boot the journal keeps: kills just before a restart are the ones that matter most, and `journalctl -k` reads only the current boot): when, the program and its pid, whose (uid and account), the control group it ran in, and the memory it held (`oom_kills`). Each run reads on from where the previous one stopped; the first looks back `lookback_days` (30; 0 starts from now). The account needs to read the kernel's messages (usually the `systemd-journal` or `adm` group); when it cannot, the run says so (a first look back that finds no kernel message at all says so once, and the look then starts from that run: to look back again after giving the account access, delete the rows of `oom_state`). A journal kept only in memory (`Storage=volatile`, or `auto` without `/var/log/journal`) loses what came before a restart.
+
+```toml
+[collectors.oom]
+enabled = true
+```
 
 ## Workstations over SSH
 

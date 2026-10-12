@@ -110,6 +110,18 @@ DEFAULT_RULES: tuple[Rule, ...] = (
          "informational", "head_node_io"),
 )
 
+# An interactive server (RStudio, JupyterHub: role = "interactive") is where
+# heavy use is the point: a notebook at full speed is not misuse, as it is on
+# a cluster's login node. What is worth knowing there is one person holding a
+# large share of the machine for long: everyone else's sessions slow down or
+# get killed when memory runs out.
+INTERACTIVE_RULES: tuple[Rule, ...] = (
+    Rule("interactive_user_cpu_800pct_30min", "user_cpu", 800.0, "percent", 1800,
+         "informational", "interactive_user_cpu"),
+    Rule("interactive_user_memory_64gb_30min", "user_memory", 64.0, "gb", 1800,
+         "informational", "interactive_user_memory"),
+)
+
 
 @dataclass
 class Reading:
