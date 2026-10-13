@@ -62,15 +62,6 @@ def _known_names(conn) -> set:
     return names
 
 
-def _limits(conn, server: str) -> tuple[str | None, str | None]:
-    """The first day and hour the totals were kept for (rebuilt rows aside)."""
-    day = conn.execute("SELECT MIN(day) FROM interactive_daily WHERE server_id = ? "
-                       "AND rebuilt = 0", (server,)).fetchone()[0]
-    hour = conn.execute("SELECT MIN(hour) FROM interactive_hourly WHERE server_id = ? "
-                        "AND rebuilt = 0", (server,)).fetchone()[0]
-    return day, hour
-
-
 def _runs(conn, until: str) -> list[datetime]:
     try:
         rows = conn.execute("SELECT started_at FROM collection_log WHERE collector = 'interactive' "
@@ -81,11 +72,28 @@ def _runs(conn, until: str) -> list[datetime]:
     return [t for t in (_parse(r[0]) for r in rows) if t is not None]
 
 
-def rebuild(conn: sqlite3.Connection, apply: bool = False, redo: bool = False) -> dict:
+def _all_limits(conn) -> dict:
+    """server -> (first day, first hour) the totals were kept for."""
+    out: dict = {}
+    for server, day in conn.execute("SELECT server_id, MIN(day) FROM interactive_daily "
+                                    "WHERE rebuilt = 0 GROUP BY server_id"):
+        out[server] = [day, None]
+    for server, hour in conn.execute("SELECT server_id, MIN(hour) FROM interactive_hourly "
+                                     "WHERE rebuilt = 0 GROUP BY server_id"):
+        out.setdefault(server, [None, None])[1] = hour
+    return out
+
+
+PROGRESS_ROWS = 500_000
+
+
+def rebuild(conn: sqlite3.Connection, apply: bool = False, redo: bool = False,
+            progress=None) -> dict:
     """What would be (``apply``: is) rebuilt, per server: days, hours, people,
     readings and names that could not be matched. ``redo``: replace earlier
-    rebuilt rows. Commits a day at a time, so the collector is never held
-    up for long."""
+    rebuilt rows. One pass over the snapshots, in the order they are stored
+    (``progress(rows, timestamp)`` every PROGRESS_ROWS); commits a day at a
+    time, so the collector is never held up for long."""
     D.ensure(conn)
     conn.commit()
     have = {r[1] for r in conn.execute("PRAGMA table_info(interactive_sessions)")}
@@ -106,27 +114,44 @@ def rebuild(conn: sqlite3.Connection, apply: bool = False, redo: bool = False) -
         conn.commit()
     known = _known_names(conn)
     mem_col = "mem_mb" if "mem_mb" in have else "NULL"
-    out = []
-    for (server,) in conn.execute("SELECT DISTINCT server_id FROM interactive_sessions").fetchall():
-        day_limit, hour_limit = _limits(conn, server)
-        day_limit = day_limit or "9999-12-31"
-        hour_limit = hour_limit or "9999-12-31T23"
-        # Read snapshots up to the later of the two limits.
-        bound = max(day_limit + "T00:00:00", hour_limit + ":00:00")
-        snaps: dict = defaultdict(lambda: defaultdict(float))     # time -> user -> MB
-        unmatched: set = set()
-        for ts, user, mem in conn.execute(
-                f"SELECT timestamp, user, {mem_col} FROM interactive_sessions "
-                "WHERE server_id = ? AND timestamp < ? ORDER BY timestamp", (server, bound)):
-            t = _parse(ts)
-            if t is None or not user:
-                continue
-            name = resolve_name(str(user), known) or str(user)
-            if name.endswith("+"):
-                unmatched.add(name)
-            snaps[t][name] += float(mem or 0.0)
-        if not snaps:
+    limits = _all_limits(conn)
+    # One pass, in storage order (no index lookups); each name matched once.
+    names: dict = {}
+    times: dict = {}
+    bounds: dict = {}
+    by_server: dict = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+    rows = 0
+    for server, ts, user, mem in conn.execute(
+            f"SELECT server_id, timestamp, user, {mem_col} FROM interactive_sessions"):
+        rows += 1
+        if progress is not None and rows % PROGRESS_ROWS == 0:
+            progress(rows, ts)
+        if not user or not ts:
             continue
+        bound = bounds.get(server)
+        if bound is None:
+            day_limit, hour_limit = limits.get(server, [None, None])
+            day_limit = day_limit or "9999-12-31"
+            hour_limit = hour_limit or "9999-12-31T23"
+            bound = bounds[server] = (max(day_limit + "T00:00:00", hour_limit + ":00:00"),
+                                      day_limit, hour_limit)
+        key = str(ts)[:19]
+        if key >= bound[0]:
+            continue
+        t = times.get(key)
+        if t is None:
+            t = times[key] = _parse(key)
+        if t is None:
+            continue
+        name = names.get(user)
+        if name is None:
+            name = names[user] = resolve_name(str(user), known) or str(user)
+        by_server[server][t][name] += float(mem or 0.0)
+    times.clear()
+    out = []
+    for server, snaps in by_server.items():
+        bound, day_limit, hour_limit = bounds[server]
+        unmatched = {n for n in {n for people in snaps.values() for n in people} if n.endswith("+")}
         # One reading's rows, stamped seconds apart, are one reading.
         merged: dict = {}
         start = None

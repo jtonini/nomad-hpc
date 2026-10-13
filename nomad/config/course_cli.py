@@ -260,8 +260,13 @@ def backfill_cmd(ctx, db, redo, apply):
     if not path.exists():
         raise click.ClickException(f"no database at {path}")
     conn = sqlite3.connect(path, timeout=30)
+    click.echo(f"Reading the snapshots in {path} (one pass; a few minutes for millions of rows)...",
+               err=True)
+
+    def progress(rows, ts):
+        click.echo(f"  {rows:,} rows read (now at {str(ts)[:10]})", err=True)
     try:
-        result = rebuild(conn, apply=apply, redo=redo)
+        result = rebuild(conn, apply=apply, redo=redo, progress=progress)
     finally:
         conn.close()
     if result.get("note"):
