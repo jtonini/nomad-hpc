@@ -7,6 +7,7 @@ Three questions every front to nomad asks, answered once, as data:
 | **sites** | every site now (freshness, nodes, CPU, memory and GPUs in use, jobs running and waiting, storage, alerts, workstations) and its jobs over a window | anyone signed in: aggregates only |
 | **me** | one person's work: their jobs over a window, running and waiting now, score and advice | that person |
 | **lab** | the labs a person leads: members, their jobs taken together, the lab's workstations and storage | the lab's PI; staff for any lab |
+| **course** | the courses a person teaches, this term: the class together, each student as a row, when the class works | the course's instructors; staff for any course |
 
 The Console serves them at `/api/v1/sites`, `/api/v1/me` and `/api/v1/lab`;
 a dashboard widget elsewhere (an Open OnDemand page, say) or an assistant
@@ -19,6 +20,8 @@ nomad facts me NETID --days 90    # one person
 nomad facts lab NETID             # the labs NETID leads
 nomad facts sites --json          # the data itself
 nomad facts lab NETID --mask      # no NetID, lab, machine or storage names, for sharing
+nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
+nomad facts course GROUP              # one course
 ```
 
 They read the hub's `combined.db` when there is one, else this host's own
@@ -130,6 +133,41 @@ each student is the institution's decision, and the Console's own pages
 carry whatever it decides. A member's jobs count wholly toward the lab, and
 someone in two labs counts in both: group membership is all there is to go
 on.
+
+## course
+
+For each course the person teaches this term, by nomad.toml's
+`[console.courses]` (see docs/config.md, Courses):
+
+* `students`: the group's members who are not faculty (`listed`); this
+  term's (`this_term`: joined since the term began, or used an interactive
+  server or a cluster since); those left out, as from earlier terms (nomad
+  saw them join before) or not known (in the group since before nomad 1.11
+  recorded join dates, and not active: earlier students, or some who haven't
+  started); `used_a_server`, `not_yet`, and `open_never_computing` (had
+  sessions open while computing was measured, and never computed: possibly
+  stuck).
+* `interactive`: hours open and computing for the class, week by week, and
+  from when each was recorded.
+* `each_student`: one row per student, busiest first: hours open in a
+  typical week (the median over the term's complete weeks) and the range of
+  their weeks (10th to 90th percentile), the same for hours computing over
+  the weeks it was measured, CPU-hours, peak memory, memory kills, weeks
+  active. This is what a caterpillar plot draws: one row per student, a dot
+  for the typical week, a bar for the range. `nomad facts course` prints it.
+  Rows are "student 1", "student 2"... unless `[console.courses] names` is
+  true (the institution's decision).
+* `when`: students on, and computing, on average at each hour of each
+  weekday (from nomad 1.11.1's hourly totals).
+* `oom`: the students' sessions the kernel killed for lack of memory.
+* `jobs`: their cluster jobs, taken together.
+
+A week before a figure was recorded is left out of it, never counted as
+zero: hours open from nomad 1.11 (earlier weeks once `nomad interactive
+backfill` has rebuilt them), computing from 1.11, hours of the week from
+1.11.1. With `min_students` set, a course with fewer students this term shows
+counts only. Unnamed rows are not anonymous to an instructor who knows the
+class: in a course of three, the rows are three people.
 
 ## Using the functions
 

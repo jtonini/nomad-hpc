@@ -286,3 +286,166 @@ def lab_cmd(ctx, netid, days, db, as_json, mask):
             else:
                 click.echo(f"  {label}: {_p(s['used_pct'])} used, "
                            f"{_size(s['free_bytes'])} free" + (" [stale]" if s["stale"] else ""))
+
+
+_BARS = " ▁▂▃▄▅▆▇█"
+
+
+def _caterpillar(spread: dict | None, top: float, width: int = 30) -> str:
+    """One student's weeks as a line: the range (10th to 90th percentile)
+    and the typical week (median) on a shared scale."""
+    if not spread:
+        return " " * (width + 2)
+    scale = (width - 1) / top if top > 0 else 0
+
+    def at(v):
+        return min(width - 1, max(0, round(v * scale)))
+    lo, mid, hi = at(spread["low"]), at(spread["typical"]), at(spread["high"])
+    cells = [" "] * width
+    for i in range(lo, hi + 1):
+        cells[i] = "─"
+    if hi > lo:
+        cells[lo], cells[hi] = "├", "┤"
+    cells[mid] = "●"
+    return "|" + "".join(cells) + "|"
+
+
+def _strip(values: list, top: float) -> str:
+    out = []
+    for v in values:
+        if v is None:
+            out.append("·")
+        elif v <= 0 or top <= 0:
+            out.append(" ")
+        else:
+            out.append(_BARS[max(1, min(8, round(8 * v / top)))])
+    return "".join(out)
+
+
+def _left_out(s: dict) -> str:
+    """Who the group lists but the term's figures leave out, and why."""
+    parts = []
+    if s.get("left_out_earlier"):
+        parts.append(f"{s['left_out_earlier']} from earlier terms")
+    if s.get("left_out_unknown"):
+        parts.append(f"{s['left_out_unknown']} listed but not active this term: earlier "
+                     "students, or some not started yet")
+    return f" (not counted: {'; '.join(parts)})" if parts else ""
+
+
+def _mask_courses(data: dict) -> None:
+    """Course groups and names can say who teaches them; instructors are NetIDs."""
+    if data.get("not_courses"):
+        data["not_courses"] = [f"group #{i}" for i in range(1, len(data["not_courses"]) + 1)]
+    for i, course in enumerate(data["courses"], 1):
+        course["group"] = course["name"] = f"course #{i}"
+        course["instructors"] = [f"instructor {j}" for j in range(1, len(course["instructors"]) + 1)]
+        for j, r in enumerate(course.get("each_student", ()), 1):
+            r["user"] = f"student {j}"
+
+
+@facts_group.command("course")
+@click.argument("groups", nargs=-1)
+@click.option("--instructor", metavar="NETID", help="The courses NETID teaches.")
+@click.option("--names", is_flag=True,
+              help="Students by name (default: as [console.courses] names says).")
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.option("--json", "as_json", is_flag=True, help="The answer as JSON.")
+@click.option("--mask", is_flag=True,
+              help="Leave out course groups and names, instructors, students' names and the "
+                   "database's path.")
+@click.pass_context
+def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
+    """A course's students this term: the class together, each student as
+    a row (their typical week and its range: a caterpillar plot), and when
+    the class works. GROUPS: the course groups (default: every course, or
+    with --instructor the ones NETID teaches). Needs [console.courses] in
+    nomad.toml."""
+    from nomad.facts.courses import courses
+    if groups and instructor:
+        raise click.UsageError("give course groups or --instructor, not both")
+    path, conn = _open(ctx, db)
+    try:
+        data = courses(conn, ctx.obj.get("config", {}) or {},
+                       netid=instructor.strip().lower() if instructor else None,
+                       groups=list(groups) or None, names=True if names else None)
+    finally:
+        conn.close()
+    if mask:
+        _mask_courses(data)
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+    if not data["courses"]:
+        note = (data.get("notes") or [""])[0]
+        if note.startswith(("Courses are off", "No database")):
+            click.echo(note)
+        elif instructor:
+            who = "this person" if mask else instructor
+            click.echo(f"{who} teaches no course by nomad.toml's rules "
+                       "(nomad course list shows each course's instructors)")
+        else:
+            click.echo("no course found (nomad course list)")
+        return
+    w = data["window"]
+    for course in data["courses"]:
+        label = course["group"] if course["name"] == course["group"] else \
+            f"{course['group']} ({course['name']})"
+        click.echo(f"\n{label}: this term, from {w['term_start']} ({w['term_start_from']})"
+                   f"{_where(path, mask)}")
+        teach = course["instructors"]
+        click.echo(f"  instructors: {', '.join(teach) if teach else 'none found (nomad course add)'}")
+        s = course["students"]
+        line = f"  students: {s['this_term']} this term" + _left_out(s)
+        if "used_a_server" in s:
+            line += f"; {s['used_a_server']} used a server, {s['not_yet']} not yet"
+            if s["open_never_computing"]:
+                line += f"; {s['open_never_computing']} had sessions open but never computed"
+        click.echo(line)
+        if course.get("suppressed"):
+            click.echo(f"  {course['suppressed']}")
+            continue
+        it = course["interactive"]
+        if it["recorded_since"] is None:
+            click.echo("  interactive servers: nothing recorded")
+        else:
+            text = f"  hours open: {it['hours_open']:g} (recorded since {it['recorded_since']})"
+            if it["hours_computing"] is not None:
+                text += (f"; computing: {it['hours_computing']:g} "
+                         f"(measured since {it['computing_measured_since']})")
+            click.echo(text)
+        rows = course.get("each_student", [])
+        if rows and it["weeks_counted"]["open"]:
+            top = max((r["open_per_week"] or {}).get("high", 0) for r in rows) or 1
+            click.echo(f"  each student, hours open per week over {it['weeks_counted']['open']} "
+                       "week(s): typical ● and range ├─┤ (10th-90th percentile), busiest first")
+            width = max(len(r["user"]) for r in rows)
+            for r in rows:
+                sp = r["open_per_week"]
+                text = f"    {r['user']:<{width}} {_caterpillar(sp, top)}"
+                if sp:
+                    text += f" {sp['typical']:5.1f} h ({sp['low']:.1f}-{sp['high']:.1f})"
+                c = r.get("computing_per_week")
+                if c and it["weeks_counted"]["computing"]:
+                    text += f"; computing {c['typical']:.1f} h"
+                if r["oom_kills"]:
+                    text += f"; {r['oom_kills']} killed for memory"
+                click.echo(text)
+        when = course.get("when")
+        if when:
+            grid = when["students_on"]
+            top = max((v for row in grid for v in row if v is not None), default=0)
+            if top > 0:
+                click.echo(f"  when the class works: students on, on average (since "
+                           f"{when['since'][:10]}; scale {_BARS[1]} to {_BARS[8]} = up to "
+                           f"{top:g})")
+                click.echo("        0     6     12    18    ")
+                for day, row in zip(when["weekdays"], grid):
+                    click.echo(f"    {day} {_strip(row, top)}")
+        o = course.get("oom")
+        if o and o["kills"]:
+            click.echo(f"  memory: {o['kills']} session(s) killed for lack of memory "
+                       f"({o['students']} student(s))")
+        j = course.get("jobs")
+        if j and j["students_with_jobs"]:
+            click.echo(f"  clusters: {j['students_with_jobs']} student(s) ran jobs; {_jobs_line(j)}")

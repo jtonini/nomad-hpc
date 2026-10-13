@@ -62,7 +62,7 @@ it didn't measure.
 | 10 | Reliability: how jobs ended, core-hours lost to down nodes, nodes out of service, outages | job records; Slurm's totals; node samples |
 | 11 | Policy indicators: no time limit, running from /home, CPU-only jobs on GPU nodes, memory over-request | job records |
 | 12 | Departments and schools (with `--user-map`) | user map |
-| 13 | Teaching server (with `--teaching SITE`) | interactive sessions |
+| 13 | Teaching server (with `--teaching SITE`): people by role and department, sessions by kind, hours open and the share computing, the most people on (and computing) at once and when, people on by hour of the day, the busiest weekday, the most memory held at once, CPU busy and run queue against its cores, memory kills, by month | the interactive collector's daily and hourly totals and snapshots; vmstat; the oom collector |
 | 14 | Capacity and projection: practical capacity, projected demand, the year each capacity line is passed | sections 1 and 2; report.toml |
 
 After them come a table of where each section's figures come from (source,
@@ -168,3 +168,24 @@ writes the period's usernames to a CSV (`user,department,school`) readable
 only by you, and prints only how many there are. Fill it in, then pass it
 with `--user-map users.csv`. Other columns (a PI, say) are read only so the
 privacy check knows those names too.
+
+## The teaching server (section 13)
+
+Section 13 reads what the interactive collector keeps on the server given
+with `--teaching SITE`: people from its snapshots, hours open and computing
+from its daily totals (nomad 1.11), peaks and the hours of the day from its
+hourly totals (1.11.1), the machine's load from vmstat and the processes
+the kernel killed for want of memory from the oom collector. Weeks before
+nomad kept the totals are covered once `nomad interactive backfill` has
+rebuilt them on the server (who was on and for how long; not what was
+computing, which the old snapshots can't say). Each figure says from when it
+was recorded.
+
+```toml
+[report.teaching]
+cores = 52                                     # default: counted from its per-core samples
+roles = { faculty = "faculty", student = "student" }   # role = group, for people by role
+```
+
+People by department and school come from the same user map as section 12
+(`--user-map`).

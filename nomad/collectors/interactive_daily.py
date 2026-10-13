@@ -142,6 +142,10 @@ def ensure(conn: sqlite3.Connection) -> None:
                  "ON interactive_daily(user, day)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_person_hourly_user "
                  "ON interactive_person_hourly(user, hour)")
+    # Rows rebuilt from the raw snapshots (nomad interactive backfill) say so.
+    for table in ("interactive_daily", "interactive_hourly", "interactive_person_hourly"):
+        if "rebuilt" not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN rebuilt INTEGER NOT NULL DEFAULT 0")
 
 
 def _add(conn: sqlite3.Connection, table: str, keys: dict, add: dict, top: dict,

@@ -36,7 +36,8 @@ def allowed_labels(report: Report, data: sources.Data) -> tuple[set[str], set[st
     config = guard.labels_of(report.cluster, data.site, data.teaching_site,
                              *cfg.tiers, *cfg.partition_classes.values(), cfg.unlisted_partitions,
                              *(f.name for f in cfg.families), *(f.name for f in cfg.gpu_families),
-                             *(p.label for p in cfg.capacity.planned))
+                             *(p.label for p in cfg.capacity.planned),
+                             *cfg.teaching_roles, "other")
     texts = list(data.fs_labels.values())
     for j in data.jobs:
         if j.dept:
@@ -45,6 +46,7 @@ def allowed_labels(report: Report, data: sources.Data) -> tuple[set[str], set[st
             texts.append(j.school)
     if data.teaching:
         texts += [r["type"] for r in data.teaching["by_type"]]
+        texts += list(data.teaching.get("departments", {})) + list(data.teaching.get("schools", {}))
     return config, guard.labels_of(*texts)
 
 

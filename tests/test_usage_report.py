@@ -406,24 +406,84 @@ def test_user_map(site, cfg, tmp_path):
 
 
 def test_teaching_server(site, cfg):
+    """Section 13 from the interactive collector's totals: people by role,
+    hours open and computing, peaks by the hour, the machine's load, memory
+    kills; who was there from the snapshots too."""
+    from nomad.collectors import interactive_daily as D
     c = sqlite3.connect(site)
     c.execute("CREATE TABLE IF NOT EXISTS interactive_sessions (id INTEGER PRIMARY KEY, timestamp TEXT, server_id TEXT, "
               "user TEXT, session_type TEXT, pid INTEGER, cpu_percent REAL, mem_percent REAL, mem_mb REAL, "
               "mem_virtual_mb REAL, start_time TEXT, age_hours REAL, is_idle INTEGER)")
-    c.execute("CREATE TABLE IF NOT EXISTS interactive_summary (id INTEGER PRIMARY KEY, timestamp TEXT, server_id TEXT, "
-              "total_sessions INTEGER, idle_sessions INTEGER, total_memory_mb REAL, unique_users INTEGER, "
-              "rstudio_sessions INTEGER, jupyter_python_sessions INTEGER, jupyter_r_sessions INTEGER, "
-              "stale_sessions INTEGER, memory_hog_sessions INTEGER)")
-    for u, typ, idle in (("s1", "RStudio", 0), ("s2", "RStudio", 1), ("s3", "Jupyter (Python)", 0)):
-        c.execute("INSERT INTO interactive_sessions (timestamp, server_id, user, session_type, cpu_percent, mem_mb, "
-                  "is_idle) VALUES (?,?,?,?,?,?,?)", ("2026-01-15T10:00:00", "teach", u, typ, 20.0, 2048, idle))
-    c.execute("INSERT INTO interactive_summary (timestamp, server_id, total_sessions, total_memory_mb) "
-              "VALUES ('2026-01-15T10:00:00', 'teach', 3, 6144)")
+    c.execute("INSERT INTO interactive_sessions (timestamp, server_id, user, session_type) "
+              "VALUES ('2026-01-14T10:00:00', 'teach', 'early1', 'RStudio')")   # before the totals
+    t0 = datetime(2026, 1, 15, 10, 0)
+    ticks = 0
+    for i in range(4):                       # 10:00-10:15; s1 computing, s2 idle, s3 a notebook
+        t = t0 + timedelta(minutes=5 * i)
+        ticks += 300 * 100
+        on = [{"user": "s1", "session_type": "RStudio", "pid": 1, "start_time": "a", "mem_mb": 2048,
+               "cpu_ticks": ticks, "age_seconds": 10 ** 6},
+              {"user": "s2", "session_type": "RStudio", "pid": 2, "start_time": "b", "mem_mb": 1024,
+               "cpu_ticks": 0, "age_seconds": 10 ** 6}]
+        if i >= 2:
+            on.append({"user": "s3", "session_type": "Jupyter (Python)", "pid": 3, "start_time": "c",
+                       "mem_mb": 4096, "cpu_ticks": 0, "age_seconds": 10 ** 6})
+        D.update(c, on, t, "teach", epoch=t.timestamp())
+    c.execute("CREATE TABLE IF NOT EXISTS vmstat (timestamp TEXT, procs_runnable INTEGER, cpu_idle INTEGER, "
+              "swap_used_kb INTEGER)")
+    for i, (q, idle) in enumerate(((2, 90), (9, 10), (1, 95), (3, 70))):
+        c.execute("INSERT INTO vmstat (timestamp, procs_runnable, cpu_idle, swap_used_kb) VALUES (?,?,?,0)",
+                  ((t0 + timedelta(hours=i)).isoformat(), q, idle))
+    c.execute("CREATE TABLE IF NOT EXISTS oom_kills (timestamp TEXT, host TEXT, pid INTEGER, process TEXT, "
+              "uid INTEGER, username TEXT)")
+    c.execute("INSERT INTO oom_kills (timestamp, host, pid, process, uid, username) "
+              "VALUES ('2026-01-15T10:30:00', 'teach', 9, 'python', 1003, 's3')")
+    c.execute("INSERT INTO oom_kills (timestamp, host, pid, process, uid, username) "
+              "VALUES ('2026-01-15T10:40:00', 'teach', 8, 'sssd', 0, 'root')")    # not a person
+    c.execute("INSERT INTO collection_log (collector, started_at, success, records_collected) "
+              "VALUES ('oom', '2026-01-10T00:00:00', 1, 0)")
+    # Before 1.11 ps cut long names: the same person, once cut and once whole.
+    c.execute("INSERT INTO interactive_sessions (timestamp, server_id, user, session_type) "
+              "VALUES ('2026-01-14T11:00:00', 'teach', 'longnam+', 'RStudio')")
+
+    c.execute("CREATE TABLE IF NOT EXISTS group_membership (username TEXT, group_name TEXT, cluster TEXT)")
+    for u, g in (("s1", "student"), ("s2", "student"), ("prof", "faculty"), ("s3", "student"),
+                 ("longname1", "student")):
+        c.execute("INSERT INTO group_membership (username, group_name, cluster) VALUES (?, ?, 'teach')", (u, g))
     c.commit()
     c.close()
+    cfg.teaching_cores = 8
     report, data = build(site, cfg, teaching_site="teach")
-    assert fact(report, "s13.people") == 3 and fact(report, "s13.peak_sessions") == 3
-    assert fact(report, "s13.idle_share.RStudio") == pytest.approx(0.5)
+    assert fact(report, "s13.people") == 5          # early1 and longname1 too, from the snapshots
+    assert fact(report, "s13.people_by_role.student") == 4
+    assert fact(report, "s13.people_by_role.faculty") == 0
+    assert fact(report, "s13.people_by_role.other") == 1
+    # s1 and s2 three intervals each; s3 two (its first reading counts its time open).
+    assert fact(report, "s13.hours_open") == pytest.approx((3 * 2 * 300 + 2 * 300) / 3600)
+    # Computing: s1 busy in all its intervals, 900 s of the 2,100 measured (s3's first
+    # interval isn't: a session older than the interval, seen for the first time).
+    assert fact(report, "s13.computing_share") == pytest.approx(900 / 2100)
+    assert fact(report, "s13.peak_people") == 3 and fact(report, "s13.peak_computing") == 1
+    assert fact(report, "s13.peak_memory_gb") == pytest.approx(7.0)
+    assert fact(report, "s13.busiest_hour") == 10
+    assert fact(report, "s13.saturated_share") == pytest.approx(0.25)      # 1 of 4 readings over 8 cores
+    assert fact(report, "s13.run_queue_max") == 9
+    assert fact(report, "s13.oom_kills") == 2 and fact(report, "s13.oom_people") == 1
+    # A site that never ran the oom collector: not measured, not zero.
+    c = sqlite3.connect(site)
+    c.execute("DELETE FROM collection_log WHERE collector = 'oom'")
+    # A run that couldn't read the kernel's messages doesn't count either.
+    c.execute("INSERT INTO collection_log (collector, started_at, success, records_collected, "
+              "error_message) VALUES ('oom', '2026-01-10T00:00:00', 1, 0, 'not readable')")
+    c.commit()
+    c.close()
+    report2, _ = build(site, cfg, teaching_site="teach")
+    with pytest.raises(KeyError):
+        fact(report2, "s13.oom_kills")
+    s13 = next(x for x in report.sections if x.number == 13)
+    kinds = next(t for t in s13.tables if t.title.startswith("Sessions by kind"))
+    assert [r[0] for r in kinds.rows] == ["RStudio", "Jupyter (Python)"]
+    assert "up to 3 at once" in s13.finding and "killed for want of memory" in s13.finding
     run.write(report, data, Path(site).parent / "t", ["md"])        # session users are guarded too
 
 

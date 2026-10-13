@@ -7,6 +7,11 @@
 exclude_users = ["root"]
 # min_cell = 5          # counts of fewer than 5 people print as "fewer than 5"
 
+# The teaching server (section 13, with --teaching SITE).
+[report.teaching]
+cores = 52                                             # default: from its per-core samples
+roles = { faculty = "faculty", student = "student" }   # role = group
+
 [report.clusters.c1]
 # Node tiers, as Slurm node lists. A node belongs to one tier.
 tiers = { basic = "n[01-08]", medium = "n[09-13]", large = "n[14-15]", gpu = "g[01-03]", condo = "c[01-12]" }

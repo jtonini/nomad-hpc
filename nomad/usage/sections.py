@@ -1227,39 +1227,145 @@ def s12_departments(ctx: Ctx) -> Section:
 
 # 13 ----------------------------------------------------------------------------------
 
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def _when_hour(hour: str) -> str:
+    """'2026-10-13T14' as '2026-10-13 14:00' (numbers only: a weekday's
+    short name could be someone's username)."""
+    try:
+        t = datetime.strptime(hour, "%Y-%m-%dT%H")
+    except (TypeError, ValueError):
+        return str(hour)
+    return t.strftime("%Y-%m-%d %H:00")
+
+
 def s13_teaching(ctx: Ctx) -> Section:
     d = ctx.d
-    s = _section(13, "teaching_server", "Teaching server", ctx, source="NØMAÐ interactive sessions")
+    s = _section(13, "teaching_server", "Teaching server", ctx,
+                 source="NØMAÐ interactive sessions (daily and hourly totals, snapshots), vmstat, "
+                        "kernel memory kills")
     if not d.teaching_site:
         return _not_measured(s, "no teaching server given (--teaching SITE).")
     if not d.teaching:
         return _not_measured(s, f"no interactive sessions recorded at {d.teaching_site} in the period "
                                 "(the interactive collector).")
     t = d.teaching
-    rows = []
-    total = sum(r["samples"] for r in t["by_type"]) or 1
-    for r in t["by_type"]:
-        typ = r["type"]
-        s.fact(f"people.{typ}", f"{typ}: people", r["people"], "people", people=True)
-        s.fact(f"session_share.{typ}", f"{typ}: share of session samples", r["samples"] / total, "share")
-        s.fact(f"idle_share.{typ}", f"{typ}: share of samples idle", r["idle"], "share")
-        s.fact(f"cpu_percent.{typ}", f"{typ}: mean CPU per session", r["cpu_pct"], "percent of a core")
-        s.fact(f"memory_gb.{typ}", f"{typ}: mean memory per session", (r["mem_mb"] or 0) / 1024, "GB")
-        rows.append([typ, r["people"], fmt.pct(r["samples"] / total), fmt.pct(r["idle"]),
-                     f"{fmt.num(r['cpu_pct'])}%", fmt.gb((r["mem_mb"] or 0) / 1024),
-                     fmt.gb((r["max_mem_mb"] or 0) / 1024)])
     s.fact("people", "people with sessions", t["people"], "people", people=True)
-    s.tables.append(Table(f"Sessions by type ({d.teaching_site})",
-                          ["Session type", "People", "Share of sessions", "Idle", "CPU per session",
-                           "Memory per session", "Largest"], rows, people_columns=[1]))
-    conc = t.get("concurrency")
-    if conc:
-        s.fact("peak_sessions", "most sessions at once", conc["peak"], "sessions")
-        s.fact("mean_sessions", "mean sessions at once", conc["mean"], "sessions")
-        s.finding = (f"{ctx.pp(t['people'])} people used the teaching server, with up to "
-                     f"{fmt.num(conc['peak'])} sessions at once.")
-    else:
-        s.finding = f"{ctx.pp(t['people'])} people used the teaching server."
+    roles = t.get("roles")
+    if roles:
+        rows = []
+        for role, n in roles.items():
+            s.fact(f"people_by_role.{role}", f"people: {role}", n, "people", people=True)
+            rows.append([role, n])
+        note = (f"{t['names_cut']} name(s) cut short by older snapshots are left out of the roles."
+                if t.get("names_cut") else "")
+        s.tables.append(Table(f"People by role ({d.teaching_site})", ["Role", "People"], rows,
+                              note=note, people_columns=[1]))
+    for key, title in (("schools", "By school"), ("departments", "By department")):
+        counts = t.get(key)
+        if counts:
+            rows = [[k, v] for k, v in sorted(counts.items(), key=lambda kv: -kv[1])]
+            s.tables.append(Table(f"{title} ({d.teaching_site})", [key[:-1].capitalize(), "People"],
+                                  rows, people_columns=[1]))
+    hours = t.get("hours")
+    share = None
+    if hours:
+        s.fact("hours_open", "person-hours with a session open", hours["open"], "hours")
+        if hours["measured"]:
+            share = hours["computing"] / hours["measured"]
+            s.fact("computing_share", "share of open time computing", share, "share",
+                   period=f"from {hours['computing_from']}")
+        if hours.get("rebuilt_until"):
+            s.notes.append(f"Hours open up to {hours['rebuilt_until']} were rebuilt from the "
+                           "five-minute snapshots (who was on); computing is measured from "
+                           f"{hours['computing_from'] or 'nowhere in the period'}.")
+        elif hours["from"] and hours["from"] > d.t0.date().isoformat():
+            s.notes.append(f"Hours open are recorded from {hours['from']} (nomad 1.11); "
+                           "`nomad interactive backfill` rebuilds earlier weeks.")
+    if t["by_type"]:
+        rows = []
+        for r in t["by_type"]:
+            typ = r["type"]
+            s.fact(f"people.{typ}", f"{typ}: people", r["people"], "people", people=True)
+            s.fact(f"hours.{typ}", f"{typ}: hours open", r["hours"], "hours")
+            if r["computing_share"] is not None:
+                s.fact(f"computing_share.{typ}", f"{typ}: share of open time computing",
+                       r["computing_share"], "share")
+            rows.append([typ, r["people"], fmt.num(r["sessions"]), fmt.big(r["hours"]),
+                         fmt.pct(r["computing_share"]) if r["computing_share"] is not None else "–",
+                         fmt.gb((r["peak_mem_mb"] or 0) / 1024)])
+        s.tables.append(Table(f"Sessions by kind ({d.teaching_site})",
+                              ["Kind", "People", "Session-days", "Hours open", "Computing",
+                               "Largest session"], rows, people_columns=[1],
+                              note="A session is a process tree; a notebook's kernel is a session "
+                                   "of its own, apart from its server. Session-days: a session "
+                                   "open across several days counts on each. Computing: at least "
+                                   "2% of a core between readings."))
+    h = t.get("hourly")
+    if h:
+        if h["peak"]:
+            s.fact("peak_people", "most people on at once", h["peak"][0], "people",
+                   note=_when_hour(h["peak"][1]))
+        if h["busy_peak"]:
+            s.fact("peak_computing", "most people computing at once", h["busy_peak"][0], "people",
+                   note=_when_hour(h["busy_peak"][1]))
+        if h["mem_peak"]:
+            s.fact("peak_memory_gb", "most memory held at once", h["mem_peak"][0] / 1024, "GB",
+                   note=_when_hour(h["mem_peak"][1]))
+        busiest = max((r for r in h["by_hour"] if r["mean"] is not None),
+                      key=lambda r: r["mean"], default=None)
+        if busiest:
+            s.fact("busiest_hour", "busiest hour of the day (most people on, on average)",
+                   busiest["hour"], "hour")
+        days = [(i, v) for i, v in enumerate(h["by_weekday"]) if v is not None]
+        if days:
+            top = max(days, key=lambda iv: iv[1])
+            s.fact("busiest_weekday", "busiest day of the week (most people on, on average)",
+                   _WEEKDAYS[top[0]], "")
+        rows = [[f"{r['hour']:02d}:00", fmt.num(r["mean"], 1) if r["mean"] is not None else "–",
+                 fmt.num(r["mean_computing"], 1) if r["mean_computing"] is not None else "–",
+                 fmt.num(r["max"])] for r in h["by_hour"]]
+        s.tables.append(Table(f"People on, by hour of the day ({d.teaching_site})",
+                              ["Hour", "On, on average", "Computing, on average", "Most at once"],
+                              rows, note=f"From {h['from'][:10]}"
+                              + (f"; computing from {h['computing_from'][:10]}"
+                                 if h["computing_from"] else "; computing not measured") + "."))
+    m = t.get("machine")
+    if m:
+        s.fact("cpu_busy", "CPU busy, on average", (m["cpu_busy_pct"] or 0) / 100, "share",
+               source="vmstat")
+        s.fact("run_queue_max", "most processes waiting for a core", m["run_queue_max"], "processes",
+               source="vmstat")
+        if m["queue_over_cores_share"] is not None:
+            s.fact("saturated_share", f"share of readings with more runnable processes than its "
+                   f"{m['cores']} cores", m["queue_over_cores_share"], "share", source="vmstat")
+        if m["busiest_hour"] is not None:
+            s.fact("busiest_cpu_hour", "hour of the day with the most CPU in use",
+                   m["busiest_hour"], "hour", source="vmstat")
+    o = t.get("oom")
+    if o is not None:
+        s.fact("oom_kills", "processes killed for want of memory", o["kills"], "processes",
+               source="kernel messages (oom collector)",
+               note=f"recorded from {str(o['recorded_from'])[:10]} (its first run also read "
+                    "back up to 30 days)")
+        s.fact("oom_people", "people whose processes were killed for want of memory", o["people"],
+               "people", people=True)
+    months = t.get("months") or []
+    if len(months) > 1:
+        rows = [[fmt.month(r["month"]), r["people"], fmt.big(r["hours"]),
+                 fmt.pct(r["computing_share"]) if r["computing_share"] is not None else "–"]
+                for r in months]
+        s.tables.append(Table(f"By month ({d.teaching_site})",
+                              ["Month", "People", "Hours open", "Computing"], rows, people_columns=[1]))
+    parts = [f"{ctx.pp(t['people'])} people used the teaching server"]
+    if h and h["peak"]:
+        parts.append(f"up to {fmt.num(h['peak'][0])} at once")
+    if share is not None:
+        parts.append(f"computing {fmt.pct(share)} of the time sessions were open")
+    if o and o["kills"]:
+        parts.append(f"{fmt.plural(o['kills'], 'process', 'processes')} killed for want of memory")
+    s.finding = (parts[0] + (", " + ", ".join(parts[1:]) if len(parts) > 1 else "") + ".")
     return s
 
 

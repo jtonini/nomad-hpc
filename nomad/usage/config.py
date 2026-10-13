@@ -104,6 +104,12 @@ class ClusterConfig:
     # which clusters it has.
     section_found: bool = False
     known_clusters: list[str] = field(default_factory=list)
+    # The teaching server ([report.teaching]): its cores (else counted from
+    # its per-core samples) and the groups that say who is faculty and who
+    # a student.
+    teaching_cores: int | None = None
+    teaching_roles: dict[str, str] = field(default_factory=lambda: {"faculty": "faculty",
+                                                                     "student": "student"})
 
     def tier_of(self, node: str) -> str | None:
         """The node's tier; None for a node outside the tier map."""
@@ -330,6 +336,17 @@ def from_dict(data: dict, cluster: str, path: Path | None = None) -> ClusterConf
     cfg.families = (_families(fams, "families") if fams is not None
                     else cfg.gpu_families)
     cfg.capacity = _capacity(c.get("capacity"), _capacity(report.get("capacity")))
+    teaching = report.get("teaching") or {}
+    if not isinstance(teaching, dict):
+        raise ReportConfigError("[report.teaching] must be a table")
+    if teaching.get("cores") is not None:
+        cfg.teaching_cores = int(_number(teaching["cores"], "teaching cores", 1, 100000))
+    roles = teaching.get("roles")
+    if roles is not None:
+        if not isinstance(roles, dict) or not all(isinstance(v, str) and v.strip()
+                                                  for v in roles.values()):
+            raise ReportConfigError("[report.teaching] roles must be a table of role = group")
+        cfg.teaching_roles = {str(k): v.strip() for k, v in roles.items()}
     mc = c.get("min_cell", report.get("min_cell", 0))
     cfg.min_cell = int(_number(mc, "min_cell", 0, 1000))
     cfg.reindex()

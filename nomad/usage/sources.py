@@ -662,7 +662,7 @@ def load(cfg: ClusterConfig, t0: datetime, t1: datetime, *, db: Path | None = No
             _filesystems(conn, data)
             _usage(conn, data)
             if teaching_site:
-                _teaching(conn, data, teaching_site)
+                _teaching(conn, data, teaching_site, umap)
         return data
     finally:
         if conn is not None:
@@ -830,34 +830,195 @@ def _usage(conn, data: Data) -> None:
     data.usage_rows = rows
 
 
-def _teaching(conn, data: Data, site: str) -> None:
-    cols = _columns(conn, "interactive_sessions")
-    if not {"timestamp", "user", "session_type"} <= cols:
-        data.teaching_site = site
-        return
+def _teaching(conn, data: Data, site: str, umap: dict | None = None) -> None:
+    """The teaching server over the period: people (by role, department,
+    course), sessions by kind, hours open and computing, peaks by the hour,
+    the machine's load and memory kills. From the interactive collector's
+    totals (nomad 1.11: days; 1.11.1: hours; earlier weeks only if rebuilt
+    from the raw snapshots, which carry no CPU) and, for who was there, the
+    raw snapshots. Nothing here is a name: counts, kinds and times."""
     data.teaching_site = site
-    where, args = _site_filter(conn, "interactive_sessions", site)
-    rng = [data.t0.isoformat(), data.t1.isoformat()] + args
-    by_type = []
-    for r in conn.execute(
-            "SELECT session_type, COUNT(DISTINCT user), COUNT(*), COUNT(DISTINCT substr(timestamp, 1, 16)), "
-            "AVG(cpu_percent), AVG(mem_mb), MAX(mem_mb), AVG(CASE WHEN is_idle THEN 1.0 ELSE 0.0 END) "
-            f"FROM interactive_sessions WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY 1 ORDER BY 3 DESC",
-            rng):
-        by_type.append({"type": data.safe_label(r[0]), "people": r[1], "samples": r[2], "times": r[3],
-                        "cpu_pct": r[4], "mem_mb": r[5], "max_mem_mb": r[6], "idle": r[7]})
-    people = conn.execute(f"SELECT COUNT(DISTINCT user) FROM interactive_sessions "
-                          f"WHERE timestamp >= ? AND timestamp < ?{where}", rng).fetchone()[0]
-    for r in conn.execute(f"SELECT DISTINCT user FROM interactive_sessions "
-                          f"WHERE timestamp >= ? AND timestamp < ?{where}", rng):
-        data.names.users.add(str(r[0]))
-    peak = None
-    if {"total_sessions", "timestamp"} <= _columns(conn, "interactive_summary"):
-        w2, a2 = _site_filter(conn, "interactive_summary", site)
-        row = conn.execute(f"SELECT MAX(total_sessions), AVG(total_sessions), MAX(total_memory_mb) "
-                           f"FROM interactive_summary WHERE timestamp >= ? AND timestamp < ?{w2}",
-                           [data.t0.isoformat(), data.t1.isoformat()] + a2).fetchone()
-        if row and row[0] is not None:
-            peak = {"peak": row[0], "mean": row[1], "peak_memory_mb": row[2]}
-    if by_type or peak:
-        data.teaching = {"by_type": by_type, "people": people, "concurrency": peak}
+    t0, t1 = data.t0.isoformat(), data.t1.isoformat()
+    d0, d1 = data.t0.date().isoformat(), data.t1.date().isoformat()
+    out: dict = {"by_type": [], "people": 0}
+    people: set = set()
+    cols = _columns(conn, "interactive_sessions")
+    if {"timestamp", "user", "session_type"} <= cols:
+        where, args = _site_filter(conn, "interactive_sessions", site)
+        for (u,) in conn.execute(f"SELECT DISTINCT user FROM interactive_sessions "
+                                 f"WHERE timestamp >= ? AND timestamp < ?{where}", [t0, t1] + args):
+            if u:
+                people.add(str(u))
+    # The daily totals: who, how long, computing.
+    dcols = _columns(conn, "interactive_daily")
+    if {"day", "user", "session_type", "session_seconds"} <= dcols:
+        where, args = _site_filter(conn, "interactive_daily", site)
+        rebuilt = "rebuilt" if "rebuilt" in dcols else "0"
+        rng = [d0, d1] + args
+        for (u,) in conn.execute(f"SELECT DISTINCT user FROM interactive_daily WHERE day >= ? "
+                                 f"AND day < ? AND session_seconds > 0{where}", rng):
+            if u:
+                people.add(str(u))
+        row = conn.execute(
+            "SELECT SUM(session_seconds), SUM(busy_seconds), SUM(cpu_measured_seconds), "
+            f"MIN(day), MIN(CASE WHEN cpu_measured_seconds > 0 THEN day END), "
+            f"MAX(CASE WHEN {rebuilt} = 1 THEN day END) "
+            f"FROM interactive_daily WHERE session_type = '(any)' AND day >= ? AND day < ?{where}",
+            rng).fetchone()
+        if row and row[0]:
+            out["hours"] = {"open": row[0] / 3600, "computing": (row[1] or 0) / 3600,
+                            "measured": (row[2] or 0) / 3600, "from": row[3],
+                            "computing_from": row[4], "rebuilt_until": row[5]}
+        by_type = []
+        for typ, n, sessions, open_s, busy_s, meas_s, peak in conn.execute(
+                "SELECT session_type, COUNT(DISTINCT user), SUM(sessions), SUM(session_seconds), "
+                "SUM(busy_seconds), SUM(cpu_measured_seconds), MAX(peak_mem_mb) FROM interactive_daily "
+                f"WHERE session_type != '(any)' AND {rebuilt} = 0 AND day >= ? AND day < ?{where} "
+                "GROUP BY 1 ORDER BY 4 DESC", rng):
+            by_type.append({"type": data.safe_label(typ), "people": n, "sessions": sessions,
+                            "hours": (open_s or 0) / 3600,
+                            "computing_share": (busy_s / meas_s) if meas_s else None,
+                            "peak_mem_mb": peak})
+        out["by_type"] = by_type
+        months = []
+        for month, n, open_s, busy_s, meas_s in conn.execute(
+                "SELECT substr(day, 1, 7), COUNT(DISTINCT CASE WHEN session_seconds > 0 THEN user END), "
+                "SUM(session_seconds), "
+                "SUM(busy_seconds), SUM(cpu_measured_seconds) FROM interactive_daily "
+                f"WHERE session_type = '(any)' AND day >= ? AND day < ?{where} GROUP BY 1 ORDER BY 1",
+                rng):
+            months.append({"month": month, "people": n, "hours": (open_s or 0) / 3600,
+                           "computing_share": (busy_s / meas_s) if meas_s else None})
+        out["months"] = months
+    # By the hour: peaks, and the typical day.
+    hcols = _columns(conn, "interactive_hourly")
+    if {"hour", "runs", "people_sum", "people_max"} <= hcols:
+        where, args = _site_filter(conn, "interactive_hourly", site)
+        h0, h1 = data.t0.strftime("%Y-%m-%dT%H"), data.t1.strftime("%Y-%m-%dT%H")
+        rows = conn.execute(
+            "SELECT hour, runs, measured_runs, people_sum, people_max, busy_people_sum, "
+            "busy_people_max, mem_mb_max FROM interactive_hourly "
+            f"WHERE hour >= ? AND hour < ?{where}", [h0, h1] + args).fetchall()
+        if rows:
+            by_hod: dict = {h: [0, 0, 0, 0, 0] for h in range(24)}   # runs, people, measured, busy, max
+            by_dow: dict = {d: [0, 0] for d in range(7)}
+            peak = busy_peak = mem_peak = None
+            for hour, runs, mruns, psum, pmax, bsum, bmax, mmax in rows:
+                try:
+                    t = datetime.strptime(hour, "%Y-%m-%dT%H")
+                except (TypeError, ValueError):
+                    continue
+                b = by_hod[t.hour]
+                b[0] += runs or 0
+                b[1] += psum or 0
+                b[2] += mruns or 0
+                b[3] += bsum or 0
+                b[4] = max(b[4], pmax or 0)
+                by_dow[t.weekday()][0] += runs or 0
+                by_dow[t.weekday()][1] += psum or 0
+                if pmax and (peak is None or pmax > peak[0]):
+                    peak = (pmax, hour)
+                if bmax and (busy_peak is None or bmax > busy_peak[0]):
+                    busy_peak = (bmax, hour)
+                if mmax and (mem_peak is None or mmax > mem_peak[0]):
+                    mem_peak = (mmax, hour)
+            out["hourly"] = {
+                "from": min(r[0] for r in rows),
+                "computing_from": min((r[0] for r in rows if r[2]), default=None),
+                "peak": peak, "busy_peak": busy_peak, "mem_peak": mem_peak,
+                "by_hour": [{"hour": h, "mean": (v[1] / v[0]) if v[0] else None,
+                             "mean_computing": (v[3] / v[2]) if v[2] else None, "max": v[4]}
+                            for h, v in by_hod.items()],
+                "by_weekday": [(v[1] / v[0]) if v[0] else None for d, v in sorted(by_dow.items())],
+            }
+    # The machine: CPU busy, run queue, swap.
+    vcols = _columns(conn, "vmstat")
+    if {"timestamp", "cpu_idle", "procs_runnable"} <= vcols:
+        where, args = _site_filter(conn, "vmstat", site)
+        cores = data.cfg.teaching_cores
+        if cores is None and {"timestamp", "core_id"} <= _columns(conn, "mpstat_core"):
+            # The cores the server's per-core samples name, over the period's last day.
+            w2, a2 = _site_filter(conn, "mpstat_core", site)
+            last = (data.t1 - timedelta(days=1)).isoformat()
+            row = conn.execute(f"SELECT COUNT(DISTINCT core_id) FROM mpstat_core "
+                               f"WHERE timestamp >= ? AND timestamp < ?{w2}", [last, t1] + a2).fetchone()
+            cores = row[0] if row and row[0] else None
+        swap = "MAX(swap_used_kb)" if "swap_used_kb" in vcols else "NULL"
+        row = conn.execute(
+            f"SELECT COUNT(*), AVG(100 - cpu_idle), MAX(procs_runnable), {swap}, "
+            f"SUM(CASE WHEN ? IS NOT NULL AND procs_runnable > ? THEN 1 ELSE 0 END) "
+            f"FROM vmstat WHERE timestamp >= ? AND timestamp < ?{where}",
+            [cores, cores or 0, t0, t1] + args).fetchone()
+        if row and row[0]:
+            busiest = conn.execute(
+                "SELECT CAST(substr(timestamp, 12, 2) AS INTEGER), AVG(100 - cpu_idle) FROM vmstat "
+                f"WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY 1 ORDER BY 2 DESC LIMIT 1",
+                [t0, t1] + args).fetchone()
+            out["machine"] = {"samples": row[0], "cpu_busy_pct": row[1], "run_queue_max": row[2],
+                              "swap_max_kb": row[3], "cores": cores,
+                              "queue_over_cores_share": (row[4] / row[0]) if cores else None,
+                              "busiest_hour": busiest[0] if busiest else None,
+                              "busiest_hour_cpu_pct": busiest[1] if busiest else None}
+    # Kills for want of memory: only where the oom collector ran (on a hub
+    # the table is there if any site runs it), from its first run (which
+    # also read back lookback_days).
+    oom_from = None
+    if {"collector", "started_at"} <= _columns(conn, "collection_log"):
+        wl, al = _site_filter(conn, "collection_log", site)
+        # A run that could not read the journal is logged a success with a note.
+        note = " AND error_message IS NULL" if "error_message" in _columns(conn, "collection_log") else ""
+        row = conn.execute("SELECT MIN(started_at) FROM collection_log WHERE collector = 'oom' "
+                           f"AND success = 1{note} AND started_at < ?{wl}", [t1] + al).fetchone()
+        oom_from = row[0] if row else None
+    if oom_from and {"timestamp", "pid"} <= _columns(conn, "oom_kills"):
+        where, args = _site_filter(conn, "oom_kills", site)
+        # People: not root or a system account (uid under 1000).
+        ucol = ("COUNT(DISTINCT CASE WHEN uid IS NULL OR uid >= 1000 "
+                "THEN COALESCE(username, uid) END)")
+        row = conn.execute(f"SELECT COUNT(*), {ucol} FROM oom_kills "
+                           f"WHERE timestamp >= ? AND timestamp < ?{where}", [t0, t1] + args).fetchone()
+        out["oom"] = {"kills": row[0] if row else 0, "people": row[1] if row else 0,
+                      "recorded_from": oom_from}
+    # Names ps cut short before 1.11 ("abcdefg+"), as the one full name each
+    # can be: else someone on both sides of the upgrade counts twice.
+    from nomad.facts.courses import resolve_name
+    known = {u for u in people if not u.endswith("+")}
+    if {"username", "group_name"} <= _columns(conn, "group_membership"):
+        w3, a3 = _site_filter(conn, "group_membership", site)
+        known |= {r[0] for r in conn.execute(
+            f"SELECT DISTINCT username FROM group_membership WHERE 1 = 1{w3}", a3) if r[0]}
+    for u in people:
+        data.names.users.add(u)
+    people = {resolve_name(u, known) or u for u in people}
+    # Who: by role (the groups data at the site) and department (user map).
+    full = {u for u in people if not u.endswith("+")}
+    if {"username", "group_name"} <= _columns(conn, "group_membership"):
+        where, args = _site_filter(conn, "group_membership", site)
+        roles = {}
+        for role, group in data.cfg.teaching_roles.items():
+            members = {r[0] for r in conn.execute(
+                f"SELECT DISTINCT username FROM group_membership WHERE group_name = ?{where}",
+                [group] + args)}
+            if members:
+                roles[role] = members
+        if roles:
+            counted: dict = {}
+            seen: set = set()
+            for role, members in roles.items():
+                counted[role] = len((full & members) - seen)
+                seen |= full & members
+            counted["other"] = len(full - seen)
+            out["roles"] = counted
+            out["names_cut"] = len(people - full)
+    if umap:
+        depts: Counter = Counter()
+        schools: Counter = Counter()
+        for u in full:
+            dept, school = umap.get(u, (None, None))
+            depts[dept or "not in the map"] += 1
+            schools[school or "not in the map"] += 1
+        out["departments"] = dict(depts)
+        out["schools"] = dict(schools)
+    out["people"] = len(people)
+    if people or out.get("hours") or out.get("hourly"):
+        data.teaching = out

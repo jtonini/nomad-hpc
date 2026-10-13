@@ -224,6 +224,65 @@ longer counts as its lab's. A machine known only by
 its tag is marked `[tagged]` (`--db` for the database holding group membership, such as the hub's
 combined database; `--mask` for counts only).
 
+### Courses: `nomad course`
+
+A course is a Unix group (`demo101`, say). Its instructors see it in `nomad
+facts course` (and, later, the Console): the class this term, each student as
+a row, when the class works. Nothing is a course until `[console.courses]` is
+there: a site that hasn't said how its groups work gets no course view rather
+than a wrong one.
+
+```toml
+[console.courses]
+pattern = "^[a-z]{2,6}[0-9]{3}[a-z]?$"   # which groups are courses, by name
+faculty_group = "faculty"                # whose members can teach one
+term_start = "2026-08-24"                # this term's first day
+min_students = 0                         # fewer students this term: counts only
+names = false                            # instructors see students by name
+
+[console.courses.groups."demo101"]
+name = "Econometrics"
+instructors = ["jdoe"]                   # teaches it, in the group or not
+exclude = ["asmith"]                     # in the group and faculty, not teaching it
+
+[console.courses.groups."lab201"]
+course = false                           # named like a course, but isn't one
+```
+
+- A group is a course when its name matches `pattern` or it is listed under
+  `groups`. Its **instructors** are its members in `faculty_group`, and
+  anyone listed, less anyone excluded. Its **students** are its other
+  members; of those, **this term's** joined since `term_start` or used an
+  interactive server or a cluster since then (groups nobody prunes keep
+  earlier terms' students). nomad records when a membership began from 1.11
+  on; before that, a member who hasn't been active this term can't be told
+  from an earlier term's, and is left out (and counted as such).
+- A group named like a course that isn't one (a project's or a lab's) is
+  marked `course = false` (`nomad course ignore GROUP`): otherwise every
+  faculty member in it would see its other members as a class. `nomad course
+  list` shows every group taken for a course.
+- `term_start` defaults to the Monday on or after 15 August, 1 January or
+  1 June (a US academic calendar). Set it: weeks before classes began would
+  otherwise count in each student's range as weeks of nothing.
+- `min_students` defaults to 0: a small institution's course may have three
+  students. With so few, even figures for the class together are close to
+  each student's, and unnamed rows are not anonymous to someone who knows
+  the class. `names` (default false) decides whether instructors see each
+  student by name: both are for the institution to decide (FERPA).
+
+```
+nomad course setup --term-start 2026-08-24   turn courses on, or change a setting
+nomad course list                            each course: instructors, students this term
+nomad course add GROUP NETID                 NETID teaches GROUP (not in it, or a TA)
+nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it
+nomad course remove GROUP NETID              off either list
+nomad course name GROUP "Econometrics"       how the course is shown
+nomad course ignore GROUP [--undo]           named like a course, but isn't one
+```
+
+Like `nomad lab`, each shows the change and writes it with `--apply`, after
+a backup, only if the file still reads back as intended.
+
 ## Environment Variables
 
 | Variable | Description |
