@@ -4582,6 +4582,15 @@ def sync(ctx, config_file, output, dry_run):
             ("workstation_state", "hostname, timestamp"),
             ("workstation_mount_state", "source, timestamp"),
             ("workstation_mount_state", "hostname, timestamp"),
+            # Interactive servers: a site's days and hours, a course's or a
+            # lab's people over a term (nomad facts, the usage report).
+            ("interactive_sessions", "source_site, timestamp"),
+            ("interactive_daily", "source_site, day"),
+            ("interactive_daily", "user, day"),
+            ("interactive_hourly", "source_site, hour"),
+            ("interactive_person_hourly", "source_site, hour"),
+            ("interactive_person_hourly", "user, hour"),
+            ("oom_kills", "source_site, timestamp"),
         ]
         click.echo("  Indexing... ", nl=False)
         _built = 0

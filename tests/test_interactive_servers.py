@@ -167,6 +167,68 @@ def test_a_person_with_several_sessions_is_counted_once_in_any():
     assert anyone[5] == pytest.approx(3100 * 300)
 
 
+def _hourly(conn):
+    cols = ("runs", "measured_runs", "people_sum", "people_max", "measured_people_sum",
+            "busy_people_sum",
+            "busy_people_max", "sessions_max", "open_seconds", "busy_seconds", "cpu_seconds",
+            "mem_mb_max")
+    return {r[0]: dict(zip(cols, r[1:])) for r in conn.execute(
+        f"SELECT hour, {', '.join(cols)} FROM interactive_hourly")}
+
+
+def _person_hourly(conn):
+    cols = ("runs", "open_seconds", "busy_seconds", "measured_seconds", "cpu_seconds",
+            "mem_mb_max")
+    return {(r[0], r[1]): dict(zip(cols, r[2:])) for r in conn.execute(
+        f"SELECT hour, user, {', '.join(cols)} FROM interactive_person_hourly")}
+
+
+def test_each_hour_keeps_who_was_on_who_was_busy_and_the_peaks():
+    conn = sqlite3.connect(":memory:")
+    a1 = _s("ann", "Jupyter (Python)", 21, "t", 2000, 0)
+    a2 = _s("ann", "Jupyter (Python)", 22, "t", 1000, 0)
+    b = _s("bob", "RStudio", 30, "t", 500, 0)
+    U(conn, [a1, a2, b], T0 + timedelta(minutes=50))          # 09:50, first reading
+    # 09:55: ann busy (one kernel at 100%), bob idle.
+    U(conn, [dict(a1, cpu_ticks=300 * 100), a2, b], T0 + timedelta(minutes=55))
+    U(conn, [], T0 + timedelta(minutes=58))                    # 09:58: nobody on
+    # 10:03: bob back in a new session two minutes old, busy; ann gone.
+    b2 = dict(_s("bob", "RStudio", 31, "t2", 400, 60 * 100), age_seconds=120.0)
+    U(conn, [b2], T0 + timedelta(minutes=63))
+    h = _hourly(conn)
+    nine, ten = h["2026-10-12T09"], h["2026-10-12T10"]
+    assert nine["runs"] == 3 and nine["measured_runs"] == 2   # the first had no interval
+    assert nine["people_sum"] == 4 and nine["people_max"] == 2   # 2 + 2 + 0: average 4/3
+    assert nine["busy_people_max"] == 1 and nine["busy_people_sum"] == 1
+    assert nine["measured_people_sum"] == 2               # of 2 measured: half busy
+    assert nine["sessions_max"] == 3 and nine["mem_mb_max"] == 3500
+    assert nine["open_seconds"] == 2 * 300 and nine["busy_seconds"] == 300
+    assert nine["cpu_seconds"] == pytest.approx(300)
+    assert ten["people_max"] == 1 and ten["busy_people_max"] == 1
+    assert ten["open_seconds"] == 300 and ten["cpu_seconds"] == pytest.approx(60)
+    p = _person_hourly(conn)
+    assert p[("2026-10-12T09", "ann")]["busy_seconds"] == 300
+    assert p[("2026-10-12T09", "ann")]["mem_mb_max"] == 3000      # both kernels at once
+    assert p[("2026-10-12T09", "bob")]["busy_seconds"] == 0
+    assert p[("2026-10-12T09", "bob")]["measured_seconds"] == 300
+    assert ("2026-10-12T10", "ann") not in p
+    assert p[("2026-10-12T10", "bob")]["cpu_seconds"] == pytest.approx(60)
+    # The hours agree with the day.
+    d = _daily(conn)
+    assert d[("2026-10-12", "ann", D.ANY)][1] + d[("2026-10-12", "bob", D.ANY)][1] == \
+        nine["open_seconds"] + ten["open_seconds"]
+
+
+def test_a_gap_counts_who_was_on_but_no_time_or_busy():
+    conn = sqlite3.connect(":memory:")
+    a = _s("ann", "RStudio", 10, "t", 1000, 0)
+    U(conn, [a], T0)
+    U(conn, [dict(a, cpu_ticks=999 * 100)], T0 + timedelta(hours=3))    # collector was off
+    h = _hourly(conn)["2026-10-12T12"]
+    assert h["runs"] == 1 and h["measured_runs"] == 0 and h["people_max"] == 1
+    assert h["busy_people_max"] == 0 and h["open_seconds"] == 0 and h["cpu_seconds"] == 0
+
+
 def test_the_change_from_daylight_time_adds_no_hour():
     conn = sqlite3.connect(":memory:")
     a = _s("ann", "RStudio", 10, "t", 1000, 0)
@@ -254,9 +316,16 @@ def test_the_collector_keeps_daily_totals_but_not_from_a_failed_look(tmp_path, m
     def fail(*a, **k):
         raise OSError("ps: not found")
     monkeypatch.setattr(interactive.subprocess, "check_output", fail)
+    def hourly_runs():
+        with sqlite3.connect(db) as conn:
+            return conn.execute("SELECT SUM(runs), SUM(people_sum) FROM interactive_hourly"
+                                ).fetchone()
+
+    assert hourly_runs() == (1, 0)                     # a reading with nobody on counts
     r = c.run()
     assert r.success and interactive.LAST_FAILED and "ps failed" in (r.note or "")
     assert last_run() == first                         # not "nobody on"
+    assert hourly_runs() == (1, 0)                     # and not a reading
 
     _fake_processes(monkeypatch, " 1001 100 1 5.0 1.0 /usr/lib/rstudio-server/bin/rsession -u ann")
     r = c.run()
@@ -266,6 +335,7 @@ def test_the_collector_keeps_daily_totals_but_not_from_a_failed_look(tmp_path, m
         rows = dict(conn.execute("SELECT session_type, sessions FROM interactive_daily "
                                  "WHERE user = 'ann'").fetchall())
     assert rows == {"RStudio": 1, D.ANY: 1}
+    assert hourly_runs()[0] == 2
 
 
 def test_raw_snapshots_are_pruned_only_when_asked():

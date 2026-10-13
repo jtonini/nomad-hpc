@@ -32,6 +32,31 @@ sessions' together; ``peak_mem_mb`` the most they held at once.
 Memory is resident memory added up over a session's processes, so pages that
 forked workers share count once per worker.
 
+By the hour, for peaks and for when a class works (also kept for good):
+
+``interactive_hourly``: one row per hour and server. ``runs`` readings fell in
+the hour (``measured_runs`` of them with a known interval); ``people_max`` /
+``people_sum`` the most people on at once and their sum over readings
+(``people_sum / runs`` is the hour's average), ``busy_people_max`` /
+``busy_people_sum`` the same for people with a busy session, over measured
+readings only, out of ``measured_people_sum`` (people whose CPU was measured:
+``busy_people_sum / measured_people_sum`` is the share busy);
+``sessions_max``; ``open_seconds`` and ``busy_seconds`` (person-seconds,
+summed over people), ``cpu_seconds``, and ``mem_mb_max``, the most memory
+everyone held at once. A reading with nobody on counts (zero people), so
+averages are over the whole hour; an hour the collector did not run has no
+row. As for the days, the time between two readings goes to the later one's
+hour. Busy is computing (BUSY_PERCENT of a core): someone reading or typing
+in a notebook is on, not busy.
+
+``interactive_person_hourly``: one row per hour, server and person with a
+session: ``open_seconds``, ``busy_seconds``, ``measured_seconds``,
+``cpu_seconds``, ``mem_mb_max`` (the most they held at once) and ``runs``.
+
+Hours are local time (``YYYY-MM-DDTHH``): the hour repeated when daylight
+time ends holds both (twice the readings; averages stay right), and the hour
+skipped when it starts has no row.
+
 The time between two runs is added to the day the later one falls on. A gap
 longer than MAX_GAP_SECONDS (the collector was stopped) adds no time: the
 sessions are counted, their hours are not guessed. CPU comes from each
@@ -66,6 +91,39 @@ CREATE TABLE IF NOT EXISTS interactive_daily (
     updated_at           TEXT,
     PRIMARY KEY (day, server_id, user, session_type)
 )"""
+HOURLY = """
+CREATE TABLE IF NOT EXISTS interactive_hourly (
+    hour             TEXT NOT NULL,
+    server_id        TEXT NOT NULL,
+    runs             INTEGER NOT NULL DEFAULT 0,
+    measured_runs    INTEGER NOT NULL DEFAULT 0,
+    people_sum       INTEGER NOT NULL DEFAULT 0,
+    people_max       INTEGER NOT NULL DEFAULT 0,
+    measured_people_sum INTEGER NOT NULL DEFAULT 0,
+    busy_people_sum  INTEGER NOT NULL DEFAULT 0,
+    busy_people_max  INTEGER NOT NULL DEFAULT 0,
+    sessions_max     INTEGER NOT NULL DEFAULT 0,
+    open_seconds     REAL NOT NULL DEFAULT 0,
+    busy_seconds     REAL NOT NULL DEFAULT 0,
+    cpu_seconds      REAL NOT NULL DEFAULT 0,
+    mem_mb_max       REAL NOT NULL DEFAULT 0,
+    updated_at       TEXT,
+    PRIMARY KEY (hour, server_id)
+)"""
+PERSON_HOURLY = """
+CREATE TABLE IF NOT EXISTS interactive_person_hourly (
+    hour              TEXT NOT NULL,
+    server_id         TEXT NOT NULL,
+    user              TEXT NOT NULL,
+    runs              INTEGER NOT NULL DEFAULT 0,
+    open_seconds      REAL NOT NULL DEFAULT 0,
+    busy_seconds      REAL NOT NULL DEFAULT 0,
+    measured_seconds  REAL NOT NULL DEFAULT 0,
+    cpu_seconds       REAL NOT NULL DEFAULT 0,
+    mem_mb_max        REAL NOT NULL DEFAULT 0,
+    updated_at        TEXT,
+    PRIMARY KEY (hour, server_id, user)
+)"""
 STATE = """
 CREATE TABLE IF NOT EXISTS interactive_state (
     key        TEXT PRIMARY KEY,
@@ -77,9 +135,35 @@ CREATE TABLE IF NOT EXISTS interactive_state (
 
 def ensure(conn: sqlite3.Connection) -> None:
     conn.execute(DAILY)
+    conn.execute(HOURLY)
+    conn.execute(PERSON_HOURLY)
     conn.execute(STATE)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_daily_user "
                  "ON interactive_daily(user, day)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_person_hourly_user "
+                 "ON interactive_person_hourly(user, hour)")
+
+
+def _add(conn: sqlite3.Connection, table: str, keys: dict, add: dict, top: dict,
+         stamp: str) -> None:
+    """Add ``add`` to the row's columns and raise ``top``'s to at least the
+    values given, creating the row. SELECT, then UPDATE or INSERT: no
+    ON CONFLICT, which older SQLite libraries lack."""
+    where = " AND ".join(f"{k} = ?" for k in keys)
+    cols = list(add) + list(top)
+    row = conn.execute(f"SELECT {', '.join(cols)} FROM {table} WHERE {where}",
+                       tuple(keys.values())).fetchone()
+    if row is None:
+        names = list(keys) + cols + ["updated_at"]
+        values = list(keys.values()) + list(add.values()) + list(top.values()) + [stamp]
+        conn.execute(f"INSERT INTO {table} ({', '.join(names)}) "
+                     f"VALUES ({', '.join('?' * len(names))})", values)
+        return
+    old = dict(zip(cols, row))
+    values = [old[k] + v for k, v in add.items()] + [max(old[k] or 0, v) for k, v in top.items()]
+    sets = ", ".join(f"{c} = ?" for c in cols)
+    conn.execute(f"UPDATE {table} SET {sets}, updated_at = ? WHERE {where}",
+                 values + [stamp] + list(keys.values()))
 
 
 def _key(s: dict) -> str:
@@ -119,10 +203,12 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
     state = []
     person = defaultdict(lambda: {"busy": False, "measured": False, "mem": 0.0, "cpu": 0.0,
                                   "new": 0})
+    counted = 0
     for s in sessions:
         user, kind = s.get("user"), s.get("session_type")
         if not user or not kind:
             continue
+        counted += 1
         me = person[user]
         key = _key(s)
         ticks = s.get("cpu_ticks")
@@ -173,6 +259,27 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                 t["busy_seconds"] += dt
 
     stamp = now.isoformat()
+    hour = now.strftime("%Y-%m-%dT%H")
+    busy_people = sum(1 for me in person.values() if me["busy"])
+    measured_people = sum(1 for me in person.values() if me["measured"])
+    _add(conn, "interactive_hourly", {"hour": hour, "server_id": server_id},
+         {"runs": 1, "measured_runs": 1 if dt else 0,
+          "people_sum": len(person), "busy_people_sum": busy_people if dt else 0,
+          "measured_people_sum": measured_people if dt else 0,
+          "open_seconds": len(person) * dt if dt else 0.0,
+          "busy_seconds": busy_people * dt if dt else 0.0,
+          "cpu_seconds": sum(me["cpu"] for me in person.values())},
+         {"people_max": len(person), "busy_people_max": busy_people if dt else 0,
+          "sessions_max": counted, "mem_mb_max": sum(me["mem"] for me in person.values())},
+         stamp)
+    for user, me in person.items():
+        _add(conn, "interactive_person_hourly",
+             {"hour": hour, "server_id": server_id, "user": user},
+             {"runs": 1, "open_seconds": dt or 0.0,
+              "busy_seconds": dt if dt and me["busy"] else 0.0,
+              "measured_seconds": dt if dt and me["measured"] else 0.0,
+              "cpu_seconds": me["cpu"]},
+             {"mem_mb_max": me["mem"]}, stamp)
     for (user, kind), t in totals.items():
         row = conn.execute(
             "SELECT sessions, session_seconds, busy_seconds, cpu_measured_seconds, cpu_seconds, "
