@@ -14,12 +14,15 @@ def course_group():
     \b
     nomad course setup --term-start 2026-08-24   turn courses on (or change settings)
     nomad course list                            each course: instructors (and why), students
-    nomad course add GROUP NETID                 NETID teaches GROUP (not in it, or a TA)
-    nomad course exclude GROUP NETID             in GROUP and faculty, but not teaching it
+    nomad course add GROUP NETID                 NETID teaches GROUP this term
+    nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it this term
+                                                 (both: --every-term for good)
     nomad course remove GROUP NETID              off either list
     nomad course name GROUP "Econometrics"       how the course is shown
     nomad course ignore GROUP [--undo]           named like a course, but isn't one
     nomad course not-teaching NETID [--undo]     faculty group, but teaches nothing (staff)
+    nomad course answers                         what faculty said in the Console this term
+    nomad course answer GROUP NETID --yes|--no   record it for them
     Changes are shown first; --apply writes them (with a backup).
     `nomad facts course` gives a course's figures.
     """
@@ -84,6 +87,14 @@ def setup_cmd(ctx, term_start, pattern, faculty_group, min_students, names, appl
     if names:
         notes.append("Instructors will see their students by name: a decision for the "
                      "institution (FERPA).")
+    if term_start and _date(term_start):
+        before = courses_from(_original(edit))
+        old = before.start().isoformat()                # set, or the calendar's
+        if old != _date(term_start).isoformat():
+            held = [g for g, x in before.listed.items() if old in x.terms]
+            notes.append(f"A new term: decisions for the term from {old} "
+                         f"({len(held)} course(s) in nomad.toml) and what faculty members said "
+                         "for it stop applying; they are kept as a record.")
     _finish(edit, changes, apply, check, notes)
 
 
@@ -141,21 +152,31 @@ def _course_change(ctx, group, apply, new_group=False, **kw):
                 f"{group}: no such group in the groups data (nomad course list shows the "
                 "courses). Check the spelling, or give --new-group for a group not collected yet.")
     edit = _edit(ctx)
+    # Decisions about who teaches hold for this term unless --every-term.
+    before = courses_from(_original(edit))
+    term = before.start().isoformat()
+    if kw.get("add") or kw.get("exclude"):
+        from datetime import date
+        note = _term_note(before, date.today())
+        if note:
+            click.echo(click.style(note, fg="yellow"))
     try:
-        changes = set_course(edit, group, **kw)
+        changes = set_course(edit, group, term=term, **kw)
     except CourseError as e:
         raise click.ClickException(str(e))
     g = group.strip()
 
     def check(d):
-        c = courses_from(d).listed.get(g)
+        cs = courses_from(d)
+        c = cs.listed.get(g)
+        added, out = cs.decisions(g, term)
         if kw.get("add"):
-            return c is not None and kw["add"].strip().lower() in c.instructors
+            return kw["add"].strip().lower() in added
         if kw.get("exclude"):
-            return c is not None and kw["exclude"].strip().lower() in c.exclude
+            return kw["exclude"].strip().lower() in out
         if kw.get("remove"):
             n = kw["remove"].strip().lower()
-            return c is None or (n not in c.instructors and n not in c.exclude)
+            return n not in added and n not in out
         if kw.get("name") is not None:
             return ((c.name or "") if c else "") == " ".join(kw["name"].split())
         if kw.get("ignore") is not None:
@@ -169,26 +190,32 @@ def _course_change(ctx, group, apply, new_group=False, **kw):
 @course_group.command("add")
 @click.argument("group")
 @click.argument("netid")
+@click.option("--every-term", is_flag=True,
+              help="Teaches it every term (default: this term only).")
 @click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def add_cmd(ctx, group, netid, apply, new_group):
-    """NETID teaches GROUP: when no faculty member is in the group, when
-    several are and nomad can't tell which teaches it this term, or for a
-    co-instructor or a TA."""
-    _course_change(ctx, group, apply, new_group, add=netid)
+def add_cmd(ctx, group, netid, every_term, apply, new_group):
+    """NETID teaches GROUP this term: when no faculty member is in the group,
+    when several are and nomad can't tell which teaches it, or for a
+    co-instructor or a TA. Decisions for a term stop applying when the term
+    moves on (--every-term: they don't)."""
+    _course_change(ctx, group, apply, new_group, add=netid, every_term=every_term)
 
 
 @course_group.command("exclude")
 @click.argument("group")
 @click.argument("netid")
+@click.option("--every-term", is_flag=True,
+              help="Never teaches it (default: not this term).")
 @click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def exclude_cmd(ctx, group, netid, apply, new_group):
-    """NETID is in GROUP and in the faculty group but does not teach it
-    (overrides nomad's guess from who was active this term)."""
-    _course_change(ctx, group, apply, new_group, exclude=netid)
+def exclude_cmd(ctx, group, netid, every_term, apply, new_group):
+    """NETID is in GROUP and in the faculty group but doesn't teach it this
+    term (overrides what they said and nomad's guess). For someone who
+    teaches no course at all, `nomad course not-teaching`."""
+    _course_change(ctx, group, apply, new_group, exclude=netid, every_term=every_term)
 
 
 @course_group.command("remove")
@@ -197,7 +224,8 @@ def exclude_cmd(ctx, group, netid, apply, new_group):
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
 def remove_cmd(ctx, group, netid, apply):
-    """NETID off GROUP's instructors and excluded lists."""
+    """NETID off GROUP's instructors and excluded lists (this term's and
+    every term's)."""
     _course_change(ctx, group, apply, remove=netid)
 
 
@@ -247,13 +275,99 @@ def not_teaching_cmd(ctx, netid, undo, apply):
     _finish(edit, changes, apply, check, notes)
 
 
-def _short(why: str, sites=None) -> str:
-    from nomad.config.courses import ACTIVE, ONLY
+@course_group.command("answers")
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.option("--all-terms", is_flag=True, help="Every term's answers, not only this term's.")
+@click.option("--mask", is_flag=True, help="Groups and NetIDs numbered.")
+@click.pass_context
+def answers_cmd(ctx, db, all_terms, mask):
+    """What faculty members said (in the Console) about teaching their
+    course groups' courses this term."""
+    from datetime import datetime
+
+    from nomad.config import course_answers
+    from nomad.config.courses import courses_from
+    from nomad.facts.cli import _db
+    c = courses_from(ctx.obj.get("config", {}) or {})
+    term = c.start(datetime.now().date()).isoformat()
+    path = course_answers.path_beside(_db(ctx, db))
+    try:
+        rows = course_answers.listing(path, None if all_terms else term)
+    except course_answers.AnswersError as e:
+        raise click.ClickException(str(e))
+    if not rows:
+        click.echo(f"No answers {'yet' if all_terms else 'for the term from ' + term} "
+                   f"({path if not mask else 'course_answers.db'}).")
+        return
+    groups: dict = {}
+    for i, r in enumerate(rows, 1):
+        g = groups.setdefault(r["group"], f"course #{len(groups) + 1}") if mask else r["group"]
+        who = f"person {i}" if mask else r["netid"]
+        click.echo(f"  {r['term']}  {g}: {who} {'teaches it' if r['teaches'] else 'does not'} "
+                   f"(said {r['answered_at']})")
+
+
+@course_group.command("answer")
+@click.argument("group")
+@click.argument("netid")
+@click.option("--yes", "teaches", flag_value="yes", help="NETID teaches GROUP this term.")
+@click.option("--no", "teaches", flag_value="no", help="NETID doesn't teach it this term.")
+@click.option("--clear", "teaches", flag_value="clear", help="Forget what NETID said.")
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.pass_context
+def answer_cmd(ctx, group, netid, teaches, db):
+    """Record what NETID said about teaching GROUP this term, as the Console
+    does when they answer there (say, they told you by email). Only one of
+    the course group's faculty members can answer; nomad.toml's decisions
+    still win."""
+    from datetime import datetime
+
+    from nomad.config import course_answers
+    from nomad.config.courses import courses_from
+    from nomad.facts.cli import _open
+    from nomad.facts.courses import may_answer
+    if not teaches:
+        raise click.UsageError("give --yes, --no or --clear")
+    c = courses_from(ctx.obj.get("config", {}) or {})
+    term = c.start(datetime.now().date()).isoformat()
+    path, conn = _open(ctx, db)
+    try:
+        ok, why = may_answer(conn, ctx.obj.get("config", {}) or {}, netid, group.strip())
+    finally:
+        conn.close()
+    if teaches != "clear" and not ok:
+        raise click.ClickException(f"{netid} can't answer for {group}: {why}")
+    value = None if teaches == "clear" else teaches == "yes"
+    try:
+        course_answers.record(course_answers.path_beside(path), term, group.strip(), netid, value)
+    except course_answers.AnswersError as e:
+        raise click.ClickException(str(e))
+    said = {"yes": "teaches it", "no": "doesn't teach it", "clear": "answer forgotten"}[teaches]
+    click.echo(f"{netid.strip().lower()}, {group.strip()}, term from {term}: {said}.")
+
+
+def _short(why: str, sites=None, every_term: bool = False) -> str:
+    from nomad.config.courses import ACTIVE, ADDED, CONFIRMED, ONLY
     if why == ONLY:
         return "only faculty member"
     if why == ACTIVE and sites:
         return f"active on {', '.join(sites)}"
+    if why == ADDED:
+        return "added, every term" if every_term else "added this term"
+    if why == CONFIRMED:
+        return "said so"
     return why
+
+
+def _term_note(c, today) -> str | None:
+    """When the calendar's term has moved past nomad.toml's term_start."""
+    from nomad.config.courses import term_start_for
+    cal = term_start_for(today)
+    if c.term_start and cal > c.term_start:
+        return (f"nomad.toml's term_start is {c.term_start}, and by the calendar a new term "
+                f"began on {cal}: once it has, `nomad course setup --term-start YYYY-MM-DD` "
+                f"(decisions for the term from {c.term_start} then stop applying)")
+    return None
 
 
 @course_group.command("list")
@@ -289,11 +403,22 @@ def list_cmd(ctx, db, mask):
         since = datetime.combine(start, datetime.min.time())
         found = course_groups(c, group_names(conn))
         activity = Activity(conn, since, members_of, c)
+        from nomad.config import course_answers
+        try:
+            said = course_answers.load(course_answers.path_beside(path), start.isoformat())
+        except course_answers.AnswersError as e:
+            said = {}
+            click.echo(click.style(f"{course_answers.FILE if mask else e}: can't read it; what "
+                                   "faculty members said is not counted below", fg="yellow"))
+        note = _term_note(c, now.date())
+        if note:
+            click.echo(click.style(note, fg="yellow"))
         click.echo(f"Courses this term (from {start}, "
                    f"{'nomad.toml' if c.term_start else 'by the calendar'})")
-        click.echo(f"Instructors: those added by name; the group's one member of "
-                   f"{c.faculty_group!r}; with several, those who joined the group this term, "
-                   "else those active this term where its students work; less those excluded.")
+        click.echo(f"Instructors: those added by name; of the group's members in "
+                   f"{c.faculty_group!r}, those who said they teach it this term, else the one "
+                   "member, else those who joined the group this term, else those active this "
+                   "term where its students work; less those excluded and those who said no.")
         if c.not_teaching:
             who = (f"{len(c.not_teaching)} person(s)" if mask
                    else ", ".join(c.not_teaching))
@@ -305,7 +430,7 @@ def list_cmd(ctx, db, mask):
         shown = 0
         for g in found:
             r = roster(c, g, members_of, activity.of, first_seen(conn, g), since,
-                       activity.faculty)
+                       activity.faculty, said.get(g))
             t = r["teaching"]
             students = (f"{len(r['this_term'])} student(s) this term"
                         + (f", {len(r['left_out_earlier'])} from earlier terms"
@@ -323,11 +448,15 @@ def list_cmd(ctx, db, mask):
                 who = f"{len(r['instructors'])} instructor(s)"
             else:
                 sites = activity.faculty_sites.get(g)
-                who = ", ".join(f"{n} ({_short(t['why'][n], sites)})"
+                always = set(c.listed[g].instructors) if g in c.listed else set()
+                who = ", ".join(f"{n} ({_short(t['why'][n], sites, n in always)})"
                                 for n in sorted(r["instructors"]))
-            if t["not_active"]:
-                who += (f"; {len(t['not_active'])} other faculty member(s) not active this term"
-                        + ("" if mask else f" ({', '.join(sorted(t['not_active']))})"))
+            if t["left_out"]:
+                who += (f"; {len(t['left_out'])} other faculty member(s) left out this term"
+                        + ("" if mask else f" ({', '.join(sorted(t['left_out']))})"))
+            if t["said_no"]:
+                who += (f"; {len(t['said_no'])} said they don't teach it"
+                        + ("" if mask else f" ({', '.join(sorted(t['said_no']))})"))
             click.echo(f"  {label}: {who}; {students}")
         if nobody:
             click.echo("Shown to nobody this term (no instructor; `nomad course add GROUP NETID` "
@@ -335,8 +464,13 @@ def list_cmd(ctx, db, mask):
             for i, (g, t, students) in enumerate(nobody, 1):
                 label = f"group #{i}" if mask else c.label(g)
                 if t["undecided"]:
-                    why = (f"{len(t['faculty'])} faculty members, none active this term"
+                    why = (f"{len(t['faculty'])} faculty member(s)"
+                           + (" besides those who said no" if t["said_no"] else "")
+                           + ", none active this term"
                            + ("" if mask else f" ({', '.join(sorted(t['faculty']))})"))
+                elif t["said_no"]:
+                    why = ("its faculty member(s) said they don't teach it"
+                           + ("" if mask else f" ({', '.join(sorted(t['said_no']))})"))
                 else:
                     why = "no faculty member in the group"
                 click.echo(f"  {label}: {why}; {students}")

@@ -163,10 +163,19 @@ For each course the person teaches this term, by nomad.toml's
 * `jobs`: their cluster jobs, taken together.
 
 Each course says who teaches it and why (`instructors_why`: `added` by
-name, `only` faculty member in the group, `joined` the group this term,
-`active` this term where its students work, those sites in `active_on`; see
-Courses in config.md). Asked for every course, one nobody teaches this term
-is left out and listed in `not_shown` with the reason.
+name, `confirmed` (they said so this term), `only` faculty member in the
+group, `joined` the group this term, `active` this term where its students
+work, those sites in `active_on`; see Courses in config.md), and how many of
+its faculty members were left out or said no. Asked for every course, one
+nobody teaches this term is left out and listed in `not_shown` with the
+reason. `answers` (from `nomad.config.course_answers.load`) is what faculty
+members said this term.
+
+For the Console's questions: `facts.courses.questions(conn, config, netid,
+answers)` lists the courses whose groups have `netid` as a faculty member
+(with students this term, or already answered): their answer and whether
+nomad takes them as teaching it; `facts.courses.may_answer(conn, config,
+netid, group)` says whether they may answer for a group.
 
 A week before a figure was recorded is left out of it, never counted as
 zero: hours open from nomad 1.11 (earlier weeks once `nomad interactive

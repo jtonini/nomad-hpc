@@ -106,18 +106,19 @@ def test_setup_and_course_changes_write_tables_that_read_back(tmp_path):
     assert "courses are on" in C.set_settings(e, term_start="2026-08-24")[0]
     e.save(lambda d: True)
     e = TomlEdit(p)
-    assert C.set_course(e, "demo202", add="Prof2") == ["prof2 teaches demo202"]
+    assert C.set_course(e, "demo202", add="Prof2", every_term=True) == \
+        ["prof2 teaches demo202 (every term)"]
     e.save(lambda d: True)
     e = TomlEdit(p)
     C.set_course(e, "demo101", name="Intro  Data")
-    C.set_course(e, "demo101", exclude="prof3")
+    C.set_course(e, "demo101", exclude="prof3", every_term=True)
     e.save(lambda d: True)
     c = C.courses_from(TomlEdit(p).data)
     assert c.enabled and c.term_start == date(2026, 8, 24)
     assert c.listed["demo202"].instructors == ("prof2",)
     assert c.listed["demo101"].name == "Intro Data" and c.listed["demo101"].exclude == ("prof3",)
     e = TomlEdit(p)
-    assert C.set_course(e, "demo202", add="prof2") == []           # already so
+    assert C.set_course(e, "demo202", add="prof2", every_term=True) == []    # already so
     assert C.set_course(e, "demo202", remove="prof2") == ["prof2 no longer listed as teaching demo202"]
     e.save(lambda d: True)
     assert "demo202" not in C.courses_from(TomlEdit(p).data).listed
@@ -130,7 +131,7 @@ def test_setup_and_course_changes_write_tables_that_read_back(tmp_path):
 def test_edits_refuse_what_they_cannot_do_safely(tmp_path):
     e = TomlEdit(_toml(tmp_path, '[console]\ncourses = { term_start = "2026-08-24" }\n'))
     with pytest.raises(C.CourseError):
-        C.set_course(e, "demo101", add="prof1")
+        C.set_course(e, "demo101", add="prof1", every_term=True)
     with pytest.raises(C.CourseError):
         C.set_settings(e, names=True)
     e = TomlEdit(_toml(tmp_path))
@@ -400,7 +401,7 @@ def _members(groups):
 
 
 def _active(*who):
-    return lambda group, candidates: {n: "used web1 this term" for n in candidates if n in who}
+    return lambda group, candidates: {n: C.ACTIVE for n in candidates if n in who}
 
 
 def test_one_faculty_member_teaches_it_several_must_have_been_active():
@@ -413,8 +414,8 @@ def test_one_faculty_member_teaches_it_several_must_have_been_active():
     t = C.teaching(c, "demo101", m, act)
     assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ONLY and not t["undecided"]
     t = C.teaching(c, "demo202", m, act)
-    assert t["instructors"] == {"prof2"} and t["not_active"] == {"prof1", "prof3"}
-    assert t["why"] == {"prof2": "used web1 this term"}
+    assert t["instructors"] == {"prof2"} and t["left_out"] == {"prof1", "prof3"}
+    assert t["why"] == {"prof2": C.ACTIVE}
     t = C.teaching(c, "demo303", m, _active())
     assert t["instructors"] == set() and t["undecided"]
     t = C.teaching(c, "demo404", m, act)
@@ -447,7 +448,7 @@ def test_what_the_site_says_wins_over_the_guess():
     # Added by name: teaches it; the other, not active, is said to be left out.
     t = C.teaching(c, "demo303", m, _active())
     assert t["instructors"] == {"prof3"} and t["why"]["prof3"] == C.ADDED
-    assert t["not_active"] == {"prof2"} and not t["undecided"]
+    assert t["left_out"] == {"prof2"} and not t["undecided"]
     # Staff in the faculty group teach nothing, active or not: one faculty member left.
     t = C.teaching(c, "demo505", m, _active("staff1"))
     assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ONLY
@@ -536,7 +537,7 @@ def test_faculty_count_as_active_where_the_courses_students_work(tmp_path):
     shown = {x["group"]: x for x in d["courses"]}
     assert set(shown) == {"demo202", "demo505", "demo707"}
     assert shown["demo202"]["instructors"] == ["prof10", "prof3"]
-    assert shown["demo202"]["faculty_not_active"] == 3 and shown["demo202"]["active_on"] == ["web1"]
+    assert shown["demo202"]["faculty_left_out"] == 3 and shown["demo202"]["active_on"] == ["web1"]
     # s1, s8, s9 and old2 (active, if elsewhere); s2 not active.
     assert shown["demo202"]["students"]["this_term"] == 4
     assert shown["demo505"]["instructors_why"] == {"prof1": "joined"}
@@ -576,10 +577,10 @@ def test_course_list_says_why_and_not_teaching_is_written(tmp_path):
     lines = r.output.splitlines()
     line = next(x for x in lines if x.startswith("  demo202:"))
     assert "prof10 (active on web1), prof3 (active on web1)" in line
-    assert "3 other faculty member(s) not active this term (prof11, prof2, prof4)" in line
+    assert "3 other faculty member(s) left out this term (prof11, prof2, prof4)" in line
     assert "prof1 (joined)" in next(x for x in lines if x.startswith("  demo505:"))
     tail = r.output[r.output.index("Shown to nobody"):]
-    assert "demo303: 2 faculty members, none active this term (prof5, prof6)" in tail
+    assert "demo303: 2 faculty member(s), none active this term (prof5, prof6)" in tail
     assert "demo404: no faculty member in the group" in tail
     # --mask: no group, NetID or site, in either command, text or JSON.
     masked = [CliRunner().invoke(cli, ["-c", str(cfg)] + args + ["--db", db, "--mask"]).output
@@ -609,3 +610,231 @@ def test_course_list_says_why_and_not_teaching_is_written(tmp_path):
                            'term_start = "2026-08-24"\npattern = "^demo303$"\n')
     r = CliRunner().invoke(cli, ["-c", str(only), "facts", "course", "--db", db])
     assert "no course has an instructor this term" in r.output and "demo303" in r.output
+
+
+
+# --- decisions for a term, and what instructors say (1.12.4) ------------------------------
+
+FALL, SPRING = "2026-08-24", "2027-01-11"
+
+
+def test_decisions_hold_for_their_term(tmp_path):
+    p = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                        f'term_start = "{FALL}"\n')
+    e = TomlEdit(p)
+    with pytest.raises(C.CourseError):                      # a term, or every term
+        C.set_course(e, "demo202", exclude="prof2")
+    assert C.set_course(e, "demo202", exclude="prof2", term=FALL) == \
+        ["prof2 is not one of demo202's instructors (the term from 2026-08-24)"]
+    assert C.set_course(e, "demo202", add="prof9", term=FALL) == \
+        ["prof9 teaches demo202 (the term from 2026-08-24)"]
+    e.save(lambda d: True)
+    assert '[console.courses.groups.demo202.terms.2026-08-24]' in p.read_text()
+    c = C.courses_from(TomlEdit(p).data)
+    assert not c.problems
+    assert c.decisions("demo202", FALL) == ({"prof9"}, {"prof2"})
+    assert c.decisions("demo202", SPRING) == (set(), set())          # a new term: nothing holds
+    groups = {"faculty": {"prof1", "prof2"}, "demo202": {"prof1", "prof2", "s1"}}
+    t = C.teaching(c, "demo202", _members(groups), _active("prof2"), term=FALL)
+    assert t["instructors"] == {"prof9", "prof1"}                   # prof1: the one left
+    t = C.teaching(c, "demo202", _members(groups), _active("prof2"), term=SPRING)
+    assert t["instructors"] == {"prof2"}                            # the guess again
+    # The same decision for every term is one more; remove takes both.
+    e = TomlEdit(p)
+    assert C.set_course(e, "demo202", exclude="prof2", term=FALL, every_term=True) == [
+        "prof2 is not one of demo202's instructors (every term)"]
+    e.save(lambda d: True)
+    c = C.courses_from(TomlEdit(p).data)
+    assert c.listed["demo202"].exclude == ("prof2",) and c.decisions("demo202", SPRING)[1] == {"prof2"}
+    e = TomlEdit(p)
+    assert C.set_course(e, "demo202", remove="prof9", term=FALL) == \
+        ["prof9 no longer listed as teaching demo202"]
+    e.save(lambda d: True)
+    assert C.courses_from(TomlEdit(p).data).decisions("demo202", FALL) == (set(), {"prof2"})
+    bad = C.courses_from({"console": {"courses": {"groups": {"demo202": {"terms": {
+        "fall": {"exclude": ["x"]}, "20260824": {"exclude": ["z"]},
+        FALL: {"exclude": ["y"], "colour": 1}}}}}}})
+    text = " ".join(bad.problems)
+    assert "fall" in text and "20260824" in text and "colour" in text
+    assert bad.decisions("demo202", FALL)[1] == {"y"}
+
+
+def test_a_terms_decisions_override_every_terms_and_leave_them_alone(tmp_path):
+    p = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                        f'term_start = "{FALL}"\n\n[console.courses.groups."demo202"]\n'
+                        'instructors = ["alice"]\nexclude = ["bob"]\n')
+    e = TomlEdit(p)
+    C.set_course(e, "demo202", exclude="alice", term=FALL)
+    C.set_course(e, "demo202", add="bob", term=FALL)
+    e.save(lambda d: True)
+    c = C.courses_from(TomlEdit(p).data)
+    assert c.listed["demo202"].instructors == ("alice",) and c.listed["demo202"].exclude == ("bob",)
+    assert c.decisions("demo202", FALL) == ({"bob"}, {"alice"})
+    assert c.decisions("demo202", SPRING) == ({"alice"}, {"bob"})       # next term, as before
+    # A comment in the term's table stays when another change leaves it alone.
+    text = p.read_text().replace('exclude = ["alice"]', 'exclude = ["alice"]  # per the chair')
+    p.write_text(text)
+    e = TomlEdit(p)
+    C.set_course(e, "demo202", name="Econometrics")
+    e.save(lambda d: True)
+    assert "# per the chair" in p.read_text()
+    # Keys set inside another table from the group's: refused, not lost.
+    p.write_text(p.read_text() + '\n[console.courses.groups."demo303"]\n'
+                                 f'terms."{SPRING}".instructors = ["future"]\n')
+    with pytest.raises(C.CourseError):
+        C.set_course(TomlEdit(p), "demo303", name="Something")
+
+
+def test_the_calendar_says_when_term_start_is_out_of_date():
+    from nomad.config.course_cli import _term_note
+    c = C.courses_from({"console": {"courses": {"term_start": FALL}}})
+    assert _term_note(c, date(2026, 10, 14)) is None
+    note = _term_note(c, date(2027, 1, 12))
+    assert "2027-01-04" in note and "--term-start" in note
+
+
+def test_what_instructors_say_comes_before_the_guess():
+    groups = {"faculty": {"prof1", "prof2", "prof3", "staff1"},
+              "demo202": {"prof1", "prof2", "prof3", "s2"},
+              "demo101": {"prof1", "s1"}}
+    m = _members(groups)
+    cfg = {"console": {"courses": {"term_start": FALL, "not_teaching": ["staff1"],
+                                   "groups": {"demo202": {"terms": {FALL: {"exclude": ["prof3"]}}}}}}}
+    c = C.courses_from(cfg)
+    # prof1 said yes: only those who did, though prof2 was active.
+    t = C.teaching(c, "demo202", m, _active("prof2"), {"prof1": True})
+    assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.CONFIRMED
+    assert t["left_out"] == {"prof2"}
+    # prof2 said no: that says nothing about prof1, who wasn't active either.
+    t = C.teaching(c, "demo202", m, _active("prof2"), {"prof2": False})
+    assert t["instructors"] == set() and t["undecided"] and t["said_no"] == {"prof2"}
+    t = C.teaching(c, "demo202", m, _active("prof1", "prof2"), {"prof2": False})
+    assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ACTIVE
+    # nomad.toml wins: prof3 excluded this term, whatever they said; staff never count.
+    t = C.teaching(c, "demo202", m, _active(), {"prof3": True, "staff1": True})
+    assert "prof3" not in t["instructors"] and "staff1" not in t["instructors"]
+    # The one faculty member said no: nobody, and said so.
+    t = C.teaching(c, "demo101", m, None, {"prof1": False})
+    assert t["instructors"] == set() and not t["undecided"] and t["said_no"] == {"prof1"}
+    # Someone who isn't a faculty member of the group can't say yes.
+    t = C.teaching(c, "demo101", m, None, {"s1": True})
+    assert t["instructors"] == {"prof1"}
+
+
+def test_answers_are_kept_beside_the_hub_database(tmp_path):
+    import os
+    import stat
+
+    from nomad.config import course_answers as A
+    path = A.path_beside(tmp_path / "combined.db")
+    assert A.load(path, FALL) == {} and A.listing(path) == []
+    A.record(path, FALL, "demo202", "Prof1", True, now=NOW)
+    A.record(path, FALL, "demo202", "prof2", False, now=NOW)
+    A.record(path, SPRING, "demo202", "prof2", True, now=NOW)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert A.load(path, FALL) == {"demo202": {"prof1": True, "prof2": False}}
+    assert A.load(path, SPRING) == {"demo202": {"prof2": True}}
+    A.record(path, FALL, "demo202", "prof2", None)
+    assert A.load(path, FALL) == {"demo202": {"prof1": True}}
+    assert len(A.listing(path)) == 2 and len(A.listing(path, FALL)) == 1
+    os.chmod(path, 0o644)                                    # widened by hand: narrowed again
+    A.record(path, FALL, " demo202 ", "PROF3 ", True)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert A.load(path, FALL)["demo202"]["prof3"] is True
+    with pytest.raises(A.AnswersError):
+        A.record(path, "20260824", "demo202", "prof3", True)
+    junk = tmp_path / "junk" / A.FILE
+    junk.parent.mkdir()
+    junk.write_text("not a database")
+    with pytest.raises(A.AnswersError):
+        A.load(junk, FALL)
+    odd = tmp_path / "a#b?c"                                  # a path with URI characters
+    A.record(A.path_beside(odd / "combined.db"), FALL, "demo202", "prof1", True)
+    assert A.load(A.path_beside(odd / "combined.db"), FALL) == {"demo202": {"prof1": True}}
+
+
+def test_faculty_are_asked_about_their_course_groups_and_their_answers_count(tmp_path):
+    from nomad.config import course_answers as A
+    from nomad.facts.courses import may_answer, questions
+    conn = _hub(tmp_path)
+    cfg = {"console": {"courses": {"term_start": FALL, "not_teaching": ["prof7"],
+                                   "groups": {"demo707": {"instructors": ["prof4"]}}}}}
+    # prof2: in demo202 (students this term) and demo707 (students on hpc1).
+    asked = {q["group"]: q for q in questions(conn, cfg, "prof2", now=NOW)}
+    assert set(asked) == {"demo202", "demo707"}
+    assert asked["demo202"]["answer"] is None and not asked["demo202"]["teaches"]
+    assert asked["demo707"]["teaches"] and asked["demo707"]["why"] == C.ACTIVE
+    # prof4 is added to demo707 by name: not asked there.
+    assert {q["group"] for q in questions(conn, cfg, "prof4", now=NOW)} == {"demo202"}
+    assert may_answer(conn, cfg, "prof2", "demo202", NOW) == (True, "")
+    assert may_answer(conn, cfg, "s1", "demo202", NOW)[0] is False          # a student
+    assert may_answer(conn, cfg, "prof7", "demo505", NOW)[0] is False       # staff
+    assert may_answer(conn, cfg, "prof4", "demo707", NOW)[0] is False       # already added
+    assert may_answer(conn, cfg, "prof2", "faculty", NOW)[0] is False       # not a course
+    # prof2 says yes to demo202: they teach it, and only they.
+    path = A.path_beside(tmp_path / "hub.db")
+    A.record(path, FALL, "demo202", "prof2", True)
+    said = A.load(path, FALL)
+    c, = [x for x in courses(conn, cfg, now=NOW, answers=said)["courses"] if x["group"] == "demo202"]
+    assert c["instructors"] == ["prof2"] and c["instructors_why"] == {"prof2": "confirmed"}
+    assert [x["group"] for x in courses(conn, cfg, netid="prof2", now=NOW, answers=said)["courses"]] \
+        == ["demo202", "demo707"]
+    assert courses(conn, cfg, netid="prof3", now=NOW, answers=said)["courses"] == []
+    asked = {q["group"]: q for q in questions(conn, cfg, "prof2", said, now=NOW)}
+    assert asked["demo202"]["answer"] is True and asked["demo202"]["why"] == C.CONFIRMED
+
+
+def test_course_answer_and_answers_on_the_command_line(tmp_path):
+    from click.testing import CliRunner
+
+    from nomad.cli import cli
+    _hub(tmp_path).close()
+    cfg = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                          f'term_start = "{FALL}"\n')
+    db = str(tmp_path / "hub.db")
+    run = lambda *a: CliRunner().invoke(cli, ["-c", str(cfg), "course", *a])   # noqa: E731
+    r = run("answer", "demo202", "s1", "--yes", "--db", db)
+    assert r.exit_code != 0 and "faculty members" in r.output
+    r = run("answer", "demo202", "prof2", "--yes", "--db", db)
+    assert r.exit_code == 0, r.output
+    r = run("answers", "--db", db)
+    assert "demo202: prof2 teaches it" in r.output
+    assert "prof2" not in run("answers", "--db", db, "--mask").output
+    r = run("list", "--db", db)
+    line = next(x for x in r.output.splitlines() if x.startswith("  demo202:"))
+    assert line.startswith("  demo202: prof2 (said so);") and "left out this term" in line
+    r = run("answer", "demo202", "prof2", "--no", "--db", db)
+    line = next(x for x in run("list", "--db", db).output.splitlines()
+                if x.startswith("  demo202:"))
+    assert "1 said they don't teach it (prof2)" in line
+    # A decision for this term, shown as such; a new term_start says what stops applying.
+    r = run("add", "demo202", "prof4", "--apply")
+    assert r.exit_code == 0 and "(the term from 2026-08-24)" in r.output
+    line = next(x for x in run("list", "--db", db).output.splitlines()
+                if x.startswith("  demo202:"))
+    assert "prof4 (added this term)" in line
+    r = run("setup", "--term-start", SPRING)
+    assert "A new term: decisions for the term from 2026-08-24 (1 course(s)" in r.output
+    # Unset, the calendar's term is the one that ends.
+    cal = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n')
+    r = CliRunner().invoke(cli, ["-c", str(cal), "course", "setup", "--term-start", "2099-01-05"])
+    assert "A new term: decisions for the term from" in r.output
+
+
+
+def test_an_unreadable_answers_file_is_said_and_masked(tmp_path):
+    from click.testing import CliRunner
+
+    from nomad.cli import cli
+    from nomad.config import course_answers as A
+    _hub(tmp_path).close()
+    A.path_beside(tmp_path / "hub.db").write_text("not a database")
+    cfg = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                          f'term_start = "{FALL}"\n')
+    db = str(tmp_path / "hub.db")
+    for args in (["course", "list"], ["facts", "course"]):
+        r = CliRunner().invoke(cli, ["-c", str(cfg)] + args + ["--db", db, "--mask"])
+        assert r.exit_code == 0 and "course_answers.db: can't read it" in r.output
+        assert str(tmp_path) not in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "answers", "--db", db])
+    assert r.exit_code != 0 and "can't read it" in r.output

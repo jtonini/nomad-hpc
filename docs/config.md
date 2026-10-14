@@ -227,10 +227,10 @@ combined database; `--mask` for counts only).
 ### Courses: `nomad course`
 
 A course is a Unix group (`demo101`, say). Its instructors see it in `nomad
-facts course` (and, later, the Console): the class this term, each student as
-a row, when the class works. Nothing is a course until `[console.courses]` is
-there: a site that hasn't said how its groups work gets no course view rather
-than a wrong one.
+facts course` (and the Console): the class this term, each student as a row,
+when the class works. Nothing is a course until `[console.courses]` is there:
+a site that hasn't said how its groups work gets no course view rather than a
+wrong one.
 
 ```toml
 [console.courses]
@@ -243,50 +243,71 @@ not_teaching = ["jdoe"]                  # in the faculty group, teaches no cour
 
 [console.courses.groups."demo101"]
 name = "Econometrics"
-instructors = ["jdoe"]                   # teaches it, in the group or not
-exclude = ["asmith"]                     # in the group and faculty, not teaching it
+instructors = ["jdoe"]                   # teaches it every term
+exclude = ["asmith"]                     # in the group and faculty, never teaches it
+
+[console.courses.groups."demo101".terms."2026-08-24"]
+instructors = ["bsmith"]                 # teaches it this term
+exclude = ["cjones"]                     # doesn't teach it this term
 
 [console.courses.groups."lab201"]
 course = false                           # named like a course, but isn't one
 ```
 
 - A group is a course when its name matches `pattern` or it is listed under
-  `groups`. Its **instructors this term**:
-  - anyone listed (`nomad course add`);
-  - when one member of the group is in `faculty_group`, that person;
-  - when several are, those who joined the group this term; when none did,
-    those active this term where the course's students work (the servers
-    and clusters most of its active students used: research on another
-    cluster says nothing about a course). Someone added to a reused group
-    this term only for access counts as joined: exclude them. Groups are reused term after term and nobody takes last
-    term's instructor out. When none of them was, nomad can't tell who
-    teaches it, and nobody does until one is added;
+  `groups`. Its **instructors this term**, in this order:
+  1. anyone listed (`nomad course add`), this term or every term;
+  2. of the group's members in `faculty_group`, those who said in the
+     Console that they teach it this term (`nomad course answers`);
+  3. when none has, the group's one faculty member, when it has one;
+  4. when it has several, those who joined the group this term;
+  5. when none did, those active this term where the course's students work
+     (the servers and clusters most of its active students used: research
+     on another cluster says nothing about a course).
 
-  less anyone excluded from the group (`nomad course exclude`) and anyone in
-  `not_teaching` (staff in the faculty group; `nomad course not-teaching`)
-  unless added to the course by name. A course with no instructor is shown to
-  no one; `nomad course list` names those last.
+  Groups are reused term after term and nobody takes last term's instructor
+  out; when nothing above settles it, nomad can't tell who teaches it, and
+  nobody does until someone says so or is added. Left out: anyone excluded
+  from the group (`nomad course exclude`), this term or every term; anyone
+  who said they don't teach it this term; anyone in `not_teaching` (staff in
+  the faculty group, old accounts, people who retired; `nomad course
+  not-teaching`) unless added to the course by name. nomad.toml wins over
+  what people said, and both over nomad's guess. A course with no instructor
+  is shown to no one; `nomad course list` names those last.
+- **Decisions hold for a term.** Who teaches a course changes from term to
+  term, so `nomad course add` and `exclude` write under the term's own table
+  and stop applying when `term_start` moves on (they stay in nomad.toml as a
+  record); `--every-term` writes them for good. So do the answers people give
+  in the Console: each is for one term.
+- **`term_start` must move on.** When it is set, a new term begins only when
+  it is changed (`nomad course setup --term-start YYYY-MM-DD`); `nomad course
+  list` says when the calendar's term has moved past it. Left unset, it is the
+  Monday on or after 15 August, 1 January or 1 June (a US academic calendar);
+  set it to the first day of classes, or the weeks before would count in each
+  student's range as weeks of nothing.
 - Activity is a person's, not a course's: a faculty member active this term
   where a course's students work counts in every group of several they are
   in, and one who teaches without using the server is left out. `nomad
   course list` shows why each instructor is there; check it once a term.
-  `course add` takes no one off: when a group's one faculty member is last
-  term's instructor, exclude them. From the first term after nomad 1.11,
-  join dates say more: an instructor added to a reused group shows as joined
-  this term (a membership nomad saw before 1.11, on any site, has no date).
-- Its **students** are its other
-  members; of those, **this term's** joined since `term_start` or used an
-  interactive server or a cluster since then (groups nobody prunes keep
-  earlier terms' students). nomad records when a membership began from 1.11
-  on; before that, a member who hasn't been active this term can't be told
-  from an earlier term's, and is left out (and counted as such).
+  `course add` takes no one off. Join dates say more than activity: an
+  instructor added to a reused group shows as joined that term (a
+  membership nomad saw before 1.11, on any site, has no date); someone added
+  only for access counts as joined too: exclude them.
+- **What people say** is kept beside the hub's combined database
+  (`course_answers.db`, readable by its owner only), not in nomad.toml.
+  Only the group's faculty members can answer (not those excluded, staff, or
+  those already added by name); `nomad course answer GROUP NETID
+  --yes|--no|--clear` records an answer someone gave you another way.
+- Its **students** are its other members; of those, **this term's** joined
+  since `term_start` or used an interactive server or a cluster since then
+  (groups nobody prunes keep earlier terms' students). nomad records when a
+  membership began from 1.11 on; before that, a member who hasn't been active
+  this term can't be told from an earlier term's, and is left out (and
+  counted as such).
 - A group named like a course that isn't one (a project's or a lab's) is
   marked `course = false` (`nomad course ignore GROUP`): otherwise every
   faculty member in it would see its other members as a class. `nomad course
   list` shows every group taken for a course.
-- `term_start` defaults to the Monday on or after 15 August, 1 January or
-  1 June (a US academic calendar). Set it: weeks before classes began would
-  otherwise count in each student's range as weeks of nothing.
 - `min_students` defaults to 0: a small institution's course may have three
   students. With so few, even figures for the class together are close to
   each student's, and unnamed rows are not anonymous to someone who knows
@@ -294,18 +315,21 @@ course = false                           # named like a course, but isn't one
   student by name: both are for the institution to decide (FERPA).
 
 ```
-nomad course setup --term-start 2026-08-24   turn courses on, or change a setting
+nomad course setup --term-start 2026-08-24   turn courses on, or start a new term
 nomad course list                            each course: instructors (and why), students
-nomad course add GROUP NETID                 NETID teaches GROUP (not in it, or a TA)
-nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it
+nomad course add GROUP NETID                 NETID teaches GROUP this term
+nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it this term
+                                             (add, exclude: --every-term for good)
 nomad course remove GROUP NETID              off either list
 nomad course name GROUP "Econometrics"       how the course is shown
 nomad course ignore GROUP [--undo]           named like a course, but isn't one
 nomad course not-teaching NETID [--undo]     in the faculty group, teaches no course
+nomad course answers                         what faculty members said this term
+nomad course answer GROUP NETID --yes|--no   record what someone said
 ```
 
-Like `nomad lab`, each shows the change and writes it with `--apply`, after
-a backup, only if the file still reads back as intended.
+Like `nomad lab`, each change is shown first and written with `--apply`,
+after a backup, only if the file still reads back as intended.
 
 ## Environment Variables
 

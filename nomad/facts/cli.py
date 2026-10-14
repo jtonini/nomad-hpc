@@ -368,9 +368,11 @@ def _teachers(course: dict) -> str:
     teach = [f"{n} ({words(why[n])})" if n in why else n for n in course["instructors"]]
     text = ", ".join(teach) if teach else course.get("no_instructor",
                                                     "none found (nomad course add)")
-    if course.get("faculty_not_active"):
-        text += (f"; {course['faculty_not_active']} other faculty member(s) in the group not "
-                 "active this term")
+    if course.get("faculty_left_out") and teach:
+        text += (f"; {course['faculty_left_out']} other faculty member(s) in the group left out "
+                 "this term")
+    if course.get("faculty_said_no"):
+        text += f"; {course['faculty_said_no']} said they don't teach it"
     return text
 
 
@@ -422,11 +424,24 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
     from nomad.facts.courses import courses
     if groups and instructor:
         raise click.UsageError("give course groups or --instructor, not both")
+    from datetime import datetime
+
+    from nomad.config import course_answers
+    from nomad.config.courses import courses_from
     path, conn = _open(ctx, db)
     try:
-        data = courses(conn, ctx.obj.get("config", {}) or {},
+        config = ctx.obj.get("config", {}) or {}
+        term = courses_from(config).start(datetime.now().date()).isoformat()
+        try:
+            said = course_answers.load(course_answers.path_beside(path), term)
+        except course_answers.AnswersError as e:
+            said = {}
+            click.echo(click.style(f"{course_answers.FILE if mask else e}: can't read it; what "
+                                   "faculty members said is not counted", fg="yellow"), err=True)
+        data = courses(conn, config,
                        netid=instructor.strip().lower() if instructor else None,
-                       groups=list(groups) or None, names=True if names else None)
+                       groups=list(groups) or None, names=True if names else None,
+                       answers=said)
     finally:
         conn.close()
     if mask:

@@ -4,6 +4,7 @@
     person(conn, username, days, ...)     one person's work
     labs(conn, config, netid, days, ...)  the labs a person leads
     courses(conn, config, netid, ...)     the courses a person teaches, this term
+    questions(conn, config, netid, ...)   the courses to ask a faculty member about
 
 Read-only, from a nomad database (a site's own, or the hub's combined.db),
 whatever its tables hold: a figure that rests on nothing measured is None,
@@ -17,7 +18,7 @@ lead, and /api/v1/sites (aggregates only) for anyone signed in; `nomad
 facts` answers whoever can read the database. See docs/facts.md.
 """
 from nomad.facts._common import API, open_readonly  # noqa: F401
-from nomad.facts.courses import courses  # noqa: F401
+from nomad.facts.courses import courses, may_answer, questions  # noqa: F401
 from nomad.facts.labs import labs  # noqa: F401
 from nomad.facts.person import person  # noqa: F401
 from nomad.facts.sites import sites  # noqa: F401

@@ -214,14 +214,13 @@ class Activity:
     def _students(self, group: str) -> set:
         """The group's members who could be its students (not faculty, not
         staff, not added or excluded): where they work is where the course is."""
-        from nomad.config.courses import Course
         if self.members_of is None or self.courses is None:
             return set()
         c = self.courses
-        listed = c.listed.get(group, Course())
+        added, out = c.decisions(group, self.since.date().isoformat())
         lower = lambda names: {n.lower() for n in names if n}           # noqa: E731
         return (lower(self.members_of(group)) - lower(self.members_of(c.faculty_group))
-                - set(c.not_teaching) - set(listed.instructors) - set(listed.exclude))
+                - set(c.not_teaching) - added - out)
 
     def faculty(self, group: str, candidates: set) -> dict:
         """Of a course group's faculty members, who teaches it this term by
@@ -457,19 +456,85 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
     }
 
 
+def questions(conn: sqlite3.Connection, config: dict | None, netid: str,
+              answers: dict | None = None, now: datetime | None = None) -> list[dict]:
+    """What to ask ``netid`` this term: the courses whose groups they are a
+    faculty member of (not excluded, not staff, not added by name -- those
+    are decided) that have students this term or that they already answered
+    for. Each: group, name, students this term, their ``answer``
+    (True/False/None), and whether nomad takes them as teaching it now
+    (``teaches``, ``why``)."""
+    from nomad.config.access import members_lookup
+    from nomad.config.courses import (candidates, course_groups, courses_from, first_seen,
+                                      group_names, roster)
+    n = (netid or "").strip().lower()
+    now = now or datetime.now()
+    c = courses_from(config or {})
+    if conn is None or not c.enabled or not n:
+        return []
+    start = c.start(now.date())
+    term = start.isoformat()
+    since = datetime.combine(start, datetime.min.time())
+    _, members_of = members_lookup(conn)
+    activity = Activity(conn, since, members_of, c)
+    out = []
+    for g in course_groups(c, group_names(conn)):
+        if n not in candidates(c, g, members_of, term) or n in c.decisions(g, term)[0]:
+            continue
+        said = (answers or {}).get(g, {})
+        people = roster(c, g, members_of, activity.of, first_seen(conn, g), since,
+                        activity.faculty, said)
+        if not people["this_term"] and n not in said:
+            continue
+        why = people["teaching"]["why"].get(n)
+        out.append({"group": g, "name": c.listed[g].name if g in c.listed and c.listed[g].name
+                    else g, "term": term, "students_this_term": len(people["this_term"]),
+                    "answer": said.get(n), "teaches": n in people["instructors"], "why": why})
+    return out
+
+
+def may_answer(conn: sqlite3.Connection, config: dict | None, netid: str, group: str,
+               now: datetime | None = None) -> tuple[bool, str]:
+    """Whether ``netid`` may say whether they teach ``group`` this term: a
+    course whose group lists them as a faculty member, not excluded, not
+    staff, not already added by name. (ok, why not)."""
+    from nomad.config.access import members_lookup
+    from nomad.config.courses import candidates, courses_from
+    n = (netid or "").strip().lower()
+    c = courses_from(config or {})
+    if conn is None or not c.enabled:
+        return False, "courses are off"
+    if not c.is_course(group):
+        return False, "not a course"
+    term = c.start((now or datetime.now()).date()).isoformat()
+    _, members_of = members_lookup(conn)
+    if n in c.decisions(group, term)[0]:
+        return False, "already listed as teaching it"
+    if n not in candidates(c, group, members_of, term):
+        return False, "not one of the course group's faculty members"
+    return True, ""
+
+
 def _no_instructor(who: dict) -> str:
     if who["undecided"]:
-        return (f"{len(who['faculty'])} faculty members in the group, none of them active this "
-                "term: nobody teaches it until one is added (nomad course add)")
+        return (f"{len(who['faculty'])} faculty member(s) in the group"
+                + (" besides those who said no" if who["said_no"] else "")
+                + ", none of them active this term: nobody teaches it until one says so or is "
+                "added (nomad course add)")
+    if who["said_no"] and not who["faculty"]:
+        return ("its faculty members said they don't teach it this term "
+                "(nomad course add if someone else does)")
     return "no faculty member in the group and nobody added (nomad course add)"
 
 
 def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | None = None,
             groups: list | None = None, now: datetime | None = None,
-            names: bool | None = None) -> dict:
+            names: bool | None = None, answers: dict | None = None) -> dict:
     """The courses ``netid`` teaches (or, for staff, the ``groups`` named;
     neither: every course somebody teaches, the rest in ``not_shown``), this
-    term. ``names``: rows by name (None: as [console.courses] names says)."""
+    term. ``names``: rows by name (None: as [console.courses] names says).
+    ``answers``: what faculty members said this term, {group: {netid:
+    True/False}} (``nomad.config.course_answers.load``)."""
     from nomad.config.access import members_lookup
     from nomad.config.courses import course_groups, courses_from, courses_of, first_seen, group_names
     from nomad.facts import jobs as jobfacts
@@ -498,14 +563,15 @@ def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | N
         if others:
             out.setdefault("not_courses", others)
     elif netid:
-        chosen = courses_of(c, netid, known, members_of, activity.faculty)
+        chosen = courses_of(c, netid, known, members_of, activity.faculty, answers,
+                            start.isoformat())
     else:
         chosen = course_groups(c, known)
     ceilings = memory_ceilings(conn)
     for g in chosen:
         from nomad.config.courses import roster
         people = roster(c, g, members_of, activity.of, first_seen(conn, g), since,
-                        activity.faculty)
+                        activity.faculty, (answers or {}).get(g))
         who = people["teaching"]
         shown = c.listed[g].name if g in c.listed and c.listed[g].name else g
         if every and not people["instructors"]:
@@ -517,9 +583,10 @@ def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | N
         students = people["this_term"]
         entry = {"group": g, "name": shown,
                  "instructors": sorted(people["instructors"]),
-                 # added, only (faculty member), joined, active (see WHY)
+                 # added, confirmed, only (faculty member), joined, active (see WHY)
                  "instructors_why": {n: who["why"][n] for n in sorted(who["why"])},
-                 "faculty_not_active": len(who["not_active"]),
+                 "faculty_left_out": len(who["left_out"]),
+                 "faculty_said_no": len(who["said_no"]),
                  "students": {"listed": len(people["listed"]), "this_term": len(students),
                               "left_out": len(people["left_out"]),
                               # joined in an earlier term, as nomad saw it
