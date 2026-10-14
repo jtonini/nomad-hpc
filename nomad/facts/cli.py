@@ -322,6 +322,28 @@ def _strip(values: list, top: float) -> str:
     return "".join(out)
 
 
+def _rows(rows: list, key: str, head: str, other: str | None) -> None:
+    """Each student's line: their weeks on a shared scale, busiest first."""
+    top = max(((r[key] or {}).get("high") or (r[key] or {}).get("typical") or 0) for r in rows) or 1
+    click.echo(f"  each student, {head}, busiest first:")
+    width = max(len(r["user"]) for r in rows)
+    for r in rows:
+        sp = r[key]
+        shown = None
+        if sp and sp.get("low") is None:
+            shown = {"low": sp["typical"], "typical": sp["typical"], "high": sp["typical"]}
+        text = f"    {r['user']:<{width}} {_caterpillar(shown or sp, top)}"
+        if sp:
+            text += f" {sp['typical']:5.1f} h"
+            if sp.get("low") is not None:
+                text += f" ({sp['low']:.1f}-{sp['high']:.1f})"
+        if other and r.get("open_per_week"):
+            text += f"; {other} {r['open_per_week']['typical']:.0f} h/week"
+        if r["oom_kills"]:
+            text += f"; {r['oom_kills']} killed for memory"
+        click.echo(text)
+
+
 def _left_out(s: dict) -> str:
     """Who the group lists but the term's figures leave out, and why."""
     parts = []
@@ -415,30 +437,31 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
                          f"(measured since {it['computing_measured_since']})")
             click.echo(text)
         rows = course.get("each_student", [])
-        if rows and it["weeks_counted"]["open"]:
-            top = max((r["open_per_week"] or {}).get("high", 0) for r in rows) or 1
-            click.echo(f"  each student, hours open per week over {it['weeks_counted']['open']} "
-                       "week(s): typical ● and range ├─┤ (10th-90th percentile), busiest first")
-            width = max(len(r["user"]) for r in rows)
-            for r in rows:
-                sp = r["open_per_week"]
-                text = f"    {r['user']:<{width}} {_caterpillar(sp, top)}"
-                if sp:
-                    text += f" {sp['typical']:5.1f} h ({sp['low']:.1f}-{sp['high']:.1f})"
-                c = r.get("computing_per_week")
-                if c and it["weeks_counted"]["computing"]:
-                    text += f"; computing {c['typical']:.1f} h"
-                if r["oom_kills"]:
-                    text += f"; {r['oom_kills']} killed for memory"
-                click.echo(text)
+        by = it.get("ranked_by", "open")
+        if rows and by == "computing":
+            sample = next((r["computing_per_week"] for r in rows if r["computing_per_week"]), {})
+            if sample.get("estimated"):
+                head = (f"hours computing in an average week, from the {sample['days']} whole "
+                        "day(s) measured so far (each student's range once two whole weeks are)")
+            else:
+                head = (f"hours computing per week over {it['weeks_counted']['computing']} "
+                        "week(s): typical ● and range ├─┤ (10th-90th percentile)")
+            _rows(rows, "computing_per_week", head, "session open")
+        elif rows and it["weeks_counted"]["open"]:
+            _rows(rows, "open_per_week",
+                  f"hours with a session open per week over {it['weeks_counted']['open']} week(s) "
+                  "(often a session nobody closed: computing is measured from nomad 1.11 on)",
+                  None)
         when = course.get("when")
         if when:
-            grid = when["students_on"]
+            comp = when.get("students_computing")
+            grid, label, since = when["students_on"], "with a session open", when["since"]
+            if comp and any(v for row in comp for v in row if v):
+                grid, label, since = comp, "computing", when["busy_since"]
             top = max((v for row in grid for v in row if v is not None), default=0)
             if top > 0:
-                click.echo(f"  when the class works: students on, on average (since "
-                           f"{when['since'][:10]}; scale {_BARS[1]} to {_BARS[8]} = up to "
-                           f"{top:g})")
+                click.echo(f"  when the class works: students {label}, on average (since "
+                           f"{since[:10]}; scale {_BARS[1]} to {_BARS[8]} = up to {top:g})")
                 click.echo("        0     6     12    18    ")
                 for day, row in zip(when["weekdays"], grid):
                     click.echo(f"    {day} {_strip(row, top)}")

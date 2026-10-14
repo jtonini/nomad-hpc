@@ -14,10 +14,13 @@ For each course:
   how many have not yet, how many had a session open but never computed;
 * ``interactive``: the class's hours open and computing, by week;
 * ``each_student``: one row per student, busiest first, with their typical
-  week (median hours open per week) and its range (the 10th to 90th
-  percentile of their weeks) -- what a caterpillar plot draws -- and the same
-  for hours computing over the weeks that was measured. Rows carry no name
-  unless ``names`` (the institution's decision: [console.courses] names);
+  week (median hours per week) and its range (the 10th to 90th percentile of
+  their weeks) -- what a caterpillar plot draws -- for hours computing once
+  two whole weeks are measured (before that, an average week from the days
+  measured, three at least), and for hours with a session open. Ranked by
+  computing when there is any (a session open is often one nobody closed),
+  else by time open (``ranked_by``). Rows carry no name unless ``names``
+  (the institution's decision: [console.courses] names);
 * ``when``: students on, on average, at each hour of each weekday;
 * ``oom``: notebooks the kernel killed for lack of memory, and how many
   students that hit;
@@ -44,6 +47,8 @@ from nomad.facts._common import chunks, columns, envelope, iso, median, quantile
 
 ANY = "(any)"
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MIN_WEEKS = 2          # whole weeks of computing measured to show each student's range
+MIN_DAYS = 3           # whole days measured for an average week before then
 
 
 def resolve_name(raw: str, known: set) -> str | None:
@@ -272,7 +277,11 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
     open_weeks = [w for w in complete if recorded(w, cov)]
     busy_weeks = [w for w in complete if recorded(w, meas)]
     per: dict = defaultdict(lambda: {"open": defaultdict(float), "busy": defaultdict(float),
-                                     "cpu": 0.0, "peak": None, "measured": 0.0})
+                                     "busy_days": 0.0, "cpu": 0.0, "peak": None, "measured": 0.0})
+    # Whole days with computing measured (today is not over): an average
+    # week from them, until there are whole weeks to spread.
+    first_day = max(meas, since) if meas is not None else None
+    days_measured = (today - first_day).days if first_day is not None else 0
     class_week = {w: {"open": 0.0, "busy": 0.0, "students": set()} for w in weeks}
     for user, day, open_s, busy_s, measured_s, cpu_s, peak in rows:
         d = date.fromisoformat(day)
@@ -280,6 +289,8 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
         p = per[user]
         p["open"][w] += (open_s or 0) / 3600
         p["busy"][w] += (busy_s or 0) / 3600
+        if first_day is not None and first_day <= d < today:
+            p["busy_days"] += (busy_s or 0) / 3600
         p["cpu"] += cpu_s or 0
         p["measured"] += measured_s or 0
         if peak is not None:
@@ -294,20 +305,31 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
         p = per.get(user)
         open_vals = [round(p["open"].get(w, 0.0), 2) if p else 0.0 for w in open_weeks]
         busy_vals = [round(p["busy"].get(w, 0.0), 2) if p else 0.0 for w in busy_weeks]
+        computing = _spread(busy_vals) if len(busy_weeks) >= MIN_WEEKS else None
+        if computing is None and days_measured >= MIN_DAYS:
+            # Not yet two whole weeks: the average week over the days measured.
+            week = round((p["busy_days"] if p else 0.0) / days_measured * 7, 2)
+            computing = {"typical": week, "low": None, "high": None, "weeks": None,
+                         "days": days_measured, "estimated": True}
         each.append({
             "user": user,
             "hours_open": round(sum(p["open"].values()), 1) if p else 0.0,
             "hours_computing": round(sum(p["busy"].values()), 1) if p else 0.0,
             "open_per_week": _spread(open_vals),
-            "computing_per_week": _spread(busy_vals),
+            "computing_per_week": computing,
             "cpu_hours": round(p["cpu"] / 3600, 1) if p else 0.0,
             "peak_memory_gb": round(p["peak"] / 1024, 1) if p and p["peak"] is not None else None,
             "oom_kills": oom_per.get(user, 0),
             "weeks_active": sum(1 for w in open_weeks if p and p["open"].get(w, 0) > 0),
         })
-    # Busiest first; ties in no order a name could give away.
+    # Ranked by computing once it has been measured long enough (a session
+    # open is often one nobody closed); else by time open. Busiest first;
+    # ties in no order a name could give away.
+    by = "computing" if any(r["computing_per_week"] for r in each) else "open"
+    key = "computing_per_week" if by == "computing" else "open_per_week"
     random.shuffle(each)
-    each.sort(key=lambda r: (-(r["open_per_week"] or {}).get("typical", 0), -r["hours_open"]))
+    each.sort(key=lambda r: (-(r[key] or {}).get("typical", 0), -r["hours_computing"],
+                             -r["hours_open"]))
     used = {r["user"] for r in each if r["hours_open"] > 0}
     computed = {u for u in students if per.get(u) and per[u]["busy"] and sum(per[u]["busy"].values()) > 0}
     measured_open = {u for u in used if per[u]["measured"] > 0}
@@ -325,6 +347,8 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
                    "hours_computing": round(class_week[w]["busy"], 1) if recorded(w, meas) else None}
                   for w in weeks],
         "weeks_counted": {"open": len(open_weeks), "computing": len(busy_weeks)},
+        "days_computing_measured": days_measured,
+        "ranked_by": by,
         "each_student": each,
     }
 

@@ -86,6 +86,43 @@ def setup_cmd(ctx, term_start, pattern, faculty_group, min_students, names, appl
     _finish(edit, changes, apply, check, notes)
 
 
+def _group_known(ctx, group: str) -> bool | None:
+    """Does the groups data list GROUP (the hub's combined database, else
+    this host's)? None when no database could be read."""
+    import sqlite3
+    import urllib.parse
+    from pathlib import Path
+    paths = []
+    try:
+        from nomad.actions.remote import hub_settings
+        paths.append(hub_settings()["combined_db"])
+    except Exception:
+        pass
+    try:
+        from nomad.cli import get_db_path
+        paths.append(get_db_path(ctx.obj.get("config", {}) or {}))
+    except Exception:
+        pass
+    answered = False
+    for path in paths:
+        try:
+            path = Path(path).expanduser()
+            if not path.exists():
+                continue
+            conn = sqlite3.connect("file:" + urllib.parse.quote(str(path)) + "?mode=ro", uri=True)
+            try:
+                row = conn.execute("SELECT 1 FROM group_membership WHERE group_name = ? LIMIT 1",
+                                   (group,)).fetchone()
+                answered = True
+                if row:
+                    return True
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            continue
+    return False if answered else None
+
+
 def _date(text):
     from datetime import date
     try:
@@ -94,8 +131,14 @@ def _date(text):
         return None
 
 
-def _course_change(ctx, group, apply, **kw):
+def _course_change(ctx, group, apply, new_group=False, **kw):
     from nomad.config.courses import CourseError, courses_from, set_course
+    if not kw.get("remove") and not new_group:
+        known = _group_known(ctx, group.strip())
+        if known is False:
+            raise click.ClickException(
+                f"{group}: no such group in the groups data (nomad course list shows the "
+                "courses). Check the spelling, or give --new-group for a group not collected yet.")
     edit = _edit(ctx)
     try:
         changes = set_course(edit, group, **kw)
@@ -125,22 +168,24 @@ def _course_change(ctx, group, apply, **kw):
 @course_group.command("add")
 @click.argument("group")
 @click.argument("netid")
+@click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def add_cmd(ctx, group, netid, apply):
+def add_cmd(ctx, group, netid, apply, new_group):
     """NETID teaches GROUP: when no faculty member is in the group, or for
     a co-instructor or a TA."""
-    _course_change(ctx, group, apply, add=netid)
+    _course_change(ctx, group, apply, new_group, add=netid)
 
 
 @course_group.command("exclude")
 @click.argument("group")
 @click.argument("netid")
+@click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def exclude_cmd(ctx, group, netid, apply):
+def exclude_cmd(ctx, group, netid, apply, new_group):
     """NETID is in GROUP and in the faculty group but does not teach it."""
-    _course_change(ctx, group, apply, exclude=netid)
+    _course_change(ctx, group, apply, new_group, exclude=netid)
 
 
 @course_group.command("remove")
@@ -156,22 +201,24 @@ def remove_cmd(ctx, group, netid, apply):
 @course_group.command("name")
 @click.argument("group")
 @click.argument("shown")
+@click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def name_cmd(ctx, group, shown, apply):
+def name_cmd(ctx, group, shown, apply, new_group):
     """How GROUP is shown ("" to remove the name)."""
-    _course_change(ctx, group, apply, name=shown)
+    _course_change(ctx, group, apply, new_group, name=shown)
 
 
 @course_group.command("ignore")
 @click.argument("group")
 @click.option("--undo", is_flag=True, help="GROUP is a course again.")
+@click.option("--new-group", is_flag=True, help="GROUP is not in the groups data yet.")
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
-def ignore_cmd(ctx, group, undo, apply):
+def ignore_cmd(ctx, group, undo, apply, new_group):
     """GROUP is named like a course but isn't one (a project's or a lab's
     group): no course view, no instructors."""
-    _course_change(ctx, group, apply, ignore=not undo)
+    _course_change(ctx, group, apply, new_group, ignore=not undo)
 
 
 @course_group.command("list")

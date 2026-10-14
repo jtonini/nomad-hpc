@@ -220,7 +220,9 @@ def test_weeks_before_computing_was_measured_are_left_out_not_zero(tmp_path):
     c, = courses(conn, TERM, groups=["demo101"], now=NOW)["courses"]
     assert c["interactive"]["computing_measured_since"] == "2026-10-05"
     assert c["interactive"]["weeks_counted"] == {"open": 7, "computing": 1}
-    assert c["each_student"][0]["computing_per_week"]["weeks"] == 1
+    # One whole week is not a range yet: an average week from the 8 days measured.
+    est = c["each_student"][0]["computing_per_week"]
+    assert est["estimated"] and est["days"] == 8 and est["low"] is None
     weeks = {w["week"]: w for w in c["interactive"]["weeks"]}
     assert weeks["2026-09-28"]["hours_computing"] is None
     assert weeks["2026-10-05"]["hours_computing"] > 0
@@ -351,3 +353,41 @@ def test_the_backfill_runs_on_the_server_not_on_the_hub(tmp_path):
     conn.execute("CREATE TABLE interactive_sessions (timestamp TEXT, server_id TEXT, user TEXT, "
                  "source_site TEXT)")
     assert "hub" in rebuild(conn, apply=True)["note"]
+
+
+def test_students_are_ranked_by_computing_once_it_is_measured(tmp_path):
+    # s1 computes all the time it is on; s3 only has sessions open, for longer.
+    conn = _db(tmp_path, habits={"s1": (8, 12), "s3": (8, 22)}, measured_from="2026-10-08")
+    c, = courses(conn, TERM, groups=["demo101"], now=NOW, names=True)["courses"]
+    assert c["interactive"]["ranked_by"] == "computing"
+    assert c["interactive"]["days_computing_measured"] == 5
+    first, second = c["each_student"][:2]
+    assert first["user"] == "s1" and second["user"] == "s3"
+    # 08:00-11:30: three and a half hours a day after the first reading, every day.
+    assert first["computing_per_week"]["typical"] == pytest.approx(3.5 * 7)
+    assert second["open_per_week"]["typical"] > first["open_per_week"]["typical"]
+    # Too few days measured: by time open, as before.
+    (tmp_path / "b").mkdir()
+    conn2 = _db(tmp_path / "b", habits={"s1": (8, 12), "s3": (8, 22)}, measured_from="2026-10-12")
+    c2, = courses(conn2, TERM, groups=["demo101"], now=NOW, names=True)["courses"]
+    assert c2["interactive"]["ranked_by"] == "open" and c2["each_student"][0]["user"] == "s3"
+
+
+def test_a_course_change_needs_a_group_the_data_knows(tmp_path, monkeypatch):
+    import nomad.actions.remote as remote
+    import nomad.cli as cli
+    from nomad.config.course_cli import _group_known
+    db = tmp_path / "n.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT)")
+    conn.execute("INSERT INTO group_membership VALUES ('s1', 'demo101')")
+    conn.commit()
+    monkeypatch.setattr(remote, "hub_settings", lambda: {"combined_db": tmp_path / "none.db"})
+    monkeypatch.setattr(cli, "get_db_path", lambda config: db)
+
+    class Ctx:
+        obj = {"config": {}}
+    assert _group_known(Ctx(), "demo101") is True
+    assert _group_known(Ctx(), "GROUP") is False
+    monkeypatch.setattr(cli, "get_db_path", lambda config: tmp_path / "missing.db")
+    assert _group_known(Ctx(), "demo101") is None            # nothing to ask: not refused
