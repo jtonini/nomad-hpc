@@ -162,6 +162,12 @@ For each course the person teaches this term, by nomad.toml's
 * `oom`: the students' sessions the kernel killed for lack of memory.
 * `jobs`: their cluster jobs, taken together.
 
+Each course says who teaches it and why (`instructors_why`: `added` by
+name, `only` faculty member in the group, `joined` the group this term,
+`active` this term where its students work, those sites in `active_on`; see
+Courses in config.md). Asked for every course, one nobody teaches this term
+is left out and listed in `not_shown` with the reason.
+
 A week before a figure was recorded is left out of it, never counted as
 zero: hours open from nomad 1.11 (earlier weeks once `nomad interactive
 backfill` has rebuilt them), computing from 1.11, hours of the week from

@@ -8,6 +8,7 @@
     term_start = "2026-08-24"                # this term's first day
     min_students = 0                         # fewer students this term: no figures
     names = false                            # instructors see students by name
+    not_teaching = ["jdoe"]                  # in the faculty group, teaches no course
 
     [console.courses.groups."demo101"]
     name = "Econometrics"                    # how the course is shown
@@ -21,11 +22,27 @@ Nothing is a course until [console.courses] is there: a site that has not
 said how its groups work gets no course view rather than a wrong one (a
 group named like a course that isn't one would show its members to every
 faculty member in it). With the table, a group is a course when its name
-matches ``pattern`` or it is listed under ``groups``. Its instructors are its members who are in ``faculty_group``,
-and anyone listed as one, less anyone excluded. Its students are its other
-members (faculty are never students), and of those, this term's are the ones
-who joined since ``term_start`` or used a server or a cluster since then:
-groups nobody prunes keep earlier terms' students listed.
+matches ``pattern`` or it is listed under ``groups``.
+
+Its instructors this term (``teaching``):
+
+* anyone listed as one (``nomad course add``);
+* the group's one member in ``faculty_group``, when it has one;
+* with several, those who joined the group this term; when none did, those
+  active this term where the course's students work (the servers and
+  clusters they used): groups are reused term after term, and nobody takes
+  last term's instructor out. When none of them was, nomad can't tell who
+  teaches it, and nobody does until one is added;
+
+less anyone excluded from the group, and anyone in ``not_teaching`` (staff
+in the faculty group) unless added to the course by name. A course with no
+instructor is shown to no one. Who joined is a stronger sign than who was
+active: when one of several joined this term, the ones who did teach it.
+
+Its students are its other members (faculty are never students), and of
+those, this term's are the ones who joined since ``term_start`` or used a
+server or a cluster since then: groups nobody prunes keep earlier terms'
+students listed.
 
 ``term_start`` defaults to the start of the current term by a US academic
 calendar (15 August, 1 January, 1 June). ``min_students`` defaults to 0: a
@@ -35,8 +52,10 @@ institution decides, and ``names`` (default false) whether instructors see
 each student by name.
 
 ``courses_from`` reads the settings (what is wrong is listed in
-``problems`` and left out); ``instructors``, ``courses_of`` and ``roster``
-answer from the groups data; ``set_course`` edits nomad.toml for `nomad
+``problems`` and left out); ``teaching``, ``instructors``, ``courses_of``
+and ``roster`` answer from the groups data (who was active, from the
+caller: ``nomad.facts.courses.Activity``); ``set_course``,
+``set_settings`` and ``set_not_teaching`` edit nomad.toml for `nomad
 course`.
 """
 from __future__ import annotations
@@ -52,7 +71,8 @@ DEFAULT_PATTERN = r"^[a-z]{2,6}[0-9]{3}[a-z]?$"
 DEFAULT_FACULTY = "faculty"
 SECTION = ("console", "courses")
 GROUPS = SECTION + ("groups",)
-_KEYS = ("pattern", "faculty_group", "term_start", "min_students", "names", "groups")
+_KEYS = ("pattern", "faculty_group", "term_start", "min_students", "names",
+         "not_teaching", "groups")
 _COURSE_KEYS = ("name", "instructors", "exclude", "course")
 _GROUP = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._$-]*$")
 _NETID = re.compile(r"^[a-z0-9_][a-z0-9._-]*$")
@@ -91,6 +111,7 @@ class Courses:
     term_start: date | None = None
     min_students: int = 0
     names: bool = False
+    not_teaching: tuple = ()                        # faculty-group members who teach nothing
     listed: dict = field(default_factory=dict)      # group -> Course
     problems: tuple = ()
 
@@ -180,6 +201,7 @@ def courses_from(config: dict | None) -> Courses:
     if not isinstance(names, bool):
         problems.append("[console.courses] names should be true or false; false is used")
         names = False
+    not_teaching = _names(raw.get("not_teaching"), "[console.courses] not_teaching", problems)
     listed: dict = {}
     groups = raw.get("groups") or {}
     if not isinstance(groups, dict):
@@ -213,7 +235,8 @@ def courses_from(config: dict | None) -> Courses:
                                               problems),
                            exclude=_names(table.get("exclude"), f"{where} exclude", problems))
     return Courses(enabled=True, pattern=pattern, faculty_group=faculty.strip(), term_start=start,
-                   min_students=minimum, names=names, listed=listed, problems=tuple(problems))
+                   min_students=minimum, names=names, not_teaching=not_teaching, listed=listed,
+                   problems=tuple(problems))
 
 
 def group_names(conn) -> list[str]:
@@ -225,12 +248,63 @@ def group_names(conn) -> list[str]:
         return []
 
 
-def instructors(c: Courses, group: str, members_of: Callable[[str], set]) -> set:
-    """Who teaches ``group``: its members in the faculty group and anyone
-    listed as its instructor, less anyone excluded."""
+# Why someone teaches a course this term (``teaching``'s ``why``).
+ADDED, ONLY, JOINED, ACTIVE = "added", "only", "joined", "active"
+WHY = {ADDED: "added by name",
+       ONLY: "the group's only faculty member",
+       JOINED: "joined the group this term",
+       ACTIVE: "active this term where its students work"}
+
+
+def joined_this_term(when, since) -> bool:
+    """A first_seen stamp on or after the term's first day ('2026-08-24',
+    '2026-08-24T09:00:00' and '2026-08-24 09:00:00' alike)."""
+    day = since.date() if isinstance(since, datetime) else since
+    return bool(when) and str(when)[:10] >= day.isoformat()
+
+
+def teaching(c: Courses, group: str, members_of: Callable[[str], set],
+             active: Callable[[str, set], dict] | None = None) -> dict:
+    """Who teaches ``group`` this term, and why (see the module's notes).
+
+    ``active(group, candidates)``: of the group's faculty members, who
+    joined the group this term or was active this term, as {netid: JOINED or
+    ACTIVE} (``nomad.facts.courses.Activity.faculty``); without it nobody is
+    taken as active. Returns ``instructors``; ``why`` {netid: ADDED, ONLY,
+    JOINED or ACTIVE}; ``faculty``, the group's faculty members nomad chose
+    among (less those excluded and those not teaching); ``not_active``,
+    those of them left out for not being active this term; ``undecided``,
+    true when several are and none was active (nobody teaches it until one
+    is added)."""
     listed = c.listed.get(group, Course())
-    found = (set(members_of(group)) & set(members_of(c.faculty_group))) | set(listed.instructors)
-    return {n.lower() for n in found} - set(listed.exclude)
+    added = set(listed.instructors) - set(listed.exclude)
+    # The faculty members nomad chooses among: staff in the faculty group
+    # (not_teaching) never count, even when added to this course by name -- a
+    # TA added doesn't make its one faculty member one of several.
+    faculty = (_lower(members_of(group)) & _lower(members_of(c.faculty_group))) \
+        - set(listed.exclude) - set(c.not_teaching)
+    why = dict.fromkeys(added, ADDED)
+    found: dict = {}
+    if len(faculty) == 1:
+        found = dict.fromkeys(faculty, ONLY)
+    elif faculty and active is not None:
+        found = {n.lower(): r for n, r in (active(group, set(faculty)) or {}).items()
+                 if n.lower() in faculty}
+    for n, r in found.items():
+        why.setdefault(n, r)
+    not_active = faculty - set(found) - added
+    return {"instructors": set(why), "why": why, "faculty": faculty, "not_active": not_active,
+            "undecided": len(faculty) > 1 and not found and not added}
+
+
+def _lower(names) -> set:
+    return {n.lower() for n in names if n}
+
+
+def instructors(c: Courses, group: str, members_of: Callable[[str], set],
+                active: Callable[[str, set], dict] | None = None) -> set:
+    """Who teaches ``group`` this term (``teaching``'s instructors)."""
+    return teaching(c, group, members_of, active)["instructors"]
 
 
 def course_groups(c: Courses, known: Iterable[str]) -> list[str]:
@@ -241,53 +315,69 @@ def course_groups(c: Courses, known: Iterable[str]) -> list[str]:
 
 
 def courses_of(c: Courses, netid: str, known: Iterable[str],
-               members_of: Callable[[str], set]) -> list[str]:
-    """The courses ``netid`` teaches."""
+               members_of: Callable[[str], set],
+               active: Callable[[str, set], dict] | None = None) -> list[str]:
+    """The courses ``netid`` teaches this term."""
     n = (netid or "").strip().lower()
     if not n:
         return []
-    return [g for g in course_groups(c, known) if n in instructors(c, g, members_of)]
+    out = []
+    for g in course_groups(c, known):
+        listed = c.listed.get(g, Course())
+        # Only a member of the group, or someone added, can teach it.
+        if n not in listed.instructors and n not in _lower(members_of(g)):
+            continue
+        if n in instructors(c, g, members_of, active):
+            out.append(g)
+    return out
 
 
 def first_seen(conn, group: str) -> dict:
-    """{username: earliest first_seen} for a group's rows (any site); a
-    membership from before nomad 1.11 has none."""
+    """{username (lower case): earliest first_seen} for a group's rows (any
+    site). A membership from before nomad 1.11 has none, and neither does
+    anyone with such a row anywhere: a row from a site added since (or a
+    renamed one) says when nomad first looked there, not when they joined."""
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(group_membership)")}
         if "first_seen" not in cols:
             return {}
         out: dict = {}
+        unknown: set = set()
         for user, when in conn.execute(
-                "SELECT username, first_seen FROM group_membership WHERE group_name = ? "
-                "AND first_seen IS NOT NULL", (group,)):
-            if user and when and (user not in out or str(when) < out[user]):
-                out[user] = str(when)
-        return out
+                "SELECT username, first_seen FROM group_membership WHERE group_name = ?", (group,)):
+            if not user:
+                continue
+            u = user.lower()
+            if not when:
+                unknown.add(u)
+            elif u not in out or str(when) < out[u]:
+                out[u] = str(when)
+        return {u: w for u, w in out.items() if u not in unknown}
     except Exception:
         return {}
 
 
 def roster(c: Courses, group: str, members_of: Callable[[str], set],
-           active: Callable[[set], set], joined: dict, since: datetime) -> dict:
-    """The course's people: ``instructors``; ``listed``, the group's other
-    members; ``this_term``, those of them who joined since ``since`` or were
-    active since then (``active(candidates)`` says who); ``left_out``, the
-    rest (listed, from before, not active)."""
-    teach = instructors(c, group, members_of)
-    faculty = {n.lower() for n in members_of(c.faculty_group)}
-    listed = {n.lower() for n in members_of(group)} - teach - faculty
-    excluded = set(c.listed.get(group, Course()).exclude)
-    listed -= excluded
+           active: Callable[[set], set], joined: dict, since: datetime,
+           faculty_active: Callable[[str, set], dict] | None = None) -> dict:
+    """The course's people: ``instructors`` (and ``teaching``, why);
+    ``listed``, the group's other members; ``this_term``, those of them who
+    joined since ``since`` or were active since then (``active(candidates)``
+    says who); ``left_out``, the rest (listed, from before, not active).
+    ``faculty_active``: as ``teaching``'s ``active``."""
+    who = teaching(c, group, members_of, faculty_active)
+    teach = who["instructors"]
+    listed = _lower(members_of(group)) - teach - _lower(members_of(c.faculty_group))
+    listed -= set(c.listed.get(group, Course()).exclude) | set(c.not_teaching)
     were_active = active(listed) & listed
-    stamp = since.isoformat()
-    new = {u for u in listed if joined.get(u) and joined[u] >= stamp}
+    new = {u for u in listed if joined_this_term(joined.get(u), since)}
     this_term = were_active | new
     left = listed - this_term
     # Left out: joined in an earlier term (nomad saw them join), or not
     # known -- memberships older than nomad 1.11 have no join date, so a
     # student of this term who hasn't started looks like an earlier one.
     earlier = {u for u in left if joined.get(u)}
-    return {"instructors": teach, "listed": listed, "this_term": this_term,
+    return {"instructors": teach, "teaching": who, "listed": listed, "this_term": this_term,
             "active": were_active, "new": new, "left_out": left,
             "left_out_earlier": earlier, "left_out_unknown": left - earlier}
 
@@ -402,7 +492,8 @@ def set_settings(edit: TomlEdit, **values) -> list:
                           "change it by hand")
     values = {k: v for k, v in values.items() if v is not None}
     for k in values:
-        if k not in ("term_start", "pattern", "faculty_group", "min_students", "names"):
+        if k not in ("term_start", "pattern", "faculty_group", "min_students", "names",
+                     "not_teaching"):
             raise CourseError(f"{k}: not a course setting")
     if "term_start" in values:
         try:
@@ -439,3 +530,46 @@ def set_settings(edit: TomlEdit, **values) -> list:
         edit.insert_key(SECTION, key, val)
         changes.append(f"{key} = {val!r}")
     return changes
+
+
+def set_not_teaching(edit: TomlEdit, netid: str, undo: bool = False) -> list:
+    """[console.courses] not_teaching with ``netid`` (``undo``: without it):
+    someone in the faculty group who teaches no course (staff), left out of
+    every course's instructors unless added to one by name."""
+    n = (netid or "").strip().lower()
+    if not _NETID.match(n):
+        raise CourseError(f"{netid}: not a NetID (no domain, no @)")
+    clash = edit.assigned(SECTION)
+    if clash:
+        raise CourseError(f"courses is set as values in {edit.path.name} (line {clash[0] + 1}); "
+                          "change it by hand")
+    current = _get(edit.data, SECTION)
+    if not isinstance(current, dict):
+        raise CourseError("courses are off (no [console.courses] in "
+                          f"{edit.path.name}): `nomad course setup` turns them on")
+    now = current.get("not_teaching", [])
+    if isinstance(now, str):
+        now = [now]
+    if not isinstance(now, list):
+        raise CourseError(f"[console.courses] not_teaching in {edit.path.name} is not a list; "
+                          "change it by hand")
+    names = [x.strip().lower() for x in now if isinstance(x, str) and x.strip()]
+    if undo:
+        if n not in names:
+            return []
+        names = [x for x in names if x != n]
+        change = f"{n} may teach again (off [console.courses] not_teaching)"
+    else:
+        if n in names:
+            return []
+        names.append(n)
+        change = f"{n} teaches no course unless added to one ([console.courses] not_teaching)"
+    for i, table, k in reversed(edit.key_lines()):
+        if table == SECTION and k == ("not_teaching",):
+            try:
+                edit.remove_line(i)
+            except ValueError as e:
+                raise CourseError(f"{e}; change not_teaching by hand") from e
+    if names:
+        edit.insert_key(SECTION, "not_teaching", names)
+    return [change]

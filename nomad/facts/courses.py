@@ -43,6 +43,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
+from nomad.config.courses import ACTIVE
 from nomad.facts._common import chunks, columns, envelope, iso, median, quantile
 
 ANY = "(any)"
@@ -70,14 +71,39 @@ def _in(users) -> tuple[str, list]:
     return ",".join("?" * len(users)), users
 
 
+def _site_clause(conn, table: str, sites) -> tuple[str, list] | None:
+    """``sites`` None: every row; else rows of those sites only (a row whose
+    site is not known matches none). None: skip the table -- asked for sites,
+    it has no column to say (rare: `nomad sync` adds one to every table)."""
+    if sites is None:
+        return "", []
+    if "source_site" not in columns(conn, table):
+        return None
+    marks, args = _in(sorted(sites))
+    return f" AND source_site IN ({marks})", args
+
+
+SITE_SHARE = 0.5      # a site counts for a course with at least half as many of its
+                      # active students as its busiest site
+
+
 class Activity:
     """Who used an interactive server or a cluster since a time: read once
-    per answer, for every course in it."""
+    per answer, for every course in it. ``members_of`` and ``courses`` (the
+    [console.courses] settings) let it say where a course's students work,
+    for ``faculty``."""
 
-    def __init__(self, conn, since: datetime):
+    def __init__(self, conn, since: datetime, members_of=None, courses=None):
         self.conn, self.since = conn, since
+        self.members_of, self.courses = members_of, courses
         self._raw: set | None = None
         self._known: set | None = None
+        self._faculty: dict = {}
+        self.faculty_sites: dict = {}      # group -> sites its students worked on (a hub)
+
+    def combined(self) -> bool:
+        """A hub's combined database: rows carry the site they came from."""
+        return "source_site" in columns(self.conn, "group_membership")
 
     def known(self) -> set:
         """Every full name nomad has: the groups data and the daily totals."""
@@ -93,53 +119,131 @@ class Activity:
         return self._known
 
     def raw(self) -> set:
-        """Names in the raw snapshots since ``since``, on each server before
-        its daily totals began (names ps cut short matched against every
-        known name, not only a course's)."""
+        """(site, name) in the raw snapshots since ``since``, on each server
+        before its daily totals began (names ps cut short matched against
+        every known name, not only a course's); site None in one site's own
+        database."""
         if self._raw is None:
             found: set = set()
             conn = self.conn
-            if {"user", "timestamp", "server_id"} <= columns(conn, "interactive_sessions"):
+            cols = columns(conn, "interactive_sessions")
+            if {"user", "timestamp", "server_id"} <= cols:
+                site = "source_site" if "source_site" in cols else "NULL"
+                daily = columns(conn, "interactive_daily")
                 first: dict = {}
-                if {"server_id", "day"} <= columns(conn, "interactive_daily"):
-                    first = dict(conn.execute(
-                        "SELECT server_id, MIN(day) FROM interactive_daily GROUP BY server_id"))
+                if {"server_id", "day"} <= daily:
+                    dsite = "source_site" if "source_site" in daily else "NULL"
+                    first = {(w, srv): day for w, srv, day in conn.execute(
+                        f"SELECT {dsite}, server_id, MIN(day) FROM interactive_daily "
+                        "GROUP BY 1, 2")}
                 known = self.known()
-                for (server,) in conn.execute("SELECT DISTINCT server_id FROM interactive_sessions"
-                                              ).fetchall():
-                    upto = first.get(server) or "9999"
+                for where, server in conn.execute(
+                        f"SELECT DISTINCT {site}, server_id FROM interactive_sessions").fetchall():
+                    upto = first.get((where, server)) or first.get((None, server)) or "9999"
                     if self.since.isoformat() >= upto:
                         continue
+                    clause = "source_site IS ?" if site != "NULL" else "? IS NULL"
                     for (raw,) in conn.execute(
-                            "SELECT DISTINCT user FROM interactive_sessions WHERE server_id = ? "
-                            "AND timestamp >= ? AND timestamp < ?",
-                            (server, self.since.isoformat(), upto)):
+                            f"SELECT DISTINCT user FROM interactive_sessions WHERE {clause} "
+                            "AND server_id = ? AND timestamp >= ? AND timestamp < ?",
+                            (where, server, self.since.isoformat(), upto)):
                         name = resolve_name(str(raw or ""), known)
                         if name:
-                            found.add(name)
+                            found.add((where, name))
             self._raw = found
         return self._raw
 
-    def of(self, users: set) -> set:
-        """Of ``users``, who was active."""
-        if not users:
+    def of(self, users: set, sites: set | None = None) -> set:
+        """Of ``users``, who was active (``sites``: on those sites only, in a
+        hub's combined database; an empty set matches nobody)."""
+        if not users or (sites is not None and not sites):
             return set()
         conn, found = self.conn, set()
         start = self.since.date().isoformat()
-        if {"user", "day"} <= columns(conn, "interactive_daily"):
+        clause = _site_clause(conn, "interactive_daily", sites)
+        if {"user", "day"} <= columns(conn, "interactive_daily") and clause is not None:
+            extra, extra_args = clause
             for part in chunks(sorted(users)):
                 marks, args = _in(part)
                 found |= {r[0] for r in conn.execute(
                     f"SELECT DISTINCT user FROM interactive_daily WHERE day >= ? "
-                    f"AND session_seconds > 0 AND user IN ({marks})", [start] + args)}
-        found |= self.raw() & users
-        if {"user_name", "submit_time"} <= columns(conn, "jobs"):
+                    f"AND session_seconds > 0 AND user IN ({marks}){extra}",
+                    [start] + args + extra_args)}
+        found |= {n for where, n in self.raw() if sites is None or where in sites} & users
+        clause = _site_clause(conn, "jobs", sites)
+        if {"user_name", "submit_time"} <= columns(conn, "jobs") and clause is not None:
+            extra, extra_args = clause
             for part in chunks(sorted(users)):
                 marks, args = _in(part)
                 found |= {r[0] for r in conn.execute(
                     f"SELECT DISTINCT user_name FROM jobs WHERE submit_time >= ? "
-                    f"AND user_name IN ({marks})", [self.since.isoformat()] + args)}
+                    f"AND user_name IN ({marks}){extra}",
+                    [self.since.isoformat()] + args + extra_args)}
         return found & users
+
+    def sites_of(self, users: set) -> set:
+        """Where ``users`` (a course's students) worked: the sites with at
+        least SITE_SHARE as many of them active as the busiest site -- one
+        earlier term's student's research job elsewhere doesn't make that
+        cluster the course's. A hub's combined database; rows whose site is
+        not known say nothing."""
+        conn, on = self.conn, defaultdict(set)
+        if not users:
+            return set()
+        start = self.since.date().isoformat()
+        for table, user, when, extra, first in (
+                ("interactive_daily", "user", "day", " AND session_seconds > 0", start),
+                ("jobs", "user_name", "submit_time", "", self.since.isoformat())):
+            if not {user, when, "source_site"} <= columns(conn, table):
+                continue
+            for part in chunks(sorted(users)):
+                marks, args = _in(part)
+                for where, who in conn.execute(
+                        f"SELECT DISTINCT source_site, {user} FROM {table} WHERE {when} >= ?{extra} "
+                        f"AND {user} IN ({marks})", [first] + args):
+                    if where:
+                        on[where].add(who)
+        for where, n in self.raw():
+            if where and n in users:
+                on[where].add(n)
+        if not on:
+            return set()
+        busiest = max(len(v) for v in on.values())
+        return {w for w, v in on.items() if len(v) >= SITE_SHARE * busiest}
+
+    def _students(self, group: str) -> set:
+        """The group's members who could be its students (not faculty, not
+        staff, not added or excluded): where they work is where the course is."""
+        from nomad.config.courses import Course
+        if self.members_of is None or self.courses is None:
+            return set()
+        c = self.courses
+        listed = c.listed.get(group, Course())
+        lower = lambda names: {n.lower() for n in names if n}           # noqa: E731
+        return (lower(self.members_of(group)) - lower(self.members_of(c.faculty_group))
+                - set(c.not_teaching) - set(listed.instructors) - set(listed.exclude))
+
+    def faculty(self, group: str, candidates: set) -> dict:
+        """Of a course group's faculty members, who teaches it this term by
+        what they did: {netid: JOINED} for those who joined the group this
+        term, when any did; else {netid: ACTIVE} for those active this term
+        where the course's students work (in a hub's combined database, the
+        sites they used: research on another cluster says nothing about a
+        course). For ``nomad.config.courses.teaching``."""
+        from nomad.config.courses import ACTIVE, JOINED, first_seen, joined_this_term
+        key = (group, frozenset(candidates))
+        if key in self._faculty:
+            return dict(self._faculty[key])
+        joined = first_seen(self.conn, group)
+        out = {u: JOINED for u in candidates if joined_this_term(joined.get(u), self.since)}
+        if not out:
+            sites = None
+            if self.combined():
+                sites = self.sites_of(self._students(group))
+                self.faculty_sites[group] = sorted(sites)
+            out = dict.fromkeys(self.of(set(candidates), sites), ACTIVE)
+        self._faculty[key] = out
+        return dict(out)
 
 
 def active_users(conn, users: set, since: datetime) -> set:
@@ -353,12 +457,19 @@ def _interactive(conn, students: set, since: date, today: date, oom_per: dict) -
     }
 
 
+def _no_instructor(who: dict) -> str:
+    if who["undecided"]:
+        return (f"{len(who['faculty'])} faculty members in the group, none of them active this "
+                "term: nobody teaches it until one is added (nomad course add)")
+    return "no faculty member in the group and nobody added (nomad course add)"
+
+
 def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | None = None,
             groups: list | None = None, now: datetime | None = None,
             names: bool | None = None) -> dict:
     """The courses ``netid`` teaches (or, for staff, the ``groups`` named;
-    neither: every course), this term. ``names``: rows by name (None: as
-    [console.courses] names says)."""
+    neither: every course somebody teaches, the rest in ``not_shown``), this
+    term. ``names``: rows by name (None: as [console.courses] names says)."""
     from nomad.config.access import members_lookup
     from nomad.config.courses import course_groups, courses_from, courses_of, first_seen, group_names
     from nomad.facts import jobs as jobfacts
@@ -378,6 +489,8 @@ def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | N
         return out
     exists, members_of = members_lookup(conn)
     known = group_names(conn)
+    activity = Activity(conn, since, members_of, c)
+    every = groups is None and not netid
     if groups is not None:
         # Only courses: any group's members are not a class to show.
         chosen = [g for g in groups if c.is_course(g)]
@@ -385,17 +498,28 @@ def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | N
         if others:
             out.setdefault("not_courses", others)
     elif netid:
-        chosen = courses_of(c, netid, known, members_of)
+        chosen = courses_of(c, netid, known, members_of, activity.faculty)
     else:
         chosen = course_groups(c, known)
     ceilings = memory_ceilings(conn)
-    activity = Activity(conn, since)
     for g in chosen:
         from nomad.config.courses import roster
-        people = roster(c, g, members_of, activity.of, first_seen(conn, g), since)
+        people = roster(c, g, members_of, activity.of, first_seen(conn, g), since,
+                        activity.faculty)
+        who = people["teaching"]
+        shown = c.listed[g].name if g in c.listed and c.listed[g].name else g
+        if every and not people["instructors"]:
+            # Every course: one nobody teaches this term is shown to no one.
+            out.setdefault("not_shown", []).append(
+                {"group": g, "name": shown, "why": _no_instructor(who),
+                 "students_this_term": len(people["this_term"])})
+            continue
         students = people["this_term"]
-        entry = {"group": g, "name": c.listed[g].name if g in c.listed and c.listed[g].name else g,
+        entry = {"group": g, "name": shown,
                  "instructors": sorted(people["instructors"]),
+                 # added, only (faculty member), joined, active (see WHY)
+                 "instructors_why": {n: who["why"][n] for n in sorted(who["why"])},
+                 "faculty_not_active": len(who["not_active"]),
                  "students": {"listed": len(people["listed"]), "this_term": len(students),
                               "left_out": len(people["left_out"]),
                               # joined in an earlier term, as nomad saw it
@@ -404,6 +528,10 @@ def courses(conn: sqlite3.Connection | None, config: dict | None, netid: str | N
                               # this term: earlier students, or some not started yet
                               "left_out_unknown": len(people["left_out_unknown"]),
                               "new_this_term": len(people["new"])}}
+        if not people["instructors"]:
+            entry["no_instructor"] = _no_instructor(who)
+        if ACTIVE in who["why"].values() and g in activity.faculty_sites:
+            entry["active_on"] = activity.faculty_sites[g]       # where its students work
         if not exists(g) and g not in c.listed:
             entry["students"]["note"] = "no members in the groups data"
         if len(students) < c.min_students:

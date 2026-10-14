@@ -391,3 +391,221 @@ def test_a_course_change_needs_a_group_the_data_knows(tmp_path, monkeypatch):
     assert _group_known(Ctx(), "GROUP") is False
     monkeypatch.setattr(cli, "get_db_path", lambda config: tmp_path / "missing.db")
     assert _group_known(Ctx(), "demo101") is None            # nothing to ask: not refused
+
+
+# --- who teaches it this term (1.12.3) ---------------------------------------------------
+
+def _members(groups):
+    return lambda g: groups.get(g, set())
+
+
+def _active(*who):
+    return lambda group, candidates: {n: "used web1 this term" for n in candidates if n in who}
+
+
+def test_one_faculty_member_teaches_it_several_must_have_been_active():
+    groups = {"faculty": {"prof1", "prof2", "prof3"},
+              "demo101": {"prof1", "s1"},                       # one: teaches it
+              "demo202": {"prof1", "prof2", "prof3", "s2"},     # reused term after term
+              "demo303": {"prof2", "prof3", "s3"},              # several, none active
+              "demo404": {"s4"}}                                # no faculty member
+    c, m, act = C.courses_from(TERM), _members(groups), _active("prof2")
+    t = C.teaching(c, "demo101", m, act)
+    assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ONLY and not t["undecided"]
+    t = C.teaching(c, "demo202", m, act)
+    assert t["instructors"] == {"prof2"} and t["not_active"] == {"prof1", "prof3"}
+    assert t["why"] == {"prof2": "used web1 this term"}
+    t = C.teaching(c, "demo303", m, _active())
+    assert t["instructors"] == set() and t["undecided"]
+    t = C.teaching(c, "demo404", m, act)
+    assert t["instructors"] == set() and not t["undecided"]
+    # Nobody known to be active (no activity given): several can't be told apart.
+    assert C.teaching(c, "demo202", m)["undecided"]
+    known = sorted(groups)
+    assert C.courses_of(c, "prof1", known, m, act) == ["demo101"]
+    # Activity is a person's, not a course's: active this term, prof2 counts in
+    # every group of several they are in (what `nomad course list` is for).
+    assert C.courses_of(c, "prof2", known, m, act) == ["demo202", "demo303"]
+    assert C.courses_of(c, "prof3", known, m, act) == []
+
+
+def test_what_the_site_says_wins_over_the_guess():
+    groups = {"faculty": {"prof1", "prof2", "prof3", "staff1"},
+              "demo202": {"prof1", "prof2", "prof3", "s2"},
+              "demo303": {"prof2", "prof3", "s3"},
+              "demo505": {"prof1", "staff1", "staff2", "s5"},
+              "demo606": {"staff1", "prof2", "s6"}}
+    cfg = {"console": {"courses": {"term_start": "2026-08-24", "not_teaching": ["Staff1", "staff2"],
+                                   "groups": {"demo202": {"exclude": ["prof2"]},
+                                              "demo303": {"instructors": ["prof3"]},
+                                              "demo606": {"instructors": ["staff1"]}}}}}
+    c, m = C.courses_from(cfg), _members(groups)
+    assert c.not_teaching == ("staff1", "staff2") and not c.problems
+    # The active one excluded: the other two, neither active, can't be told apart.
+    t = C.teaching(c, "demo202", m, _active("prof2"))
+    assert t["instructors"] == set() and t["undecided"] and t["faculty"] == {"prof1", "prof3"}
+    # Added by name: teaches it; the other, not active, is said to be left out.
+    t = C.teaching(c, "demo303", m, _active())
+    assert t["instructors"] == {"prof3"} and t["why"]["prof3"] == C.ADDED
+    assert t["not_active"] == {"prof2"} and not t["undecided"]
+    # Staff in the faculty group teach nothing, active or not: one faculty member left.
+    t = C.teaching(c, "demo505", m, _active("staff1"))
+    assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ONLY
+    # ...unless added to a course by name.
+    t = C.teaching(c, "demo606", m, _active())
+    assert t["instructors"] == {"staff1", "prof2"}
+    assert t["why"] == {"staff1": C.ADDED, "prof2": C.ONLY}
+    # Staff outside the faculty group are not students either.
+    r = C.roster(c, "demo505", m, lambda users: set(users), {}, datetime(2026, 8, 24),
+                 _active("staff1"))
+    assert r["listed"] == {"s5"} and r["this_term"] == {"s5"}
+
+
+def _hub(tmp_path):
+    """A hub's combined database. The directory lists every group on both
+    sites (web1, a teaching server; hpc1, a cluster).
+
+    * demo202: students work on web1 (s1, s8, s9; old2, an earlier term's,
+      ran one job on hpc1); prof3 used web1, prof10 too (a raw snapshot
+      before web1's daily totals), prof2 ran jobs on hpc1 only, prof4 did
+      nothing, prof11's only snapshot has no site;
+    * demo303: prof5, prof6, neither active; demo404: no faculty member;
+    * demo505: prof1 joined this term, prof7 used web1: who joined teaches it;
+    * demo606: prof8 has a row from before 1.11 and one from a site added
+      since (with a date), prof12: neither joined nor active;
+    * demo707: students run jobs on hpc1 (s7): prof2 ran jobs there."""
+    conn = sqlite3.connect(tmp_path / "hub.db")
+    conn.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, gid INTEGER, "
+                 "cluster TEXT, collected_at TEXT, has_account INTEGER, "
+                 "account_missing_since TEXT, first_seen TEXT, source_site TEXT)")
+    faculty = ["prof1", "prof2", "prof3", "prof4", "prof5", "prof6", "prof7", "prof8", "prof10",
+               "prof11", "prof12"]
+    rows = {"faculty": faculty,
+            "demo202": ["prof2", "prof3", "prof4", "prof10", "prof11", "s1", "s2", "s8", "s9",
+                        "old2"],
+            "demo303": ["prof5", "prof6", "s3"], "demo404": ["s4"],
+            "demo505": ["prof1", "prof7", "s5"], "demo606": ["prof8", "prof12", "s6"],
+            "demo707": ["prof2", "prof4", "s7"]}
+    for site in ("web1", "hpc1"):
+        for g, users in rows.items():
+            for u in users:
+                joined = None
+                if (u, g) == ("prof1", "demo505"):
+                    joined = "2026-10-13 09:00:00"
+                if (u, g, site) == ("prof8", "demo606", "hpc1"):
+                    joined = "2026-10-13T09:00:00"
+                conn.execute("INSERT INTO group_membership VALUES (?,?,1,?,?,1,NULL,?,?)",
+                             (u, g, site, NOW.isoformat(), joined, site))
+    D.ensure(conn)
+    conn.execute("ALTER TABLE interactive_daily ADD COLUMN source_site TEXT")
+    for u, site in (("prof3", "web1"), ("prof7", "web1"), ("s1", "web1"), ("s3", "web1"),
+                    ("s4", "web1"), ("s5", "web1"), ("s8", "web1"), ("s9", "web1")):
+        conn.execute("INSERT INTO interactive_daily (day, server_id, user, session_type, sessions, "
+                     "session_seconds, source_site) VALUES ('2026-10-01', 'srv', ?, '(any)', 1, "
+                     "3600, ?)", (u, site))
+    conn.execute("CREATE TABLE interactive_sessions (id INTEGER PRIMARY KEY, timestamp TEXT, "
+                 "server_id TEXT, user TEXT, session_type TEXT, pid INTEGER, mem_mb REAL, "
+                 "source_site TEXT)")
+    conn.execute("INSERT INTO interactive_sessions (timestamp, server_id, user, source_site) "
+                 "VALUES ('2026-09-01T10:00:00', 'srv', 'prof10', 'web1')")
+    conn.execute("INSERT INTO interactive_sessions (timestamp, server_id, user, source_site) "
+                 "VALUES ('2026-09-01T10:00:00', 'srv', 'prof11', NULL)")
+    conn.execute("CREATE TABLE jobs (job_id TEXT, user_name TEXT, submit_time TEXT, "
+                 "source_site TEXT)")
+    for i, u in enumerate(("prof2", "s7", "old2")):
+        conn.execute("INSERT INTO jobs VALUES (?, ?, '2026-10-02T10:00:00', 'hpc1')", (str(i), u))
+    conn.commit()
+    return conn
+
+
+def test_faculty_count_as_active_where_the_courses_students_work(tmp_path):
+    from nomad.config.access import members_lookup
+    from nomad.facts.courses import Activity
+    conn = _hub(tmp_path)
+    c = C.courses_from(TERM)
+    _, members_of = members_lookup(conn)
+    a = Activity(conn, datetime(2026, 8, 24), members_of, c)
+    assert a.faculty("demo202", {"prof2", "prof3", "prof4", "prof10", "prof11"}) == \
+        {"prof3": C.ACTIVE, "prof10": C.ACTIVE}
+    assert a.faculty_sites["demo202"] == ["web1"]
+    assert a.faculty("demo505", {"prof1", "prof7"}) == {"prof1": C.JOINED}     # joined wins
+    assert a.faculty("demo606", {"prof8", "prof12"}) == {}       # a date beside an old row: unknown
+    assert a.faculty("demo707", {"prof2", "prof4"}) == {"prof2": C.ACTIVE}
+    assert a.faculty_sites["demo707"] == ["hpc1"]
+    d = courses(conn, TERM, now=NOW)
+    shown = {x["group"]: x for x in d["courses"]}
+    assert set(shown) == {"demo202", "demo505", "demo707"}
+    assert shown["demo202"]["instructors"] == ["prof10", "prof3"]
+    assert shown["demo202"]["faculty_not_active"] == 3 and shown["demo202"]["active_on"] == ["web1"]
+    # s1, s8, s9 and old2 (active, if elsewhere); s2 not active.
+    assert shown["demo202"]["students"]["this_term"] == 4
+    assert shown["demo505"]["instructors_why"] == {"prof1": "joined"}
+    gone = {x["group"]: x for x in d["not_shown"]}
+    assert set(gone) == {"demo303", "demo404", "demo606"}
+    assert "none of them active" in gone["demo303"]["why"]
+    assert "no faculty member" in gone["demo404"]["why"] and gone["demo404"]["students_this_term"] == 1
+    assert [x["group"] for x in courses(conn, TERM, netid="prof3", now=NOW)["courses"]] == ["demo202"]
+    # Research jobs on hpc1 don't make prof2 teach demo202: its students work on
+    # web1, and one earlier student's job on hpc1 doesn't make hpc1 the course's.
+    assert [x["group"] for x in courses(conn, TERM, netid="prof2", now=NOW)["courses"]] == ["demo707"]
+    # Staff asking for a group by name see it, with why nobody teaches it.
+    x, = courses(conn, TERM, groups=["demo303"], now=NOW)["courses"]
+    assert x["instructors"] == [] and "none of them active" in x["no_instructor"]
+
+
+def test_netids_match_whatever_their_case_and_join_stamps_whatever_their_form():
+    groups = {"faculty": {"prof1", "prof2"}, "demo101": {"Prof1", "prof2", "s1"}}
+    t = C.teaching(C.courses_from(TERM), "demo101", _members(groups), _active())
+    assert t["faculty"] == {"prof1", "prof2"} and t["undecided"]      # not prof2 alone
+    since = datetime(2026, 8, 24)
+    for stamp, yes in (("2026-08-24", True), ("2026-08-24 09:00:00", True),
+                       ("2026-08-24T00:00:00", True), ("2026-08-23T23:59:59", False), (None, False)):
+        assert C.joined_this_term(stamp, since) is yes, stamp
+
+
+def test_course_list_says_why_and_not_teaching_is_written(tmp_path):
+    from click.testing import CliRunner
+
+    from nomad.cli import cli
+    _hub(tmp_path).close()
+    cfg = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                          'term_start = "2026-08-24"\n')
+    db = str(tmp_path / "hub.db")
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "list", "--db", db])
+    assert r.exit_code == 0, r.output
+    lines = r.output.splitlines()
+    line = next(x for x in lines if x.startswith("  demo202:"))
+    assert "prof10 (active on web1), prof3 (active on web1)" in line
+    assert "3 other faculty member(s) not active this term (prof11, prof2, prof4)" in line
+    assert "prof1 (joined)" in next(x for x in lines if x.startswith("  demo505:"))
+    tail = r.output[r.output.index("Shown to nobody"):]
+    assert "demo303: 2 faculty members, none active this term (prof5, prof6)" in tail
+    assert "demo404: no faculty member in the group" in tail
+    # --mask: no group, NetID or site, in either command, text or JSON.
+    masked = [CliRunner().invoke(cli, ["-c", str(cfg)] + args + ["--db", db, "--mask"]).output
+              for args in (["course", "list"], ["facts", "course"], ["facts", "course", "--json"])]
+    for out in masked:
+        for name in ("prof", "demo", "web1", "hpc1", "hub.db"):
+            assert name not in out, (name, out)
+    assert "active this term" in masked[1]
+    # Staff: not teaching anywhere.
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "not-teaching", "Prof3"])
+    assert r.exit_code == 0 and "prof3 teaches no course" in r.output
+    assert "not_teaching" not in cfg.read_text()                  # a dry run
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "not-teaching", "prof3", "--apply"])
+    assert r.exit_code == 0, r.output
+    assert C.courses_from(TomlEdit(cfg).data).not_teaching == ("prof3",)
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "list", "--db", db])
+    line = next(x for x in r.output.splitlines() if x.startswith("  demo202:"))
+    assert "prof3" not in line and "prof10 (active on web1)" in line
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "not-teaching", "prof3", "--undo",
+                                 "--apply"])
+    assert r.exit_code == 0 and C.courses_from(TomlEdit(cfg).data).not_teaching == ()
+    off = _toml(tmp_path, '[general]\ndata_dir = "/x"\n')
+    r = CliRunner().invoke(cli, ["-c", str(off), "course", "not-teaching", "prof3"])
+    assert r.exit_code != 0 and "courses are off" in r.output
+    # Every course nobody teaches: said so.
+    only = _toml(tmp_path, '[general]\ndata_dir = "/x"\n\n[console.courses]\n'
+                           'term_start = "2026-08-24"\npattern = "^demo303$"\n')
+    r = CliRunner().invoke(cli, ["-c", str(only), "facts", "course", "--db", db])
+    assert "no course has an instructor this term" in r.output and "demo303" in r.output

@@ -13,12 +13,13 @@ def course_group():
 
     \b
     nomad course setup --term-start 2026-08-24   turn courses on (or change settings)
-    nomad course list                            each course, its instructors and students
+    nomad course list                            each course: instructors (and why), students
     nomad course add GROUP NETID                 NETID teaches GROUP (not in it, or a TA)
     nomad course exclude GROUP NETID             in GROUP and faculty, but not teaching it
     nomad course remove GROUP NETID              off either list
     nomad course name GROUP "Econometrics"       how the course is shown
     nomad course ignore GROUP [--undo]           named like a course, but isn't one
+    nomad course not-teaching NETID [--undo]     faculty group, but teaches nothing (staff)
     Changes are shown first; --apply writes them (with a backup).
     `nomad facts course` gives a course's figures.
     """
@@ -172,8 +173,9 @@ def _course_change(ctx, group, apply, new_group=False, **kw):
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
 def add_cmd(ctx, group, netid, apply, new_group):
-    """NETID teaches GROUP: when no faculty member is in the group, or for
-    a co-instructor or a TA."""
+    """NETID teaches GROUP: when no faculty member is in the group, when
+    several are and nomad can't tell which teaches it this term, or for a
+    co-instructor or a TA."""
     _course_change(ctx, group, apply, new_group, add=netid)
 
 
@@ -184,7 +186,8 @@ def add_cmd(ctx, group, netid, apply, new_group):
 @click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
 @click.pass_context
 def exclude_cmd(ctx, group, netid, apply, new_group):
-    """NETID is in GROUP and in the faculty group but does not teach it."""
+    """NETID is in GROUP and in the faculty group but does not teach it
+    (overrides nomad's guess from who was active this term)."""
     _course_change(ctx, group, apply, new_group, exclude=netid)
 
 
@@ -221,12 +224,45 @@ def ignore_cmd(ctx, group, undo, apply, new_group):
     _course_change(ctx, group, apply, new_group, ignore=not undo)
 
 
+@course_group.command("not-teaching")
+@click.argument("netid")
+@click.option("--undo", is_flag=True, help="NETID may teach again.")
+@click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
+@click.pass_context
+def not_teaching_cmd(ctx, netid, undo, apply):
+    """NETID is in the faculty group but teaches no course (staff): left out
+    of every course's instructors, unless added to one by name."""
+    from nomad.config.courses import CourseError, courses_from, set_not_teaching
+    edit = _edit(ctx)
+    try:
+        changes = set_not_teaching(edit, netid, undo=undo)
+    except CourseError as e:
+        raise click.ClickException(str(e))
+    n = netid.strip().lower()
+
+    def check(d):
+        c = courses_from(d)
+        return c.enabled and ((n not in c.not_teaching) if undo else (n in c.not_teaching))
+    notes = ["The Console reads nomad.toml on every request: no restart."] if changes else []
+    _finish(edit, changes, apply, check, notes)
+
+
+def _short(why: str, sites=None) -> str:
+    from nomad.config.courses import ACTIVE, ONLY
+    if why == ONLY:
+        return "only faculty member"
+    if why == ACTIVE and sites:
+        return f"active on {', '.join(sites)}"
+    return why
+
+
 @course_group.command("list")
 @click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
 @click.option("--mask", is_flag=True, help="Course groups, names and instructors numbered.")
 @click.pass_context
 def list_cmd(ctx, db, mask):
-    """Each course: its instructors, and its students this term (counts)."""
+    """Each course: its instructors this term and why, and its students
+    this term (counts). Courses nobody teaches this term come last."""
     from datetime import datetime
 
     from nomad.config.access import members_lookup
@@ -235,8 +271,12 @@ def list_cmd(ctx, db, mask):
     from nomad.facts.cli import _open
     from nomad.facts.courses import Activity
     c = courses_from(ctx.obj.get("config", {}) or {})
-    for p in c.problems:
-        click.echo(click.style(f"nomad.toml: {p}", fg="yellow"))
+    if mask and c.problems:
+        click.echo(click.style(f"nomad.toml: {len(c.problems)} problem(s) in [console.courses] "
+                               "(nomad config check)", fg="yellow"))
+    else:
+        for p in c.problems:
+            click.echo(click.style(f"nomad.toml: {p}", fg="yellow"))
     if not c.enabled:
         click.echo("Courses are off: nomad.toml has no [console.courses]. "
                    "`nomad course setup --term-start YYYY-MM-DD` turns them on.")
@@ -248,27 +288,58 @@ def list_cmd(ctx, db, mask):
         start = c.start(now.date())
         since = datetime.combine(start, datetime.min.time())
         found = course_groups(c, group_names(conn))
-        activity = Activity(conn, since)
+        activity = Activity(conn, since, members_of, c)
         click.echo(f"Courses this term (from {start}, "
-                   f"{'nomad.toml' if c.term_start else 'by the calendar'}); "
-                   f"instructors: members of {c.faculty_group!r} and those listed")
+                   f"{'nomad.toml' if c.term_start else 'by the calendar'})")
+        click.echo(f"Instructors: those added by name; the group's one member of "
+                   f"{c.faculty_group!r}; with several, those who joined the group this term, "
+                   "else those active this term where its students work; less those excluded.")
+        if c.not_teaching:
+            who = (f"{len(c.not_teaching)} person(s)" if mask
+                   else ", ".join(c.not_teaching))
+            click.echo(f"Teach no course unless added to one (not_teaching): {who}")
         if not found:
             click.echo("  no group is a course: none matches the pattern "
                        f"{c.pattern!r} and none is listed")
-        for i, g in enumerate(found, 1):
-            r = roster(c, g, members_of, activity.of, first_seen(conn, g), since)
-            label = f"course #{i}" if mask else c.label(g)
-            teach = r["instructors"]
-            who = (f"{len(teach)} instructor(s)" if mask else ", ".join(sorted(teach))) \
-                if teach else click.style("no instructor (nomad course add GROUP NETID)", fg="yellow")
-            line = (f"  {label}: {who}; {len(r['this_term'])} student(s) this term"
-                    + (f", {len(r['left_out_earlier'])} from earlier terms"
-                       if r["left_out_earlier"] else "")
-                    + (f", {len(r['left_out_unknown'])} listed but not active (joined before "
-                       "nomad recorded join dates)" if r["left_out_unknown"] else ""))
+        nobody = []
+        shown = 0
+        for g in found:
+            r = roster(c, g, members_of, activity.of, first_seen(conn, g), since,
+                       activity.faculty)
+            t = r["teaching"]
+            students = (f"{len(r['this_term'])} student(s) this term"
+                        + (f", {len(r['left_out_earlier'])} from earlier terms"
+                           if r["left_out_earlier"] else "")
+                        + (f", {len(r['left_out_unknown'])} listed but not active (joined "
+                           "before nomad recorded join dates)" if r["left_out_unknown"] else ""))
             if not exists(g):
-                line += "; no members in the groups data"
-            click.echo(line)
+                students += "; no members in the groups data"
+            if not r["instructors"]:
+                nobody.append((g, t, students))
+                continue
+            shown += 1
+            label = f"course #{shown}" if mask else c.label(g)
+            if mask:
+                who = f"{len(r['instructors'])} instructor(s)"
+            else:
+                sites = activity.faculty_sites.get(g)
+                who = ", ".join(f"{n} ({_short(t['why'][n], sites)})"
+                                for n in sorted(r["instructors"]))
+            if t["not_active"]:
+                who += (f"; {len(t['not_active'])} other faculty member(s) not active this term"
+                        + ("" if mask else f" ({', '.join(sorted(t['not_active']))})"))
+            click.echo(f"  {label}: {who}; {students}")
+        if nobody:
+            click.echo("Shown to nobody this term (no instructor; `nomad course add GROUP NETID` "
+                       "if someone teaches it):")
+            for i, (g, t, students) in enumerate(nobody, 1):
+                label = f"group #{i}" if mask else c.label(g)
+                if t["undecided"]:
+                    why = (f"{len(t['faculty'])} faculty members, none active this term"
+                           + ("" if mask else f" ({', '.join(sorted(t['faculty']))})"))
+                else:
+                    why = "no faculty member in the group"
+                click.echo(f"  {label}: {why}; {students}")
     finally:
         conn.close()
 

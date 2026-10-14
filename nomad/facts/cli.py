@@ -355,13 +355,49 @@ def _left_out(s: dict) -> str:
     return f" (not counted: {'; '.join(parts)})" if parts else ""
 
 
+def _teachers(course: dict) -> str:
+    """Instructors with why each one teaches it; or why nobody does."""
+    from nomad.config.courses import ACTIVE, WHY
+    why = course.get("instructors_why") or {}
+
+    def words(code):
+        text = WHY.get(code, code)
+        if code == ACTIVE and course.get("active_on"):
+            text = f"active this term on {', '.join(course['active_on'])}, where its students work"
+        return text
+    teach = [f"{n} ({words(why[n])})" if n in why else n for n in course["instructors"]]
+    text = ", ".join(teach) if teach else course.get("no_instructor",
+                                                    "none found (nomad course add)")
+    if course.get("faculty_not_active"):
+        text += (f"; {course['faculty_not_active']} other faculty member(s) in the group not "
+                 "active this term")
+    return text
+
+
+def _not_shown(data: dict) -> None:
+    gone = data.get("not_shown") or ()
+    if not gone:
+        return
+    click.echo(f"\nNot shown to anyone this term ({len(gone)}): nobody teaches them by "
+               "nomad.toml's rules (nomad course list)")
+    for g in gone:
+        click.echo(f"  {g['group']}: {g['students_this_term']} student(s) this term; {g['why']}")
+
+
 def _mask_courses(data: dict) -> None:
     """Course groups and names can say who teaches them; instructors are NetIDs."""
     if data.get("not_courses"):
         data["not_courses"] = [f"group #{i}" for i in range(1, len(data["not_courses"]) + 1)]
+    for i, gone in enumerate(data.get("not_shown", ()), 1):
+        gone["group"] = gone["name"] = f"not shown #{i}"
     for i, course in enumerate(data["courses"], 1):
         course["group"] = course["name"] = f"course #{i}"
         course["instructors"] = [f"instructor {j}" for j in range(1, len(course["instructors"]) + 1)]
+        if "instructors_why" in course:
+            course["instructors_why"] = {f"instructor {j}": why for j, why in
+                                         enumerate(course["instructors_why"].values(), 1)}
+        if course.get("active_on"):
+            course["active_on"] = [f"site {j}" for j in range(1, len(course["active_on"]) + 1)]
         for j, r in enumerate(course.get("each_student", ()), 1):
             r["user"] = f"student {j}"
 
@@ -404,8 +440,11 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
             click.echo(note)
         elif instructor:
             who = "this person" if mask else instructor
-            click.echo(f"{who} teaches no course by nomad.toml's rules "
-                       "(nomad course list shows each course's instructors)")
+            click.echo(f"{who} teaches no course this term by nomad.toml's rules "
+                       "(nomad course list shows each course's instructors and why)")
+        elif data.get("not_shown"):
+            click.echo("no course has an instructor this term")
+            _not_shown(data)
         else:
             click.echo("no course found (nomad course list)")
         return
@@ -415,8 +454,7 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
             f"{course['group']} ({course['name']})"
         click.echo(f"\n{label}: this term, from {w['term_start']} ({w['term_start_from']})"
                    f"{_where(path, mask)}")
-        teach = course["instructors"]
-        click.echo(f"  instructors: {', '.join(teach) if teach else 'none found (nomad course add)'}")
+        click.echo(f"  instructors: {_teachers(course)}")
         s = course["students"]
         line = f"  students: {s['this_term']} this term" + _left_out(s)
         if "used_a_server" in s:
@@ -472,3 +510,4 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
         j = course.get("jobs")
         if j and j["students_with_jobs"]:
             click.echo(f"  clusters: {j['students_with_jobs']} student(s) ran jobs; {_jobs_line(j)}")
+    _not_shown(data)
