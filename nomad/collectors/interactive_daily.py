@@ -53,6 +53,18 @@ in a notebook is on, not busy.
 session: ``open_seconds``, ``busy_seconds``, ``measured_seconds``,
 ``cpu_seconds``, ``mem_mb_max`` (the most they held at once) and ``runs``.
 
+By environment, for courses (nomad 1.12.5; kept for good):
+
+``interactive_env_daily``: one row per day, server, person, environment a
+session ran from (a conda environment, often a course's Jupyter kernel; see
+nomad.collectors.interactive.environment_of), where it is (``path``, its
+directory) and ``own`` (1: the person's own, which they own or keep in their
+home -- anyone can name one like a course): ``sessions`` opened that day,
+``session_seconds`` with at least one session in it open, ``busy_seconds``
+with one busy, and ``cpu_seconds``. Sessions from the base installation have no environment and
+no row. Who used a course's environment this term is who is in the class,
+whatever groups they are in.
+
 Hours are local time (``YYYY-MM-DDTHH``): the hour repeated when daylight
 time ends holds both (twice the readings; averages stay right), and the hour
 skipped when it starts has no row.
@@ -124,6 +136,21 @@ CREATE TABLE IF NOT EXISTS interactive_person_hourly (
     updated_at        TEXT,
     PRIMARY KEY (hour, server_id, user)
 )"""
+ENV_DAILY = """
+CREATE TABLE IF NOT EXISTS interactive_env_daily (
+    day              TEXT NOT NULL,
+    server_id        TEXT NOT NULL,
+    user             TEXT NOT NULL,
+    environment      TEXT NOT NULL,
+    path             TEXT NOT NULL DEFAULT '',
+    own              INTEGER NOT NULL DEFAULT 0,
+    sessions         INTEGER NOT NULL DEFAULT 0,
+    session_seconds  REAL NOT NULL DEFAULT 0,
+    busy_seconds     REAL NOT NULL DEFAULT 0,
+    cpu_seconds      REAL NOT NULL DEFAULT 0,
+    updated_at       TEXT,
+    PRIMARY KEY (day, server_id, user, environment, path, own)
+)"""
 STATE = """
 CREATE TABLE IF NOT EXISTS interactive_state (
     key        TEXT PRIMARY KEY,
@@ -137,7 +164,10 @@ def ensure(conn: sqlite3.Connection) -> None:
     conn.execute(DAILY)
     conn.execute(HOURLY)
     conn.execute(PERSON_HOURLY)
+    conn.execute(ENV_DAILY)
     conn.execute(STATE)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_env_daily_env "
+                 "ON interactive_env_daily(environment, day)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_daily_user "
                  "ON interactive_daily(user, day)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_person_hourly_user "
@@ -207,6 +237,10 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
     state = []
     person = defaultdict(lambda: {"busy": False, "measured": False, "mem": 0.0, "cpu": 0.0,
                                   "new": 0})
+    # (user, environment, path, own) -> sessions new today, busy, CPU: a
+    # person's time in an environment, once however many of its sessions
+    # they had open.
+    envs = defaultdict(lambda: {"new": 0, "busy": False, "cpu": 0.0})
     counted = 0
     for s in sessions:
         user, kind = s.get("user"), s.get("session_type")
@@ -218,9 +252,14 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
         ticks = s.get("cpu_ticks")
         before = prev.get(key)
         t = totals[(user, kind)]
+        env = s.get("environment")
+        e = envs[(user, env, s.get("environment_path") or "",
+                  1 if s.get("environment_own") else 0)] if env else None
         if before is None or before[1] != day:
             t["sessions"] += 1
             me["new"] += 1
+            if e is not None:
+                e["new"] += 1
         mem = s.get("mem_mb") or 0.0
         me["mem"] += mem
         t["peak_mem_mb"] = mem if t["peak_mem_mb"] is None else max(t["peak_mem_mb"], mem)
@@ -244,9 +283,13 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                 t["cpu_measured_seconds"] += dt
                 me["cpu"] += cpu
                 me["measured"] = True
+                if e is not None:
+                    e["cpu"] += cpu
                 if cpu / dt * 100.0 >= BUSY_PERCENT:
                     t["busy_seconds"] += dt
                     me["busy"] = True
+                    if e is not None:
+                        e["busy"] = True
         state.append((key, ticks, day, now.isoformat()))
 
     for user, me in person.items():
@@ -284,6 +327,13 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
               "measured_seconds": dt if dt and me["measured"] else 0.0,
               "cpu_seconds": me["cpu"]},
              {"mem_mb_max": me["mem"]}, stamp)
+    for (user, env, path, own), e in envs.items():
+        _add(conn, "interactive_env_daily",
+             {"day": day, "server_id": server_id, "user": user, "environment": env,
+              "path": path, "own": own},
+             {"sessions": e["new"], "session_seconds": dt or 0.0,
+              "busy_seconds": dt if dt and e["busy"] else 0.0, "cpu_seconds": e["cpu"]},
+             {}, stamp)
     for (user, kind), t in totals.items():
         row = conn.execute(
             "SELECT sessions, session_seconds, busy_seconds, cpu_measured_seconds, cpu_seconds, "

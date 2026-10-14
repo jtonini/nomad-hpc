@@ -350,8 +350,10 @@ def _left_out(s: dict) -> str:
     if s.get("left_out_earlier"):
         parts.append(f"{s['left_out_earlier']} from earlier terms")
     if s.get("left_out_unknown"):
-        parts.append(f"{s['left_out_unknown']} listed but not active this term: earlier "
-                     "students, or some not started yet")
+        parts.append(f"{s['left_out_unknown']} listed but "
+                     + ("not using its environment" if s.get("by_environment")
+                        else "not active this term")
+                     + ": earlier students, or some not started yet")
     return f" (not counted: {'; '.join(parts)})" if parts else ""
 
 
@@ -369,8 +371,8 @@ def _teachers(course: dict) -> str:
     text = ", ".join(teach) if teach else course.get("no_instructor",
                                                     "none found (nomad course add)")
     if course.get("faculty_left_out") and teach:
-        text += (f"; {course['faculty_left_out']} other faculty member(s) in the group left out "
-                 "this term")
+        text += (f"; {course['faculty_left_out']} other faculty member(s) among its people left "
+                 "out this term")
     if course.get("faculty_said_no"):
         text += f"; {course['faculty_said_no']} said they don't teach it"
     return text
@@ -400,6 +402,9 @@ def _mask_courses(data: dict) -> None:
                                          enumerate(course["instructors_why"].values(), 1)}
         if course.get("active_on"):
             course["active_on"] = [f"site {j}" for j in range(1, len(course["active_on"]) + 1)]
+        if course.get("environments"):
+            course["environments"] = [f"environment {j}"
+                                      for j in range(1, len(course["environments"]) + 1)]
         for j, r in enumerate(course.get("each_student", ()), 1):
             r["user"] = f"student {j}"
 
@@ -470,6 +475,9 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
         click.echo(f"\n{label}: this term, from {w['term_start']} ({w['term_start_from']})"
                    f"{_where(path, mask)}")
         click.echo(f"  instructors: {_teachers(course)}")
+        if course.get("environments"):
+            click.echo(f"  environment(s): {', '.join(course['environments'])} (whoever used "
+                       "them this term is one of its people)")
         s = course["students"]
         line = f"  students: {s['this_term']} this term" + _left_out(s)
         if "used_a_server" in s:

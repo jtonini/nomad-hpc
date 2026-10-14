@@ -670,6 +670,7 @@ CREATE TABLE IF NOT EXISTS interactive_sessions (
     start_time DATETIME,
     age_hours REAL,
     is_idle BOOLEAN,
+    environment TEXT,            -- the conda environment it runs from (1.12.5), else NULL
     
     FOREIGN KEY (server_id) REFERENCES interactive_servers(id)
 );

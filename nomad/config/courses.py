@@ -9,11 +9,13 @@
     min_students = 0                         # fewer students this term: no figures
     names = false                            # instructors see students by name
     not_teaching = ["jdoe"]                  # in the faculty group, teaches no course
+    sources = ["groups", "environments"]     # how a class gets access (see below)
 
     [console.courses.groups."demo101"]
     name = "Econometrics"                    # how the course is shown
     instructors = ["jdoe"]                   # teaches it every term
     exclude = ["asmith"]                     # in the group and faculty, never teaches it
+    environments = ["datakit"]              # its environments, when not named like it
 
     [console.courses.groups."demo101".terms."2026-08-24"]
     instructors = ["bsmith"]                 # teaches it this term only
@@ -25,19 +27,44 @@
 Nothing is a course until [console.courses] is there: a site that has not
 said how its groups work gets no course view rather than a wrong one (a
 group named like a course that isn't one would show its members to every
-faculty member in it). With the table, a group is a course when its name
-matches ``pattern`` or it is listed under ``groups``.
+faculty member in it).
+
+How a class gets access differs from one institution to the next, so the
+site says which of these it uses (``sources``, default ``["groups"]``):
+
+* ``groups``: a Unix group per course, named like it: a group whose name
+  matches ``pattern`` is a course, its members the course's people;
+* ``environments``: a software environment per course (a conda environment,
+  a Jupyter kernel named for it; the interactive collector records which
+  one each session runs from, nomad 1.12.5): an environment named
+  like a course group (``pattern``) counts for that course, and whoever used
+  it this term is one of its members, whatever groups they are in. Shared
+  software is named like courses too (py311): one with no group of its name
+  is a course only when listed;
+* ``own_groups``: the instructor's own group (``jdoe$``) holds a class:
+  ``nomad course discover`` proposes these, and one becomes a course when
+  someone is added to it (an instructor's group is often their research
+  lab too).
+
+Whatever the sources, a group listed under ``groups`` is a course (unless
+``course = false``) -- every term, or only in a term when nothing but that
+term's decisions lists it (someone added to an instructor's own group for
+the term it holds their class) -- and a course's ``environments`` add the
+people who used those environments this term to its students (not to whom
+it chooses its instructors among: two courses may share one).
 
 Its instructors this term (``teaching``):
 
 * anyone listed as one (``nomad course add``), for this term or every term;
-* of the group's members in ``faculty_group``: those who said they teach it
-  this term (in the Console; ``course_answers``); when none has,
-* with several, those who joined the group this term; when none did, those
-  active this term where the course's students work (the servers and
-  clusters they used): groups are reused term after term, and nobody takes
-  last term's instructor out. When none of them was, nomad can't tell who
-  teaches it, and nobody does until one is added;
+* of its people in ``faculty_group`` (its group's members, and whoever used
+  its environments this term): those who said they teach it this term (in
+  the Console; ``course_answers``); when none has, its only one;
+* with several, those who joined its group this term; when none did, those
+  who used the course's environment this term; when none did, those active
+  this term where the course's students work (the servers and clusters they
+  used): groups are reused term after term, and nobody takes last term's
+  instructor out. When none of them was, nomad can't tell who teaches it,
+  and nobody does until one is added;
 
 less anyone excluded from the group (this term or every term), anyone who
 said they don't teach it this term, and anyone in ``not_teaching`` (staff
@@ -48,10 +75,11 @@ changes from term to term. A course with no
 instructor is shown to no one. Who joined is a stronger sign than who was
 active: when one of several joined this term, the ones who did teach it.
 
-Its students are its other members (faculty are never students), and of
+Its students are its other people (faculty are never students), and of
 those, this term's are the ones who joined since ``term_start`` or used a
 server or a cluster since then: groups nobody prunes keep earlier terms'
-students listed.
+students listed. (For a course whose environment students used this term,
+the ones who joined or used it: ``nomad.facts.courses.CourseIndex.roster``.)
 
 ``term_start`` defaults to the start of the current term by a US academic
 calendar (15 August, 1 January, 1 June). ``min_students`` defaults to 0: a
@@ -81,8 +109,11 @@ DEFAULT_FACULTY = "faculty"
 SECTION = ("console", "courses")
 GROUPS = SECTION + ("groups",)
 _KEYS = ("pattern", "faculty_group", "term_start", "min_students", "names",
-         "not_teaching", "groups")
-_COURSE_KEYS = ("name", "instructors", "exclude", "course", "terms")
+         "not_teaching", "sources", "groups")
+_COURSE_KEYS = ("name", "instructors", "exclude", "course", "terms", "environments")
+SOURCES = ("groups", "environments", "own_groups")
+DEFAULT_SOURCES = ("groups",)
+_ENV = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63}$")
 _TERM_KEYS = ("instructors", "exclude")
 _GROUP = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._$-]*$")
 _NETID = re.compile(r"^[a-z0-9_][a-z0-9._-]*$")
@@ -122,6 +153,20 @@ class Course:
     exclude: tuple = ()               # every term
     course: bool = True               # false: named like a course, but isn't one
     terms: dict = field(default_factory=dict)   # "YYYY-MM-DD" -> (instructors, exclude)
+    environments: tuple = ()          # environments whose users this term are its people
+
+    def every_term(self) -> bool:
+        """Listed for good: named, given instructors, exclusions or
+        environments for every term, or a table of its own and nothing else.
+        A group listed only by a term's decisions (someone added to it for a
+        term) is listed for that term only."""
+        return bool(self.name or self.instructors or self.exclude or self.environments
+                    or not self.terms)
+
+    def in_term(self, term: str) -> bool:
+        """Listed in ``term``: for good, or by that term's instructors (an
+        exclusion alone makes nothing a course)."""
+        return self.every_term() or bool(self.terms.get(term, ((), ()))[0])
 
 
 @dataclass(frozen=True)
@@ -133,18 +178,41 @@ class Courses:
     min_students: int = 0
     names: bool = False
     not_teaching: tuple = ()                        # faculty-group members who teach nothing
+    sources: tuple = DEFAULT_SOURCES                # how classes get access (SOURCES)
     listed: dict = field(default_factory=dict)      # group -> Course
     problems: tuple = ()
 
-    def is_course(self, group: str) -> bool:
-        if not self.enabled or not group or group == self.faculty_group:
+    def is_course(self, name: str, kind: str = "group", term: str | None = None) -> bool:
+        """Whether ``name`` -- a group (``kind`` "group") or an environment
+        ("environment") -- is a course in ``term`` (default: this term):
+        listed (and not ``course = false``), or named like one when the
+        site's sources say that kind of name makes a course. A group listed
+        only by a term's decisions is a course in that term only (an
+        instructor's own group may hold a class one term and be their lab
+        the next)."""
+        if not self.enabled or not name or name == self.faculty_group:
             return False
-        if group in self.listed:
-            return self.listed[group].course
+        if name in self.listed and not self.listed[name].course:
+            return False
+        listed = name in self.listed and self.listed[name].in_term(
+            term or self.start().isoformat())
+        if kind == "environment":
+            if "environments" not in self.sources or name in self.claimed():
+                return False
+            if listed:
+                return True
+        elif listed:
+            return True
+        elif "groups" not in self.sources:
+            return False
         try:
-            return bool(self.pattern) and re.fullmatch(self.pattern, group) is not None
+            return bool(self.pattern) and re.fullmatch(self.pattern, name) is not None
         except re.error:
             return False
+
+    def claimed(self) -> set:
+        """Environments listed under a course: theirs, not courses of their own."""
+        return {e for c in self.listed.values() for e in c.environments}
 
     def start(self, today: date | None = None) -> date:
         return self.term_start or term_start_for(today or date.today())
@@ -232,6 +300,20 @@ def courses_from(config: dict | None) -> Courses:
         problems.append("[console.courses] names should be true or false; false is used")
         names = False
     not_teaching = _names(raw.get("not_teaching"), "[console.courses] not_teaching", problems)
+    sources = raw.get("sources", list(DEFAULT_SOURCES))
+    if isinstance(sources, str):
+        sources = [sources]
+    if not isinstance(sources, list):
+        problems.append("[console.courses] sources should be a list, of "
+                        f"{', '.join(SOURCES)}; {list(DEFAULT_SOURCES)} is used")
+        sources = list(DEFAULT_SOURCES)
+    known_sources = []
+    for v in sources:
+        if v in SOURCES:
+            known_sources.append(v)
+        else:
+            problems.append(f"[console.courses] sources: {v!r} is not one of {', '.join(SOURCES)}; "
+                            "ignored")
     listed: dict = {}
     groups = raw.get("groups") or {}
     if not isinstance(groups, dict):
@@ -281,13 +363,27 @@ def courses_from(config: dict | None) -> Courses:
                     problems.append(f"{tw} {k}: unknown; the settings are {', '.join(_TERM_KEYS)}")
             terms[key] = (_names(body.get("instructors"), f"{tw} instructors", problems),
                           _names(body.get("exclude"), f"{tw} exclude", problems))
+        envs = table.get("environments") or []
+        if isinstance(envs, str):
+            envs = [envs]
+        if not isinstance(envs, list):
+            problems.append(f"{where} environments should be a list of names; ignored")
+            envs = []
+        good_envs = []
+        for e in envs:
+            if isinstance(e, str) and _ENV.match(e.strip()):
+                good_envs.append(e.strip())
+            else:
+                problems.append(f"{where} environments: {e!r} is not an environment's name; "
+                                "ignored")
         listed[g] = Course(course=is_course, name=" ".join(name.split()) if name else None,
                            instructors=_names(table.get("instructors"), f"{where} instructors",
                                               problems),
                            exclude=_names(table.get("exclude"), f"{where} exclude", problems),
-                           terms=terms)
+                           terms=terms, environments=tuple(dict.fromkeys(good_envs)))
     return Courses(enabled=True, pattern=pattern, faculty_group=faculty.strip(), term_start=start,
-                   min_students=minimum, names=names, not_teaching=not_teaching, listed=listed,
+                   min_students=minimum, names=names, not_teaching=not_teaching,
+                   sources=tuple(dict.fromkeys(known_sources)), listed=listed,
                    problems=tuple(problems))
 
 
@@ -301,11 +397,13 @@ def group_names(conn) -> list[str]:
 
 
 # Why someone teaches a course this term (``teaching``'s ``why``).
-ADDED, CONFIRMED, ONLY, JOINED, ACTIVE = "added", "confirmed", "only", "joined", "active"
+ADDED, CONFIRMED, ONLY, JOINED, ENVIRONMENT, ACTIVE = (
+    "added", "confirmed", "only", "joined", "environment", "active")
 WHY = {ADDED: "added by name",
        CONFIRMED: "said they teach it this term",
-       ONLY: "the group's only faculty member",
+       ONLY: "its only faculty member",
        JOINED: "joined the group this term",
+       ENVIRONMENT: "used the course's environment this term",
        ACTIVE: "active this term where its students work"}
 
 
@@ -323,13 +421,16 @@ def teaching(c: Courses, group: str, members_of: Callable[[str], set],
     the module's notes).
 
     ``active(group, candidates)``: of the group's faculty members, who
-    joined the group this term or was active this term, as {netid: JOINED or
-    ACTIVE} (``nomad.facts.courses.Activity.faculty``); without it nobody is
-    taken as active. ``answers``: {netid: True/False}, what the group's
+    joined the group this term, used the course's environment or was active
+    this term, as {netid: JOINED, ENVIRONMENT or ACTIVE}
+    (``nomad.facts.courses.Activity.faculty``); without it nobody is taken
+    as active. ``members_of(course)`` gives the course's people: its group's
+    members, and those who used its environments (``nomad.facts.courses.
+    CourseIndex.members``). ``answers``: {netid: True/False}, what the group's
     faculty members said about teaching it this term (``course_answers``).
 
-    Returns ``instructors``; ``why`` {netid: ADDED, CONFIRMED, ONLY, JOINED
-    or ACTIVE}; ``faculty``, the group's faculty members nomad chose among
+    Returns ``instructors``; ``why`` {netid: ADDED, CONFIRMED, ONLY, JOINED,
+    ENVIRONMENT or ACTIVE}; ``faculty``, the group's faculty members nomad chose among
     (less those excluded, those not teaching and those who said no);
     ``said_no``; ``left_out``, the rest of them: not active this term, or
     others said yes or joined; ``undecided``, true when faculty members are
@@ -383,11 +484,42 @@ def _lower(names) -> set:
     return {n.lower() for n in names if n}
 
 
-def course_groups(c: Courses, known: Iterable[str]) -> list[str]:
+def course_keys(c: Courses, groups: Iterable[str], environments: Iterable[str] = (),
+                term: str | None = None) -> list[str]:
+    """Every course in ``term`` (default: this term): groups that are
+    courses (listed, or named like one when the sources include groups),
+    listed courses with no group, and environments named like a course when
+    the sources include them (each the same course as the group of its name,
+    if there is one)."""
+    if not c.enabled:
+        return []
+    groups = set(groups)
+    keys = {g for g in groups | set(c.listed) if c.is_course(g, term=term)}
+    # An environment named like a course is the course of the group of its
+    # name: py311 or cuda121 are named like courses too. One with no such
+    # group is a course when listed.
+    keys |= {e for e in environments if e in groups and c.is_course(e, "environment", term)}
+    return sorted(keys)
+
+
+def course_environments(c: Courses, key: str, environments: Iterable[str] = (),
+                        term: str | None = None, groups: Iterable[str] | None = None) -> set:
+    """The environments whose users this term are among ``key``'s people:
+    those listed under it, and the one of its own name when that is a
+    course's -- a group of that name, or the course listed (``environments``:
+    the names seen; ``groups``: the groups data's, None: not asked)."""
+    envs = set(c.listed.get(key, Course()).environments)
+    if key in set(environments) and c.is_course(key, "environment", term) and (
+            groups is None or key in set(groups) or key in c.listed):
+        envs.add(key)
+    return envs
+
+
+def course_groups(c: Courses, known: Iterable[str], term: str | None = None) -> list[str]:
     """The groups that are courses: listed ones and those whose name matches."""
     if not c.enabled:
         return []
-    return sorted({g for g in set(known) | set(c.listed) if c.is_course(g)})
+    return sorted({g for g in set(known) | set(c.listed) if c.is_course(g, term=term)})
 
 
 def courses_of(c: Courses, netid: str, known: Iterable[str],
@@ -400,7 +532,7 @@ def courses_of(c: Courses, netid: str, known: Iterable[str],
     if not n:
         return []
     out = []
-    for g in course_groups(c, known):
+    for g in course_groups(c, known, term):
         # Only a member of the group, or someone added, can teach it.
         if n not in c.decisions(g, term)[0] and n not in _lower(members_of(g)):
             continue
@@ -437,9 +569,11 @@ def first_seen(conn, group: str) -> dict:
 def roster(c: Courses, group: str, members_of: Callable[[str], set],
            active: Callable[[set], set], joined: dict, since: datetime,
            faculty_active: Callable[[str, set], dict] | None = None,
-           answers: dict | None = None) -> dict:
+           answers: dict | None = None,
+           people_of: Callable[[str], set] | None = None) -> dict:
     """The course's people in the term that began ``since``: ``instructors``
-    (and ``teaching``, why); ``listed``, the group's other members;
+    (and ``teaching``, why; chosen among ``members_of``); ``listed``, the
+    others of its people (``people_of``, default ``members_of``);
     ``this_term``, those of them who joined since ``since`` or were active
     since then (``active(candidates)`` says who); ``left_out``, the rest
     (listed, from before, not active). ``faculty_active`` and ``answers``
@@ -447,7 +581,7 @@ def roster(c: Courses, group: str, members_of: Callable[[str], set],
     term = (since.date() if isinstance(since, datetime) else since).isoformat()
     who = teaching(c, group, members_of, faculty_active, answers, term)
     teach = who["instructors"]
-    listed = _lower(members_of(group)) - teach - _lower(members_of(c.faculty_group))
+    listed = _lower((people_of or members_of)(group)) - teach - _lower(members_of(c.faculty_group))
     listed -= c.decisions(group, term)[1] | set(c.not_teaching)
     were_active = active(listed) & listed
     new = {u for u in listed if joined_this_term(joined.get(u), since)}
@@ -482,13 +616,16 @@ def _check_group(group: str) -> str:
 def set_course(edit: TomlEdit, group: str, *, add: str | None = None,
                exclude: str | None = None, remove: str | None = None,
                name: str | None = None, ignore: bool | None = None,
-               term: str | None = None, every_term: bool = False) -> list:
+               term: str | None = None, every_term: bool = False,
+               env_add: str | None = None, env_remove: str | None = None) -> list:
     """Change [console.courses.groups."GROUP"]: ``add`` an instructor,
     ``exclude`` a member who isn't one, ``remove`` someone from either list,
     set the course's ``name``, or ``ignore`` it (True: not a course; False:
     a course again). ``add`` and ``exclude`` hold for ``term`` (its first
     day, YYYY-MM-DD: [...."GROUP".terms."TERM"]) unless ``every_term``;
-    ``remove`` takes the person off both. Returns what changed, in words."""
+    ``remove`` takes the person off both. ``env_add`` / ``env_remove``: an
+    environment whose users this term are the course's people (every term).
+    Returns what changed, in words."""
     g = _check_group(group)
     path = GROUPS + (g,)
     if (add or exclude) and not every_term and not term:
@@ -532,10 +669,27 @@ def set_course(edit: TomlEdit, group: str, *, add: str | None = None,
     t_teach, t_out = names(tbody, "instructors"), names(tbody, "exclude")
     before = (list(teach), list(out), list(t_teach), list(t_out))
     shown = table.get("name") if isinstance(table.get("name"), str) else None
+    envs = table.get("environments") or []
+    if isinstance(envs, str):
+        envs = [envs]
+    if not isinstance(envs, list):
+        raise CourseError(f'[console.courses.groups."{g}"] environments is not a list; '
+                          "change it by hand")
+    envs = [e for e in envs if isinstance(e, str)]
     changes = []
     for who in (add, exclude, remove):
         if who is not None and not _NETID.match(who.strip().lower()):
             raise CourseError(f"{who}: not a NetID (no domain, no @)")
+    for env in (env_add, env_remove):
+        if env is not None and not _ENV.match(env.strip()):
+            raise CourseError(f"{env}: not an environment's name")
+    if env_add and env_add.strip() not in envs:
+        envs.append(env_add.strip())
+        changes.append(f"whoever used the environment {env_add.strip()} this term is one of "
+                       f"{g}'s people")
+    if env_remove and env_remove.strip() in envs:
+        envs.remove(env_remove.strip())
+        changes.append(f"the environment {env_remove.strip()} no longer counts for {g}")
     when = "every term" if every_term else f"the term from {term}"
 
     def put(n, lst):
@@ -595,12 +749,15 @@ def set_course(edit: TomlEdit, group: str, *, add: str | None = None,
         new_body["instructors"] = teach
     if out:
         new_body["exclude"] = out
+    if envs:
+        new_body["environments"] = envs
     new_term = {k: v for k, v in (("instructors", t_teach), ("exclude", t_out)) if v}
     if (new_body or new_term) and _get(edit.data, SECTION) is None:
         edit.set_table(SECTION, {"pattern": DEFAULT_PATTERN, "faculty_group": DEFAULT_FACULTY})
         changes.insert(0, "[console.courses] with the default pattern and faculty group: "
                           "courses are on")
-    old_body = {k: table[k] for k in ("course", "name", "instructors", "exclude") if k in table}
+    old_body = {k: table[k] for k in ("course", "name", "instructors", "exclude", "environments")
+                if k in table}
     if new_body != old_body:
         edit.set_table(path, new_body, after=SECTION)
     # A term's table is rewritten only when its lists changed (comments kept).
@@ -621,8 +778,14 @@ def set_settings(edit: TomlEdit, **values) -> list:
     values = {k: v for k, v in values.items() if v is not None}
     for k in values:
         if k not in ("term_start", "pattern", "faculty_group", "min_students", "names",
-                     "not_teaching"):
+                     "not_teaching", "sources"):
             raise CourseError(f"{k}: not a course setting")
+    if "sources" in values:
+        wrong = [v for v in values["sources"] if v not in SOURCES]
+        if wrong or not values["sources"]:
+            raise CourseError(f"sources: {', '.join(wrong) or 'none given'}; the sources are "
+                              f"{', '.join(SOURCES)}")
+        values["sources"] = list(dict.fromkeys(values["sources"]))
     if "term_start" in values:
         try:
             values["term_start"] = date.fromisoformat(str(values["term_start"])).isoformat()

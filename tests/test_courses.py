@@ -581,7 +581,7 @@ def test_course_list_says_why_and_not_teaching_is_written(tmp_path):
     assert "prof1 (joined)" in next(x for x in lines if x.startswith("  demo505:"))
     tail = r.output[r.output.index("Shown to nobody"):]
     assert "demo303: 2 faculty member(s), none active this term (prof5, prof6)" in tail
-    assert "demo404: no faculty member in the group" in tail
+    assert "demo404: no faculty member among its people" in tail
     # --mask: no group, NetID or site, in either command, text or JSON.
     masked = [CliRunner().invoke(cli, ["-c", str(cfg)] + args + ["--db", db, "--mask"]).output
               for args in (["course", "list"], ["facts", "course"], ["facts", "course", "--json"])]

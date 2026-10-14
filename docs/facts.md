@@ -139,9 +139,12 @@ on.
 For each course the person teaches this term, by nomad.toml's
 `[console.courses]` (see docs/config.md, Courses):
 
-* `students`: the group's members who are not faculty (`listed`); this
-  term's (`this_term`: joined since the term began, or used an interactive
-  server or a cluster since); those left out, as from earlier terms (nomad
+* `students`: the course's people who are not faculty (`listed`: its
+  group's members, and whoever used its environments this term, on two
+  days or more); this term's (`this_term`: joined since the term began, or
+  used an interactive server or a cluster since; for a course whose
+  environment's users are mostly not in its group, `by_environment`:
+  joined, or used the environment); those left out, as from earlier terms (nomad
   saw them join before) or not known (in the group since before nomad 1.11
   recorded join dates, and not active: earlier students, or some who haven't
   started); `used_a_server`, `not_yet`, and `open_never_computing` (had
@@ -163,19 +166,34 @@ For each course the person teaches this term, by nomad.toml's
 * `jobs`: their cluster jobs, taken together.
 
 Each course says who teaches it and why (`instructors_why`: `added` by
-name, `confirmed` (they said so this term), `only` faculty member in the
-group, `joined` the group this term, `active` this term where its students
-work, those sites in `active_on`; see Courses in config.md), and how many of
-its faculty members were left out or said no. Asked for every course, one
+name, `confirmed` (they said so this term), `only` faculty member among its
+people, `joined` its group this term, `environment`: used its environment
+this term, `active` this term where its students work, those sites in
+`active_on`; see Courses in config.md), and how many of its faculty members
+were left out or said no. `environments` lists the environments whose users
+this term are among its people (nomad 1.12.5). Asked for every course, one
 nobody teaches this term is left out and listed in `not_shown` with the
 reason. `answers` (from `nomad.config.course_answers.load`) is what faculty
 members said this term.
 
 For the Console's questions: `facts.courses.questions(conn, config, netid,
-answers)` lists the courses whose groups have `netid` as a faculty member
-(with students this term, or already answered): their answer and whether
-nomad takes them as teaching it; `facts.courses.may_answer(conn, config,
-netid, group)` says whether they may answer for a group.
+answers)` lists the courses that have `netid` as a faculty member, in its
+group or a user of the environment named for it (with students this term, or already
+answered): their answer and whether nomad takes them as teaching it;
+`facts.courses.may_answer(conn, config, netid, group)` says whether they may
+answer for a course. `facts.teaches(conn, config, netid, answers)` names the
+courses a person teaches without their figures (a menu), and
+`facts.every_course(conn, config)` every course this term, for staff to
+choose from.
+
+For whoever sets courses up: `facts.courses.discover(conn, config)` (what
+`nomad course discover` prints) lists the environments people had a session
+in this term (people, faculty members among them, the courses each counts
+for, whether it is named like a course, the group most of its other users
+are in) and the groups that are not courses with a faculty member and people
+active this term (whose own group each is, the environment most of them
+used), with how many courses there are and how many nobody teaches. It
+names NetIDs, groups and environments.
 
 A week before a figure was recorded is left out of it, never counted as
 zero: hours open from nomad 1.11 (earlier weeks once `nomad interactive

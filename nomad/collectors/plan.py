@@ -70,7 +70,7 @@ SPECS: tuple[Spec, ...] = (
     Spec("interactive", "interactive", "InteractiveCollector", False,
          "hosts running RStudio or Jupyter", (), (),
          ("interactive_sessions", "interactive_summary", "interactive_daily",
-          "interactive_hourly", "interactive_person_hourly")),
+          "interactive_hourly", "interactive_person_hourly", "interactive_env_daily")),
     Spec("workstation", "workstation", "WorkstationCollector", False,
          "a hub that reaches workstations over SSH", ("ssh",), (),
          ("workstation_state", "workstation_user_snapshot", "workstation_mount_state")),

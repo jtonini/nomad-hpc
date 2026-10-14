@@ -4590,6 +4590,14 @@ def sync(ctx, config_file, output, dry_run):
             ("interactive_hourly", "source_site, hour"),
             ("interactive_person_hourly", "source_site, hour"),
             ("interactive_person_hourly", "user, hour"),
+            # Who used which environment (a course's kernel) this term.
+            ("interactive_env_daily", "source_site, day"),
+            ("interactive_env_daily", "environment, day"),
+            # Who is in a group, and which groups a person is in: every
+            # course, lab and Console sign-in asks (nomad course discover asks
+            # of every group).
+            ("group_membership", "group_name"),
+            ("group_membership", "username"),
             ("oom_kills", "source_site, timestamp"),
         ]
         click.echo("  Indexing... ", nl=False)

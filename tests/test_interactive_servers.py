@@ -568,3 +568,163 @@ def test_the_wording_of_this_sites_kernel():
     assert (k["pid"], k["process"], k["uid"], k["anon_rss_kb"], k["total_vm_kb"]) == \
         (2920394, "python", 5001, 354114376, 359233860)
     assert k["memcg"] == "/user.slice/user-5001.slice/session-c99.scope"
+
+
+# --- the environment a session runs from (1.12.5) --------------------------------
+
+def test_the_environment_comes_from_the_program_a_session_runs():
+    from nomad.collectors.interactive import environment_of, environment_patterns
+    conda = environment_patterns()
+    assert environment_of("/opt/conda/envs/demo101/bin/python -m ipykernel_launcher -f k.json",
+                          conda) == "demo101"
+    assert environment_of("/opt/conda/envs/stats-r/bin/R --slave -e IRkernel::main()",
+                          conda) == "stats-r"
+    assert environment_of("/opt/conda/bin/python -m ipykernel_launcher", conda) is None
+    # Only the program: an argument naming an environment is not where it runs.
+    assert environment_of("/opt/jh/bin/python /opt/jh/bin/jupyterhub-singleuser "
+                          "--notebook-dir=/home/a/envs/x/bin/", conda) is None
+    assert environment_of("/sw/envs/../bin/python", conda) is None          # not a name
+    assert environment_of("", conda) is None
+    venvs = environment_patterns([r"/opt/venvs/(?P<env>[^/]+)/bin/", "([", r"/kernels/([^/]+)/"])
+    assert len(venvs) == 2                                                   # the typo skipped
+    assert environment_of("/opt/venvs/bio201/bin/python -m ipykernel_launcher", venvs) == "bio201"
+    assert environment_of("/srv/kernels/chem110/run.sh", venvs) == "chem110"
+
+
+def test_a_persons_own_environment_says_so(monkeypatch):
+    import os
+    import pwd
+    import types
+
+    from nomad.collectors import interactive
+    conda = interactive.environment_patterns()
+    # R from an environment runs its exec binary.
+    assert interactive.environment_of("/opt/conda/envs/stats-r/lib/R/bin/exec/R --no-echo",
+                                      conda) == "stats-r"
+    # A program named without a path: what /proc says it runs.
+    real_readlink = os.readlink
+    monkeypatch.setattr(interactive.os, "readlink", lambda path, *a, **k: (
+        "/opt/conda/envs/demo250/bin/python3.11" if str(path) == "/proc/42/exe"
+        else real_readlink(path, *a, **k)))
+    assert interactive.environment_of("python -m ipykernel_launcher", conda, pid=42) == "demo250"
+    assert interactive.environment_of("python -m ipykernel_launcher", conda, pid=43) is None
+    # An environment the account owns, or keeps in its home, is its own:
+    # anyone can name one like a course (the hub counts it for faculty only).
+    real_stat = os.stat
+
+    def stat(path, *a, **k):
+        p = os.fspath(path)
+        if p == "/scratch/ann/envs/demo250":
+            return types.SimpleNamespace(st_uid=1001)
+        if p.startswith("/opt/conda/"):
+            return types.SimpleNamespace(st_uid=0)
+        return real_stat(path, *a, **k)
+    monkeypatch.setattr(interactive.os, "stat", stat)
+    real_pw = pwd.getpwuid
+    monkeypatch.setattr(pwd, "getpwuid", lambda n: types.SimpleNamespace(
+        pw_dir={1001: "/home/ann", 1002: "/", 1003: "/home/cy"}[n]) if n in (1001, 1002, 1003)
+        else real_pw(n))
+    seen = {}
+
+    def run(prog, uid):
+        return interactive.environment_info(prog + " -m ipykernel_launcher", conda, 1, uid,
+                                            seen)[:2]
+    assert run("/opt/conda/envs/demo250/bin/python", "1001") == ("demo250", False)
+    assert run("/scratch/ann/envs/demo250/bin/python", "1001") == ("demo250", True)   # owns it
+    assert run("/scratch/ann/envs/demo250/bin/python", "1003") == ("demo250", False)  # shared
+    assert run("/home/ann/.conda/envs/demo250/bin/python", "1001") == ("demo250", True)
+    assert run("/opt/conda/envs/demo250/bin/python", "1002") == ("demo250", False)  # home "/"
+    # Where it is: the environment's directory.
+    assert interactive.environment_info("/opt/conda/envs/demo250/lib/R/bin/exec/R", conda) \
+        == ("demo250", False, "/opt/conda/envs/demo250")
+    assert ("/scratch/ann/envs/demo250", "1001") in seen                       # once a run
+
+
+def test_sessions_say_their_environment(monkeypatch):
+    ps = "\n".join([
+        " 1001   100     1  5.0  1.0 /opt/conda/envs/demo250/bin/python -m ipykernel_launcher -f a",
+        " 1001   101   100 80.0  1.0 /opt/conda/envs/demo250/bin/python -m ipykernel_launcher -f a",
+        " 1002   200     1  1.0  1.0 /opt/conda/bin/python -m ipykernel_launcher -f b",
+        " 1002   300     1  1.0  1.0 /usr/lib/rstudio-server/bin/rsession -u bob",
+        # A Jupyter server runs from the hub's environment, whatever its kernels use.
+        " 1002   400     1  1.0  1.0 /opt/conda/envs/jhub/bin/python "
+        "/opt/conda/envs/jhub/bin/jupyterhub-singleuser",
+    ])
+    interactive = _fake_processes(monkeypatch, ps)
+    got = {s["pid"]: s for s in interactive.collect_sessions("web1")}
+    assert got[100]["environment"] == "demo250" and got[100]["processes"] == 2
+    assert got[200]["environment"] is None and got[300]["environment"] is None
+    assert got[400]["session_type"] == "Jupyter Server" and got[400]["environment"] is None
+    custom = interactive.environment_patterns([r"/opt/conda/(?P<env>bin)/"])
+    got = {s["pid"]: s for s in interactive.collect_sessions("web1", custom)}
+    assert got[200]["environment"] == "bin"
+
+
+def _envs(conn):
+    return {(r[0], r[1], r[2]): r[3:] for r in conn.execute(
+        "SELECT day, user, environment, sessions, session_seconds, busy_seconds, cpu_seconds "
+        "FROM interactive_env_daily")}
+
+
+def test_a_persons_time_in_an_environment_is_counted_once():
+    conn = sqlite3.connect(":memory:")
+    k1 = dict(_s("ann", "Jupyter (Python)", 10, "t1", 100, 0), environment="demo250")
+    k2 = dict(_s("ann", "Jupyter (Python)", 11, "t2", 100, 0), environment="demo250")
+    base = _s("ann", "Jupyter (Python)", 12, "t3", 100, 0)                  # no environment
+    other = dict(_s("bob", "Jupyter (R)", 20, "t4", 100, 0), environment="stats-r")
+    U(conn, [k1, k2, base, other], T0)
+    # Five minutes on: one of ann's two kernels computed; bob's was idle.
+    U(conn, [dict(k1, cpu_ticks=300 * 100 * 0.5), k2, base, other], T0 + timedelta(minutes=5))
+    U(conn, [dict(k1, cpu_ticks=300 * 100 * 0.5), k2, base, other], T0 + timedelta(minutes=10))
+    got = _envs(conn)
+    assert set(got) == {("2026-10-12", "ann", "demo250"), ("2026-10-12", "bob", "stats-r")}
+    sessions, seconds, busy, cpu = got[("2026-10-12", "ann", "demo250")]
+    assert sessions == 2 and seconds == 600 and busy == 300 and cpu == pytest.approx(150)
+    assert got[("2026-10-12", "bob", "stats-r")] == (1, 600, 0, 0)
+    # A new day: each session counted again on it.
+    U(conn, [k1], T0 + timedelta(days=1))
+    assert _envs(conn)[("2026-10-13", "ann", "demo250")][0] == 1
+    # A session from ann's own copy of it is kept apart (own = 1).
+    U(conn, [k1, dict(k2, environment_own=True, environment_path="/home/ann/envs/demo250")],
+      T0 + timedelta(days=1, minutes=5))
+    assert conn.execute("SELECT own, path, sessions FROM interactive_env_daily WHERE "
+                        "day = '2026-10-13' ORDER BY own").fetchall() == \
+        [(0, "", 1), (1, "/home/ann/envs/demo250", 1)]
+
+
+def test_the_collector_stores_the_environment_also_in_an_older_database(tmp_path, monkeypatch):
+    db = tmp_path / "n.db"
+    with sqlite3.connect(db) as conn:                # interactive_sessions as before 1.12.5
+        conn.execute("CREATE TABLE interactive_sessions (id INTEGER PRIMARY KEY, timestamp TEXT, "
+                     "server_id TEXT, user TEXT, session_type TEXT, pid INTEGER, "
+                     "cpu_percent REAL, mem_percent REAL, mem_mb REAL, mem_virtual_mb REAL, "
+                     "start_time TEXT, age_hours REAL, is_idle BOOLEAN)")
+        conn.execute("CREATE TABLE interactive_summary (timestamp TEXT, server_id TEXT, "
+                     "total_sessions INTEGER, idle_sessions INTEGER, total_memory_mb REAL, "
+                     "unique_users INTEGER, rstudio_sessions INTEGER, "
+                     "jupyter_python_sessions INTEGER, jupyter_r_sessions INTEGER, "
+                     "stale_sessions INTEGER, memory_hog_sessions INTEGER)")
+    interactive = _fake_processes(
+        monkeypatch, " 1001 100 1 5.0 1.0 /sw/conda/envs/demo250/bin/python -m ipykernel_launcher")
+    c = interactive.InteractiveCollector({"server_id": "web1"}, db)
+    c.store(c.collect())
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT user, environment FROM interactive_sessions").fetchall() == \
+            [("ann", "demo250")]
+        assert conn.execute("SELECT user, environment, sessions FROM interactive_env_daily"
+                            ).fetchall() == [("ann", "demo250", 1)]
+    # A site's own patterns, as nomad.toml gives them (a string or a list).
+    c = interactive.InteractiveCollector({"server_id": "web1",
+                                          "environment_patterns": r"/sw/(?P<env>conda)/"}, db)
+    assert [s["environment"] for s in c.collect()] == ["conda"]
+
+
+def test_the_hub_indexes_environments():
+    import inspect
+
+    import nomad.cli as cli
+    from nomad.collectors.plan import SPECS
+    src = inspect.getsource(cli)
+    assert '("interactive_env_daily", "environment, day")' in src
+    spec = next(s for s in SPECS if s.name == "interactive")
+    assert "interactive_env_daily" in spec.tables

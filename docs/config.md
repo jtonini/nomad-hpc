@@ -226,15 +226,17 @@ combined database; `--mask` for counts only).
 
 ### Courses: `nomad course`
 
-A course is a Unix group (`demo101`, say). Its instructors see it in `nomad
-facts course` (and the Console): the class this term, each student as a row,
-when the class works. Nothing is a course until `[console.courses]` is there:
-a site that hasn't said how its groups work gets no course view rather than a
-wrong one.
+A course is a Unix group (`demo101`, say), a software environment, or both.
+Its instructors see it in `nomad facts course` (and the Console): the class
+this term, each student as a row, when the class works. Nothing is a course
+until `[console.courses]` is there: a site that hasn't said how its classes
+work gets no course view rather than a wrong one. `nomad course setup`
+asks, showing what it finds here for each answer.
 
 ```toml
 [console.courses]
-pattern = "^[a-z]{2,6}[0-9]{3}[a-z]?$"   # which groups are courses, by name
+sources = ["groups", "environments"]     # how classes get access (below)
+pattern = "^[a-z]{2,6}[0-9]{3}[a-z]?$"   # which groups and environments are courses, by name
 faculty_group = "faculty"                # whose members can teach one
 term_start = "2026-08-24"                # this term's first day
 min_students = 0                         # fewer students this term: counts only
@@ -245,6 +247,7 @@ not_teaching = ["jdoe"]                  # in the faculty group, teaches no cour
 name = "Econometrics"
 instructors = ["jdoe"]                   # teaches it every term
 exclude = ["asmith"]                     # in the group and faculty, never teaches it
+environments = ["datakit"]              # whoever used it this term is in the class
 
 [console.courses.groups."demo101".terms."2026-08-24"]
 instructors = ["bsmith"]                 # teaches it this term
@@ -254,14 +257,48 @@ exclude = ["cjones"]                     # doesn't teach it this term
 course = false                           # named like a course, but isn't one
 ```
 
-- A group is a course when its name matches `pattern` or it is listed under
-  `groups`. Its **instructors this term**, in this order:
+- **How classes get access** differs from one institution to the next;
+  `sources` says which of these happen here (default `["groups"]`):
+  - `groups`: a Unix group per course, named for it. A group whose name
+    matches `pattern` is a course; its members are the course's people.
+  - `environments`: a software environment per course, a conda environment
+    or a Jupyter kernel named for it. The interactive servers record which
+    environment each session runs from (nomad 1.12.5; `environment_patterns`
+    under the interactive collector, [collectors](collectors.md)), and
+    whether it is the person's own (they own it, or keep it in their home):
+    anyone can name one like a course, so a session from one's own counts
+    only for a faculty member (an instructor who built their course's). An
+    environment named like a course group
+    (`pattern`) counts for that course: whoever used it this term, on two
+    days or more, is one of its members, whatever groups they are in. Shared
+    software is named like courses too (`py311`, `cuda121`): an environment
+    with no group of its name is a course only when listed (`nomad course
+    env NAME NAME`).
+  - `own_groups`: an instructor's own group (`jdoe$`, by `[console.labs]
+    group_pattern`) holds their class. Such a group is often their lab too,
+    so none becomes a course by itself: `nomad course discover` proposes the
+    ones with people active this term, and one becomes a course when someone
+    is added to it.
+
+  Whatever the sources, a group listed under `groups` is a course (unless
+  `course = false`), and a course's `environments` add whoever used them this
+  term to its students (`nomad course env GROUP ENV`): for a class whose
+  environment isn't named like its course. They add no one to choose its
+  instructors among: an environment two courses share says who is in a
+  class, not who teaches it (its users are students of both). An
+  environment listed under a course counts for that course, not as one of
+  its own. Environments are listed for good; a group listed only by a term's
+  decisions (someone added to an instructor's own group for a term) is a
+  course that term only.
+- A course's **instructors this term**, in this order:
   1. anyone listed (`nomad course add`), this term or every term;
-  2. of the group's members in `faculty_group`, those who said in the
-     Console that they teach it this term (`nomad course answers`);
-  3. when none has, the group's one faculty member, when it has one;
-  4. when it has several, those who joined the group this term;
-  5. when none did, those active this term where the course's students work
+  2. of its members in `faculty_group` (its group's, and whoever used the
+     environment named for it), those who said in the Console that they
+     teach it this term (`nomad course answers`);
+  3. when none has, its one faculty member, when it has one;
+  4. when it has several, those who joined its group this term;
+  5. when none did, those who used its environment this term;
+  6. when none did, those active this term where the course's students work
      (the servers and clusters most of its active students used: research
      on another cluster says nothing about a course).
 
@@ -295,15 +332,26 @@ course = false                           # named like a course, but isn't one
   only for access counts as joined too: exclude them.
 - **What people say** is kept beside the hub's combined database
   (`course_answers.db`, readable by its owner only), not in nomad.toml.
-  Only the group's faculty members can answer (not those excluded, staff, or
-  those already added by name); `nomad course answer GROUP NETID
+  Only the course's faculty members can answer (in its group, or a user of
+  the environment named for it; not those excluded, staff, or those already
+  added by name); `nomad course answer GROUP NETID
   --yes|--no|--clear` records an answer someone gave you another way.
-- Its **students** are its other members; of those, **this term's** joined
-  since `term_start` or used an interactive server or a cluster since then
-  (groups nobody prunes keep earlier terms' students). nomad records when a
-  membership began from 1.11 on; before that, a member who hasn't been active
-  this term can't be told from an earlier term's, and is left out (and
-  counted as such).
+- Its **students** are its other people; of those, **this term's** joined its
+  group since `term_start` or used an interactive server or a cluster since
+  then (groups nobody prunes keep earlier terms' students). For a course
+  whose class is in its environment rather than its group -- more of the
+  environment's users are outside the group than the group has students who
+  joined or were active this term; or, early in a term, a faculty member
+  outside the group uses it, none of the group's does, and fewer than half
+  the group's active students do -- the environment says it: this term's
+  students joined its group this term or used its environment, an earlier
+  student's work this term in another class doesn't count, and its group's
+  faculty members count only if they joined it this term or used the
+  environment (left out otherwise: not last term's instructor shown this
+  term's class). One outsider in a course's kernel changes nothing. nomad
+  records when a membership began from 1.11 on; before that, a member who
+  hasn't been active this term can't be told from an earlier term's, and is
+  left out (and counted as such).
 - A group named like a course that isn't one (a project's or a lab's) is
   marked `course = false` (`nomad course ignore GROUP`): otherwise every
   faculty member in it would see its other members as a class. `nomad course
@@ -314,9 +362,48 @@ course = false                           # named like a course, but isn't one
   the class. `names` (default false) decides whether instructors see each
   student by name: both are for the institution to decide (FERPA).
 
+A faculty member who used the environment named for a course on two days or
+more this term is among those it chooses its instructors from when they are
+in its group, or when its class is in the environment (above); with several,
+those who used it count as teaching it. A faculty member outside a course's
+group who used its environment counts only when people besides faculty
+outside the group used it too (a colleague who borrowed a group course's
+kernel is not one).
+`nomad course list` shows why; exclude whoever doesn't teach it. Its students' figures are all their work
+this term, as for a group's students, not only in its environment.
+
+**`nomad course discover`** (read-only) lists what may be a course that
+nomad.toml doesn't say is one yet: each environment people had a session in
+this term (how many, the faculty members among them, the course it counts
+for, the group most of its users are in), and groups with a faculty member
+and at least three people active this term besides faculty (whose own group
+each is, and the environment most of them used). Then what to do, as
+commands that each show their change first: environments named like a
+course group (`setup --sources ...,environments`), one named like a course
+with no group (`course env NAME NAME`), an environment four in five of whose
+users are in a course's group (`course env`), an instructor's own group
+whose people are active (`course add`, for this term, when `own_groups` is a
+source). Nothing for an environment several faculty members use: that is
+shared software, not a class's.
+`--mask` numbers groups, environments and NetIDs. Run it a week or two into
+a term.
+
+**`nomad course setup`** in a terminal with no setting given asks: how
+classes get access (the sources, with how many groups and environments here
+are named like a course and how many instructors' own groups have people
+active), which names are courses' (and what they match), the faculty group
+(and its size), the term's first day, `min_students` and `names`; then shows
+how many courses those settings make, what `discover` would suggest, and
+what would change, and asks before writing (`--apply`: without asking).
+Each setting is also an option (`--sources groups,environments`), for
+scripts; `--ask` asks even then.
+
 ```
-nomad course setup --term-start 2026-08-24   turn courses on, or start a new term
+nomad course setup                           turn courses on: asks how classes get access
+nomad course setup --term-start 2026-08-24   start a new term (or --sources, --pattern, ...)
+nomad course discover                        what here may be a course, and what to do
 nomad course list                            each course: instructors (and why), students
+nomad course env GROUP ENV [--remove]        whoever used environment ENV is in GROUP's class
 nomad course add GROUP NETID                 NETID teaches GROUP this term
 nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it this term
                                              (add, exclude: --every-term for good)
