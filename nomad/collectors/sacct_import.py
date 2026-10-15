@@ -314,7 +314,7 @@ class Importer:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
         self._check = ", ".join(c if c in cols else "NULL" for c in
                                 ("state", "work_root", "alloc_tres", "account", "partition",
-                                 "failure_reason", "end_time"))
+                                 "failure_reason", "end_time", "eligible_time"))
 
     def _stored(self, job_id: str):
         return self.conn.execute(f"SELECT {self._check} FROM jobs WHERE job_id = ?",
@@ -325,8 +325,10 @@ class Importer:
         """Whether the record gives the stored row something it lacks."""
         if row is None:
             return False
-        state, work_root, alloc_tres, account, partition, failure, _ = row
+        state, work_root, alloc_tres, account, partition, failure, _, eligible = row
         return ((work_root is None and rec["work_root"] is not None)
+                # Exports with Eligible fill it in for jobs stored before 1.13.
+                or (eligible is None and rec.get("eligible_time") is not None)
                 or (alloc_tres is None and rec["alloc_tres"] is not None)
                 or (account is None and rec["account"] is not None)
                 or bool(partition and "," in partition and rec["partition"]

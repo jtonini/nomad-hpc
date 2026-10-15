@@ -54,6 +54,7 @@ nav:
     - Data Readiness: readiness.md
     - Diagnostics: diagnostics.md
     - Usage Report: usage-report.md
+    - Impact: impact.md
     - Actions: actions.md
     - Facts: facts.md
     - Insight Engine: insights.md

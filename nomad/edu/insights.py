@@ -88,6 +88,9 @@ KEY_TO_DISPLAY = {
 # directive -> (SLURM flag shown to the user, singular unit, plural unit).
 DIRECTIVE_LABEL = {
     "ntasks": ("--ntasks", "core", "cores"),
+    "cpus-per-task": ("--cpus-per-task", "core", "cores"),
+    # How the job asked for its cores isn't known: name both.
+    "cores": ("--cpus-per-task (or --ntasks)", "core", "cores"),
     "gres":   ("--gres=gpu", "GPU", "GPUs"),
     "mem":    ("--mem", "", ""),      # value already carries a unit (e.g. 32G)
     "time":   ("--time", "", ""),     # value is HH:MM:SS
@@ -98,6 +101,8 @@ DIRECTIVE_LABEL = {
 #   "quantile"      -> p95 of actual_usage × buffer factor (continuous)
 DIRECTIVE_STRATEGY = {
     "ntasks": "mode",
+    "cpus-per-task": "mode",
+    "cores": "mode",
     "gres":   "mode",
     "mem":    "quantile",
     "time":   "quantile",
@@ -201,7 +206,7 @@ class UserInsights:
     # too_few_weeks when there aren't two weeks with measured jobs
     overall_trajectory: str = "too_few_weeks"
     overall_score: float | None = None    # None: nothing measured to score
-    finished_job_count: int = 0           # COMPLETED/FAILED/TIMEOUT in the window;
+    finished_job_count: int = 0           # COMPLETED/FAILED/TIMEOUT/OUT_OF_MEMORY in the window;
                                           # job_count of these were measured
     overall_change: float | None = None   # last week with jobs minus the first
     dimensions: dict[str, float] = field(default_factory=dict)  # average per dimension
@@ -232,10 +237,19 @@ def _load_cluster_capacities(db_path: str) -> list[dict[str, Any]]:
     """
     Load distinct cluster memory tiers from node_state.
 
-    Returns a list of {cluster, memory_mb, memory_gb, node_count, partitions}
-    dicts, sorted ascending by memory_mb. Used by the verdict builder to
-    pick a promotion target. Site-agnostic: reads whatever clusters the
-    DB has been syncing.
+    Returns a list of {cluster, memory_mb, memory_gb, node_count, partitions,
+    partition} dicts, sorted ascending by memory_mb. Used by the verdict
+    builder to pick a promotion target. Site-agnostic: reads whatever
+    clusters the DB has been syncing. cluster is the site (source_site) in a
+    combined database, where node_state's own cluster is often 'default'.
+
+    partition is the tier's own partition, the one to suggest: of the
+    partitions with only this tier's nodes, the one with the most (a lab's
+    condo partition holds a few of them; an overlay partition spans tiers);
+    when every partition spans tiers, the one with most of this tier's nodes
+    and fewest others. (Until 1.13 the first name among the tier's nodes'
+    partitions, which could be an overlay or a lab's own.) partitions, all
+    the tier's nodes' partitions, stays for callers that read it.
 
     Empty list means no recent node_state data — verdict builder will
     treat this as "cannot promote anywhere" rather than crashing.
@@ -244,39 +258,76 @@ def _load_cluster_capacities(db_path: str) -> list[dict[str, Any]]:
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
+            cols = {r[1] for r in con.execute("PRAGMA table_info(node_state)")}
+            site = ("source_site" if "source_site" in cols
+                    else "cluster" if "cluster" in cols else "NULL")
             rows = con.execute(
-                """
-                SELECT cluster,
-                       memory_total_mb,
-                       COUNT(DISTINCT node_name) AS node_count,
-                       GROUP_CONCAT(DISTINCT partitions) AS partitions
+                f"""
+                SELECT {site}, node_name, memory_total_mb, partitions, timestamp
                 FROM node_state
                 WHERE timestamp > datetime('now', '-1 day')
                   AND memory_total_mb > 0
-                GROUP BY cluster, memory_total_mb
-                ORDER BY memory_total_mb ASC
+                ORDER BY timestamp
                 """
             ).fetchall()
-            for cluster, mem_mb, node_count, partitions in rows:
-                capacities.append({
-                    "cluster": cluster,
-                    "memory_mb": int(mem_mb),
-                    "memory_gb": round(mem_mb / 1024.0, 1),
-                    "node_count": int(node_count),
-                    "partitions": partitions or "",
-                })
         finally:
             con.close()
     except sqlite3.Error as e:
         logger.warning(f"_load_cluster_capacities: DB error: {e}")
+        return capacities
+
+    # Each node as last seen: its memory and partitions.
+    nodes: dict[tuple, tuple[int, set[str]]] = {}
+    for cluster, node, mem_mb, partitions, _ts in rows:
+        names = {p.strip().rstrip("*") for p in str(partitions or "").split(",")}
+        nodes[(cluster, node)] = (int(mem_mb), {p for p in names if p})
+
+    members: dict[tuple, set] = {}          # (cluster, partition) -> nodes
+    for (cluster, node), (_mem, parts) in nodes.items():
+        for p in parts:
+            members.setdefault((cluster, p), set()).add(node)
+    tiers: dict[tuple, set] = {}            # (cluster, memory) -> nodes
+    for (cluster, node), (mem, _parts) in nodes.items():
+        tiers.setdefault((cluster, mem), set()).add(node)
+
+    for (cluster, mem_mb), tier_nodes in sorted(tiers.items(), key=lambda t: (t[0][1], str(t[0][0]))):
+        names = sorted({p for n in tier_nodes for p in nodes[(cluster, n)][1]})
+        own = [p for p in names if p != "all" and members[(cluster, p)] <= tier_nodes]
+        if own:
+            partition = max(own, key=lambda p: (len(members[(cluster, p)]), -names.index(p)))
+        else:
+            spanning = [p for p in names if p != "all"] or names
+            partition = max(spanning, key=lambda p: (
+                len(members[(cluster, p)] & tier_nodes),
+                -len(members[(cluster, p)] - tier_nodes), -names.index(p))) if spanning else ""
+        capacities.append({
+            "cluster": cluster,
+            "memory_mb": mem_mb,
+            "memory_gb": round(mem_mb / 1024.0, 1),
+            "node_count": len(tier_nodes),
+            "partitions": ",".join(names),
+            "partition": partition,
+        })
     return capacities
 
 
-def _load_partition_wait(db_path: str) -> dict[tuple[str, str], float]:
+def _tier_partition(target: dict[str, Any]) -> str:
+    """The partition to suggest for a memory tier (see _load_cluster_capacities)."""
+    if target.get("partition"):
+        return target["partition"]
+    partitions = (target.get("partitions") or "").split(",")
+    return next((p for p in partitions if p and p != "all"), partitions[0] if partitions else "")
+
+
+def _load_partition_wait(db_path: str) -> dict[tuple[str | None, str], float]:
     """
-    Historical queue wait per (cluster, partition), in SECONDS, from
-    jobs.wait_time_seconds. Used by the queue-aware promotion verdict to weigh
-    "how long would I wait if I moved to the cluster?".
+    Historical queue wait per (site, partition), in SECONDS: how long jobs
+    waited to start once they could (nomad.db.jobkeys.queue_wait_sql). Used
+    by the queue-aware promotion verdict to weigh "how long would I wait if
+    I moved to the cluster?". The site is source_site in a combined database
+    and None in a single site's own (its jobs carry no site); look a wait up
+    with _partition_wait. (Until 1.13 this asked jobs for a cluster column,
+    which only demo databases have, so it never found a wait.)
 
     Uses the MEDIAN (robust to outliers) over recent completed jobs.
 
@@ -286,22 +337,28 @@ def _load_partition_wait(db_path: str) -> dict[tuple[str, str], float]:
     falls back to the memory-only recommendation and makes NO queue claims.
     Never crashes, never fabricates.
     """
-    waits: dict[tuple[str, str], list[float]] = {}
+    from nomad.db.jobkeys import queue_wait_sql
+    waits: dict[tuple[str | None, str], list[float]] = {}
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
+            cols = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+            if "wait_time_seconds" not in cols:
+                return {}
+            site = ("source_site" if "source_site" in cols
+                    else "cluster" if "cluster" in cols else "NULL")
+            wait = queue_wait_sql(cols)
             rows = con.execute(
-                """
-                SELECT cluster, partition, wait_time_seconds
+                f"""
+                SELECT {site}, partition, {wait} AS w
                 FROM jobs
                 WHERE wait_time_seconds IS NOT NULL
-                  AND wait_time_seconds >= 0
-                  AND cluster IS NOT NULL
                   AND partition IS NOT NULL
                 """
             ).fetchall()
-            for cluster, partition, wait in rows:
-                waits.setdefault((cluster, partition), []).append(float(wait))
+            for cluster, partition, wait_s in rows:
+                if wait_s is not None and wait_s >= 0:
+                    waits.setdefault((cluster, partition), []).append(float(wait_s))
         finally:
             con.close()
     except sqlite3.Error as e:
@@ -312,6 +369,15 @@ def _load_partition_wait(db_path: str) -> dict[tuple[str, str], float]:
         for key, vals in waits.items()
         if vals
     }
+
+
+def _partition_wait(waits: dict, cluster: str | None, partition: str) -> float | None:
+    """The median wait of a partition at a site, from _load_partition_wait:
+    by site and partition, else (a single site's database, whose jobs carry
+    no site) by partition alone."""
+    if (cluster, partition) in waits:
+        return waits[(cluster, partition)]
+    return waits.get((None, partition))
 
 
 # Thresholds for detecting workstation memory-thrashing (tunable constants,
@@ -606,13 +672,32 @@ def _typical_current_value(suggestions: list[Suggestion]) -> float:
     return statistics.median(sorted(values))
 
 
+CORE_DIRECTIVES = ("ntasks", "cpus-per-task", "cores")
+
+
+def _directive_family(directive: str) -> str:
+    return "cores" if directive in CORE_DIRECTIVES else directive
+
+
+def sbatch_lines(directive: str, display: str) -> list[str]:
+    """The #SBATCH line(s) for an issue's suggestion: the flag as Slurm
+    takes it ("cores", the flag not known, names --cpus-per-task and says
+    when --ntasks is the one; GPUs are --gres=gpu:N)."""
+    if directive == "cores":
+        return [f"#SBATCH --cpus-per-task={display}",
+                f"(or --ntasks={display}, if the job runs several tasks: srun, MPI)"]
+    if directive == "gres":
+        return [f"#SBATCH --gres=gpu:{display}"]
+    return [f"#SBATCH --{directive}={display}"]
+
+
 def _format_value_for_directive(directive: str, value: float) -> str:
     """Render a numeric value as a human-readable string for the directive."""
     if directive == "mem":
         return format_memory(value)
     if directive == "time":
         return format_time_slurm(value)
-    if directive in ("ntasks", "gres"):
+    if directive in ("ntasks", "cpus-per-task", "cores", "gres"):
         return str(int(value))
     return str(value)
 
@@ -712,11 +797,17 @@ def _aggregate_dimension(
         return issue
 
     # All affected suggestions should share a directive (each scorer uses one).
-    # Sanity check; if mixed, take the modal directive.
-    directives = Counter(s.directive for s in affected_suggestions)
+    # Sanity check; if mixed, take the modal directive. The cores of a job
+    # are one thing however it asked for them (--cpus-per-task, --ntasks, or
+    # unknown: "cores", 1.13): taken together, and named by the flag the jobs
+    # used when they all used the same one, by both otherwise.
+    directives = Counter(_directive_family(s.directive) for s in affected_suggestions)
     primary_directive = directives.most_common(1)[0][0]
     same_directive = [s for s in affected_suggestions
-                      if s.directive == primary_directive]
+                      if _directive_family(s.directive) == primary_directive]
+    if primary_directive == "cores":
+        flags = {s.directive for s in same_directive}
+        primary_directive = flags.pop() if len(flags) == 1 else "cores"
 
     # Which way the flagged jobs point: asked for more than they used
     # ("lower") or ran out, came close, or used more than they asked for
@@ -883,8 +974,7 @@ def _verdict_promote_message(
     time_str = f"{sbatch_days}-{sbatch_hh:02d}:00:00" if sbatch_days else f"{sbatch_hh:02d}:00:00"
 
     # Pick smallest representative partition name
-    partitions = (target.get("partitions") or "").split(",")
-    partition = next((p for p in partitions if p and p not in ("all",)), partitions[0] if partitions else "")
+    partition = _tier_partition(target)
 
     if reason == "chronic":
         # Chronic: many short sessions repeatedly at the ceiling. Duration is
@@ -1114,11 +1204,9 @@ def _build_cluster_promotion_verdict(
         headline_fp = headline[0]
         _hostname = getattr(headline_fp, "hostname", None)
         _username = getattr(headline_fp, "username", None)
-        _parts = (target.get("partitions") or "").split(",")
-        _tpart = next((p for p in _parts if p and p != "all"),
-                      _parts[0] if _parts else "")
-        _waits = _load_partition_wait(db_path)
-        _wait_s = _waits.get((target.get("cluster"), _tpart))
+        _tpart = _tier_partition(target)
+        _wait_s = _partition_wait(_load_partition_wait(db_path),
+                                  target.get("cluster"), _tpart)
         _thrash = _assess_thrashing(db_path, _hostname) if _hostname else None
         _comp_h = _user_compute_hours(db_path, _username) if _username else None
         queue_mod = _time_to_results(_wait_s, _thrash, _comp_h)
@@ -1195,9 +1283,7 @@ def _build_compute_verdict(
     kind, target = _select_verdict_kind(max(peak_gb, 0.5), 0.0, cluster_capacities)
     if kind != "promote" or target is None:
         return None
-    partitions = (target.get("partitions") or "").split(",")
-    partition = next((p for p in partitions if p and p != "all"),
-                     partitions[0] if partitions else "")
+    partition = _tier_partition(target)
 
     cores = max(1, math.ceil(busy))
     mem_gb = max(1, math.ceil(peak_gb * 2))
@@ -1207,7 +1293,9 @@ def _build_compute_verdict(
         days, hh = days + 1, 0
     time_str = f"{days}-{hh:02d}:00:00" if days else f"{hh:02d}:00:00"
     snippet = "\n".join(
-        [f"#SBATCH --ntasks={cores}", f"#SBATCH --mem={mem_gb}G", f"#SBATCH --time={time_str}"]
+        # One program using several cores, as it did on the workstation:
+        # cores per task, not tasks.
+        [f"#SBATCH --cpus-per-task={cores}", f"#SBATCH --mem={mem_gb}G", f"#SBATCH --time={time_str}"]
         + ([f"#SBATCH --partition={partition}"] if partition else []))
 
     n = len(heavy)
@@ -1220,7 +1308,7 @@ def _build_compute_verdict(
         f"through disconnects, reboots and other people's work, and the "
         f"workstation stays usable for whoever sits at it."
     )
-    wait_s = _load_partition_wait(db_path).get((target.get("cluster"), partition)) \
+    wait_s = _partition_wait(_load_partition_wait(db_path), target.get("cluster"), partition) \
         if db_path is not None else None
     if wait_s is not None:
         detail += f" Jobs there typically wait ~{_format_wait(wait_s / 3600)} to start."
@@ -1533,8 +1621,9 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
         # Recommendation
         if issue.suggested_display:
             lines.append("")
-            lines.append(f"    Try:          "
-                         f"#SBATCH --{issue.directive}={issue.suggested_display}")
+            first, *more = sbatch_lines(issue.directive, issue.suggested_display)
+            lines.append(f"    Try:          {first}")
+            lines.extend(f"                  {line}" for line in more)
             if issue.directive_label:
                 lines.append(f"                  change {issue.directive_label}")
             if issue.suggestion_rationale:

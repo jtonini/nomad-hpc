@@ -229,7 +229,7 @@ def test_month_windows():
 
 
 SA = ("{id}|u1|people|basic|job|COMPLETED|cn01|8|41G|billing=8|1-00:00:00|00:10:00|"
-      "{submit}|{start}|{end}|0:0|lab1|cpu=8|/home/u1/p/r")
+      "{submit}|{start}|{end}|0:0|lab1|cpu=8|{submit}|/home/u1/p/r")
 
 
 def test_import_from_sacct_asks_month_by_month(db, monkeypatch):

@@ -93,9 +93,11 @@ ACTIONS: tuple[Action, ...] = (
            (Param("severity", "choice", "Only this severity", flag="--severity",
                   choices=("info", "warning", "critical")),),
            hub_db=True, names=True),
+    # Names shown (1.13): actions are for admins, and an admin asking who is
+    # loading a login node needs to know who, to write to them.
     Action("per_user", "Heavy use of shared hosts",
-           "What the per_user collector flagged on login nodes, with people replaced by stand-ins.",
-           frozenset({SITE, HUB}), ("per-user", "--mask"), (_DAYS,), hub_db=True),
+           "What the per_user collector flagged on login nodes, and who used each host most.",
+           frozenset({SITE, HUB}), ("per-user",), (_DAYS,), hub_db=True, names=True),
     Action("insights.brief", "Insights briefing", "A short operational briefing for one site.",
            frozenset({HUB}), ("insights", "brief"),
            (Param("site", "site", "The site", flag="--site", required=True),

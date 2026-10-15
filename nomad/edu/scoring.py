@@ -156,7 +156,7 @@ class Suggestion:
     pre-formatted output. Formatters render this to text/JSON at the
     presentation layer.
     """
-    directive: str             # SLURM directive name: "ntasks", "mem", "time", "gres"
+    directive: str             # "ntasks", "cpus-per-task", "cores" (either), "mem", "time", "gres"
     suggested_value: float     # value in canonical units
     current_value: float       # what the user currently requests
     actual_usage: float        # what the job actually used (peak or avg)
@@ -180,13 +180,27 @@ class Suggestion:
         return format_suggestion_directive(self)
 
 
+def cores_directive(summary: dict) -> str:
+    """The flag a job asked for its cores with: 'cpus-per-task' (cores for
+    each task: a threaded program), 'ntasks' (several tasks: MPI, srun -n),
+    or 'cores' when nomad doesn't know (the job collector reads it from the
+    submit command line and the job's steps, 1.13). Advice names this flag:
+    "--ntasks from 8 to 1" told someone who wrote -c 8 to change a flag they
+    never set."""
+    r = (summary or {}).get("cpu_request")
+    return r if r in ("cpus-per-task", "ntasks") else "cores"
+
+
 def format_suggestion_directive(s: Suggestion) -> str:
     """
     Render a Suggestion as a SLURM directive line for legacy display.
     Format depends on the directive type.
     """
-    if s.directive == "ntasks":
-        return f"#SBATCH --ntasks={int(s.suggested_value)}"
+    if s.directive in ("ntasks", "cpus-per-task"):
+        return f"#SBATCH --{s.directive}={int(s.suggested_value)}"
+    if s.directive == "cores":
+        return (f"#SBATCH --cpus-per-task={int(s.suggested_value)}"
+                "   (or --ntasks, if the job runs several tasks)")
     if s.directive == "mem":
         return f"#SBATCH --mem={format_memory(s.suggested_value)}"
     if s.directive == "time":
@@ -290,7 +304,7 @@ def score_cpu(job: dict, summary: dict) -> DimensionScore:
                   f"Using ~{cores_used}/{req_cpus} requested cores.")
         if req_cpus > cores_used + 2:
             suggestion = Suggestion(
-                directive="ntasks",
+                directive=cores_directive(summary),
                 suggested_value=max(1, cores_used + 1),
                 current_value=req_cpus,
                 actual_usage=cores_used,
@@ -304,7 +318,7 @@ def score_cpu(job: dict, summary: dict) -> DimensionScore:
                   f"only ~{cores_used}/{req_cpus} cores active. "
                   f"{waste_pct:.0f}% of allocated CPU was idle.")
         suggestion = Suggestion(
-            directive="ntasks",
+            directive=cores_directive(summary),
             suggested_value=max(1, cores_used + 1),
             current_value=req_cpus,
             actual_usage=cores_used,
@@ -316,7 +330,7 @@ def score_cpu(job: dict, summary: dict) -> DimensionScore:
                   f"requested {req_cpus} cores but used ~{cores_used}. "
                   f"This wastes resources and may delay other users' jobs.")
         suggestion = Suggestion(
-            directive="ntasks",
+            directive=cores_directive(summary),
             suggested_value=max(1, cores_used),
             current_value=req_cpus,
             actual_usage=cores_used,
@@ -391,6 +405,22 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
                     f"node here has ({ceiling_mb / 1024:,.0f}GB), so it isn't a "
                     f"measurement: its accounting counted memory shared between "
                     f"the job's processes once per process. Not scored."),
+            applicable=False,
+        )
+
+    # Slurm's MaxRSS is the peak of the largest single task, not of the job:
+    # an 8-task MPI job whose tasks each held 1.5GB of a 16GB request reads
+    # as 9% used, and "ask for 3GB" would kill it. nomad can't add the tasks
+    # up from what sacct keeps, so jobs that ran several tasks aren't scored
+    # on memory (max_tasks: the most tasks any step ran, 1.13).
+    tasks = summary.get("max_tasks") or 0
+    if tasks > 1:
+        return DimensionScore(
+            name="Memory Efficiency",
+            score=50,
+            level="Unknown",
+            detail=(f"The job ran {tasks} tasks, and Slurm records the memory of "
+                    f"the largest one, not of all of them together. Not scored."),
             applicable=False,
         )
 

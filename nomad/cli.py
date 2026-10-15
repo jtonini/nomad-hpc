@@ -5702,6 +5702,179 @@ def config_check(ctx):
         click.echo(f"  sections: {', '.join(sections)}")
     for problem in access_from(data, log=False).problems:
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.impact import impact_from
+    for problem in impact_from(data).problems:
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
+
+
+@cli.group('impact')
+def impact_group():
+    """What changed after NØMAÐ: [impact] in nomad.toml, jobs before and after launch.
+
+    \b
+    nomad impact status             what each period has, and what to run
+    nomad impact report             month by month, and before vs after
+    nomad impact backfill           the before period measured again (site)
+
+    \b
+    [impact]
+    launch = 2026-10-19             when people started getting NØMAÐ's feedback
+    baseline_from = 2025-08-24      where "before" starts (default: a year earlier)
+    events = [ { date = 2027-01-11, what = "nodes added" } ]
+    """
+
+
+def _impact_db(ctx, db, hub=True):
+    """--db, else (hub=True) the hub's combined database when there is one,
+    else this host's own, as nomad facts does. The backfill writes this
+    host's own (hub=False)."""
+    config = ctx.obj['config']
+    if db:
+        db_path = Path(db).expanduser()
+    else:
+        db_path = None
+        if hub:
+            from nomad.facts.cli import _db
+            db_path = _db(ctx, None)
+        db_path = db_path or get_db_path(config)
+    if not db_path.exists():
+        raise click.ClickException(f"{db_path} does not exist")
+    return config, db_path
+
+
+@impact_group.command('status')
+@click.option('--db', type=click.Path(), help='Database (default: the hub\'s, else this host\'s)')
+@click.option('--json', 'as_json', is_flag=True, help='As JSON')
+@click.pass_context
+def impact_status(ctx, db, as_json):
+    """The launch, the periods and events, and for each site what the jobs
+    before and after launch have: measured, measured the 1.13 way, with an
+    eligible time. Then what to run so the before period can be compared."""
+    import json as _json
+
+    from nomad.impact import advice, coverage, impact_from, sites
+    config, db_path = _impact_db(ctx, db)
+    imp = impact_from(config)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        found = sites(conn)
+        hub = found != [None]
+        covs = [coverage(conn, imp, site) for site in found]
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(_json.dumps({"launch": imp.launch and imp.launch.isoformat(),
+                                "baseline_from": imp.baseline_from and imp.baseline_from.isoformat(),
+                                "events": [{"date": e.when.isoformat(), "what": e.what}
+                                           for e in imp.events],
+                                "problems": list(imp.problems), "sites": covs}, indent=2))
+        return
+    for p in imp.problems:
+        click.echo(click.style(f"! {p}", fg='yellow'))
+    if not imp.set:
+        click.echo("[impact] launch is not set in nomad.toml: the day people started getting "
+                   "NØMAÐ's feedback. Until then there is no before and after.")
+        return
+    click.echo(f"Launch {imp.launch}; before from {imp.baseline_from}.")
+    for e in imp.events:
+        click.echo(f"  {e.when}  {e.what}")
+    for cov in covs:
+        click.echo(f"\n{cov['site'] or 'This site'}: jobs from {cov['first_job_end'] or '—'}")
+        if "after" not in cov:
+            click.echo(f"  (launch is {imp.launch}: no after yet)")
+        for key in ("before", "after"):
+            if key not in cov:
+                continue
+            p = cov[key]
+            click.echo(f"  {key:<6} {p['from']} to {p['to']}: {p['jobs']:,} jobs; "
+                       f"{p['measured']:,} measured, {p['measured_113']:,} the 1.13 way; "
+                       f"{p['eligible']:,} with an eligible time")
+        for line in advice(cov, imp, hub):
+            click.echo(f"  → {line}")
+
+
+@impact_group.command('report')
+@click.option('--db', type=click.Path(), help='Database (default: the hub\'s, else this host\'s)')
+@click.option('--site', help='One site of a combined database')
+@click.option('--json', 'as_json', is_flag=True, help='As JSON')
+@click.pass_context
+def impact_report(ctx, db, site, as_json):
+    """Month by month from baseline_from: jobs, people (new ones too), CPU,
+    memory and time used of what was asked for, failures, out-of-memory
+    jobs, median wait; events in their month; then before launch, after it,
+    and the same days a year earlier. Counts and shares only."""
+    import json as _json
+
+    from nomad.impact import impact_from, render, report, sites
+    config, db_path = _impact_db(ctx, db)
+    imp = impact_from(config)
+    for p in imp.problems:
+        click.echo(click.style(f"! {p}", fg='yellow'), err=True)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        found = sites(conn)
+        if site is not None:
+            if site not in found:
+                raise click.ClickException(f"no jobs from {site} here; sites: "
+                                           f"{', '.join(str(s) for s in found)}")
+            found = [site]
+        reps = [report(conn, imp, s) for s in found]
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(_json.dumps(reps if len(reps) > 1 else reps[0], indent=2))
+        return
+    for i, rep in enumerate(reps):
+        if i:
+            click.echo("")
+        for line in render(rep):
+            click.echo(line)
+
+
+@impact_group.command('backfill')
+@click.option('--db', type=click.Path(), help='Database (default: this host\'s)')
+@click.option('--from', 'since', help='Start (default: [impact] baseline_from)')
+@click.option('--to', 'until', help='End, not included (default: [impact] launch)')
+@click.option('--apply', is_flag=True, help='Ask Slurm and store (default: count only)')
+@click.pass_context
+def impact_backfill(ctx, db, since, until, apply):
+    """Measure the before period again from Slurm's accounting, the 1.13 way.
+
+    CPU use measured before 1.13 came from AveCPU and undercounts jobs that
+    run several tasks; set against 1.13's figures it would look like an
+    improvement. This reads the jobs that ended between --from and --to
+    from sacct, a week at a time, and stores their CPU and memory as the
+    collector does now: those measured before 1.13 and those never measured.
+    Jobs the database doesn't hold yet come in too (`nomad import sacct
+    --from` first brings their accounts, work directories and eligible
+    times). A dry run only counts. On a site, not on the hub: the next sync
+    brings the measurements to the hub.
+    """
+    from datetime import date as _date
+
+    from nomad.impact import _as_date, backfill, impact_from
+    config, db_path = _impact_db(ctx, db, hub=False)
+    imp = impact_from(config)
+    start = _as_date(since) if since else imp.baseline_from
+    end = _as_date(until) if until else imp.launch
+    if start is None or end is None:
+        raise click.ClickException("give --from and --to, or set [impact] launch in nomad.toml")
+    if start >= end:
+        raise click.ClickException(f"--from {start} is not before --to {end}")
+    end = min(end, _date.today())
+    try:
+        counts = backfill(str(db_path), config, start, end, apply,
+                          progress=lambda a, n: click.echo(f"  week of {a}: {n:,} jobs read"))
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"{counts['from']} to {counts['to']}: {counts['jobs']:,} jobs here, "
+               f"{counts['to_read']:,} to read again; {counts['windows']} weeks of sacct.")
+    if apply:
+        click.echo(f"Read {counts['read']:,} jobs from Slurm. `nomad impact status` shows what "
+                   f"the period has now.")
+    else:
+        click.echo("A dry run: nothing was asked or stored. --apply reads them (it can take "
+                   "a while: one sacct call a week).")
 
 
 @cli.group()

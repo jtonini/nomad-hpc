@@ -733,3 +733,11 @@ cpu_idle_fraction = 0.3    # idle draw of an unused core, as fraction of per-cor
 carbon_source = "epa_egrid"   # epa_egrid | iea | manual
 carbon_region = "SRVC"        # eGRID subregion (Virginia); or country code if iea
 # carbon_intensity_g_per_kwh = 380   # manual override; use with carbon_source = "manual"
+
+# [impact]
+# What changed after NØMAÐ (nomad impact status | report | backfill).
+# launch = 2026-10-19            # when people started getting NØMAÐ's feedback
+# baseline_from = 2025-08-24     # where "before" starts (default: a year before launch)
+# events = [                     # anything else that changes how the machines are used
+#   { date = 2027-01-11, what = "four nodes added to the large partition" },
+# ]

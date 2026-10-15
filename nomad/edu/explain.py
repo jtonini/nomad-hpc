@@ -140,25 +140,35 @@ def load_summary(db_path: str, job_id: str, cluster: str = None) -> dict | None:
         return None
 
 
-def load_user_history(db_path: str, user: str, limit: int = 50) -> list[dict]:
-    """Load recent jobs for a user (for progress tracking)."""
+def load_user_history(db_path: str, user: str, limit: int = 50, site: str | None = None,
+                      before: str | None = None) -> list[dict]:
+    """Load recent jobs for a user (for progress tracking).
+
+    site: only that site's jobs (combined database). before: only jobs that
+    ended before then, so a job is compared with the jobs before it, not
+    with ones that came later.
+    """
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
-        from nomad.edu.progress import summary_join
+        from nomad.edu.progress import summary_columns, summary_join
+        where, args = "", [user]
+        site_col = _site_column(conn, "jobs")
+        if site and site_col:
+            where += f" AND j.{site_col} = ?"
+            args.append(site)
+        if before:
+            where += " AND j.end_time < ?"
+            args.append(before)
         rows = conn.execute(f"""
-            SELECT j.*, js.peak_cpu_percent, js.peak_memory_gb,
-                   js.avg_cpu_percent, js.avg_memory_gb, js.avg_io_wait_percent,
-                   js.total_nfs_read_gb, js.total_nfs_write_gb,
-                   js.total_local_read_gb, js.total_local_write_gb,
-                   js.nfs_ratio, js.used_gpu, js.health_score
+            SELECT j.*, {summary_columns(conn)}
             FROM jobs j
             LEFT JOIN job_summary js ON {summary_join(conn)}
             WHERE j.user_name = ?
-              AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
+              AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT', 'OUT_OF_MEMORY'){where}
             ORDER BY j.end_time DESC
             LIMIT ?
-        """, (user, limit)).fetchall()
+        """, (*args, limit)).fetchall()
         from nomad.edu.progress import memory_ceiling, memory_ceilings
         ceilings = memory_ceilings(conn)
         conn.close()
@@ -176,13 +186,27 @@ def load_user_history(db_path: str, user: str, limit: int = 50) -> list[dict]:
 
 # ── Progress calculation ─────────────────────────────────────────────
 
-def compute_progress(db_path: str, user: str, current_fp: JobFingerprint) -> dict:
+def compute_progress(db_path: str, user: str, current_fp: JobFingerprint,
+                     job: dict | None = None) -> dict:
     """
     Compare current job's scores against the user's recent history.
 
+    job: the explained job's row. The history is then that site's jobs that
+    ended before it. Without it (before 1.13 always) the newest job was taken
+    to be the explained one and left out, so explaining any older job left
+    out the newest instead and compared the job with itself.
+
     Returns dict of dimension_name -> {previous_avg, current, trend}
     """
-    history = load_user_history(db_path, user, limit=30)
+    if job:
+        site = job.get("source_site")
+        history = load_user_history(db_path, user, limit=30, site=site,
+                                    before=job.get("end_time"))
+        history = [r for r in history
+                   if not (str(r.get("job_id")) == str(job.get("job_id"))
+                           and r.get("source_site") == site)]
+    else:
+        history = load_user_history(db_path, user, limit=31)[1:]
 
     if len(history) < 3:
         return {}  # not enough data for trends
@@ -198,16 +222,12 @@ def compute_progress(db_path: str, user: str, current_fp: JobFingerprint) -> dic
         "req_mem_mb", "req_gpus", "req_time_seconds",
         "runtime_seconds", "wait_time_seconds", "_node_memory_mb",
     ]
-    summary_fields = [
-        "peak_cpu_percent", "peak_memory_gb", "avg_cpu_percent",
-        "avg_memory_gb", "avg_io_wait_percent", "total_nfs_read_gb",
-        "total_nfs_write_gb", "total_local_read_gb",
-        "total_local_write_gb", "nfs_ratio", "used_gpu", "health_score",
-    ]
+    from nomad.edu.progress import SUMMARY_COLUMNS
+    summary_fields = SUMMARY_COLUMNS
 
     historical_scores = {dim: [] for dim in current_fp.dimensions}
 
-    for row in history[1:]:  # skip most recent (that's the current job)
+    for row in history:
         job_data = {k: row.get(k) for k in job_fields}
         summary_data = {k: row.get(k) for k in summary_fields}
         fp = score_job(job_data, summary_data)
@@ -457,7 +477,7 @@ def explain_job(
     # Compute progress if requested
     progress = {}
     if show_progress:
-        progress = compute_progress(db_path, fingerprint.user, fingerprint)
+        progress = compute_progress(db_path, fingerprint.user, fingerprint, job)
 
     # Format output
     if output_format == "json":

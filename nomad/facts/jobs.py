@@ -17,7 +17,8 @@ site's are computed the same way:
     measurement (Slurm's jobacct_gather/linux counts shared memory once per
     process) and is set aside and counted;
   * GPUs asked for (their use per job is not measured here);
-  * how long jobs waited to start.
+  * how long jobs waited to start, from when they could (a job waiting on
+    another job or a --begin time isn't waiting for the queue; 1.13).
 
 A figure that rests on nothing measured is None, never zero.
 """
@@ -60,13 +61,17 @@ def _select(jcols: set, scols: set) -> str:
         return f"js.{c}" if c in scols else "NULL"
     site = ("j.source_site" if "source_site" in jcols else "j.cluster" if "cluster" in jcols
             else "NULL")
+    # From when the job could start (1.13), not from submission.
+    from nomad.db.jobkeys import queue_wait_sql
+    wait = queue_wait_sql(jcols, "j") if "wait_time_seconds" in jcols else "NULL"
     return (
         "SELECT CASE WHEN instr(j.state, ' by ') > 0 "
         "THEN substr(j.state, 1, instr(j.state, ' by ') - 1) ELSE j.state END AS state, "
         f"{j('user_name')} AS user_name, {j('req_cpus')} AS req_cpus, "
         f"{j('req_mem_mb')} AS req_mem_mb, {j('req_gpus')} AS req_gpus, "
+        f"{j('req_time_seconds')} AS req_time, {j('eligible_time')} AS eligible_time, "
         f"{j('runtime_seconds')} AS runtime, {j('submit_time')} AS submit_time, "
-        f"{j('start_time')} AS start_time, {j('wait_time_seconds')} AS wait_seconds, "
+        f"{j('start_time')} AS start_time, {wait} AS wait_seconds, "
         f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb "
     )
 

@@ -109,7 +109,7 @@ def test_work_dir_keeps_only_its_ends():
 
 LINE = ("4711|u1|people|basic|myjob|COMPLETED|cn[01-02]|8|41G|billing=8,cpu=8|1-00:00:00|"
         "00:10:00|2026-10-05T09:00:00|2026-10-05T09:01:00|2026-10-05T09:11:00|0:0|"
-        "{account}|{tres}|{workdir}")
+        "{account}|{tres}|2026-10-05T09:00:00|{workdir}")
 
 
 def test_sacct_line_gives_account_alloc_and_work_dir():
@@ -130,7 +130,7 @@ def test_sacct_line_gives_account_alloc_and_work_dir():
 
 SQ = "{id}|{user}|people|basic|{name}|{state}|{nodes}|4|4G|N/A|1-00:00:00|0:00|{submit}|{start}"
 SA = ("{id}|{user}|people|basic|{name}|{state}|{nodes}|8|41G|billing=8|1-00:00:00|{elapsed}|"
-      "{submit}|{start}|{end}|0:0|{account}|{tres}|{workdir}")
+      "{submit}|{start}|{end}|0:0|{account}|{tres}|{eligible}|{workdir}")
 
 
 class Fake:
@@ -161,10 +161,10 @@ class Fake:
 
 def sa(id, user="u1", name="job", state="COMPLETED", nodes="cn01", submit="2026-10-05T09:00:00",
        start="2026-10-05T09:01:00", end="2026-10-05T09:11:00", elapsed="00:10:00",
-       account="", tres="cpu=8,mem=41G,node=1", workdir="/home/u1/p/r"):
+       account="", tres="cpu=8,mem=41G,node=1", workdir="/home/u1/p/r", eligible="Unknown"):
     return dict(id=id, user=user, name=name, state=state, nodes=nodes, submit=submit,
                 start=start, end=end, elapsed=elapsed, account=account, tres=tres,
-                workdir=workdir)
+                workdir=workdir, eligible=eligible)
 
 
 def sq(id, user="u1", name="job", state="PENDING", nodes="", submit="2026-10-05T09:00:00",
@@ -657,7 +657,8 @@ def test_the_repair_takes_sacct_for_a_requeued_job(site):
 def test_a_pipe_in_a_job_name_does_not_shift_the_fields():
     col = SlurmCollector({}, ":memory:")
     line = ("4711|u1|people|basic|a|b|c|COMPLETED|cn01|8|41G|billing=8|1-00:00:00|00:10:00|"
-            "2026-10-05T09:00:00|2026-10-05T09:01:00|2026-10-05T09:11:00|0:0|lab1|cpu=8|/home/u1/x|y")
+            "2026-10-05T09:00:00|2026-10-05T09:01:00|2026-10-05T09:11:00|0:0|lab1|cpu=8|"
+            "2026-10-05T09:00:00|/home/u1/x|y")
     j = col._parse_sacct_job(line)
     assert (j.job_name, j.state, j.account, j.work_tail) == ("a|b|c", "COMPLETED", "lab1", "u1/x|y")
     assert j.submit_time == datetime(2026, 10, 5, 9) and j.runtime_seconds == 600

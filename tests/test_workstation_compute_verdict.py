@@ -50,7 +50,8 @@ def test_one_long_heavy_run_is_advised_onto_the_cluster():
     assert ctx["verdict"] == "promote" and ctx["reason"] == "compute"
     assert ctx["target_partition"] == "basic"
     assert ctx["sbatch_snippet"].splitlines() == [
-        "#SBATCH --ntasks=14", "#SBATCH --mem=16G", "#SBATCH --time=3-18:00:00",
+        # One program using 14 cores: cores per task, not 14 tasks (1.13).
+        "#SBATCH --cpus-per-task=14", "#SBATCH --mem=16G", "#SBATCH --time=3-18:00:00",
         "#SBATCH --partition=basic"]
     assert "60 hours (one session" in issue.rationale
     assert "about 14 of labws1's 16 cores" in issue.rationale

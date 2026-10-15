@@ -337,6 +337,15 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (17, "Add avail_bytes to workstation_mount_state", """
         ALTER TABLE workstation_mount_state ADD COLUMN avail_bytes INTEGER;
     """),
+    # 1.13: the most tasks a job's steps ran (memory per task can't size a
+    # multi-task job's --mem) and how it asked for cores (the flag advice
+    # names). One column per migration: a duplicate column ends a script.
+    (18, "Add max_tasks to job_summary", """
+        ALTER TABLE job_summary ADD COLUMN max_tasks INTEGER;
+    """),
+    (19, "Add cpu_request to job_summary", """
+        ALTER TABLE job_summary ADD COLUMN cpu_request TEXT;
+    """),
 ]
 
 

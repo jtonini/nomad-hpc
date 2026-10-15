@@ -188,8 +188,16 @@ Console's Trajectory and My Activity pages. With `--detailed`:
                   use 2.0 median (range 1.0–3.0 cores)
                   that's 25.0% utilization
 
-    Try:          #SBATCH --ntasks=2
+    Try:          #SBATCH --cpus-per-task=2
+                  (or --ntasks=2, if the job runs several tasks: srun, MPI)
 ```
+
+The CPU advice names the flag the jobs asked for their cores with:
+`--cpus-per-task` for `-c` (cores for one program), `--ntasks` for `-n` (several
+tasks: `srun`, MPI). nomad reads it from the submit command line and the jobs'
+steps; for a job whose `#SBATCH` lines are inside its script and that ran one
+task, it can't tell, and names `--cpus-per-task` with `--ntasks` as the other
+possibility.
 
 An issue is listed when most of your measured jobs on a cluster and partition
 fall below the threshold for that dimension. `--detailed` adds the line with

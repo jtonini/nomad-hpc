@@ -34,6 +34,73 @@ HEALTH_WEIGHTS = {
 }
 
 
+# sbatch/srun/salloc options that take no value: the word after one of these
+# is the script or program, not the option's value.
+_FLAGS_WITHOUT_VALUE = {
+    '--exclusive', '--requeue', '--no-requeue', '-H', '--hold', '-Q', '--quiet',
+    '-W', '--wait', '--parsable', '--test-only', '-v', '--verbose', '-O',
+    '--overcommit', '-k', '--no-kill', '--spread-job', '--use-min-nodes',
+    '--contiguous', '--ignore-pbs', '--get-user-env', '--export-file',
+    '--pty', '-l', '--label', '-u', '--unbuffered', '-X', '--disable-status',
+    '-Z', '--no-allocate', '--exact', '--overlap', '--mpi',
+}
+
+
+def _takes_value(word: str) -> bool:
+    """Whether the word after this option is the option's value."""
+    if not word.startswith('-') or word in _FLAGS_WITHOUT_VALUE:
+        return False
+    if word.startswith('--'):
+        return '=' not in word
+    return len(word) == 2           # "-N 2"; "-N2" carries its value
+
+
+def _cpu_request_flag(submit_line: str) -> str | None:
+    """How a job asked for its cores, from its submit command line: 'ntasks'
+    when it asked for several tasks, 'cpus-per-task' when for cores per task,
+    None when the line doesn't say (#SBATCH lines inside a script are not on
+    it). Only the flags are kept; the line itself is not stored."""
+    import shlex
+    try:
+        words = shlex.split(submit_line or '')
+    except ValueError:
+        words = (submit_line or '').split()
+    ntasks = per_node = cpt = None
+    for i, w in enumerate(words[1:], start=1):
+        if w == '--wrap' or w.startswith('--wrap='):
+            break                       # the command it wraps
+        if not w.startswith('-'):
+            if _takes_value(words[i - 1]):
+                continue                # an option's value
+            break                       # the script or program: its own arguments follow
+        for short, long_ in (('-n', '--ntasks'), ('', '--ntasks-per-node'),
+                             ('-c', '--cpus-per-task')):
+            if w == long_ or (short and w == short):
+                value = words[i + 1] if i + 1 < len(words) else ''
+            elif w.startswith(long_ + '='):
+                value = w.split('=', 1)[1]
+            elif short and w.startswith(short) and w[2:].isdigit():
+                value = w[2:]
+            else:
+                continue
+            try:
+                n = int(value)
+            except ValueError:
+                n = None
+            if long_ == '--ntasks':
+                ntasks = n
+            elif long_ == '--ntasks-per-node':
+                per_node = n
+            else:
+                cpt = n
+            break
+    if (ntasks and ntasks > 1) or (per_node and per_node > 1):
+        return 'ntasks'
+    if cpt is not None:
+        return 'cpus-per-task'
+    return None             # -n 1 alone: the cores were set somewhere else
+
+
 @dataclass
 class JobMetrics:
     """Comprehensive job metrics from sacct."""
@@ -82,6 +149,13 @@ class JobMetrics:
     health_score: float | None = None
     feature_vector: list[float] = field(default_factory=list)
 
+    # CPU time of the whole job (sacct TotalCPU on the job's own row: every
+    # step and every task), the most tasks any step ran (NTasks), and how the
+    # cores were asked for: 'cpus-per-task', 'ntasks', or None when unknown.
+    total_cpu_seconds: float | None = None
+    max_tasks: int | None = None
+    cpu_request: str | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             'job_id': self.job_id,
@@ -115,6 +189,9 @@ class JobMetrics:
             'had_swap': self.had_swap,
             'health_score': self.health_score,
             'feature_vector': json.dumps(self.feature_vector),
+            'total_cpu_seconds': self.total_cpu_seconds,
+            'max_tasks': self.max_tasks,
+            'cpu_request': self.cpu_request,
         }
 
 
@@ -144,15 +221,25 @@ class JobMetricsCollector(BaseCollector):
     description = "Detailed job metrics from sacct"
     default_interval = 300  # 5 minutes
 
-    # sacct format string
-    SACCT_FORMAT = (
+    # sacct format string. TotalCPU and NTasks come after NodeList, so the
+    # fields before keep their places; SubmitLine (Slurm 21.08 and later) is
+    # last because it can itself contain '|'. Without SubmitLine (an older
+    # Slurm rejects it) the rest still works.
+    SACCT_FORMAT_BASE = (
         "JobID,JobName,User,Group,Partition,State,ExitCode,"
         "Submit,Start,End,Elapsed,Timelimit,"
         "ReqCPUS,ReqMem,ReqTRES,"
         "AveCPU,MaxRSS,AveRSS,MaxVMSize,"
         "MaxDiskRead,MaxDiskWrite,AveDiskRead,AveDiskWrite,"
-        "NodeList"
+        "NodeList,TotalCPU,NTasks"
     )
+    SACCT_FORMAT = SACCT_FORMAT_BASE + ",SubmitLine"
+
+    # Every way a job ends. Out of memory, node failure and preemption were
+    # left out until 1.13, so the jobs that ran out of memory were missing
+    # from every memory figure.
+    ENDED_STATES = ("COMPLETED,FAILED,TIMEOUT,CANCELLED,OUT_OF_MEMORY,NODE_FAIL,"
+                    "PREEMPTED,BOOT_FAIL,DEADLINE")
 
     def __init__(self, config: dict[str, Any], db_path: str):
         super().__init__(config, db_path)
@@ -222,31 +309,14 @@ class JobMetricsCollector(BaseCollector):
             start_time = min(watermark - timedelta(minutes=5), fallback_start)
         else:
             start_time = fallback_start
+        return self.collect_window(start_time, end_time)
 
+    def collect_window(self, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]:
+        """Metrics of the jobs that ended between start_time and end_time and
+        are not yet measured (_processed_jobs). collect() uses the recent
+        window; nomad impact backfill goes back over earlier ones."""
         try:
-            # Build sacct command
-            cmd = [
-                'sacct',
-                '-a',              # All users (collector may run as non-submitting monitoring user)
-                '-n', '-P',        # No header, parseable. -X dropped so step rows return too.
-                '--format', self.SACCT_FORMAT,
-                '--starttime', start_time.strftime('%Y-%m-%dT%H:%M:%S'),
-                '--endtime', end_time.strftime('%Y-%m-%dT%H:%M:%S'),
-                '--state', 'COMPLETED,FAILED,TIMEOUT,CANCELLED',
-            ]
-
-            if self.partitions:
-                cmd.extend(['--partition', ','.join(self.partitions)])
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-
-            if result.returncode != 0:
-                raise CollectionError(f"sacct failed: {result.stderr}")
+            result = self._run_sacct(start_time, end_time)
 
             # Parse jobs. SLURM emits one row per job plus one row per step
             # (e.g. job '506137' has rows '506137', '506137.batch', '506137.0').
@@ -307,6 +377,32 @@ class JobMetricsCollector(BaseCollector):
         except subprocess.TimeoutExpired:
             raise CollectionError("sacct command timed out")
 
+    def _run_sacct(self, start_time: datetime, end_time: datetime):
+        """sacct over the window, every user, job and step rows. A Slurm that
+        rejects SubmitLine is asked again without it (and from then on)."""
+        fmt = getattr(self, '_sacct_format', self.SACCT_FORMAT)
+        cmd = [
+            'sacct',
+            '-a',              # All users (collector may run as non-submitting monitoring user)
+            '-n', '-P',        # No header, parseable. -X dropped so step rows return too.
+            '--format', fmt,
+            '--starttime', start_time.strftime('%Y-%m-%dT%H:%M:%S'),
+            '--endtime', end_time.strftime('%Y-%m-%dT%H:%M:%S'),
+            '--state', self.ENDED_STATES,
+        ]
+        if self.partitions:
+            cmd.extend(['--partition', ','.join(self.partitions)])
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=self.config.get('sacct_timeout', 60))
+        if (result.returncode != 0 and fmt != self.SACCT_FORMAT_BASE
+                and 'invalid field' in (result.stderr or '').lower()):
+            logger.warning("sacct has no SubmitLine here; reading jobs without it")
+            self._sacct_format = self.SACCT_FORMAT_BASE
+            return self._run_sacct(start_time, end_time)
+        if result.returncode != 0:
+            raise CollectionError(f"sacct failed: {result.stderr}")
+        return result
+
     def _parse_sacct_line(self, line: str) -> JobMetrics | None:
         """Parse a sacct output line."""
         try:
@@ -341,6 +437,10 @@ class JobMetricsCollector(BaseCollector):
                 avg_disk_read_mb=self._parse_memory(parts[21]),
                 avg_disk_write_mb=self._parse_memory(parts[22]),
                 node_list=(parts[23] or None) if len(parts) > 23 else None,
+                total_cpu_seconds=(self._parse_cpu_seconds(parts[24]) or None)
+                if len(parts) > 24 else None,
+                # SubmitLine is last and may contain '|' itself.
+                cpu_request=_cpu_request_flag('|'.join(parts[26:])) if len(parts) > 26 else None,
             )
         except Exception as e:
             logger.debug(f"Failed to parse sacct line: {e}")
@@ -356,9 +456,10 @@ class JobMetricsCollector(BaseCollector):
         observed across the job's execution" which is the meaningful number
         for efficiency analysis.
 
-        AveCPU is reported as cumulative CPU time (HH:MM:SS), not percentage.
-        We sum across steps and convert to a percentage in
-        _compute_derived_metrics using elapsed_seconds and req_cpus.
+        CPU use comes from TotalCPU on the job's own row (1.13): the CPU time
+        of every step and every task. AveCPU, a step's average over its
+        tasks, is summed across steps only where TotalCPU is missing. Either
+        becomes a percentage of elapsed_seconds × req_cpus here.
         """
         max_rss_mb = 0.0
         avg_rss_mb_sum = 0.0
@@ -371,11 +472,14 @@ class JobMetricsCollector(BaseCollector):
         avg_disk_write_sum = 0.0
         avg_disk_write_count = 0
         cpu_seconds_total = 0.0
+        max_tasks = 0
 
         for line in step_lines:
             parts = line.split('|')
             if len(parts) < 23:
                 continue
+            if len(parts) > 25:
+                max_tasks = max(max_tasks, self._parse_int(parts[25]))
             # AveCPU is parts[15]: cumulative CPU time, summed across steps
             ave_cpu = self._parse_elapsed(parts[15])
             if ave_cpu:
@@ -412,12 +516,22 @@ class JobMetricsCollector(BaseCollector):
                 avg_disk_write_sum += v
                 avg_disk_write_count += 1
 
-        # Convert cumulative CPU seconds to a percent using job's elapsed time
-        # and allocated CPUs. Done lazily here; _compute_derived_metrics expects
-        # avg_cpu_percent to be a percentage already.
-        if cpu_seconds_total > 0 and job.elapsed_seconds > 0 and job.req_cpus > 0:
+        if max_tasks:
+            job.max_tasks = max_tasks
+        # How the cores were asked for, when the command line didn't say: a
+        # step that ran several tasks means --ntasks.
+        if job.cpu_request is None and max_tasks > 1:
+            job.cpu_request = 'ntasks'
+
+        # CPU use as a percent of what the requested cores could do over the
+        # run. TotalCPU on the job's row is the CPU time of every step and
+        # every task. AveCPU, used before 1.13 and still the fallback, is the
+        # average over a step's tasks: a job running 16 tasks read about a
+        # sixteenth of its real use.
+        cpu_seconds = job.total_cpu_seconds or cpu_seconds_total
+        if cpu_seconds > 0 and job.elapsed_seconds > 0 and job.req_cpus > 0:
             theoretical_max = job.elapsed_seconds * job.req_cpus
-            job.avg_cpu_percent = (cpu_seconds_total / theoretical_max) * 100.0
+            job.avg_cpu_percent = (cpu_seconds / theoretical_max) * 100.0
         # Memory and disk: take what we found, leave None if nothing reported
         if max_rss_mb > 0:
             job.max_rss_mb = max_rss_mb
@@ -495,7 +609,7 @@ class JobMetricsCollector(BaseCollector):
         # Success bonus
         if job.state == 'COMPLETED' and job.exit_code == 0:
             score += 0.3
-        elif job.state in ('FAILED', 'TIMEOUT'):
+        elif job.state.split()[0] in ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'NODE_FAIL'):
             score -= 0.3
 
         # Efficiency bonuses
@@ -582,6 +696,25 @@ class JobMetricsCollector(BaseCollector):
             return days * 86400 + h * 3600 + m * 60 + s
         except ValueError:
             return 0
+
+    def _parse_cpu_seconds(self, value: str) -> float:
+        """TotalCPU: [D-][HH:]MM:SS[.mmm] (sacct shows short times with
+        milliseconds, "00:02.345"). 0 when it can't be read."""
+        try:
+            value = (value or '').strip()
+            if not value:
+                return 0.0
+            days = 0
+            if '-' in value:
+                day_part, value = value.split('-', 1)
+                days = int(day_part)
+            parts = value.split(':')
+            seconds = float(parts[-1])
+            minutes = int(parts[-2]) if len(parts) >= 2 else 0
+            hours = int(parts[-3]) if len(parts) >= 3 else 0
+            return days * 86400 + hours * 3600 + minutes * 60 + seconds
+        except (ValueError, IndexError):
+            return 0.0
 
     def _parse_datetime(self, value: str) -> datetime | None:
         """Parse datetime string."""
@@ -744,14 +877,17 @@ class JobMetricsCollector(BaseCollector):
                     INSERT INTO job_summary
                     (job_id, peak_cpu_percent, peak_memory_gb, avg_cpu_percent, avg_memory_gb,
                      total_local_write_gb, nfs_ratio, used_gpu, avg_gpu_util, had_swap,
-                     health_score, feature_vector)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     health_score, feature_vector, max_tasks, cpu_request)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         peak_cpu_percent = excluded.peak_cpu_percent,
                         peak_memory_gb = excluded.peak_memory_gb,
+                        avg_cpu_percent = excluded.avg_cpu_percent,
                         avg_gpu_util = excluded.avg_gpu_util,
                         health_score = excluded.health_score,
-                        feature_vector = excluded.feature_vector
+                        feature_vector = excluded.feature_vector,
+                        max_tasks = excluded.max_tasks,
+                        cpu_request = excluded.cpu_request
                     """,
                     (
                         job_id,
@@ -769,6 +905,8 @@ class JobMetricsCollector(BaseCollector):
                         record['had_swap'],
                         record['health_score'],
                         record['feature_vector'],
+                        record.get('max_tasks'),
+                        record.get('cpu_request'),
                     )
                 )
 

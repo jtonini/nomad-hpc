@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 # WorkDir last: a '|' in a path then only lengthens the last field.
 SACCT_FORMAT_BASE = ("JobID,User,Group,Partition,JobName,State,NodeList,AllocCPUS,ReqMem,"
                      "ReqTRES,Timelimit,Elapsed,Submit,Start,End,ExitCode")
-SACCT_FORMAT = SACCT_FORMAT_BASE + ",Account,AllocTRES,WorkDir"
-_BASE_FIELDS, _ALL_FIELDS = 16, 19
+SACCT_FORMAT = SACCT_FORMAT_BASE + ",Account,AllocTRES,Eligible,WorkDir"
+_BASE_FIELDS, _ALL_FIELDS = 16, 20
 
 # Jobs looked up by number in sacct per run: those that left the queue, and
 # older records whose outcome was assumed rather than read (see
@@ -83,8 +83,8 @@ _JOB_UPSERT = f"""
      exit_signal, failure_reason,
      req_cpus, req_mem_mb, req_gpus, req_time_seconds,
      runtime_seconds, wait_time_seconds,
-     account, alloc_tres, alloc_gpus, work_root, work_tail)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     account, alloc_tres, alloc_gpus, work_root, work_tail, eligible_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(job_id) DO UPDATE SET
         submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
         partition = CASE
@@ -108,13 +108,15 @@ _JOB_UPSERT = f"""
         alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
         alloc_gpus = COALESCE(excluded.alloc_gpus, jobs.alloc_gpus),
         work_root = COALESCE(excluded.work_root, jobs.work_root),
-        work_tail = COALESCE(excluded.work_tail, jobs.work_tail)
+        work_tail = COALESCE(excluded.work_tail, jobs.work_tail),
+        eligible_time = COALESCE(excluded.eligible_time, jobs.eligible_time)
 """
 _JOB_FIELDS = ('job_id', 'user_name', 'group_name', 'partition', 'job_name', 'state',
                'node_list', 'submit_time', 'start_time', 'end_time', 'exit_code',
                'exit_signal', 'failure_reason', 'req_cpus', 'req_mem_mb', 'req_gpus',
                'req_time_seconds', 'runtime_seconds', 'wait_time_seconds',
-               'account', 'alloc_tres', 'alloc_gpus', 'work_root', 'work_tail')
+               'account', 'alloc_tres', 'alloc_gpus', 'work_root', 'work_tail',
+               'eligible_time')
 
 
 def gpu_count(tres) -> int:
@@ -198,6 +200,7 @@ class JobInfo:
     alloc_gpus: int | None = None
     work_root: str | None = None
     work_tail: str | None = None
+    eligible_time: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -225,6 +228,7 @@ class JobInfo:
             'alloc_gpus': self.alloc_gpus,
             'work_root': self.work_root,
             'work_tail': self.work_tail,
+            'eligible_time': self.eligible_time.isoformat() if self.eligible_time else None,
         }
 
 
@@ -461,10 +465,10 @@ class SlurmCollector(BaseCollector):
             raise
         if (result.returncode != 0 and fmt != SACCT_FORMAT_BASE
                 and 'invalid field' in (result.stderr or '').lower()):
-            # A Slurm without Account, AllocTRES or WorkDir in sacct: the
+            # A Slurm without Account, AllocTRES, Eligible or WorkDir in sacct: the
             # rest still works, without those columns.
             logger.warning(f"sacct rejects a field ({result.stderr.strip()[:120]}); "
-                           f"reading jobs without Account, AllocTRES and WorkDir")
+                           f"reading jobs without Account, AllocTRES, Eligible and WorkDir")
             self._sacct_format = SACCT_FORMAT_BASE
             return self._sacct(*selection)
         if result.returncode != 0:
@@ -511,7 +515,7 @@ class SlurmCollector(BaseCollector):
 
     def job_from_fields(self, f: dict[str, str]) -> JobInfo | None:
         """A JobInfo from sacct fields by name (JobID, User, ... as in
-        SACCT_FORMAT; Account, AllocTRES and WorkDir may be missing). Job
+        SACCT_FORMAT; Account, AllocTRES, Eligible and WorkDir may be missing). Job
         steps ('123.batch') give None. Used for sacct's own output and for
         an export read by its header (nomad import sacct)."""
         def get(name: str) -> str:
@@ -532,6 +536,8 @@ class SlurmCollector(BaseCollector):
         wait_time = None
         if submit_time and start_time:
             wait_time = int((start_time - submit_time).total_seconds())
+        eligible = self._sane_eligible(self._parse_datetime(get('Eligible')),
+                                       submit_time, start_time)
 
         return JobInfo(
             job_id=job_id,
@@ -558,6 +564,7 @@ class SlurmCollector(BaseCollector):
             alloc_gpus=gpu_count(alloc_tres) if alloc_tres else None,
             work_root=work_root,
             work_tail=work_tail,
+            eligible_time=eligible,
         )
 
     def _fields(self, parts: list[str]) -> list[str] | None:
@@ -882,6 +889,18 @@ class SlurmCollector(BaseCollector):
         if submit is not None and start < submit:
             return None
         return start
+
+    @staticmethod
+    def _sane_eligible(eligible, submit, start):
+        """The eligible time, when it can be one: not before submission and
+        not after the start."""
+        if eligible is None:
+            return None
+        if submit is not None and eligible < submit:
+            return None
+        if start is not None and eligible > start:
+            return None
+        return eligible
 
     def _parse_datetime(self, value: str) -> datetime | None:
         """Parse SLURM datetime format."""

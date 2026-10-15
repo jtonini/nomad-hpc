@@ -140,7 +140,7 @@ SUMMARY_COLUMNS = (
     "peak_cpu_percent", "peak_memory_gb", "avg_cpu_percent", "avg_memory_gb",
     "avg_io_wait_percent", "total_nfs_read_gb", "total_nfs_write_gb",
     "total_local_read_gb", "total_local_write_gb", "nfs_ratio", "used_gpu",
-    "avg_gpu_util", "health_score",
+    "avg_gpu_util", "health_score", "max_tasks", "cpu_request",
 )
 
 
@@ -219,7 +219,7 @@ def _load_user_jobs(
             LEFT JOIN job_summary js ON {summary_join(conn)}
             WHERE j.user_name = ?
               AND j.end_time >= ?
-              AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
+              AND j.state IN ('COMPLETED', 'FAILED', 'TIMEOUT', 'OUT_OF_MEMORY')
             ORDER BY j.end_time ASC
         """, (username, cutoff)).fetchall()
         ceilings = memory_ceilings(conn)

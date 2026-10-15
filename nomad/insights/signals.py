@@ -666,11 +666,16 @@ def read_queue_signals(db_path: Path, hours: int = 6, config: dict | None = None
 
         # Wait = start - submit, from the job's own timestamps (a stored
         # wait_time_seconds is not trusted), as a median: a few held or
-        # array jobs make a mean meaningless.
+        # array jobs make a mean meaningless. From the eligible time instead
+        # of submission where sacct gave one (1.13): a job waiting on another
+        # job or a --begin time wasn't waiting for the queue.
+        jcols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+        since = ("COALESCE(eligible_time, submit_time)" if "eligible_time" in jcols
+                 else "submit_time")
         waits: dict[str, list[float]] = {}
-        for r in conn.execute("""
+        for r in conn.execute(f"""
             SELECT partition,
-                   (julianday(start_time) - julianday(submit_time)) * 86400 AS wait
+                   (julianday(start_time) - julianday({since})) * 86400 AS wait
             FROM jobs
             WHERE end_time >= ? AND start_time IS NOT NULL AND submit_time IS NOT NULL
         """, (cutoff,)):

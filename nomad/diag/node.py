@@ -91,25 +91,50 @@ def get_state_history(db_path: str, cluster: str, node_name: str, hours: int = 2
         return []
 
 
-def get_recent_jobs(db_path: str, cluster: str, node_name: str, limit: int = 20) -> list:
-    """Get recent jobs that ran on this node."""
+# Slurm states of a job that hasn't ended: not a success or a failure yet.
+NOT_ENDED = {"RUNNING", "PENDING", "REQUEUED", "SUSPENDED", "CONFIGURING",
+             "COMPLETING", "RESIZING", "STAGE_OUT", "SIGNALING"}
+
+
+def job_ended(state) -> bool:
+    """Whether a job in this state has ended ("CANCELLED by 1234" has)."""
+    return bool(state) and str(state).split()[0].upper() not in NOT_ENDED
+
+
+def get_recent_jobs(db_path: str, cluster: str, node_name: str, limit: int = 20,
+                    site: str | None = None) -> list:
+    """Get recent jobs that ended on this node, newest first.
+
+    Which jobs are this node's site's: a combined database's jobs carry the
+    site (source_site; give site=, the node_state row's source_site), a demo
+    database's a cluster column, a single site's own database neither (all
+    its jobs are this site's). Until 1.13 the jobs were asked for by cluster
+    alone, a column the Slurm collector doesn't write, so a real database
+    found none; and a running job counted as a failure.
+    """
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
         # node_list is Slurm's range form ("cn[01-04]"): LIKE narrows the
         # rows down to lists that name the node or use ranges, and the node
         # itself is checked on the expanded list.
         where, pats = like_clause("node_list", node_name)
+        args = list(pats)
+        if "source_site" in cols and site:
+            where, args = f"source_site = ? AND {where}", [site, *args]
+        elif "cluster" in cols:
+            where, args = f"cluster = ? AND {where}", [cluster, *args]
         cur = conn.execute(f"""
             SELECT job_id, user_name, job_name, state, exit_code,
                    start_time, end_time, runtime_seconds, failure_reason, node_list
             FROM jobs
-            WHERE cluster = ? AND {where}
+            WHERE {where}
             ORDER BY end_time DESC
-        """, (cluster, *pats))
+        """, args)
         out = []
         for r in cur:
-            if node_in(node_name, r["node_list"]):
+            if job_ended(r["state"]) and node_in(node_name, r["node_list"]):
                 job = dict(r)
                 job.pop("node_list", None)
                 out.append(job)
@@ -125,7 +150,7 @@ def get_recent_jobs(db_path: str, cluster: str, node_name: str, limit: int = 20)
 def get_failure_summary(jobs: list) -> dict:
     """Analyze failure patterns from job history."""
     summary = {
-        'total_jobs': len(jobs),
+        'total_jobs': sum(1 for j in jobs if job_ended(j.get('state'))),
         'failed_jobs': 0,
         'failure_types': {},
         'exit_codes': {},
@@ -133,6 +158,8 @@ def get_failure_summary(jobs: list) -> dict:
     }
 
     for job in jobs:
+        if not job_ended(job.get('state')):
+            continue                    # running or waiting: not an outcome yet
         if job.get('state') not in ('COMPLETED',):
             summary['failed_jobs'] += 1
             summary['affected_users'].add(job.get('user_name'))
@@ -324,7 +351,8 @@ def diagnose_node(
     history = get_state_history(db_path, cluster, node_name, hours)
 
     # Get recent jobs
-    jobs = get_recent_jobs(db_path, cluster, node_name)
+    jobs = get_recent_jobs(db_path, cluster, node_name,
+                           site=(state or {}).get('source_site'))
 
     # Analyze failures
     failures = get_failure_summary(jobs)

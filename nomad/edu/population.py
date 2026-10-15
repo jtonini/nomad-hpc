@@ -38,7 +38,9 @@ from nomad.edu.progress import (
 )
 from nomad.edu.scoring import JobFingerprint, score_job
 
-FINISHED = ("COMPLETED", "FAILED", "TIMEOUT")
+# A job that ran out of memory finished too: it is the clearest memory
+# lesson there is (scored 15 on memory, with a request that fits). 1.13.
+FINISHED = ("COMPLETED", "FAILED", "TIMEOUT", "OUT_OF_MEMORY")
 DIMENSIONS = ("cpu", "memory", "time", "io", "gpu")
 NEEDS_WORK = 65          # the same line JobFingerprint.needs_work draws
 MIN_TREND_WINDOWS = 2    # a change needs a first and a last window with jobs

@@ -50,7 +50,30 @@ JOB_COLUMNS = (
     ("account", "TEXT"),
     ("work_root", "TEXT"),
     ("work_tail", "TEXT"),
+    # 1.13: when the job could first start (sacct Eligible): its dependencies
+    # met, its --begin time reached. A job held by those waited, but not for
+    # the queue.
+    ("eligible_time", "DATETIME"),
 )
+
+
+def queue_wait_sql(cols: set, alias: str = "") -> str:
+    """SQL for how long a job waited in the queue, in seconds: from when it
+    could start (eligible_time) to when it started; from submission
+    (wait_time_seconds) where the eligible time isn't recorded (squeue
+    doesn't give it, jobs stored before 1.13). A job waiting on another's
+    end or a --begin time isn't waiting for the queue, and counting that
+    time made a partition look slower than it is.
+
+    cols: the jobs table's columns; alias: the table's alias in the query.
+    """
+    a = f"{alias}." if alias else ""
+    if "eligible_time" not in cols or "start_time" not in cols:
+        return f"{a}wait_time_seconds"
+    return (f"CASE WHEN {a}eligible_time IS NOT NULL AND {a}start_time IS NOT NULL "
+            f"AND {a}start_time >= {a}eligible_time "
+            f"THEN CAST(ROUND((julianday({a}start_time) - julianday({a}eligible_time)) "
+            f"* 86400) AS INTEGER) ELSE {a}wait_time_seconds END")
 
 
 def ensure_job_columns(conn: sqlite3.Connection) -> None:

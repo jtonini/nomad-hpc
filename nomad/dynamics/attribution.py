@@ -15,7 +15,13 @@ A job can be placed in one group when:
    when that names more than one group and no single value covers most of
    the people (a catch-all Unix group such as ``people`` says nothing); or
 2. membership is unambiguous: every person who ran jobs belongs to at most
-   one group, leaving out umbrella groups that hold most users.
+   one group, leaving out umbrella groups that hold most users; or
+3. (1.13) it is unambiguous among the lab groups: groups named after a
+   person, by LAB_PATTERN ("{netid}$": a faculty member's own group, as
+   [console.labs] group_pattern names it), where the name's person is
+   someone the membership data knows. People are in course, department and
+   other groups as well, which made every one of them "ambiguous"; their
+   lab, when they are in exactly one, is where their jobs belong.
 
 Otherwise the analyses are not run, and the reason says why.
 """
@@ -32,6 +38,17 @@ UMBRELLA_SHARE = 0.8
 # Groups must hold at least this share of the jobs: if most jobs fall under
 # "none" or "ungrouped", comparing the few placed ones says little.
 MIN_PLACED_SHARE = 0.8
+# A lab group's name: a person's username in place of {netid}.
+LAB_PATTERN = "{netid}$"
+
+
+def _lab_regex(pattern: str | None):
+    import re
+    if not pattern or "{netid}" not in pattern:
+        return None
+    left, right = pattern.split("{netid}", 1)
+    return re.compile("^" + re.escape(left) + r"(?P<netid>[A-Za-z0-9_][A-Za-z0-9._-]*)"
+                      + re.escape(right) + "$")
 
 
 @dataclass
@@ -70,11 +87,12 @@ def _unavailable(reason: str, people: int = 0, ambiguous: int = 0) -> Attributio
 
 
 def job_attribution(conn: sqlite3.Connection, since: str,
-                    mode: str = "auto") -> Attribution:
+                    mode: str = "auto", lab_pattern: str | None = LAB_PATTERN) -> Attribution:
     """How to place each job submitted since ``since`` in one group.
 
     ``mode="membership"`` forces the old join to group_membership, counting
     a job once per group of its owner's (for callers that want it knowingly).
+    ``lab_pattern``: how lab groups are named (None: no lab groups).
     """
     jobs_cols = scope.table_columns(conn, "jobs")
     if not jobs_cols:
@@ -149,6 +167,9 @@ def job_attribution(conn: sqlite3.Connection, since: str,
                            "Jobs placed by their owner's group membership." + note,
                            n_users, ambiguous)
     if ambiguous:
+        labs = _by_lab_group(conn, users, jobs_of, groups_of, members_of, lab_pattern, when)
+        if labs is not None:
+            return labs
         return _unavailable(
             f"Jobs don't record a group, and {ambiguous} of the {n_users} people who "
             f"ran jobs {when} belong{'s' if ambiguous == 1 else ''} to more than one group, so "
@@ -171,3 +192,48 @@ def job_attribution(conn: sqlite3.Connection, since: str,
     return Attribution(True, "membership", expr, join,
                        "Jobs placed by their owner's group; everyone who ran jobs "
                        "belongs to at most one group.", n_users, 0)
+
+
+def _by_lab_group(conn, users, jobs_of, groups_of, members_of, lab_pattern, when):
+    """Attribution by lab group (see the module's 3.), or None when the lab
+    groups don't place the jobs either; the reason then stays the
+    membership one. Uses the TEMP membership table, narrowed to lab groups."""
+    rx = _lab_regex(lab_pattern)
+    if rx is None:
+        return None
+    known = {u for (u,) in conn.execute("SELECT DISTINCT username FROM group_membership")}
+
+    def is_lab(g):
+        m = rx.match(g or "")
+        return bool(m) and m.group("netid") in known and members_of.get(g, 0) >= 2
+    labs_of = {u: {g for g in gs if is_lab(g)} for u, gs in groups_of.items()}
+    n_users, n_jobs = len(users), sum(jobs_of.values())
+    in_labs = {u for u in users if labs_of.get(u)}
+    if not in_labs:
+        return None
+    ambiguous = sum(1 for u in users if len(labs_of.get(u, ())) > 1)
+    if ambiguous:
+        return _unavailable(
+            f"Jobs don't record a group, and {ambiguous} of the {n_users} people who "
+            f"ran jobs {when} belong{'s' if ambiguous == 1 else ''} to more than one lab "
+            f"group (and other groups), so their jobs can't be placed in one. Group views "
+            f"need a group per job, such as a Slurm account.",
+            n_users, ambiguous)
+    used = {g for u in in_labs for g in labs_of[u]}
+    if len(used) < 2:
+        return None
+    placed = sum(jobs_of[u] for u in in_labs)
+    if placed / n_jobs < MIN_PLACED_SHARE:
+        return _unavailable(
+            f"Only {placed / n_jobs:.0%} of the jobs {when} were run by people in a lab "
+            f"group; comparing labs would leave most of the work out.", n_users, 0)
+    conn.execute("DELETE FROM temp._nomad_membership")
+    conn.executemany("INSERT INTO temp._nomad_membership VALUES (?, ?)",
+                     [(u, g) for u, gs in labs_of.items() for g in gs])
+    return Attribution(
+        True, "lab_group", "COALESCE(gm.group_name, 'ungrouped')",
+        "LEFT JOIN temp._nomad_membership gm ON j.user_name = gm.username",
+        f"Jobs placed by their owner's lab group (groups named like "
+        f"{lab_pattern.replace('{netid}', 'NETID')}); everyone who ran jobs is in at "
+        f"most one. Other groups (courses, departments) are left aside.",
+        n_users, 0)
