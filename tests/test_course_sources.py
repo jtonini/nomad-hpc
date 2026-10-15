@@ -331,7 +331,7 @@ def test_course_env_maps_an_environment_to_a_course(tmp_path, monkeypatch):
     import nomad.actions.remote as remote
     _hub(tmp_path).close()
     db = tmp_path / "hub.db"
-    monkeypatch.setattr(remote, "hub_settings", lambda: {"combined_db": db})
+    monkeypatch.setattr(remote, "hub_settings", lambda *a: {"combined_db": db})
     cfg = _toml(tmp_path, f'[console.courses]\nterm_start = "{FALL}"\n'
                           'sources = ["groups", "environments"]\n')
     r = _cli(cfg, "env", "demo303", "dataenv")

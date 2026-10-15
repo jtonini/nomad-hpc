@@ -8,12 +8,14 @@ hardware has to be justified.
 
 ```bash
 nomad usage-report --from 2025-10-01 --to 2026-10-07 --cluster c1
-nomad usage-report init --cluster c1        # draft ~/.config/nomad/report.toml
+nomad usage-report init --cluster c1        # draft report.toml beside nomad.toml
 nomad usage-report people --cluster c1 --out users.csv   # for a user map
 ```
 
 It writes `usage-c1-2025-10-01-to-2026-10-07.md` and `.json` to `--out`
-(default: the current directory) and prints each section's finding.
+(default: the current directory) and prints each section's finding. Its
+settings, `report.toml`, are found beside the nomad.toml in use, else in
+`~/.config/nomad`, else in `/etc/nomad` (`--config` names another).
 
 ## Privacy
 

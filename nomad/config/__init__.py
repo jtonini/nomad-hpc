@@ -18,6 +18,21 @@ DEFAULT_CONFIG_PATHS = [
     Path('/etc/nomad/nomad.toml'),
 ]
 
+def default_data_dir() -> Path:
+    """Where nomad keeps its databases when nothing says otherwise."""
+    return Path.home() / '.local' / 'share' / 'nomad'
+
+
+def combined_db_path(output_db=None) -> Path:
+    """The hub's combined database: [hub] output_db (a relative path is in
+    the default data directory, wherever nomad runs from), else combined.db
+    there."""
+    if output_db:
+        p = Path(str(output_db)).expanduser()
+        return p if p.is_absolute() else default_data_dir() / p
+    return default_data_dir() / 'combined.db'
+
+
 def find_config() -> Path | None:
     """Find the first existing config file."""
     for path in DEFAULT_CONFIG_PATHS:

@@ -30,9 +30,9 @@ MARKER = "__NOMAD_AGENT_REPLY__"
 MAX_REPLY = 16_000_000          # bytes: 2 MB of output, escaped
 
 
-def _config() -> dict:
+def _config(path: str | Path | None = None) -> dict:
     from nomad.config import find_config, read_toml
-    p = find_config()
+    p = Path(path).expanduser() if path else find_config()
     if p is None:
         return {}
     try:
@@ -41,11 +41,13 @@ def _config() -> dict:
         return {}
 
 
-def hub_settings() -> dict:
+def hub_settings(config_path: str | Path | None = None) -> dict:
     """The hub's sites and combined database, read quietly from nomad.toml's
-    [hub] or the older sync.toml (the same files `nomad sync` reads)."""
-    from nomad.config import read_toml
-    cfg = _config()
+    [hub] or the older sync.toml (the same files `nomad sync` reads).
+    ``config_path``: the nomad.toml in use (-c), else the first found."""
+    from nomad.config import combined_db_path, read_toml
+    from nomad.db.pull import is_local
+    cfg = _config(config_path)
     hub = cfg.get("hub") if isinstance(cfg.get("hub"), dict) else None
     raw, output = [], None
     if hub and hub.get("sites"):
@@ -64,8 +66,9 @@ def hub_settings() -> dict:
             continue
         sites.append({"name": str(s["name"]), "host": str(s["host"]),
                       "user": str(s.get("ssh_user") or s.get("user") or ""),
-                      "port": int(s["port"]) if str(s.get("port", "")).isdigit() else None})
-    db = Path(output).expanduser() if output else Path.home() / ".local" / "share" / "nomad" / "combined.db"
+                      "port": int(s["port"]) if str(s.get("port", "")).isdigit() else None,
+                      "local": is_local(str(s["host"]))})
+    db = combined_db_path(output)
     actions = cfg.get("actions") if isinstance(cfg.get("actions"), dict) else {}
     key = Path(actions["agent_key"]).expanduser() if actions.get("agent_key") else \
         Path.home() / ".config" / "nomad" / "agent" / "id_ed25519"

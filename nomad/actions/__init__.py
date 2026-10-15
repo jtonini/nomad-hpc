@@ -62,4 +62,10 @@ def run(name: str, params: dict | None = None, *, site: str | None = None, here:
         raise ActionError(f"{action.name} runs on the hub, not on a site")
     if site not in sites:
         raise ActionError(f"{site!r} is not one of the hub's sites")
+    if any(s["name"] == site and s["local"] for s in h["sites"]):
+        # The hub's own collectors (host = "localhost"): run here, as that
+        # site's agent would, rather than over ssh to this host.
+        res = runner.run_action(action, values, cancel=cancel, on_output=on_output)
+        res["site"] = site
+        return res
     return remote.run_remote(site, action.name, values, timeout=action.timeout, cancel=cancel)

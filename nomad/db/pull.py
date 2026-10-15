@@ -27,6 +27,12 @@ it. What this module adds to that, each from something that went wrong:
   before.
 * **The reason given is the error**, not the site's login banner: a banner
   comes first in what ssh prints, the error last.
+* **A site on the hub itself** (``host = "localhost"``) is read directly,
+  with SQLite's backup, as whichever account runs the sync: no ssh to itself
+  (an account with no login shell can't).
+* **Before a site without sqlite3 is copied directly**, its write-ahead log
+  is checkpointed into the database (with python3, when the site has it), so
+  the copy holds what was written since the last checkpoint.
 """
 from __future__ import annotations
 
@@ -58,6 +64,21 @@ COPY_RATE = 5 * MIB               # bytes per second, copying it to the hub
 MAX_SECONDS = 3600
 # A directory that is safe to name in a command and in scp's remote path.
 _SAFE_DIR = re.compile(r"^/[A-Za-z0-9._/+@:-]*$")
+# A site on the hub itself: read directly, no ssh.
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def is_local(host) -> bool:
+    return str(host or "").strip().lower() in LOCAL_HOSTS
+
+
+def checkpoint_command(remote_db: str) -> str:
+    """Fold the write-ahead log into the database before it is copied as a
+    file (a site without sqlite3); nothing if the site has no python3."""
+    script = ("import sqlite3,sys; c=sqlite3.connect(sys.argv[1], timeout=20); "
+              "c.execute('PRAGMA wal_checkpoint(TRUNCATE)'); c.close()")
+    return (f"if command -v python3 >/dev/null 2>&1; then "
+            f"python3 -c {shlex.quote(script)} {remote_word(remote_db)}; fi")
 
 
 def remote_word(path: str) -> str:
@@ -190,6 +211,8 @@ def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None =
     a complete new copy; False otherwise, with ``local_copy`` untouched (the
     hub's last good copy) and the reason appended to ``why``."""
     local_copy = Path(local_copy)
+    if is_local(host):
+        return copy_local(remote_db, local_copy, why)
     # Unique, so two syncs (with different outputs) never share one.
     part = local_copy.with_name(f"{local_copy.name}.{os.getpid()}.part")
     _remove_old_parts(local_copy)
@@ -238,6 +261,13 @@ def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None =
         # No sqlite3 there: the database itself is all there is to copy (as
         # before), checked whole before it replaces the cached copy.
         logger.info(f"sqlite3 not available on {host}, copying the database directly")
+        try:
+            done = ssh(checkpoint_command(remote_db), timeout=60)
+            if done.returncode != 0:
+                logger.info(f"{host}: checkpoint before the copy failed "
+                            f"({error_text(done.stderr, banner) or done.returncode}); copying anyway")
+        except (sp.TimeoutExpired, OSError) as e:
+            logger.info(f"{host}: checkpoint before the copy failed ({e}); copying anyway")
         return _fetch(scp, remote_db, size, part, local_copy, fail, banner=banner,
                       check_size=False, check_whole=True)
 
@@ -289,6 +319,64 @@ def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None =
         if not _remove(ssh, tried):
             logger.warning(f"{host}: could not remove {', '.join(tried)}; removed after "
                            f"{STALE_MINUTES} min, at a later pull")
+
+
+def copy_local(db_path: str, local_copy, why: list | None = None) -> bool:
+    """A database on this host, copied with SQLite's backup (consistent while
+    its collectors write) to ``local_copy``, which it replaces only when the
+    copy is whole. False, with ``local_copy`` untouched and the reason in
+    ``why``, otherwise."""
+    import sqlite3
+    local_copy = Path(local_copy)
+    src_path = Path(os.path.expanduser(str(db_path)))
+    if not src_path.is_absolute():
+        # As a remote site's relative path is in its home: in the data
+        # directory, not wherever nomad runs from (/ under systemd).
+        from nomad.config import default_data_dir
+        src_path = default_data_dir() / src_path
+    part = local_copy.with_name(f"{local_copy.name}.{os.getpid()}.part")
+    _remove_old_parts(local_copy)
+
+    def fail(reason: str) -> bool:
+        logger.warning(f"localhost: {reason}")
+        if why is not None:
+            why.append(reason)
+        for p in (part, Path(str(part) + "-journal")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        return False
+    if not src_path.is_file():
+        return fail(f"no database at {src_path}")
+    src = dst = None
+    try:
+        # Read-write when this account may write it (its own collectors'
+        # database), so a journal a crashed writer left is rolled back
+        # rather than read around; read-only otherwise.
+        rw = os.access(src_path, os.W_OK) and os.access(src_path.parent, os.W_OK)
+        src = sqlite3.connect(f"{src_path.resolve().as_uri()}?mode={'rw' if rw else 'ro'}",
+                              uri=True, timeout=20)
+        if part.exists():
+            part.unlink()
+        dst = sqlite3.connect(str(part))
+        src.backup(dst)
+        ok = dst.execute("PRAGMA quick_check").fetchone()
+        dst.close()
+        dst = None
+        if not ok or ok[0] != "ok":
+            return fail(f"the copy of {src_path} is not whole ({ok[0] if ok else 'no answer'})")
+        os.replace(part, local_copy)
+        return True
+    except (sqlite3.Error, OSError) as e:
+        return fail(f"could not copy {src_path}: {e}")
+    finally:
+        for c in (src, dst):
+            if c is not None:
+                try:
+                    c.close()
+                except sqlite3.Error:
+                    pass
 
 
 def _remove(ssh, snaps) -> bool:

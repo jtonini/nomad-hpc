@@ -34,6 +34,10 @@ def _cli():
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Computed from the real home at import, and the system's /etc/nomad
+    # would count too: this home's, and a system file that isn't there.
+    monkeypatch.setattr("nomad.config.DEFAULT_CONFIG_PATHS",
+                        [tmp_path / ".config" / "nomad" / "nomad.toml", tmp_path / "etc" / "nomad.toml"])
     return tmp_path
 
 

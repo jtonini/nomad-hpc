@@ -17,7 +17,7 @@ def _db(ctx, db) -> Path:
     if db:
         return Path(db).expanduser()
     from nomad.actions.remote import hub_settings
-    combined = hub_settings()["combined_db"]
+    combined = hub_settings((ctx.obj or {}).get("config_target"))["combined_db"]
     if combined.exists():
         return combined
     from nomad.cli import get_db_path

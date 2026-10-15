@@ -68,6 +68,10 @@ The result is that whoever holds the hub's key, the hub included, can ask a
 site for catalog actions and nothing else. If the hub is compromised, the
 sites are exposed only to those actions.
 
+A site whose `host` is `localhost` (collectors on the hub itself) needs no
+key: its actions run on the hub directly, as the account the Console or
+`nomad actions` runs as.
+
 On the hub's side, the ssh command:
 - offers this key first and never reuses a shared connection (a master opened
   with a stronger key would otherwise carry the request);

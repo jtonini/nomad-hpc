@@ -419,7 +419,7 @@ def _db_has(ctx, queries, value) -> bool | None:
     paths = []
     try:
         from nomad.actions.remote import hub_settings
-        paths.append(hub_settings()["combined_db"])
+        paths.append(hub_settings((ctx.obj or {}).get("config_target"))["combined_db"])
     except Exception:
         pass
     try:

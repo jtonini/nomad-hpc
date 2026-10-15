@@ -43,6 +43,23 @@ from pathlib import Path
 from nomad.hostlist import expand_hostlist
 
 DEFAULT_PATH = Path.home() / ".config" / "nomad" / "report.toml"
+SYSTEM_PATH = Path("/etc/nomad/report.toml")
+
+
+def default_path(config_target=None) -> Path:
+    """Where report.toml is when --config doesn't say: beside the nomad.toml
+    in use (``config_target``), else ~/.config/nomad, else /etc/nomad (a
+    service account's settings); the first that exists, or the first of
+    these when none does (where `usage-report init` writes it)."""
+    places = []
+    if config_target:
+        places.append(Path(config_target).expanduser().parent / "report.toml")
+    places += [DEFAULT_PATH, SYSTEM_PATH]
+    places = list(dict.fromkeys(places))
+    for p in places:
+        if p.exists():
+            return p
+    return places[0]
 
 # Partition classes besides tier names.
 OVERLAY = "overlay"
@@ -241,12 +258,13 @@ def _str_list(value, what: str) -> list[str]:
     return [str(v) for v in value]
 
 
-def load(path: Path | str | None, cluster: str) -> ClusterConfig:
+def load(path: Path | str | None, cluster: str, config_target=None) -> ClusterConfig:
     """The settings for ``cluster``. A missing file (the default path only)
-    gives the defaults; a file that can't be read raises ReportConfigError."""
+    gives the defaults; a file that can't be read raises ReportConfigError.
+    ``path`` None: ``default_path(config_target)``."""
     from nomad.config import read_toml
     explicit = path is not None
-    path = Path(path).expanduser() if path is not None else DEFAULT_PATH
+    path = Path(path).expanduser() if path is not None else default_path(config_target)
     if not path.exists():
         if explicit:
             raise ReportConfigError(f"{path}: no such file")
@@ -354,4 +372,4 @@ def from_dict(data: dict, cluster: str, path: Path | None = None) -> ClusterConf
 
 
 __all__ = ["ClusterConfig", "Capacity", "Planned", "Family", "ReportConfigError",
-           "load", "from_dict", "DEFAULT_PATH", "OVERLAY", "CONDO", "OTHER", "ALL_NODES"]
+           "load", "from_dict", "DEFAULT_PATH", "SYSTEM_PATH", "default_path", "OVERLAY", "CONDO", "OTHER", "ALL_NODES"]

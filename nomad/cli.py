@@ -3876,14 +3876,16 @@ def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None, why=None):
     return pull(user, host, remote_db, local_copy, ssh_key, why=why)
 
 
-def _load_hub_config(config_file_override=None):
+def _load_hub_config(config_file_override=None, config_path=None):
     """Load hub/sync configuration.
 
     Priority order:
-      1. ``config_file_override`` (from --config-file flag) — read as a
-         standalone TOML file with top-level [[sites]], same shape as
-         legacy sync.toml. No fallback if this is given and missing.
-      2. ``~/.config/nomad/nomad.toml`` [hub] section — preferred location.
+      1. ``config_file_override`` (from --config-file flag) — a file with
+         top-level [[sites]], same shape as legacy sync.toml, or a nomad.toml
+         with a [hub] section. No fallback if this is given and missing.
+      2. The [hub] section of the nomad.toml in use — ``config_path`` (from
+         -c), else ~/.config/nomad/nomad.toml, else /etc/nomad/nomad.toml
+         (a service account's settings live there).
       3. ``~/.config/nomad/sync.toml`` — deprecated, warns every run.
 
     Returns a dict with keys:
@@ -3899,7 +3901,7 @@ def _load_hub_config(config_file_override=None):
     Returns None if no config can be found. Caller is responsible for
     printing the "create one with ..." help in that case.
     """
-    import toml as toml_lib
+    from nomad.config import read_toml
 
     def _normalize_sites(raw_sites):
         """Accept ssh_user or legacy `user`; emit ssh_user."""
@@ -3915,11 +3917,12 @@ def _load_hub_config(config_file_override=None):
 
     # 1. Explicit --config-file override
     if config_file_override:
-        path = Path(config_file_override)
+        path = Path(config_file_override).expanduser()
         if not path.exists():
             return None
-        with open(path) as f:
-            data = toml_lib.load(f)
+        data = read_toml(path)
+        if isinstance(data.get('hub'), dict) and data['hub'].get('sites'):
+            data = data['hub']                    # a nomad.toml
         sites = _normalize_sites(data.get('sites', []))
         if not sites:
             return None
@@ -3931,17 +3934,16 @@ def _load_hub_config(config_file_override=None):
             'source': str(path),
         }
 
-    nomad_toml = Path.home() / '.config' / 'nomad' / 'nomad.toml'
+    nomad_toml = Path(config_path or resolve_config_path()).expanduser()
     sync_toml = Path.home() / '.config' / 'nomad' / 'sync.toml'
 
     nomad_has_hub = False
     nomad_hub_data = None
     if nomad_toml.exists():
         try:
-            with open(nomad_toml) as f:
-                cfg = toml_lib.load(f)
+            cfg = read_toml(nomad_toml)
             hub = cfg.get('hub')
-            if hub and hub.get('sites'):
+            if isinstance(hub, dict) and hub.get('sites'):
                 nomad_has_hub = True
                 nomad_hub_data = hub
         except Exception:
@@ -3976,8 +3978,7 @@ def _load_hub_config(config_file_override=None):
             "`nomad sync --help` for the new format.",
             fg="yellow"))
         try:
-            with open(sync_toml) as f:
-                data = toml_lib.load(f)
+            data = read_toml(sync_toml)
         except Exception as e:
             click.echo(click.style(
                 f"  Failed to parse sync.toml: {e}", fg="red"))
@@ -4013,7 +4014,8 @@ def sync(ctx, config_file, output, dry_run):
     Each site keeps its own database as a fallback.
 
     \b
-    Preferred config location — ~/.config/nomad/nomad.toml:
+    Preferred config location — the [hub] section of the nomad.toml in use
+    (-c, else ~/.config/nomad/nomad.toml, else /etc/nomad/nomad.toml):
       [hub]
       output_db = "~/.local/share/nomad/combined.db"
       sync_interval_minutes = 10
@@ -4029,6 +4031,11 @@ def sync(ctx, config_file, output, dry_run):
       host = "jonimitchell"
       ssh_user = "zeus"
       db_path = "~/.local/share/nomad/nomad.db"
+
+      [[hub.sites]]
+      name = "hub"                   # collectors on the hub itself:
+      host = "localhost"             # read directly, no ssh
+      db_path = "/var/lib/nomad/nomad.db"
 
     \b
     Legacy fallback — ~/.config/nomad/sync.toml (deprecated, will be
@@ -4048,14 +4055,14 @@ def sync(ctx, config_file, output, dry_run):
     import shutil
     import sqlite3
     import subprocess as sp
-    import toml as toml_lib
 
     # Resolve config via shared loader (handles nomad.toml [hub] preference,
     # sync.toml fallback with deprecation warning, --config-file override)
-    hub_cfg = _load_hub_config(config_file_override=config_file)
+    hub_cfg = _load_hub_config(config_file_override=config_file,
+                               config_path=ctx.obj.get('config_target'))
 
     if hub_cfg is None:
-        nomad_toml_path = Path.home() / '.config' / 'nomad' / 'nomad.toml'
+        nomad_toml_path = Path(ctx.obj.get('config_target') or resolve_config_path())
         click.echo(click.style(
             "  No hub configuration found.", fg="red"))
         click.echo()
@@ -4078,11 +4085,14 @@ def sync(ctx, config_file, output, dry_run):
     sites = hub_cfg['sites']
 
     # Output path
-    default_data = Path.home() / '.local' / 'share' / 'nomad'
+    from nomad.config import combined_db_path, default_data_dir
+    default_data = default_data_dir()
     if output:
-        combined_path = Path(output)
+        combined_path = Path(output).expanduser()
     else:
-        combined_path = default_data / 'combined.db'
+        # Where the settings say: where `nomad facts`, `nomad course` and
+        # the Console read it (it was written to the default regardless).
+        combined_path = combined_db_path(hub_cfg.get('output_db'))
 
     cache_dir = default_data / 'sync_cache'
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -4095,6 +4105,15 @@ def sync(ctx, config_file, output, dry_run):
     click.echo()
     click.echo(f"  Sites:    {len(sites)}")
     click.echo(f"  Output:   {combined_path}")
+    _old_default = default_data / 'combined.db'
+    if (not output and combined_path != _old_default and _old_default.exists()
+            and not combined_path.exists()):
+        # Said on the first sync there: until 1.12.6 output_db was ignored.
+        click.echo(click.style(
+            f"  Note: writing {combined_path}, as [hub] output_db says. Before "
+            f"nomad 1.12.6 sync wrote {_old_default} whatever it said; that copy "
+            "is no longer updated (point --db or the Console at the new one).",
+            fg="yellow"))
     click.echo()
 
     if dry_run:
@@ -4106,7 +4125,13 @@ def sync(ctx, config_file, output, dry_run):
             user = site.get('ssh_user') or site.get('user', '?')
             db = site.get('db_path', '?')
             click.echo(f"  Would sync: {name}")
-            click.echo(f"    scp {user}@{host}:{db} -> {cache_dir}/{name}.db")
+            from nomad.db.pull import is_local
+            if is_local(host):
+                _src = Path(db).expanduser()
+                _src = _src if _src.is_absolute() else default_data / _src
+                click.echo(f"    copy {_src} (on this host) -> {cache_dir}/{name}.db")
+            else:
+                click.echo(f"    scp {user}@{host}:{db} -> {cache_dir}/{name}.db")
         click.echo()
         click.echo(f"  Would merge into: {combined_path}")
         return
@@ -4241,7 +4266,8 @@ def sync(ctx, config_file, output, dry_run):
         try:
             _sync_alerts(combined_path, pull_errors, cache_dir,
                          after=hub_cfg.get('alert_after_minutes'),
-                         blocked="no site could be pulled")
+                         blocked="no site could be pulled",
+                         config=ctx.obj.get('config') or None)
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"sync alert not sent: {_alert_err}")
         return
@@ -4249,6 +4275,8 @@ def sync(ctx, config_file, output, dry_run):
     click.echo()
 
     # Phase 1b: Pull site configs (for partition metadata)
+    from nomad.config import read_toml
+    from nomad.db.pull import is_local
     site_configs = {}
     for site in sites:
         name = site.get('name', 'unknown')
@@ -4261,18 +4289,24 @@ def sync(ctx, config_file, output, dry_run):
         else:
             remote_toml = f'/home/{user}/.config/nomad/nomad.toml'
         local_toml = cache_dir / f'{name}.toml'
-        toml_cmd = ['scp', '-o', 'ConnectTimeout=5',
-                    '-o', 'BatchMode=yes']
-        if ssh_key:
-            toml_cmd += ['-i', ssh_key]
-        toml_cmd += [f'{user}@{host}:{remote_toml}',
-                     str(local_toml)]
         try:
-            r = sp.run(toml_cmd, capture_output=True,
-                       text=True, timeout=15)
-            if r.returncode == 0 and local_toml.exists():
-                with open(local_toml) as f:
-                    cfg = toml_lib.load(f)
+            if is_local(host):
+                # The hub's own collectors: the settings this run uses (a
+                # service account's are in /etc/nomad, not its home).
+                local_toml = Path(ctx.obj.get('config_target') or resolve_config_path())
+                fetched = local_toml.is_file()
+            else:
+                toml_cmd = ['scp', '-o', 'ConnectTimeout=5',
+                            '-o', 'BatchMode=yes']
+                if ssh_key:
+                    toml_cmd += ['-i', ssh_key]
+                toml_cmd += [f'{user}@{host}:{remote_toml}',
+                             str(local_toml)]
+                r = sp.run(toml_cmd, capture_output=True,
+                           text=True, timeout=15)
+                fetched = r.returncode == 0
+            if fetched and local_toml.exists():
+                cfg = read_toml(local_toml)
                 partitions = (cfg.get('collectors', {})
                               .get('slurm', {})
                               .get('partitions', []))
@@ -4731,7 +4765,8 @@ def sync(ctx, config_file, output, dry_run):
         _failing.setdefault(_s, f"merge failed: {_err}")
     try:
         _sync_alerts(combined_path, _failing, cache_dir,
-                     after=hub_cfg.get('alert_after_minutes'), blocked=_blocked)
+                     after=hub_cfg.get('alert_after_minutes'), blocked=_blocked,
+                     config=ctx.obj.get('config') or None)
     except Exception as _alert_err:          # never let an alert stop a sync
         logging.getLogger("nomad.sync").warning(f"sync alert not sent: {_alert_err}")
 
@@ -5386,7 +5421,8 @@ def _usage_db(ctx, db, need: bool = True):
         if not p.exists():
             raise click.ClickException(f"no database at {p}")
         return p
-    combined = Path.home() / '.local' / 'share' / 'nomad' / 'combined.db'
+    from nomad.actions.remote import hub_settings
+    combined = hub_settings(ctx.obj.get('config_target'))["combined_db"]
     if combined.exists():
         return combined
     p = get_db_path(ctx.obj.get('config') or {})
@@ -5437,12 +5473,12 @@ def _usage_site(ctx, db_path, cluster):
     return site, name
 
 
-def _usage_config(path, name):
+def _usage_config(path, name, config_target=None):
     """report.toml's settings for ``name``; an error when the file names its
     clusters and this isn't one of them (a mistyped --cluster)."""
     from nomad.usage import config as ucfg
     try:
-        cfg = ucfg.load(path, name)
+        cfg = ucfg.load(path, name, config_target)
     except ucfg.ReportConfigError as e:
         raise click.ClickException(f"report.toml: {e}")
     if cfg.path is not None and cfg.known_clusters and not cfg.section_found:
@@ -5459,7 +5495,8 @@ def _usage_config(path, name):
 @click.option('--db', type=click.Path(dir_okay=False),
               help="Database (default: the hub's combined.db if there is one, else this host's).")
 @click.option('--config', 'report_config', type=click.Path(dir_okay=False),
-              help='Site settings (default: ~/.config/nomad/report.toml).')
+              help='Site settings (default: report.toml beside nomad.toml, else in '
+                   '~/.config/nomad, else /etc/nomad).')
 @click.option('--sacct', type=click.Path(exists=True, dir_okay=False),
               help='Read jobs from an `sacct -P` export instead of the database (.gz too).')
 @click.option('--user-map', type=click.Path(exists=True, dir_okay=False),
@@ -5498,7 +5535,7 @@ def usage_report(ctx, since, until, cluster, db, report_config, sacct, user_map,
     t0, t1 = _usage_period(since, until)
     db_path = _usage_db(ctx, db, need=sacct is None)
     site, name = _usage_site(ctx, db_path, cluster)
-    cfg = _usage_config(report_config, name)
+    cfg = _usage_config(report_config, name, ctx.obj.get('config_target'))
     exclude = {u.strip() for u in (exclude_users or "").split(",") if u.strip()}
     try:
         report, data = run.build(cfg, t0, t1, db=db_path, site=site, sacct=Path(sacct) if sacct else None,
@@ -5531,7 +5568,7 @@ def usage_report(ctx, since, until, cluster, db, report_config, sacct, user_map,
 @click.option('--cluster', help='The site (needed when the database holds several).')
 @click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the report).")
 @click.option('--out', 'out_path', type=click.Path(dir_okay=False),
-              default='~/.config/nomad/report.toml', show_default=True)
+              help='Where to write it (default: beside nomad.toml).')
 @click.option('--force', is_flag=True, help='Replace an existing file.')
 @click.pass_context
 def usage_report_init(ctx, cluster, db, out_path, force):
@@ -5540,7 +5577,12 @@ def usage_report_init(ctx, cluster, db, out_path, force):
     from nomad.usage import draft, run, sources
     db_path = _usage_db(ctx, db)
     site, name = _usage_site(ctx, db_path, cluster)
-    target = Path(out_path).expanduser()
+    if out_path:
+        target = Path(out_path).expanduser()
+    else:
+        from nomad.config import DEFAULT_CONFIG_PATHS
+        target = Path(ctx.obj.get('config_target') or DEFAULT_CONFIG_PATHS[0]).expanduser() \
+            .parent / "report.toml"
     if target.exists() and not force:
         raise click.ClickException(f"{target} exists (--force replaces it)")
     conn = sources.open_db(db_path)
@@ -5584,7 +5626,7 @@ def usage_report_people(ctx, since, until, cluster, db, report_config, sacct, ou
     target = Path(out_path).expanduser()
     if target.exists() and not force:
         raise click.ClickException(f"{target} exists (--force replaces it)")
-    cfg = _usage_config(report_config, name)
+    cfg = _usage_config(report_config, name, ctx.obj.get('config_target'))
     try:
         data = sources.load(cfg, t0, t1, db=db_path, site=site, sacct=Path(sacct) if sacct else None,
                             keep_people=True)
@@ -5740,6 +5782,11 @@ def _lab_known(config, group, config_path=None) -> bool:
     candidates = []
     try:
         candidates.append(get_db_path(config))
+    except Exception:
+        pass
+    try:
+        from nomad.actions.remote import hub_settings
+        candidates.append(hub_settings(config_path)["combined_db"])
     except Exception:
         pass
     candidates += [h / ".local" / "share" / "nomad" / "combined.db" for h in homes]

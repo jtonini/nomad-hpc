@@ -302,21 +302,37 @@ Open `http://localhost:8050` in your browser.
 To monitor multiple sites from a single dashboard:
 
 1. Install and configure NØMAÐ on each site using `nomad init`
-2. On a central machine, create `~/.config/nomad/sync.toml`:
+2. On a central machine (the hub), list the sites under `[hub]` in its
+   nomad.toml (`~/.config/nomad/nomad.toml`, or `/etc/nomad/nomad.toml` for a
+   service account; `nomad -c FILE sync` names another):
 
 ```toml
-[[sites]]
+[hub]
+output_db = "~/.local/share/nomad/combined.db"   # the default
+
+[[hub.sites]]
 name = "cluster-a"
 host = "headnode-a"
-user = "monitor"
+ssh_user = "monitor"
 db_path = "~/.local/share/nomad/cluster-a.db"
 
-[[sites]]
+[[hub.sites]]
 name = "cluster-b"
 host = "headnode-b"
-user = "monitor"
+ssh_user = "monitor"
 db_path = "~/.local/share/nomad/cluster-b.db"
+
+[[hub.sites]]
+name = "hub"                  # collectors on the hub itself (lab workstations, say)
+host = "localhost"            # read directly: no ssh to itself
+db_path = "/var/lib/nomad/nomad.db"
 ```
+
+   A relative `output_db` is in the data directory
+   (`~/.local/share/nomad`). A `localhost` site's partitions come from the
+   nomad.toml in use, and an action run on it (`nomad actions run --site`)
+   runs on the hub itself, without the agent key. `~/.config/nomad/sync.toml` with top-level
+   `[[sites]]` still works, with a warning.
 
 3. Run sync and launch the combined dashboard:
 

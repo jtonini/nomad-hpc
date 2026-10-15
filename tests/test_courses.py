@@ -383,7 +383,7 @@ def test_a_course_change_needs_a_group_the_data_knows(tmp_path, monkeypatch):
     conn.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT)")
     conn.execute("INSERT INTO group_membership VALUES ('s1', 'demo101')")
     conn.commit()
-    monkeypatch.setattr(remote, "hub_settings", lambda: {"combined_db": tmp_path / "none.db"})
+    monkeypatch.setattr(remote, "hub_settings", lambda *a: {"combined_db": tmp_path / "none.db"})
     monkeypatch.setattr(cli, "get_db_path", lambda config: db)
 
     class Ctx:
