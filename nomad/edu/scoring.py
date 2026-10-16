@@ -835,6 +835,11 @@ class SessionFingerprint:
     busy_cores: float | None = None
     host_cores: int | None = None
     span_hours: float | None = None
+    # Long CPU-heavy stretches inside the session, [(hours, cores, ended)]
+    # (nomad.workstation_sessions.busy_runs; 1.13.3): a session can be weeks
+    # long, and its average says little about a two-day job in it. None when
+    # the loader couldn't tell (no host size or no CPU readings).
+    long_runs: list | None = None
 
     @property
     def overall(self) -> float:
@@ -1058,6 +1063,7 @@ def score_session(session: dict, host_state: dict) -> SessionFingerprint:
         busy_cores=session_busy_cores(session),
         host_cores=host_state.get("cpu_count") or None,
         span_hours=session.get("span_hours"),
+        long_runs=session.get("long_runs"),
     )
 
 

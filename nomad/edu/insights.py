@@ -1249,12 +1249,25 @@ def _build_cluster_promotion_verdict(
         context=context,
     )
 
+def _runs_of(fp: SessionFingerprint) -> list[tuple]:
+    """A session's long CPU-heavy runs as (hours, cores): the stretches
+    inside it the loader found (1.13.3), else the session itself."""
+    if fp.long_runs is not None:
+        return [(run[0], run[1]) for run in fp.long_runs]
+    return [(fp.span_hours, fp.busy_cores)]
+
+
 def _compute_sessions(fingerprints: list[SessionFingerprint]) -> list[SessionFingerprint]:
-    """Sessions of VERDICT_COMPUTE_MIN_SPAN_HOURS or more that kept at least
-    VERDICT_COMPUTE_HOST_SHARE of the host's cores (and
-    VERDICT_COMPUTE_MIN_CORES) busy on average."""
+    """Sessions with a stretch of VERDICT_COMPUTE_MIN_SPAN_HOURS or more that
+    kept at least VERDICT_COMPUTE_HOST_SHARE of the host's cores (and
+    VERDICT_COMPUTE_MIN_CORES) busy on average. Where the loader found the
+    stretches inside a session (long_runs), those; else the whole session."""
     out = []
     for fp in fingerprints:
+        if fp.long_runs is not None:
+            if fp.long_runs and fp.host_cores:
+                out.append(fp)
+            continue
         if fp.busy_cores is None or not fp.host_cores or not fp.span_hours:
             continue
         if fp.span_hours < VERDICT_COMPUTE_MIN_SPAN_HOURS:
@@ -1276,13 +1289,14 @@ def _build_compute_verdict(
     VERDICT_COMPUTE_MIN_TOTAL_HOURS in the window and there is a cluster to
     move to (a workstation-only site gets nothing: there is nowhere better)."""
     heavy = _compute_sessions(fingerprints)
-    hours = sum(fp.span_hours for fp in heavy)
+    stretches = [(fp, h, c) for fp in heavy for h, c in _runs_of(fp)]
+    hours = sum(h for _fp, h, _c in stretches)
     if not heavy or hours < VERDICT_COMPUTE_MIN_TOTAL_HOURS or not cluster_capacities:
         return None
 
-    headline = max(heavy, key=lambda fp: fp.busy_cores)
-    busy, host_cores = headline.busy_cores, headline.host_cores
-    longest = max(fp.span_hours for fp in heavy)
+    headline, _h, busy = max(stretches, key=lambda r: r[2])
+    host_cores = headline.host_cores
+    longest = max(h for _fp, h, _c in stretches)
     # The programs' own memory (1.13.2); without it, memory.peak, which
     # counts the file cache too, as an upper bound: --mem is then generous,
     # never short.
@@ -1313,7 +1327,9 @@ def _build_compute_verdict(
         + ([f"#SBATCH --partition={partition}"] if partition else []))
 
     n = len(heavy)
-    runs = "one session" if n == 1 else f"{n} sessions"
+    k = len(stretches)
+    runs = ("one session" if n == 1 else f"{n} sessions") if k == n else \
+        f"{k} runs in {'one session' if n == 1 else f'{n} sessions'}"
     detail = (
         f"In your recent sessions, long computation ran for {hours:.0f} hours "
         f"({runs}, the longest {longest:.0f} h), at its heaviest keeping about "

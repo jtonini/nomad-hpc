@@ -235,7 +235,8 @@ def advice(cov: dict, imp: Impact, hub: bool) -> list[str]:
         out.append(f"{b['jobs'] - b['measured_113']:,} of the {b['jobs']:,} jobs before launch "
                    f"have no measurement read the 1.13 way. {on}`nomad impact backfill` "
                    f"(a dry run; then --apply) reads again what Slurm still keeps; jobs whose "
-                   f"usage it has purged keep what is stored.")
+                   f"usage it has purged keep what is stored. Once it has run, what is left "
+                   f"is what Slurm no longer has: running it again changes nothing.")
     return out
 
 
@@ -330,16 +331,23 @@ def _measurements(src, site=None):
     if hub and not site:
         raise ValueError("it is a combined database: say which site's jobs (--site)")
     cols = [c for c in MEASURE_COLUMNS if c in scols]
-    join, where, args = "", "", []
+    # The submit times in one pass, matched here: a hub's jobs table has an
+    # index on source_site and none on job_id, and with it SQLite answered a
+    # join by scanning the site's jobs for every measured job (hours for a
+    # big site; 1.13.2).
+    submit: dict = {}
     if {"job_id", "submit_time"} <= jcols:
-        same = " AND j.source_site = js.source_site" if hub and "source_site" in jcols else ""
-        join = f" LEFT JOIN jobs j ON j.job_id = js.job_id{same}"
-    if hub:
-        where, args = " AND js.source_site = ?", [site]
-    submit = "j.submit_time" if join else "NULL"
-    for row in src.execute(f"SELECT js.job_id, {submit}, {', '.join('js.' + c for c in cols)} "
-                           f"FROM job_summary js{join} WHERE {_MEASURED}{where}", args):
-        yield str(row[0]), norm_time(row[1]), dict(zip(cols, row[2:]))
+        if hub and "source_site" in jcols:
+            found = src.execute("SELECT job_id, submit_time FROM jobs WHERE source_site = ?",
+                                (site,))
+        else:
+            found = src.execute("SELECT job_id, submit_time FROM jobs")
+        submit = {str(j): t for j, t in found}
+    where, args = ("", []) if not hub else (" AND js.source_site = ?", [site])
+    for row in src.execute(f"SELECT js.job_id, {', '.join('js.' + c for c in cols)} "
+                           f"FROM job_summary js WHERE {_MEASURED}{where}", args):
+        job_id = str(row[0])
+        yield job_id, norm_time(submit.get(job_id)), dict(zip(cols, row[1:]))
 
 
 def extract(src_path, out_path, site=None) -> int:

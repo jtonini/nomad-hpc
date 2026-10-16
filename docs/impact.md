@@ -133,8 +133,17 @@ for as long as it lives. Until 1.13.2 sessions were told apart by the
 slice directory's change time, which the kernel moves whenever a login,
 terminal, ssh connection or cron job starts or ends there: one person's day
 came out as many sessions. Now a session runs while the slice's CPU time
-and memory peak keep growing, as they do until it is made again; this holds
-for the readings already collected too.
+and memory peak keep growing, as they do until it is made again, and ends
+after two hours without a reading; this holds for the readings already
+collected too.
+
+A session can then last weeks (anything left running keeps the slice), so
+its average says little about a two-day job inside it. Long runs are found
+inside sessions (1.13.3): stretches in which every reading kept three
+quarters of the cores needed busy, with pauses of up to 30 minutes, and the
+whole stretch averaged half the machine's cores (at least 2) for 12 hours
+or more. Each run counts in the month it ended. The Console's advice to move
+long runs to a cluster uses the same runs.
 
 Memory is the programs' own (memory.stat anon + shmem, read from 1.13.2
 on). memory.peak, all there was before, counts the file cache: a session

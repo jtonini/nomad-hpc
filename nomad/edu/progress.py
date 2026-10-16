@@ -286,7 +286,9 @@ def _load_user_sessions(
     Workstation snapshots churn faster than cluster jobs, so the default
     window is shorter (7 days vs 90).
     """
-    from nomad.workstation_sessions import split
+    from nomad.edu.insights import (VERDICT_COMPUTE_HOST_SHARE, VERDICT_COMPUTE_MIN_CORES,
+                                    VERDICT_COMPUTE_MIN_SPAN_HOURS)
+    from nomad.workstation_sessions import busy_runs, split
     try:
         conn = sqlite3.connect(db_path)
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
@@ -320,6 +322,11 @@ def _load_user_sessions(
             except ValueError:
                 span = None
             mem, cores = hosts.get(first[5], (None, None))
+            # Long CPU-heavy stretches inside the session (1.13.3): it can
+            # be weeks long, and its average hides a two-day job in it.
+            runs = busy_runs(((r[1], r[3]) for r in rows),
+                             max(VERDICT_COMPUTE_MIN_CORES, VERDICT_COMPUTE_HOST_SHARE * cores),
+                             VERDICT_COMPUTE_MIN_SPAN_HOURS) if cores and cpus else None
             out.append({
                 "hostname": first[5], "username": username, "uid": first[6],
                 "session_epoch": first[2],
@@ -330,6 +337,7 @@ def _load_user_sessions(
                 "first_seen": first[1], "last_seen": last[1], "samples": len(rows),
                 "span_hours": span,
                 "host_memory_total_mb": mem, "host_cpu_count": cores,
+                "long_runs": runs,
             })
         conn.close()
         out.sort(key=lambda r: str(r["last_seen"]))
@@ -352,6 +360,7 @@ def _split_session_fields(row: dict) -> tuple[dict, dict]:
         "session_epoch":     row.get("session_epoch"),
         "peak_memory_bytes": row.get("peak_memory_bytes"),
         "anon_peak_bytes":   row.get("anon_peak_bytes"),
+        "long_runs":         row.get("long_runs"),
         "cpu_usage_usec":    row.get("cpu_usage_usec"),
         "cpu_usage_usec_first": row.get("cpu_usage_usec_first"),
         "samples":           row.get("samples"),

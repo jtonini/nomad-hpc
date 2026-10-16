@@ -129,7 +129,7 @@ def workstation_sessions(conn, since: date, site=None, exclude=()) -> list[dict]
     while its counters keep growing (nomad.workstation_sessions, 1.13.2).
     Pressured needs the programs' own memory (memory_anon_bytes, 1.13.2):
     memory.peak counts the file cache; without it, ``pressured`` is None."""
-    from nomad.workstation_sessions import split
+    from nomad.workstation_sessions import busy_runs, split
     cols = _cols(conn, "workstation_user_snapshot")
     if not {"timestamp", "hostname", "username", "uid", "session_epoch",
             "cpu_usage_usec", "memory_peak_bytes"} <= cols:
@@ -168,26 +168,35 @@ def workstation_sessions(conn, since: date, site=None, exclude=()) -> list[dict]
         core_h = (max(cpus) - min(cpus)) / 3.6e9 if cpus else None
         anons = [r[8] for r in rows if r[8] is not None]
         mem_mb, cores = hosts.get((s, h), (0, 0))
-        busy = core_h / span if core_h is not None and span > 0 else None
+        # Long runs inside the session: it can be weeks long, and its own
+        # average says little about a two-day job in it (1.13.3).
+        runs = busy_runs(((r[1], r[3]) for r in rows),
+                         max(LONG_RUN_MIN_CORES, LONG_RUN_HOST_SHARE * cores),
+                         LONG_RUN_HOURS) if cores else []
         out.append({
             "site": s, "host": h, "user": user, "end": str(last[1])[:10], "hours": span,
             "core_hours": core_h,
-            "long_run": bool(busy is not None and cores and span >= LONG_RUN_HOURS
-                             and busy >= max(LONG_RUN_MIN_CORES, LONG_RUN_HOST_SHARE * cores)),
+            "long_run": bool(runs), "runs": runs,
             "pressured": (bool(mem_mb and max(anons) >= PRESSURED_SHARE * mem_mb * 2 ** 20)
                           if anons else None),
         })
     return out
 
 
-def _ws_agg(sessions: list) -> dict:
-    long_runs = [x for x in sessions if x["long_run"]]
+def _ws_agg(records: list) -> dict:
+    """records: sessions (dicts, by the day they ended) and long runs
+    ((hours, cores, ended, user), by the day they ended: a session can run
+    for weeks, and a run in it belongs to its own month; its person counts
+    there too)."""
+    sessions = [x for x in records if isinstance(x, dict)]
+    long_runs = [x for x in records if not isinstance(x, dict)]     # (hours, cores, ended, user)
     measured = [x for x in sessions if x["core_hours"] is not None]
-    return {"people": len({x["user"] for x in sessions}), "sessions": len(sessions),
+    people = {x["user"] for x in sessions} | {run[3] for run in long_runs}
+    return {"people": len(people), "sessions": len(sessions),
             "hours": round(sum(x["hours"] for x in sessions), 1),
             "core_hours": round(sum(x["core_hours"] for x in measured), 1) if measured else None,
             "long_runs": len(long_runs),
-            "long_run_hours": round(sum(x["hours"] for x in long_runs), 1),
+            "long_run_hours": round(sum(run[0] for run in long_runs), 1),
             # Of the sessions with the programs' own memory read (1.13.2).
             "pressured": (sum(1 for x in sessions if x["pressured"])
                           if any(x["pressured"] is not None for x in sessions) else None),
@@ -202,7 +211,10 @@ def workstations(conn, imp: Impact, site=None, today: date | None = None,
     by_site = defaultdict(list)
     for x in sessions:
         by_site[x["site"]].append((x["end"], x))
-    return [{"site": s, "machines": len({r["host"] for _d, r in by_site[s]}),
+        for run in x.get("runs", ()):
+            by_site[x["site"]].append((run[2][:10], (*run, x["user"])))
+    return [{"site": s, "machines": len({r["host"] for _d, r in by_site[s]
+                                         if isinstance(r, dict)}),
              **_bucket(by_site[s], imp, today, _ws_agg)}
             for s in sorted(by_site, key=str)]
 
@@ -311,7 +323,8 @@ SECTIONS = {
     "workstations": (
         "Lab workstations",
         "a session runs from sign-in to the last program ending, counted in the month it "
-        "ended; long runs: 12 h or more keeping half the machine's cores busy; pressured: "
+        "ended; long runs: stretches of 12 h or more inside a session keeping half the "
+        "machine's cores busy, and their hours; pressured: "
         "its programs held 80% or more of the machine's memory (read from nomad 1.13.2 on: "
         "the readings before include the file cache)",
         [("people", "people", "n"), ("sessions", "sessions", "n"), ("hours", "hours", "h"),

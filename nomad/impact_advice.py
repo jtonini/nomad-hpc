@@ -128,9 +128,12 @@ def moved_to_cluster(conn, a: dict, sessions_by_user: dict, now: datetime) -> st
         return "too_early"
     d0, d1, d2 = ((at - window).date().isoformat(), at.date().isoformat(),
                   min(at + window, now).date().isoformat())
-    runs = [x for x in sessions_by_user.get(a["user"], []) if x["long_run"]]
-    before = sum(x["hours"] for x in runs if d0 <= x["end"] < d1)
-    after = sum(x["hours"] for x in runs if d1 <= x["end"] <= d2)
+    # Long runs by when each ended (a session can span the advice; a run that
+    # ended before the advice was seen is before it, the same day or not).
+    runs = [run for x in sessions_by_user.get(a["user"], []) for run in x.get("runs", ())]
+    seen = a["at"][:19]
+    before = sum(run[0] for run in runs if d0 <= run[2] < seen)
+    after = sum(run[0] for run in runs if seen <= run[2] and run[2][:10] <= d2)
     jobs_before = _jobs_count(conn, a["user"], a["site"], at - window, at)
     jobs_after = _jobs_count(conn, a["user"], a["site"], at, min(at + window, now))
     fewer = after <= 0.5 * before if before else after == 0

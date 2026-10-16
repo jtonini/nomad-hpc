@@ -392,3 +392,35 @@ def test_the_report_computes_from_kernels_and_rstudio_for_the_history_too(tmp_pa
     assert before["people"] == 2 and before["open_hours"] == 14.0
     assert before["computing_pct"] == pytest.approx(100 * 2 / 24, abs=0.1)
     assert before["idle_hours"] == 22.0
+
+
+def test_extract_from_a_hub_with_its_indexes_is_quick(tmp_path):
+    """The hub indexes jobs by source_site (and none by job_id): a join made
+    SQLite scan the site's jobs for every measured job, hours on a big site."""
+    import time
+    db = tmp_path / "combined.db"
+    c = sqlite3.connect(db)
+    c.executescript("""
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT,
+            submit_time TEXT, end_time TEXT, source_site TEXT);
+        CREATE TABLE job_summary (id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT,
+            avg_cpu_percent REAL, peak_memory_gb REAL, source_site TEXT);
+    """)
+    n = 20_000
+    c.executemany("INSERT INTO jobs (job_id, submit_time, end_time, source_site) "
+                  "VALUES (?, '2026-03-01T08:00:00', '2026-03-01T09:00:00', 'big')",
+                  [(str(i),) for i in range(n)])
+    c.executemany("INSERT INTO job_summary (job_id, avg_cpu_percent, peak_memory_gb, "
+                  "source_site) VALUES (?, 50.0, 1.0, 'big')", [(str(i),) for i in range(n)])
+    for cols in ("source_site", "source_site, end_time", "source_site, submit_time"):
+        c.execute(f"CREATE INDEX idx_{cols.replace(', ', '_')} ON jobs({cols})")
+    c.execute("CREATE INDEX idx_js_job_id ON job_summary(job_id)")
+    c.execute("ANALYZE")
+    c.commit()
+    c.close()
+    t = time.monotonic()
+    assert extract(db, tmp_path / "m.db", "big") == n
+    assert time.monotonic() - t < 10
+    one = sqlite3.connect(tmp_path / "m.db").execute(
+        "SELECT submit_time FROM measurements WHERE job_id = '7'").fetchone()
+    assert one == ("2026-03-01T08:00:00",)

@@ -63,3 +63,61 @@ def split(rows: Iterable[tuple]) -> Iterator[list[tuple]]:
         current.append(row)
     if current:
         yield current
+
+
+# A pause this long (reading or writing a file, waiting on the network) does
+# not end a run; a longer one does.
+RUN_GRACE = timedelta(minutes=30)
+# An interval keeps a run going when it keeps this share of the cores needed
+# busy; the run counts when its average reaches all of them.
+RUN_DIP = 0.75
+
+
+def busy_runs(readings: Iterable[tuple], cores_needed: float, min_hours: float,
+              dip: float = RUN_DIP, grace: timedelta = RUN_GRACE) -> list[tuple]:
+    """The stretches of one session that kept ``cores_needed`` cores busy on
+    average for ``min_hours`` or more: [(hours, cores, ended)], in order
+    (``ended``: the run's last busy reading, YYYY-MM-DDTHH:MM:SS).
+
+    ``readings`` are (timestamp, cpu_usage_usec) in time order. A session can
+    be weeks long (a slice lives while anything of the person's runs on the
+    machine), so its own average says little about a two-day job inside it:
+    a run is a stretch of intervals each keeping ``dip`` of the cores needed
+    busy, with pauses up to ``grace`` inside it, and counts when its average
+    over the whole stretch reaches ``cores_needed``. A stretch whose average
+    falls short (a heavy job beside days of moderate load) is searched again
+    for the stretches inside it that were fully busy."""
+    points = [(t, cpu) for t, cpu in ((_when(w), c) for w, c in readings)
+              if t is not None and cpu is not None]
+    return _runs(points, cores_needed, min_hours, dip, grace)
+
+
+def _runs(points: list, need: float, min_hours: float, dip: float, grace: timedelta) -> list:
+    runs: list[tuple] = []
+    first = last = None              # indices of the run's first and last busy reading
+
+    def close():
+        if first is None:
+            return
+        (t0, c0), (t1, c1) = points[first], points[last]
+        hours = (t1 - t0).total_seconds() / 3600
+        if hours < min_hours or hours <= 0:
+            return
+        cores = (c1 - c0) / 1e6 / (hours * 3600)
+        if cores >= need:
+            runs.append((hours, cores, t1.isoformat(timespec="seconds")))
+        elif dip < 1.0:
+            runs.extend(_runs(points[first:last + 1], need, min_hours, 1.0, grace))
+
+    for i in range(1, len(points)):
+        (ta, ca), (tb, cb) = points[i - 1], points[i]
+        dt = (tb - ta).total_seconds()
+        if dt > 0 and (cb - ca) / 1e6 / dt >= dip * need:
+            if first is None:
+                first = i - 1
+            last = i
+        elif first is not None and tb - points[last][0] > grace:
+            close()
+            first = last = None
+    close()
+    return runs
