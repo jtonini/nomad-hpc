@@ -271,7 +271,7 @@ class AlertDispatcher:
         """
         now = datetime.now()
         sev = (alert.get('severity') or 'info').lower()
-        gap = timedelta(minutes=self.episode_gap_minutes)
+        gap = timedelta(minutes=max(self.episode_gap_minutes, _own_gap(alert)))
         try:
             conn = sqlite3.connect(self.db_path, timeout=30)
             try:
@@ -420,6 +420,14 @@ def _time(text, default: datetime) -> datetime:
         return datetime.fromisoformat(str(text))
     except (TypeError, ValueError):
         return default
+
+
+def _own_gap(alert: dict) -> float:
+    """A condition's own episode gap, in minutes (0: none), for one read less
+    often than episode_gap_minutes allows (a compute node's local disk)."""
+    details = alert.get('details')
+    g = details.get('episode_gap_minutes') if isinstance(details, dict) else None
+    return float(g) if isinstance(g, (int, float)) and not isinstance(g, bool) and g > 0 else 0.0
 
 
 def alert_key(alert: dict) -> str:

@@ -351,6 +351,29 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (20, "Add memory_anon_bytes to workstation_user_snapshot", """
         ALTER TABLE workstation_user_snapshot ADD COLUMN memory_anon_bytes INTEGER;
     """),
+    # Compute nodes' local disks, read from the head node (1.14).
+    (21, "Create node_disks", """
+        CREATE TABLE IF NOT EXISTS node_disks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            node TEXT NOT NULL,
+            path TEXT NOT NULL,
+            mount TEXT,
+            device TEXT,
+            total_bytes INTEGER,
+            used_bytes INTEGER,
+            available_bytes INTEGER,
+            used_percent REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_disks_node_time ON node_disks(node, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_node_disks_time ON node_disks(timestamp);
+        CREATE TABLE IF NOT EXISTS node_disks_sweeps (
+            timestamp TEXT NOT NULL,
+            asked INTEGER,
+            answered INTEGER,
+            readings INTEGER
+        );
+    """),
 ]
 
 

@@ -94,7 +94,7 @@ _FLAT_KEYS = {
 
 def subject_of(collector_name: str, item: dict):
     """What on the host an item is about: the condition's name."""
-    if collector_name == 'disk':
+    if collector_name in ('disk', 'node_disk'):
         return item.get('path')
     if collector_name == 'nfs':
         return item.get('mount_point')
@@ -181,10 +181,35 @@ class ThresholdChecker:
             # A disk collector's quota records are about people, not disks.
             if collector_name == 'disk' and item.get('type', 'filesystem') != 'filesystem':
                 continue
+            if collector_name == 'node_disks':
+                # Each about its own node, not the head node that read it.
+                alerts.extend(self._check_node_disk(item))
+                continue
             alerts.extend(self._check_item(collector_name, item, host))
             if collector_name == 'disk':
                 alerts.extend(self._check_forecast(item, host))
         return alerts
+
+    def _check_node_disk(self, item: dict) -> list[dict]:
+        """A compute node's local disk (nomad.collectors.node_disks) at the
+        disk thresholds: one condition per node and path."""
+        if item.get('type') != 'node_disk' or not item.get('node'):
+            return []
+        value = item.get('used_percent')
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return []
+        t = self.thresholds.get('disk', {})
+        # Read every 30 minutes, not every few: one reading missed (the node
+        # too busy to answer in time) must not end the condition and raise
+        # it again as new. Two and a half intervals cover one missed reading.
+        every = item.get('every_minutes')
+        gap = 2.5 * every if isinstance(every, (int, float)) and every > 0 else None
+        for severity, key in (('critical', 'used_percent_critical'),
+                              ('warning', 'used_percent_warning')):
+            if key in t and value >= t[key]:
+                return [self._create_alert(severity, 'node_disk', item['node'], 'used_percent',
+                                           value, t[key], item, gap_minutes=gap)]
+        return []
 
     def _check_item(self, collector_name: str, item: dict, host: str) -> list[dict]:
         """Check a single data item against thresholds."""
@@ -254,9 +279,12 @@ class ThresholdChecker:
         metric: str,
         value: float,
         threshold: float,
-        item: dict
+        item: dict,
+        gap_minutes: float | None = None,
     ) -> dict:
-        """Create and dispatch an alert."""
+        """Create and dispatch an alert. ``gap_minutes``: for a condition
+        read less often than the alerts' episode_gap_minutes allows, how long
+        it may go unseen before it has ended (the longer of the two holds)."""
         message = self._format_message(source, metric, value, threshold, item)
         subject = subject_of(source, item)
         alert = {
@@ -273,6 +301,8 @@ class ThresholdChecker:
             },
             'timestamp': datetime.now().isoformat()
         }
+        if gap_minutes:
+            alert['details']['episode_gap_minutes'] = float(gap_minutes)
         send_alert(severity=alert["severity"], source=alert["source"], message=alert["message"],
                    host=alert["host"], details=alert["details"], subject=subject)
         logger.info(f"Alert triggered: {severity} - {source} - {message}")
@@ -293,6 +323,15 @@ class ThresholdChecker:
             free = item.get('available_bytes')
             free = f"{_size(free)} free; " if isinstance(free, (int, float)) else ""
             return f"Disk {path} at {value:.1f}% ({free}threshold: {threshold:g}%)"
+
+        elif source == 'node_disk':
+            path, mount = item.get('path', 'unknown'), item.get('mount')
+            free = item.get('available_bytes')
+            free = f"{_size(free)} free; " if isinstance(free, (int, float)) else ""
+            where = (" -- on the node's system disk (/): filling it can take the node down"
+                     if mount == '/' else (f" (on {mount})" if mount and mount != path else ""))
+            return (f"Node {item.get('node', 'unknown')}: {path} at {value:.1f}% "
+                    f"({free}threshold: {threshold:g}%){where}")
 
         elif source == 'nfs':
             mount = item.get('mount_point', 'unknown')

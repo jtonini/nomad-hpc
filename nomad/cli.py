@@ -4345,7 +4345,7 @@ def sync(ctx, config_file, output, dry_run):
         'schema_version', 'schema_migrations',
         'sqlite_sequence', 'config',
         # Counters and cursors from one run to the next: local working state.
-        'per_user_state', 'interactive_state', 'oom_state',
+        'per_user_state', 'interactive_state', 'oom_state', 'node_disks_sweeps',
     }
 
     # Build to a temp path so a failed or interrupted sync doesn't destroy
@@ -4633,6 +4633,8 @@ def sync(ctx, config_file, output, dry_run):
             ("group_membership", "group_name"),
             ("group_membership", "username"),
             ("oom_kills", "source_site, timestamp"),
+            # Compute nodes' local disks: each node's latest reading (1.14).
+            ("node_disks", "source_site, node, timestamp"),
         ]
         click.echo("  Indexing... ", nl=False)
         _built = 0

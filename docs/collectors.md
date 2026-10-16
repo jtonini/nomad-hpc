@@ -219,6 +219,42 @@ straight line and stores the fill rate and when the filesystem will be full
 (`fill_rate_bytes_per_day`, `days_until_full`); a disk that will be full
 soon raises a `disk_forecast` alert (see `docs/alerts.md`).
 
+## Compute nodes' local disks (node_disks)
+
+Slurm knows a node's local disk only as configured (`TmpDisk`, often 0), and
+never how full it is. On the head node, `node_disks` asks every node that
+`sinfo -a` lists and that isn't down for `df` of each path in `paths`
+(default `/localscratch`), over ssh with `BatchMode` to the node's
+`NodeHostname` (the collector's account needs key or host-based access to the
+nodes, as it usually has inside a cluster), `parallel` nodes at a time, for at
+most `max_seconds` (120) in all, every `interval_minutes` (30; `collect
+--once` runs in between note when it last asked). The interval runs from when
+a sweep started, whatever came of it: one where no node answered (logins
+hanging on a dead home directory, say) is neither retried nor repeated at the
+next cron run. Off until enabled:
+
+```toml
+[collectors.node_disks]
+enabled = true
+paths = ["/localscratch"]
+```
+
+Each reading (`node_disks`: node, path, mount, device, size, used, free,
+percent) says which filesystem holds the path: `mount = "/"` means the path
+is a folder on the node's system disk, where a job that fills it can take
+the node down. Alerts (`node_disk`) at the disk thresholds of
+`[alerts.thresholds.disk]` (80 and 95% by default), one per node and path,
+raised and reminded of like the other disks; one ends when its disk hasn't
+been seen full for two and a half intervals (75 minutes), or
+`episode_gap_minutes` in `[alerts]` if longer, so a reading missed now and
+then doesn't raise it anew. A run says which nodes didn't answer, and fails
+only when none did. On the hub the readings are synced
+with the rest; the Console shows each node's latest.
+
+To see whether the account reaches a node:
+
+    ssh -o BatchMode=yes NODE 'df -P /localscratch | tail -1'
+
 ## NFS
 
 On a host that mounts NFS, each run reads `nfsiostat 5 2` and keeps the second report: what each mount did in those 5 seconds (`sample_seconds` in `[collectors.nfs]`). The first report averages everything since the share was mounted. Per mount: operations, read and write rates, and round-trip and execution times and retransmissions weighted over reads and writes — empty (NULL) for a mount with no reads or writes in the sample, rather than 0 ms. A host that mounts nothing says "no NFS mounts on this host"; turn nfs off there.

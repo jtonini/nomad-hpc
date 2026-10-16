@@ -61,6 +61,8 @@ SPECS: tuple[Spec, ...] = (
          ("vmstat",), (), ("vmstat",)),
     Spec("node_state", "node_state", "NodeStateCollector", True, "Slurm head node",
          ("scontrol",), (), ("node_state",)),
+    Spec("node_disks", "node_disks", "NodeDisksCollector", False,
+         "Slurm head node reaching its nodes over SSH", ("ssh", "sinfo"), (), ("node_disks",)),
     Spec("gpu", "gpu", "GPUCollector", True, "hosts with NVIDIA GPUs, or a head node "
          "reaching GPU nodes over SSH", ("nvidia-smi|ssh",), (), ("gpu_stats", "gpu_health")),
     Spec("nfs", "nfs", "NFSCollector", True, "hosts that mount NFS (client side)",

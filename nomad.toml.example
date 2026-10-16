@@ -124,6 +124,19 @@ nfs_mount_points = ["/home", "/scratch"]
 # Services to check (via systemctl)
 check_services = ["slurmd", "munge"]
 
+# Compute nodes' local disks (1.14): on the head node, df of each path on
+# every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the
+# [alerts.thresholds.disk] percentages, one per node and path.
+# [collectors.node_disks]
+# enabled = true
+# paths = ["/localscratch"]
+# interval_minutes = 30
+# parallel = 8                   # nodes asked at once
+# timeout = 10                   # seconds a node has to answer
+# max_seconds = 120              # a sweep stops asking after this long
+# ssh_user = "..."               # default: this account
+# nodes = ["cn01", "cn02"]       # default: every node sinfo lists
+
 # ============================================
 # LICENSE COLLECTOR
 # ============================================
