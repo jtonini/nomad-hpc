@@ -36,6 +36,7 @@ def make_session(*, peak_gb, span_hours, hostname="host_a",
         "hostname": hostname,
         "session_epoch": session_epoch,
         "peak_memory_bytes": int(peak_gb * 1024 * 1024 * 1024),
+        "anon_peak_bytes": int(peak_gb * 1024 * 1024 * 1024),
         "span_hours": span_hours,
         "samples": max(1, int(span_hours * 60)),
     }

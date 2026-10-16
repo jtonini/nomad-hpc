@@ -276,55 +276,64 @@ def _load_user_sessions(
     """
     Load a user's workstation sessions with host capacity, for scoring.
 
-    Aggregates workstation_user_snapshot rows by session_epoch into one
-    row per session. Joins to the latest workstation_state per host so
-    each row carries the host's capacity (memory_total_mb, cpu_count) at
-    scoring time.
+    One row per session (nomad.workstation_sessions: the user's slice on a
+    machine for as long as its counters keep growing; the snapshots'
+    session_epoch changes with every login and terminal, 1.13.2). Each row
+    carries the host's capacity (memory_total_mb, cpu_count) from its latest
+    workstation_state.
 
     Filters uid >= 1000 to exclude system accounts (root, dbus, etc.).
     Workstation snapshots churn faster than cluster jobs, so the default
     window is shorter (7 days vs 90).
     """
+    from nomad.workstation_sessions import split
     try:
         conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        rows = conn.execute("""
-            WITH latest_state AS (
-              SELECT hostname, memory_total_mb, cpu_count,
-                     ROW_NUMBER() OVER (
-                         PARTITION BY hostname ORDER BY timestamp DESC
-                     ) AS rn
-              FROM workstation_state
-            ),
-            session_agg AS (
-              SELECT hostname, username, uid, session_epoch,
-                     MAX(memory_peak_bytes) AS peak_memory_bytes,
-                     MAX(cpu_usage_usec)    AS cpu_usage_usec,
-                     MIN(cpu_usage_usec)    AS cpu_usage_usec_first,
-                     MIN(timestamp)         AS first_seen,
-                     MAX(timestamp)         AS last_seen,
-                     COUNT(*)               AS samples
-              FROM workstation_user_snapshot
-              WHERE timestamp >= ?
-                AND uid >= 1000
-                AND username = ?
-              GROUP BY hostname, username, uid, session_epoch
-            )
-            SELECT s.hostname, s.username, s.uid, s.session_epoch,
-                   s.peak_memory_bytes, s.cpu_usage_usec, s.cpu_usage_usec_first,
-                   s.first_seen, s.last_seen, s.samples,
-                   (julianday(s.last_seen) - julianday(s.first_seen)) * 24
-                       AS span_hours,
-                   ls.memory_total_mb AS host_memory_total_mb,
-                   ls.cpu_count       AS host_cpu_count
-            FROM session_agg s
-            LEFT JOIN latest_state ls
-                ON ls.hostname = s.hostname AND ls.rn = 1
-            ORDER BY s.last_seen ASC
-        """, (cutoff, username)).fetchall()
+        # The programs' own memory (1.13.2); memory_peak_bytes counts the
+        # file cache too, so a session reading big files looked full.
+        snap_cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_user_snapshot)")}
+        anon = "memory_anon_bytes" if "memory_anon_bytes" in snap_cols else "NULL"
+        hosts = {}
+        for host, mem, cores in conn.execute("""
+                SELECT hostname, memory_total_mb, cpu_count FROM (
+                  SELECT hostname, memory_total_mb, cpu_count,
+                         ROW_NUMBER() OVER (PARTITION BY hostname ORDER BY timestamp DESC) AS rn
+                  FROM workstation_state) WHERE rn = 1"""):
+            hosts[host] = (mem, cores)
+        snaps = conn.execute(f"""
+            SELECT COALESCE(hostname, '') || char(0) || uid, timestamp, session_epoch, cpu_usage_usec,
+                   memory_peak_bytes, hostname, uid, {anon}
+            FROM workstation_user_snapshot
+            WHERE timestamp >= ? AND uid >= 1000 AND username = ?
+            ORDER BY hostname, uid, timestamp
+        """, (cutoff, username))
+        out = []
+        for rows in split(snaps):
+            first, last = rows[0], rows[-1]
+            peaks = [r[4] for r in rows if r[4] is not None]
+            anons = [r[7] for r in rows if r[7] is not None]
+            cpus = [r[3] for r in rows if r[3] is not None]
+            try:
+                span = (datetime.fromisoformat(str(last[1])[:19])
+                        - datetime.fromisoformat(str(first[1])[:19])).total_seconds() / 3600
+            except ValueError:
+                span = None
+            mem, cores = hosts.get(first[5], (None, None))
+            out.append({
+                "hostname": first[5], "username": username, "uid": first[6],
+                "session_epoch": first[2],
+                "peak_memory_bytes": max(peaks) if peaks else None,
+                "anon_peak_bytes": max(anons) if anons else None,
+                "cpu_usage_usec": max(cpus) if cpus else None,
+                "cpu_usage_usec_first": min(cpus) if cpus else None,
+                "first_seen": first[1], "last_seen": last[1], "samples": len(rows),
+                "span_hours": span,
+                "host_memory_total_mb": mem, "host_cpu_count": cores,
+            })
         conn.close()
-        return [dict(r) for r in rows]
+        out.sort(key=lambda r: str(r["last_seen"]))
+        return out
     except Exception as e:
         logger.error(f"Error loading sessions for {username}: {e}")
         return []
@@ -342,6 +351,7 @@ def _split_session_fields(row: dict) -> tuple[dict, dict]:
         "hostname":          row.get("hostname"),
         "session_epoch":     row.get("session_epoch"),
         "peak_memory_bytes": row.get("peak_memory_bytes"),
+        "anon_peak_bytes":   row.get("anon_peak_bytes"),
         "cpu_usage_usec":    row.get("cpu_usage_usec"),
         "cpu_usage_usec_first": row.get("cpu_usage_usec_first"),
         "samples":           row.get("samples"),

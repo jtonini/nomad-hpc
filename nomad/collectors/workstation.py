@@ -220,6 +220,10 @@ class UserCgroupSnapshot:
     # Process activity
     pids_current: int | None
 
+    # memory.stat anon + shmem (probe version 2, nomad 1.13.2): the
+    # programs' own memory, without the file cache memory_peak_bytes holds.
+    memory_anon_bytes: int | None = None
+
     probe_version: str = "1"
     source: str = "cgroup_v2"
 
@@ -895,6 +899,9 @@ class WorkstationCollector(BaseCollector):
         # Appended to whatever workstation_state rows were just written,
         # in the same transaction. Each record may carry 0..N snapshots
         # depending on how many users were logged in at probe time.
+        snap_cols = {r[1] for r in cursor.execute("PRAGMA table_info(workstation_user_snapshot)")}
+        if snap_cols and "memory_anon_bytes" not in snap_cols:
+            cursor.execute("ALTER TABLE workstation_user_snapshot ADD COLUMN memory_anon_bytes INTEGER")
         for record in data:
             hostname = record.get('hostname')
             for snap in record.get('user_snapshots', []):
@@ -904,8 +911,8 @@ class WorkstationCollector(BaseCollector):
                         cpu_usage_usec, cpu_user_usec, cpu_system_usec,
                         memory_current_bytes, memory_peak_bytes,
                         io_read_bytes, io_write_bytes, pids_current,
-                        collector_version, source
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        collector_version, source, memory_anon_bytes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     timestamp,
                     hostname,
@@ -922,6 +929,7 @@ class WorkstationCollector(BaseCollector):
                     snap.get('pids_current'),
                     COLLECTOR_VERSION,
                     snap.get('source', 'cgroup_v2'),
+                    snap.get('memory_anon_bytes'),
                 ))
 
         # ---------------------------------------------------------------

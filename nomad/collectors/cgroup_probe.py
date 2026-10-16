@@ -49,7 +49,7 @@ DEFAULT_CGROUP_ROOT = Path("/sys/fs/cgroup")
 # to decide how to filter. But we skip user-<UID>.slice directories where
 # pids.current is absent or zero AND the slice has cpu.stat == 0. These
 # are phantom slices systemd sometimes leaves behind briefly.
-PROBE_VERSION = "1"
+PROBE_VERSION = "2"
 
 
 @dataclass
@@ -90,6 +90,11 @@ class UserCgroupSnapshot:
     # Process activity
     pids_current: int | None
 
+    # The programs' own memory (memory.stat anon + shmem, bytes): what
+    # memory.current and memory.peak hold without the file cache, which
+    # the kernel gives back when it is needed. Probe version 2 (1.13.2).
+    memory_anon_bytes: int | None = None
+
     # Probe metadata
     probe_version: str = PROBE_VERSION
     source: str = "cgroup_v2"
@@ -106,6 +111,15 @@ def _read_int(path: Path) -> int | None:
         return int(path.read_text().strip())
     except (FileNotFoundError, PermissionError, ValueError):
         return None
+
+
+def _read_unreclaimable(path: Path) -> int | None:
+    """anon + shmem from memory.stat: memory the programs hold, not the file
+    cache memory.current and memory.peak count too. None without the file."""
+    stat = _read_cpu_stat(path)
+    if not stat:
+        return None
+    return stat.get("anon", 0) + stat.get("shmem", 0)
 
 
 def _read_cpu_stat(path: Path) -> dict[str, int]:
@@ -241,6 +255,7 @@ def probe_users(
         cpu = _read_cpu_stat(entry / "cpu.stat")
         mem_current = _read_int(entry / "memory.current")
         mem_peak = _read_int(entry / "memory.peak")  # may not exist
+        mem_anon = _read_unreclaimable(entry / "memory.stat")
         io_read, io_write = _read_io_stat(entry / "io.stat")
         pids = _read_int(entry / "pids.current")
 
@@ -258,6 +273,7 @@ def probe_users(
             io_read_bytes=io_read,
             io_write_bytes=io_write,
             pids_current=pids,
+            memory_anon_bytes=mem_anon,
         )
         snapshots.append(snap)
 

@@ -5775,6 +5775,7 @@ def impact_status(ctx, db, as_json):
                                 "events": [{"date": e.when.isoformat(), "what": e.what}
                                            for e in imp.events],
                                 "problems": list(imp.problems), "sites": covs,
+                                "excluded_accounts": len(imp.exclude_users),
                                 "other_sources": other,
                                 "advice_db": str(advice_path) if advice_path else None},
                                indent=2))
@@ -5788,6 +5789,10 @@ def impact_status(ctx, db, as_json):
     click.echo(f"Launch {imp.launch}; before from {imp.baseline_from}.")
     for e in imp.events:
         click.echo(f"  {e.when}  {e.what}")
+    if imp.exclude_users:
+        n = len(imp.exclude_users)
+        click.echo(f"  {n} account{'' if n == 1 else 's'} left out of every figure "
+                   "([impact] exclude_users)")
     for cov in covs:
         click.echo(f"\n{cov['site'] or 'This site'}: jobs from {cov['first_job_end'] or '—'}")
         if "after" not in cov:
@@ -5898,6 +5903,90 @@ def impact_report(ctx, db, site, source, advice_db, as_json):
             click.echo(line)
 
 
+@impact_group.command('extract')
+@click.option('--from', 'src', required=True, type=click.Path(exists=True, dir_okay=False),
+              help='An older copy of a database (a site\'s, or a hub\'s combined one)')
+@click.option('--site', help='With a combined database: whose jobs')
+@click.option('--out', 'out', required=True, type=click.Path(dir_okay=False),
+              help='The file to write (it must not exist)')
+@click.pass_context
+def impact_extract(ctx, src, site, out):
+    """The measured jobs of an older copy, into a small file for `nomad
+    impact restore` on the site: job numbers, submit times and the
+    measurements, no names. Read-only on the copy.
+
+    \b
+    nomad impact extract --from OLD/combined.db --site SITE --out SITE-measurements.db
+    """
+    from nomad.impact import extract
+    try:
+        n = extract(src, out, site)
+    except (ValueError, sqlite3.Error) as e:
+        raise click.ClickException(str(e))
+    click.echo(f"{n:,} measured jobs written to {out}.")
+
+
+@impact_group.command('restore')
+@click.option('--from', 'src', required=True, type=click.Path(exists=True, dir_okay=False),
+              help='An extract (nomad impact extract) or an older copy of this site\'s database')
+@click.option('--site', help='With a combined database: whose jobs')
+@click.option('--db', type=click.Path(), help='Database (default: this host\'s)')
+@click.option('--apply', is_flag=True, help='Write (default: count only)')
+@click.option('--backup', 'backup_to', type=click.Path(dir_okay=False),
+              help='With --apply: where the copy taken first goes (default: next to the '
+                   'database)')
+@click.option('--no-backup', is_flag=True, help='With --apply: take no copy first')
+@click.pass_context
+def impact_restore(ctx, src, site, db, apply, backup_to, no_backup):
+    """Bring back measurements an older copy has for jobs this site now
+    holds unmeasured: those 1.13.0's and 1.13.1's backfill wrote "not
+    measured" over where Slurm no longer kept the steps' usage. Only jobs
+    without a measurement now, and only the same job (the submit times
+    agree). With --apply, a copy of the database is taken first (SQLite's
+    backup: safe while the collector writes). On the site; the next sync
+    brings them to the hub.
+    """
+    from datetime import datetime as _dt
+
+    from nomad.impact import restore
+    config, db_path = _impact_db(ctx, db, hub=False)
+    try:
+        c = restore(str(db_path), src, site, False)
+        if apply and c["restored"] and not no_backup:
+            dest = Path(backup_to).expanduser() if backup_to else db_path.with_name(
+                f"{db_path.stem}.before-restore-{_dt.now():%Y%m%d-%H%M%S}{db_path.suffix}")
+            if dest.exists():
+                raise click.ClickException(f"{dest} exists; nothing restored")
+            click.echo(f"Copying {db_path} to {dest} first ...")
+            try:
+                s_conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                d_conn = sqlite3.connect(dest)
+                try:
+                    s_conn.backup(d_conn)
+                finally:
+                    d_conn.close()
+                    s_conn.close()
+            except (sqlite3.Error, OSError) as e:
+                dest.unlink(missing_ok=True)
+                raise click.ClickException(
+                    f"couldn't copy the database first ({e}); nothing restored. --backup "
+                    f"PATH puts the copy elsewhere; --no-backup takes none")
+            click.echo(f"  done ({dest.stat().st_size / 2 ** 30:.1f} GB).")
+        if apply:
+            c = restore(str(db_path), src, site, True)
+    except (ValueError, sqlite3.Error) as e:
+        raise click.ClickException(str(e))
+    if c["copy_site"]:
+        click.echo(f"An extract of {c['copy_site']}'s jobs.")
+    click.echo(f"{c['in_copy']:,} measured jobs in the copy: {c['restored']:,} "
+               f"{'restored' if apply else 'to restore'} (unmeasured here now); "
+               f"{c['measured_now']:,} measured here already, {c['other_job']:,} another job "
+               f"under the same number, {c['unsure']:,} without a submit time to tell (left "
+               f"alone), {c['not_here']:,} not here.")
+    if not apply:
+        click.echo("A dry run: nothing was written. --apply writes them.")
+
+
 @impact_group.command('backfill')
 @click.option('--db', type=click.Path(), help='Database (default: this host\'s)')
 @click.option('--from', 'since', help='Start (default: [impact] baseline_from)')
@@ -5931,14 +6020,19 @@ def impact_backfill(ctx, db, since, until, apply):
     end = min(end, _date.today())
     try:
         counts = backfill(str(db_path), config, start, end, apply,
-                          progress=lambda a, n: click.echo(f"  week of {a}: {n:,} jobs read"))
+                          progress=lambda a, n, kept: click.echo(
+                              f"  week of {a}: {n:,} jobs read"
+                              + (f", {kept:,} with no usage left in Slurm (left as stored)"
+                                 if kept else "")))
     except ValueError as e:
         raise click.ClickException(str(e))
     click.echo(f"{counts['from']} to {counts['to']}: {counts['jobs']:,} jobs here, "
                f"{counts['to_read']:,} to read again; {counts['windows']} weeks of sacct.")
     if apply:
-        click.echo(f"Read {counts['read']:,} jobs from Slurm. `nomad impact status` shows what "
-                   f"the period has now.")
+        click.echo(f"Read {counts['read']:,} jobs from Slurm; {counts['kept']:,} had no usage "
+                   f"left there: what was stored for them, if anything, stays. `nomad impact status` "
+                   f"shows what the "
+                   f"period has now.")
     else:
         click.echo("A dry run: nothing was asked or stored. --apply reads them (it can take "
                    "a while: one sacct call a week).")

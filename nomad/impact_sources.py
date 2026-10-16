@@ -5,10 +5,11 @@ workstations and shared login hosts (nomad 1.13.1). The periods, months and
 events are nomad.impact's; each source has its own measures, from what its
 collector already keeps:
 
-* interactive servers (``interactive_daily``, the "(any)" rows: a person's
-  time with at least one session open): people, hours open, the share of
-  measured open time spent computing, and the measured open hours that
-  weren't. Days rebuilt from the raw snapshots (``nomad interactive
+* interactive servers (``interactive_daily``): people and hours open (the
+  "(any)" rows: a person's time with at least one session open), and from
+  the sessions' own rows, without the Jupyter server's polling (1.13.2), the
+  share of their measured time spent computing and the measured
+  session-hours that weren't. Days rebuilt from the raw snapshots (``nomad interactive
   backfill``) have hours but no CPU, so the computing share rests on the
   days after the collector kept CPU;
 * lab workstations (``workstation_user_snapshot``: a person's session on a
@@ -89,11 +90,26 @@ def interactive(conn, imp: Impact, site=None, today: date | None = None) -> list
     where, args = "", [imp.baseline_from.isoformat()]
     if site is not None and sc != "NULL":
         where, args = f" AND {sc} = ?", args + [site]
+    from nomad.collectors.interactive_daily import ANY, NOT_COMPUTING
+    # Hours open: the "(any)" rows (a person's time with a session open, once).
+    # Computing: the other rows' busy time over their measured time, without
+    # the Jupyter server's own polling (NOT_COMPUTING), which made anyone with
+    # JupyterLab open look busy all the time; so for the history too.
+    days: dict = {}
+    for s, day, user, kind, open_s, busy, measured in conn.execute(
+            f"SELECT {sc}, day, user, session_type, session_seconds, busy_seconds, "
+            f"cpu_measured_seconds FROM interactive_daily WHERE day >= ?{where}", args):
+        if user in imp.exclude_users or kind in NOT_COMPUTING:
+            continue
+        d = days.setdefault((s, str(day)[:10], user), [0.0, 0.0, 0.0])
+        if kind == ANY:
+            d[0] += open_s or 0
+        else:
+            d[1] += busy or 0
+            d[2] += measured or 0
     by_site = defaultdict(list)
-    for s, day, user, open_s, busy, measured in conn.execute(
-            f"SELECT {sc}, day, user, session_seconds, busy_seconds, cpu_measured_seconds "
-            f"FROM interactive_daily WHERE session_type = '(any)' AND day >= ?{where}", args):
-        by_site[s].append((str(day)[:10], (user, open_s or 0, busy or 0, measured or 0)))
+    for (s, day, user), (open_s, busy, measured) in days.items():
+        by_site[s].append((day, (user, open_s, busy, measured)))
     out = []
     for s in sorted(by_site, key=str):
         rec = by_site[s]
@@ -105,15 +121,21 @@ def interactive(conn, imp: Impact, site=None, today: date | None = None) -> list
 
 # -- lab workstations -------------------------------------------------------------------
 
-def workstation_sessions(conn, since: date, site=None) -> list[dict]:
-    """Each person's sessions on each machine (uid 1000 and up) that were
-    seen on or after ``since``: when, how long, CPU and memory, the machine's
-    size, and whether it was a long CPU-heavy run or memory-pressured."""
+def workstation_sessions(conn, since: date, site=None, exclude=()) -> list[dict]:
+    """Each person's sessions on each machine (uid 1000 and up; not the
+    accounts in ``exclude``) seen on or after ``since``: when, how long, CPU
+    and memory, the machine's size, and whether it was a long CPU-heavy run
+    or memory-pressured. A session is the person's slice on the machine
+    while its counters keep growing (nomad.workstation_sessions, 1.13.2).
+    Pressured needs the programs' own memory (memory_anon_bytes, 1.13.2):
+    memory.peak counts the file cache; without it, ``pressured`` is None."""
+    from nomad.workstation_sessions import split
     cols = _cols(conn, "workstation_user_snapshot")
     if not {"timestamp", "hostname", "username", "uid", "session_epoch",
             "cpu_usage_usec", "memory_peak_bytes"} <= cols:
         return []
     sc = _site_col(cols)
+    anon = "memory_anon_bytes" if "memory_anon_bytes" in cols else "NULL"
     where, args = "", [since.isoformat()]
     if site is not None and sc != "NULL":
         where, args = f" AND {sc} = ?", args + [site]
@@ -125,27 +147,35 @@ def workstation_sessions(conn, since: date, site=None) -> list[dict]:
                 f"SELECT {hsc}, hostname, memory_total_mb, cpu_count, MAX(timestamp) "
                 f"FROM workstation_state GROUP BY 1, 2"):
             hosts[(s, h)] = (mem or 0, cores or 0)
+    skip = set(exclude or ())
+    snaps = conn.execute(
+        f"SELECT COALESCE({sc}, '') || char(0) || COALESCE(hostname, '') || char(0) || uid, "
+        f"timestamp, session_epoch, "
+        f"cpu_usage_usec, memory_peak_bytes, {sc}, hostname, username, {anon} "
+        f"FROM workstation_user_snapshot WHERE timestamp >= ? AND uid >= 1000{where} "
+        f"ORDER BY {sc}, hostname, uid, timestamp", args)
     out = []
-    for s, h, user, first, last, c0, c1, peak in conn.execute(
-            f"SELECT {sc}, hostname, username, MIN(timestamp), MAX(timestamp), "
-            f"MIN(cpu_usage_usec), MAX(cpu_usage_usec), MAX(memory_peak_bytes) "
-            f"FROM workstation_user_snapshot WHERE timestamp >= ? AND uid >= 1000{where} "
-            f"GROUP BY 1, 2, 3, uid, session_epoch", args):
+    for rows in split(r for r in snaps if r[7] not in skip):
+        first, last = rows[0], rows[-1]
+        s, h, user = first[5], first[6], first[7]
         try:
-            t0 = datetime.fromisoformat(str(first)[:19])
-            t1 = datetime.fromisoformat(str(last)[:19])
+            t0 = datetime.fromisoformat(str(first[1])[:19])
+            t1 = datetime.fromisoformat(str(last[1])[:19])
         except ValueError:
             continue
         span = (t1 - t0).total_seconds() / 3600
-        core_h = (c1 - c0) / 3.6e9 if c0 is not None and c1 is not None and c1 >= c0 else None
+        cpus = [r[3] for r in rows if r[3] is not None]
+        core_h = (max(cpus) - min(cpus)) / 3.6e9 if cpus else None
+        anons = [r[8] for r in rows if r[8] is not None]
         mem_mb, cores = hosts.get((s, h), (0, 0))
         busy = core_h / span if core_h is not None and span > 0 else None
         out.append({
-            "site": s, "host": h, "user": user, "end": str(last)[:10], "hours": span,
+            "site": s, "host": h, "user": user, "end": str(last[1])[:10], "hours": span,
             "core_hours": core_h,
             "long_run": bool(busy is not None and cores and span >= LONG_RUN_HOURS
                              and busy >= max(LONG_RUN_MIN_CORES, LONG_RUN_HOST_SHARE * cores)),
-            "pressured": bool(mem_mb and peak and peak >= PRESSURED_SHARE * mem_mb * 2 ** 20),
+            "pressured": (bool(mem_mb and max(anons) >= PRESSURED_SHARE * mem_mb * 2 ** 20)
+                          if anons else None),
         })
     return out
 
@@ -158,14 +188,17 @@ def _ws_agg(sessions: list) -> dict:
             "core_hours": round(sum(x["core_hours"] for x in measured), 1) if measured else None,
             "long_runs": len(long_runs),
             "long_run_hours": round(sum(x["hours"] for x in long_runs), 1),
-            "pressured": sum(1 for x in sessions if x["pressured"])}
+            # Of the sessions with the programs' own memory read (1.13.2).
+            "pressured": (sum(1 for x in sessions if x["pressured"])
+                          if any(x["pressured"] is not None for x in sessions) else None),
+            "memory_read": sum(1 for x in sessions if x["pressured"] is not None)}
 
 
 def workstations(conn, imp: Impact, site=None, today: date | None = None,
                  sessions: list | None = None) -> list[dict]:
     today = today or date.today()
     if sessions is None:
-        sessions = workstation_sessions(conn, imp.baseline_from, site)
+        sessions = workstation_sessions(conn, imp.baseline_from, site, imp.exclude_users)
     by_site = defaultdict(list)
     for x in sessions:
         by_site[x["site"]].append((x["end"], x))
@@ -215,7 +248,7 @@ def login_hosts(conn, imp: Impact, site=None, today: date | None = None) -> list
         for s, rows in alerts.items():
             for e in _episodes(rows):
                 day = _local_day(e["last"])
-                if day:
+                if day and e["user"] not in imp.exclude_users:
                     by_site[s].append((day, ("episode", e["user"], e["actionable"])))
     if {"day", "username", "cpu_seconds"} <= dcols:
         sc = _site_col(dcols)
@@ -225,7 +258,8 @@ def login_hosts(conn, imp: Impact, site=None, today: date | None = None) -> list
         for s, day, user, cpu in conn.execute(
                 f"SELECT {sc}, day, username, cpu_seconds FROM per_user_daily "
                 f"WHERE day >= ?{where}", args):
-            by_site[s].append((str(day)[:10], ("day", user, cpu or 0)))
+            if user not in imp.exclude_users:
+                by_site[s].append((str(day)[:10], ("day", user, cpu or 0)))
     return [{"site": s, **_bucket(by_site[s], imp, today, _login_agg)}
             for s in sorted(by_site, key=str)]
 
@@ -268,8 +302,9 @@ def _f(v, kind: str) -> str:
 SECTIONS = {
     "interactive": (
         "Interactive servers",
-        "hours: with at least one session open; computing: share of the measured open time a "
-        "session was busy; idle: measured open hours that weren't",
+        "hours: with at least one session open; computing: share of the measured time "
+        "notebooks, kernels and RStudio sessions were busy (not the Jupyter server's own "
+        "polling); idle: their measured session-hours that weren't",
         [("people", "people", "n"), ("open_hours", "hours", "h"),
          ("hours_per_person", "per person", "h"), ("computing_pct", "computing", "pct"),
          ("idle_hours", "idle", "h")]),
@@ -277,7 +312,8 @@ SECTIONS = {
         "Lab workstations",
         "a session runs from sign-in to the last program ending, counted in the month it "
         "ended; long runs: 12 h or more keeping half the machine's cores busy; pressured: "
-        "80% or more of its memory",
+        "its programs held 80% or more of the machine's memory (read from nomad 1.13.2 on: "
+        "the readings before include the file cache)",
         [("people", "people", "n"), ("sessions", "sessions", "n"), ("hours", "hours", "h"),
          ("core_hours", "core-h", "h"), ("long_runs", "long runs", "n"),
          ("long_run_hours", "their h", "h"), ("pressured", "pressured", "n")]),

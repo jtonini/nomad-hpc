@@ -742,3 +742,4 @@ carbon_region = "SRVC"        # eGRID subregion (Virginia); or country code if i
 #   { date = 2027-01-11, what = "four nodes added to the large partition" },
 # ]
 # advice_db = "/home/nomad/.nomad-console/activity.db"   # the Console's record of advice shown
+# exclude_users = ["svc-backup"]   # accounts that aren't people: left out of every figure

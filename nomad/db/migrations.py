@@ -346,6 +346,11 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (19, "Add cpu_request to job_summary", """
         ALTER TABLE job_summary ADD COLUMN cpu_request TEXT;
     """),
+    # 1.13.2: the programs' own memory on workstations (memory.stat anon +
+    # shmem); memory_peak_bytes counts the file cache too.
+    (20, "Add memory_anon_bytes to workstation_user_snapshot", """
+        ALTER TABLE workstation_user_snapshot ADD COLUMN memory_anon_bytes INTEGER;
+    """),
 ]
 
 

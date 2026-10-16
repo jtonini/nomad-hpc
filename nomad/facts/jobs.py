@@ -72,7 +72,8 @@ def _select(jcols: set, scols: set) -> str:
         f"{j('req_time_seconds')} AS req_time, {j('eligible_time')} AS eligible_time, "
         f"{j('runtime_seconds')} AS runtime, {j('submit_time')} AS submit_time, "
         f"{j('start_time')} AS start_time, {wait} AS wait_seconds, "
-        f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb "
+        f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb, "
+        f"{s('max_tasks')} AS max_tasks "
     )
 
 

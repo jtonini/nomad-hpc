@@ -533,32 +533,40 @@ def _time_to_results(
 def _user_compute_hours(db_path: str, username: str) -> float | None:
     """
     Total ACTUAL compute time (hours) for a user's recent workstation sessions,
-    from the cpu_usage_usec delta (MAX-MIN) per session_epoch. This is measured
-    compute time, distinct from wall-clock session span.
+    from the cpu_usage_usec delta (MAX-MIN) per session (the slice while its
+    counters grow: nomad.workstation_sessions, 1.13.2; by session_epoch the
+    time between two logins was lost). This is measured compute time,
+    distinct from wall-clock session span.
 
     Returns None when there is no usable cpu_usage data (so the time-to-results
     comparison degrades to evidence-only wording rather than fabricating a
     number). Production reliability of cpu_usage under load is unverified, so a
     None here is expected and handled honestly downstream.
     """
+    from nomad.workstation_sessions import split
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
-            rows = con.execute(
+            snaps = con.execute(
                 """
-                SELECT MAX(cpu_usage_usec) - MIN(cpu_usage_usec)
+                SELECT COALESCE(hostname, '') || char(0) || uid, timestamp, session_epoch,
+                       cpu_usage_usec, memory_peak_bytes
                 FROM workstation_user_snapshot
                 WHERE username = ?
-                GROUP BY session_epoch
+                ORDER BY hostname, uid, timestamp
                 """,
                 (username,),
-            ).fetchall()
+            )
+            deltas = []
+            for rows in split(snaps):
+                cpus = [r[3] for r in rows if r[3] is not None]
+                if cpus and max(cpus) > min(cpus):
+                    deltas.append(float(max(cpus) - min(cpus)))
         finally:
             con.close()
     except sqlite3.Error as e:
         logger.warning(f"_user_compute_hours: DB error: {e}")
         return None
-    deltas = [float(r[0]) for r in rows if r[0] is not None and r[0] > 0]
     if not deltas:
         return None
     total_usec = sum(deltas)
@@ -1275,8 +1283,14 @@ def _build_compute_verdict(
     headline = max(heavy, key=lambda fp: fp.busy_cores)
     busy, host_cores = headline.busy_cores, headline.host_cores
     longest = max(fp.span_hours for fp in heavy)
-    peaks = [(fp.dimensions.get("memory_pressure").raw or {}).get("peak_bytes", 0)
-             for fp in heavy if fp.dimensions.get("memory_pressure") is not None]
+    # The programs' own memory (1.13.2); without it, memory.peak, which
+    # counts the file cache too, as an upper bound: --mem is then generous,
+    # never short.
+    peaks = []
+    for fp in heavy:
+        raw = (fp.dimensions.get("memory_pressure").raw or {}) \
+            if fp.dimensions.get("memory_pressure") is not None else {}
+        peaks.append(raw.get("peak_bytes") or raw.get("cache_included_peak_bytes") or 0)
     peak_gb = max(peaks, default=0) / 1024 ** 3
 
     # Where to: the smallest node with room for twice the memory peak.

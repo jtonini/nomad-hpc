@@ -19,8 +19,9 @@ from nomad.edu.scoring import SessionFingerprint
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
-def _make_db(tmp_path):
-    """Build a minimal combined.db schema for loader tests."""
+def _make_db(tmp_path, anon=True):
+    """Build a minimal combined.db schema for loader tests (``anon``: with
+    the programs' own memory, 1.13.2)."""
     db = tmp_path / "combined.db"
     conn = sqlite3.connect(str(db))
     conn.executescript("""
@@ -40,13 +41,15 @@ def _make_db(tmp_path):
             status TEXT, memory_total_mb INTEGER, cpu_count INTEGER
         );
     """)
+    if anon:
+        conn.execute("ALTER TABLE workstation_user_snapshot ADD COLUMN memory_anon_bytes INTEGER")
     conn.commit()
     return db, conn
 
 
 def _insert_session(conn, *, hostname, username, uid, session_epoch,
                     peak_gb, span_hours, samples=None,
-                    end_offset_hours=1.0):
+                    end_offset_hours=1.0, anon=1.0):
     """Insert a synthetic session: first sample + final sample (with peak)."""
     end = datetime.now() - timedelta(hours=end_offset_hours)
     start = end - timedelta(hours=span_hours)
@@ -64,6 +67,9 @@ def _insert_session(conn, *, hostname, username, uid, session_epoch,
             VALUES (?, ?, ?, ?, ?, ?, ?, 'cgroup_v2')
         """, (ts, hostname, username, uid, session_epoch,
               i * 1_000_000, cur_peak))
+        if anon:
+            conn.execute("UPDATE workstation_user_snapshot SET memory_anon_bytes = ? "
+                         "WHERE id = last_insert_rowid()", (int(anon * cur_peak),))
 
 
 def _insert_host(conn, *, hostname, memory_total_mb, cpu_count):
@@ -100,6 +106,27 @@ def test_load_returns_session_dicts(tmp_path):
     assert row["host_memory_total_mb"] == 256_904
     assert row["host_cpu_count"] == 64
     assert row["samples"] >= 2
+    assert row["anon_peak_bytes"] > 250 * 1024**3
+
+
+def test_load_without_the_programs_own_memory(tmp_path):
+    """Readings from before 1.13.2 (no memory_anon_bytes column, or no values
+    in it): the session has no anon peak, and isn't scored on memory."""
+    for with_column in (False, True):
+        d = tmp_path / ("column" if with_column else "none")
+        d.mkdir()
+        db, conn = _make_db(d, anon=with_column)
+        _insert_host(conn, hostname="ws_a", memory_total_mb=256_904, cpu_count=64)
+        _insert_session(conn, hostname="ws_a", username="user1", uid=5001,
+                        session_epoch=1, peak_gb=253.0, span_hours=34.3, anon=0)
+        conn.commit()
+        conn.close()
+        rows = _load_user_sessions(str(db), "user1", days=7)
+        assert rows[0]["peak_memory_bytes"] > 250 * 1024**3
+        assert rows[0]["anon_peak_bytes"] is None
+        fp = _score_sessions(rows)[0]
+        assert not fp.dimensions["memory_pressure"].applicable
+        assert fp.dimensions["duration_fit"].score == 10
 
 
 def test_load_filters_uid_under_1000(tmp_path):

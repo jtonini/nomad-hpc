@@ -14,14 +14,17 @@ events = [
   { date = 2026-10-06, what = "Console open to staff" },
   { date = 2027-01-11, what = "four nodes added to the large partition" },
 ]
+exclude_users = ["svc-backup"] # accounts that aren't people (1.13.2)
 ```
 
 `launch` splits the jobs into before and after. `events` is a log of
 everything else that changes how people use the machines: nodes added, a
 Slurm limit, a workshop, a new part of NØMAÐ itself. Write them down when
 they happen; a report a year later names them instead of crediting NØMAÐ
-with what they did. `nomad config check` says what in the section it can't
-use.
+with what they did. `exclude_users` names accounts that aren't people (a
+service account that runs test jobs, signs in to every workstation, or holds
+a login session open): they are left out of every figure. `nomad config
+check` says what in the section it can't use.
 
 ## What the before period needs
 
@@ -43,10 +46,41 @@ eligible time. Then what to run:
   an improvement NØMAÐ didn't make. On the site, `nomad impact backfill`
   (a dry run, then `--apply`) reads the before period again from Slurm, a
   week at a time, and stores CPU and memory as the collector does now.
-  Slurm keeps step usage only as long as slurmdbd's purge settings allow;
-  what it no longer has stays unmeasured, and the status says how much.
+  Slurm keeps step usage only as long as slurmdbd's purge settings allow,
+  often far less time than it keeps the jobs; a job whose usage it no
+  longer has keeps what nomad stored (1.13.2), and the status says how much
+  is still unmeasured.
 
 Both run on each site, not on the hub; the next sync brings the results.
+
+### Bringing back measurements from an older copy
+
+In 1.13.0 and 1.13.1, a job read again without usage (Slurm had purged its
+steps) was stored as "not measured" over the measurement nomad had taken
+when the job ended: `nomad impact backfill` could erase months of them.
+1.13.2 never writes an empty reading over a stored one. What was erased can
+come back from an older copy of the site's database, or of a hub's combined
+database, from before the backfill:
+
+```
+nomad impact extract --from OLD/combined.db --site SITE --out SITE-measurements.db
+nomad impact restore --from SITE-measurements.db            # on the site: a dry run
+nomad impact restore --from SITE-measurements.db --apply
+```
+
+`extract` reads the copy (read-only) and writes a small file with one row
+per measured job: its number, submit time and measurements, nothing else.
+`restore` runs on the site: it fills in only jobs that have no measurement
+now, and only the same job: the submit times are known on both sides and
+agree (a job kept under NUMBER@SUBMIT when a later job took its number is
+found there). A value the copy doesn't have never replaces one stored. It
+counts the rest: measured since, another job under the same number, no
+submit time to tell (left alone), not on the site. Restored rows were
+measured the old way and the report counts them so (below). An older copy
+of the site's own database works as `--from` too, without `extract`. Not on
+the hub: the next sync brings them there. `--apply` first copies the
+database next to itself (`--backup PATH` elsewhere; SQLite's backup, safe
+while the collector writes) and stops if it can't.
 
 ## The report
 
@@ -60,23 +94,31 @@ or `all` (the default: every part that has data).
 ### Clusters
 
 Month by month from `baseline_from`: jobs, people and how many were new,
-CPU used of the core-hours measured jobs held, memory peak of what was
+the share of jobs measured (of those that ran 10 s or more: the others'
+figures rest on them), CPU used of the core-hours measured jobs held, memory peak of what was
 asked for, time used of the time limits of completed jobs, the share that
 failed, timed out or ran out of memory, out-of-memory jobs, and the median
 wait from when a job could start. Events appear in their month. Then the
 periods side by side: before launch, after it, and the same days a year
 earlier where the data reaches back (students and courses follow the
 academic year). The figures are the ones the Console and `nomad facts`
-use. Counts and shares only: no names.
+use. When more than a fifth of the measured jobs before launch were
+measured before 1.13 (CPU from AveCPU, which reads jobs running several
+tasks low), the report says their CPU can't be set against after launch;
+memory, time, failures and waits can. Counts and shares only: no names.
 
 ### Interactive servers
 
-From the interactive collector's daily totals (a person's time with at least
-one session open): people, hours open and per person, the share of the
-measured open time a session was computing, and the measured open hours
-that weren't. Days rebuilt from the raw snapshots (`nomad interactive
-backfill`) have hours but no CPU, so the computing share starts where the
-collector began keeping CPU; the report says from when.
+From the interactive collector's daily totals: people, hours with at least
+one session open (in all and per person), the share of the measured time
+notebooks, kernels and RStudio sessions were computing, and their measured
+session-hours that weren't. The Jupyter server's own process isn't
+counted: it polls all the time, a few percent of a core, which until 1.13.2
+made anyone with JupyterLab open look busy all the time (the report reads
+the sessions' own rows, so this holds for the history too). Days rebuilt
+from the raw snapshots (`nomad interactive backfill`) have hours but no
+CPU, so the computing share starts where the collector began keeping CPU;
+the report says from when.
 
 ### Lab workstations
 
@@ -84,7 +126,21 @@ From the workstation collector's per-person snapshots: sessions (from
 signing in to the last program ending, counted in the month they ended),
 hours, core-hours used, long CPU-heavy runs (12 hours or more keeping half
 the machine's cores busy: what the Console advises moving to a cluster) and
-sessions that held 80% or more of the machine's memory.
+sessions whose programs held 80% or more of the machine's memory.
+
+A session is the person's slice on the machine (systemd's user-UID.slice)
+for as long as it lives. Until 1.13.2 sessions were told apart by the
+slice directory's change time, which the kernel moves whenever a login,
+terminal, ssh connection or cron job starts or ends there: one person's day
+came out as many sessions. Now a session runs while the slice's CPU time
+and memory peak keep growing, as they do until it is made again; this holds
+for the readings already collected too.
+
+Memory is the programs' own (memory.stat anon + shmem, read from 1.13.2
+on). memory.peak, all there was before, counts the file cache: a session
+that read large files looked as if it had filled the machine. Sessions
+without the new reading aren't counted as pressured or not (a dash), and
+the Console doesn't advise on their memory.
 
 ### Shared login hosts
 

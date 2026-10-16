@@ -43,7 +43,8 @@ def hub(tmp_path):
             rebuilt INTEGER DEFAULT 0, source_site TEXT);
         CREATE TABLE workstation_user_snapshot (id INTEGER PRIMARY KEY, timestamp TEXT,
             hostname TEXT, username TEXT, uid INTEGER, session_epoch INTEGER,
-            cpu_usage_usec INTEGER, memory_peak_bytes INTEGER, source_site TEXT);
+            cpu_usage_usec INTEGER, memory_peak_bytes INTEGER, source_site TEXT,
+            memory_anon_bytes INTEGER);
         CREATE TABLE workstation_state (id INTEGER PRIMARY KEY, timestamp TEXT, hostname TEXT,
             memory_total_mb INTEGER, cpu_count INTEGER, source_site TEXT);
         CREATE TABLE per_user_alert (id INTEGER PRIMARY KEY, fired_at TEXT, last_seen TEXT,
@@ -63,7 +64,14 @@ def hub(tmp_path):
         c.execute("INSERT INTO interactive_daily (day, server_id, user, session_type, sessions, "
                   "session_seconds, busy_seconds, cpu_measured_seconds, rebuilt, source_site) "
                   "VALUES (?, 'local', ?, '(any)', 1, ?, ?, ?, ?, 'teach')",
-                  (day, user, open_h * 3600, busy_h * 3600, meas_h * 3600, rebuilt))
+                  (day, user, open_h * 3600, open_h * 3600, meas_h * 3600, rebuilt))
+        # Computing comes from the sessions themselves; the Jupyter server's
+        # own polling, busy all the time (and in "(any)" before 1.13.2), isn't.
+        for kind, busy in (("Jupyter (Python)", busy_h), ("Jupyter Server", meas_h)):
+            c.execute("INSERT INTO interactive_daily (day, server_id, user, session_type, "
+                      "sessions, session_seconds, busy_seconds, cpu_measured_seconds, rebuilt, "
+                      "source_site) VALUES (?, 'local', ?, ?, 1, ?, ?, ?, ?, 'teach')",
+                      (day, user, kind, open_h * 3600, busy * 3600, meas_h * 3600, rebuilt))
     c.execute("INSERT INTO interactive_daily (day, server_id, user, session_type, sessions, "
               "session_seconds, busy_seconds, cpu_measured_seconds, source_site) "
               "VALUES ('2026-11-10', 'local', 's1', 'jupyter', 3, 99999, 0, 0, 'teach')")
@@ -72,16 +80,18 @@ def hub(tmp_path):
     c.execute("INSERT INTO workstation_state (timestamp, hostname, memory_total_mb, cpu_count, "
               "source_site) VALUES ('2026-11-01T00:00:00', 'ws1', 65536, 16, 'labs')")
 
-    def session(user, epoch, start, hours, cores, peak_gb):
+    def session(user, epoch, start, hours, cores, peak_gb, anon_gb=None, uid=1001):
         for i in range(int(hours * 12) + 1):
             t = start + timedelta(minutes=5 * i)
             c.execute("INSERT INTO workstation_user_snapshot (timestamp, hostname, username, uid, "
-                      "session_epoch, cpu_usage_usec, memory_peak_bytes, source_site) "
-                      "VALUES (?, 'ws1', ?, 1001, ?, ?, ?, 'labs')",
-                      (iso(t), user, epoch, int(cores * 300e6 * i), int(peak_gb * 2 ** 30)))
+                      "session_epoch, cpu_usage_usec, memory_peak_bytes, source_site, "
+                      "memory_anon_bytes) VALUES (?, 'ws1', ?, ?, ?, ?, ?, 'labs', ?)",
+                      (iso(t), user, uid, epoch, int(cores * 300e6 * i), int(peak_gb * 2 ** 30),
+                       None if anon_gb is None else int(anon_gb * 2 ** 30)))
+    # Before 1.13.2: no reading of the programs' own memory.
     session("w1", 1, datetime(2026, 9, 15, 8), 20, 12, 10)
-    session("w1", 2, datetime(2026, 11, 15, 8), 2, 1, 60)        # held 60 of 64 GB
-    session("w1", 3, datetime(2026, 11, 16, 8), 2, 1, 4)
+    session("w1", 2, datetime(2026, 11, 15, 8), 2, 1, 60, 60)    # held 60 of 64 GB
+    session("w1", 3, datetime(2026, 11, 16, 8), 2, 1, 4, 4)
     c.execute("INSERT INTO workstation_user_snapshot (timestamp, hostname, username, uid, "
               "session_epoch, cpu_usage_usec, memory_peak_bytes, source_site) "
               "VALUES ('2026-11-16T09:00:00', 'ws1', 'root', 0, 9, 1, 1, 'labs')")
@@ -153,6 +163,7 @@ def test_workstation_long_runs_and_memory(hub):
     assert (before["sessions"], before["long_runs"], before["long_run_hours"]) == (1, 1, 20.0)
     assert before["core_hours"] == pytest.approx(240, abs=1)
     assert (after["sessions"], after["long_runs"], after["pressured"], after["people"]) == (2, 0, 1, 1)
+    assert before["pressured"] is None and after["memory_read"] == 2    # read from 1.13.2
 
 
 def test_login_host_episodes(hub):

@@ -28,7 +28,8 @@ TIERS = [
 def fp(busy_cores, span_hours, *, peak_gb=8, host_cores=16, host_gb=64, epoch=1,
        counters=True):
     session = {"username": "jdoe", "hostname": "labws1", "session_epoch": epoch,
-               "peak_memory_bytes": int(peak_gb * GB), "span_hours": span_hours,
+               "peak_memory_bytes": int(peak_gb * GB), "anon_peak_bytes": int(peak_gb * GB),
+               "span_hours": span_hours,
                "samples": int(span_hours * 12)}
     if counters:
         session["cpu_usage_usec_first"] = 5_000_000

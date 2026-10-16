@@ -879,8 +879,25 @@ def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
         65-85% → Developing (noticeable pressure)
         >85%   → Needs Work (sustained near-saturation)
     """
-    peak_bytes = session.get("peak_memory_bytes") or 0
+    # The programs' own memory at its highest reading (memory.stat anon +
+    # shmem, 1.13.2). memory.peak, all there was before, counts the file
+    # cache too: a session that read big files looked as if it had filled
+    # the machine, and was told to move to a cluster. Without the programs'
+    # own memory the session isn't scored on it.
     host_mb = host_state.get("memory_total_mb") or 0
+    if session.get("anon_peak_bytes") is None:
+        return DimensionScore(
+            name="Memory Pressure",
+            score=50,
+            level="Unknown",
+            detail=("This session's memory readings include the file cache, so they "
+                    "don't say how much its programs held. Not scored."),
+            applicable=False,
+            raw={"peak_bytes": 0, "host_total_bytes": host_mb * 1024 * 1024,
+                 "pressure_ratio": 0.0, "cache_included_peak_bytes":
+                 session.get("peak_memory_bytes") or 0},
+        )
+    peak_bytes = session.get("anon_peak_bytes") or 0
 
     if peak_bytes <= 0 or host_mb <= 0:
         return DimensionScore(
@@ -893,6 +910,7 @@ def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
                 "peak_bytes": peak_bytes,
                 "host_total_bytes": host_mb * 1024 * 1024,
                 "pressure_ratio": 0.0,
+                "cache_included_peak_bytes": session.get("peak_memory_bytes") or 0,
             },
         )
 

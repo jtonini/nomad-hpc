@@ -86,6 +86,12 @@ from datetime import datetime
 MAX_GAP_SECONDS = 2 * 3600
 BUSY_PERCENT = 2.0
 ANY = "(any)"
+# The Jupyter server's own process (its kernels and terminals are not in its
+# CPU) polls all the time, a few percent of a core: that is not the person
+# computing. Its own row keeps its busy time; a person, an hour and an
+# environment count as busy only for their other sessions (1.13.2; before,
+# anyone with JupyterLab open looked busy all the time).
+NOT_COMPUTING = ("Jupyter Server",)
 
 DAILY = """
 CREATE TABLE IF NOT EXISTS interactive_daily (
@@ -287,9 +293,10 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                     e["cpu"] += cpu
                 if cpu / dt * 100.0 >= BUSY_PERCENT:
                     t["busy_seconds"] += dt
-                    me["busy"] = True
-                    if e is not None:
-                        e["busy"] = True
+                    if kind not in NOT_COMPUTING:
+                        me["busy"] = True
+                        if e is not None:
+                            e["busy"] = True
         state.append((key, ticks, day, now.isoformat()))
 
     for user, me in person.items():

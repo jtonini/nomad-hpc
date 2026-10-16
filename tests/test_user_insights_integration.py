@@ -55,6 +55,7 @@ def _build_db(path, *, with_jobs=False, with_sessions=False):
             uid INTEGER,
             session_epoch INTEGER,
             memory_peak_bytes INTEGER,
+            memory_anon_bytes INTEGER,
             cpu_usage_usec INTEGER
         )
     """)
@@ -110,29 +111,26 @@ def _build_db(path, *, with_jobs=False, with_sessions=False):
         # Two qualifying sessions: ~60 GB peak (97% of host), ~20h span each.
         # span_hours derived from first/last snapshot timestamps sharing a session_epoch.
         peak = int(60 * 1024 * 1024 * 1024)
-        # Each session: a start snapshot and an end snapshot sharing one
-        # session_epoch. span_hours is derived from their timestamp gap, so
-        # SQLite modifiers must be SEPARATE args ('-3 days','+20 hours'),
-        # not a single combined string (which SQLite silently mis-parses).
+        # span_hours is derived from the first and last readings, so SQLite
+        # modifiers must be SEPARATE args ('-3 days','+20 hours'), not a
+        # single combined string (which SQLite silently mis-parses).
         sessions = [
             (1001, "-3 days", "+20 hours"),  # ~20h span
             (1002, "-2 days", "+18 hours"),  # ~18h span
         ]
         for epoch, day_off, hour_off in sessions:
-            # first snapshot (session start)
-            c.execute(
-                "INSERT INTO workstation_user_snapshot "
-                "(timestamp, hostname, username, uid, session_epoch, memory_peak_bytes, cpu_usage_usec) "
-                "VALUES (datetime('now', ?), 'wks1', 'alice', 1001, ?, ?, 1000000)",
-                (day_off, epoch, peak),
-            )
-            # last snapshot — same epoch, start + hour_off → defines span
-            c.execute(
-                "INSERT INTO workstation_user_snapshot "
-                "(timestamp, hostname, username, uid, session_epoch, memory_peak_bytes, cpu_usage_usec) "
-                "VALUES (datetime('now', ?, ?), 'wks1', 'alice', 1001, ?, ?, 2000000)",
-                (day_off, hour_off, epoch, peak),
-            )
+            # A reading every hour from the session's start to its end (the
+            # collector reads every few minutes; a gap of hours ends a
+            # session, nomad.workstation_sessions), one session_epoch.
+            hours = int(hour_off.strip("+").split()[0])
+            for h in range(hours + 1):
+                c.execute(
+                    "INSERT INTO workstation_user_snapshot "
+                    "(timestamp, hostname, username, uid, session_epoch, memory_peak_bytes, "
+                    "memory_anon_bytes, cpu_usage_usec) "
+                    "VALUES (datetime('now', ?, ?), 'wks1', 'alice', 1001, ?, ?, ?, ?)",
+                    (day_off, f"+{h} hours", epoch, peak, peak, 1000000 + h * 50000),
+                )
 
     if with_jobs:
         # A wasteful job: 32 cores requested, ~3% used → CPU dimension issue.

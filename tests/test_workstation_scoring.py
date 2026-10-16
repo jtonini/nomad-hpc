@@ -40,6 +40,7 @@ def make_session(*, peak_gb: float, span_hours: float, hostname="boyi",
         "hostname": hostname,
         "session_epoch": session_epoch,
         "peak_memory_bytes": int(peak_gb * 1024 * 1024 * 1024),
+        "anon_peak_bytes": int(peak_gb * 1024 * 1024 * 1024),
         "span_hours": span_hours,
         "samples": max(1, int(span_hours * 60)),  # 60s collector cadence
     }
@@ -93,6 +94,22 @@ def test_memory_pressure_missing_peak(host_boyi):
                "peak_memory_bytes": 0, "span_hours": 1.0}
     score = score_memory_pressure(session, host_boyi)
     assert not score.applicable
+
+
+def test_memory_pressure_needs_the_programs_own_memory():
+    """memory.peak alone counts the file cache: a session that read big files
+    would look as if it filled the machine. Without the programs' own memory
+    (memory.stat anon + shmem) the session isn't scored on memory."""
+    host = {"hostname": "ws_a", "memory_total_mb": 256_904, "cpu_count": 64}
+    session = make_session(peak_gb=253.0, span_hours=34.3, hostname="ws_a")
+    session["anon_peak_bytes"] = None
+    score = score_memory_pressure(session, host)
+    assert not score.applicable
+    assert "file cache" in score.detail
+    # A reading near the machine's size with little of it the programs' own.
+    session["anon_peak_bytes"] = 20 * 1024 ** 3
+    score = score_memory_pressure(session, host)
+    assert score.applicable and score.score > 85
 
 
 # ── Duration fit ─────────────────────────────────────────────────────

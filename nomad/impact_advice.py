@@ -164,7 +164,7 @@ def report(conn, imp: Impact, site=None, today: date | None = None,
                 "SELECT substr(day, 1, 7), page, COUNT(DISTINCT username) FROM pages_viewed "
                 "GROUP BY 1, 2 ORDER BY 1"):
             views[month][page] = n
-        shown = _shown(adv, site)
+        shown = [a for a in _shown(adv, site) if a["user"] not in imp.exclude_users]
     finally:
         adv.close()
 

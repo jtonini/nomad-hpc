@@ -871,7 +871,37 @@ class JobMetricsCollector(BaseCollector):
                     )
                 )
 
-                # Update job_summary table
+                # Update job_summary table. A reading without CPU or memory
+                # (Slurm no longer keeps the steps' usage: an old job read
+                # again) never replaces what was stored; a partial one fills
+                # in only what it has. Until 1.13.2 it wrote "not measured"
+                # over stored measurements.
+                measured = (record['avg_cpu_percent'] is not None
+                            or (record['max_rss_mb'] or 0) > 0)
+                full = (record['avg_cpu_percent'] is not None
+                        and (record['max_rss_mb'] or 0) > 0)
+                on_conflict = """
+                    ON CONFLICT(job_id) DO UPDATE SET
+                        peak_cpu_percent = COALESCE(excluded.peak_cpu_percent,
+                                                    job_summary.peak_cpu_percent),
+                        peak_memory_gb = CASE WHEN COALESCE(excluded.peak_memory_gb, 0) > 0
+                                              THEN excluded.peak_memory_gb
+                                              ELSE job_summary.peak_memory_gb END,
+                        avg_cpu_percent = COALESCE(excluded.avg_cpu_percent,
+                                                   job_summary.avg_cpu_percent),
+                        avg_gpu_util = COALESCE(excluded.avg_gpu_util, job_summary.avg_gpu_util),
+                        health_score = {score},
+                        feature_vector = {vector},
+                        max_tasks = COALESCE(excluded.max_tasks, job_summary.max_tasks),
+                        cpu_request = COALESCE(excluded.cpu_request, job_summary.cpu_request)
+                    """.format(
+                        # Both read: scored from this reading. One of them:
+                        # the score from a full reading stays, if there is one.
+                        score="excluded.health_score" if full else
+                              "COALESCE(job_summary.health_score, excluded.health_score)",
+                        vector="excluded.feature_vector" if full else
+                               "COALESCE(job_summary.feature_vector, excluded.feature_vector)",
+                    ) if measured else " ON CONFLICT(job_id) DO NOTHING"
                 conn.execute(
                     """
                     INSERT INTO job_summary
@@ -879,16 +909,7 @@ class JobMetricsCollector(BaseCollector):
                      total_local_write_gb, nfs_ratio, used_gpu, avg_gpu_util, had_swap,
                      health_score, feature_vector, max_tasks, cpu_request)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(job_id) DO UPDATE SET
-                        peak_cpu_percent = excluded.peak_cpu_percent,
-                        peak_memory_gb = excluded.peak_memory_gb,
-                        avg_cpu_percent = excluded.avg_cpu_percent,
-                        avg_gpu_util = excluded.avg_gpu_util,
-                        health_score = excluded.health_score,
-                        feature_vector = excluded.feature_vector,
-                        max_tasks = excluded.max_tasks,
-                        cpu_request = excluded.cpu_request
-                    """,
+                    """ + on_conflict,
                     (
                         job_id,
                         record['avg_cpu_percent'],
