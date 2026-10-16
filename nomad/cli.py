@@ -5753,21 +5753,31 @@ def impact_status(ctx, db, as_json):
     import json as _json
 
     from nomad.impact import advice, coverage, impact_from, sites
+    from nomad.impact_advice import advice_db_path
+    from nomad.impact_sources import data_from
     config, db_path = _impact_db(ctx, db)
     imp = impact_from(config)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         found = sites(conn)
         hub = found != [None]
-        covs = [coverage(conn, imp, site) for site in found]
+        has_jobs = conn.execute("SELECT 1 FROM jobs LIMIT 1").fetchone() is not None \
+            if "jobs" in {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")} else False
+        covs = [coverage(conn, imp, site) for site in found] if has_jobs else []
+        other = data_from(conn)
     finally:
         conn.close()
+    advice_path = advice_db_path(imp)
     if as_json:
         click.echo(_json.dumps({"launch": imp.launch and imp.launch.isoformat(),
                                 "baseline_from": imp.baseline_from and imp.baseline_from.isoformat(),
                                 "events": [{"date": e.when.isoformat(), "what": e.what}
                                            for e in imp.events],
-                                "problems": list(imp.problems), "sites": covs}, indent=2))
+                                "problems": list(imp.problems), "sites": covs,
+                                "other_sources": other,
+                                "advice_db": str(advice_path) if advice_path else None},
+                               indent=2))
         return
     for p in imp.problems:
         click.echo(click.style(f"! {p}", fg='yellow'))
@@ -5791,43 +5801,100 @@ def impact_status(ctx, db, as_json):
                        f"{p['eligible']:,} with an eligible time")
         for line in advice(cov, imp, hub):
             click.echo(f"  → {line}")
+    if other:
+        click.echo("\nBeyond the clusters (nomad impact report has them too):")
+        names = {"interactive": "interactive servers", "workstations": "lab workstations",
+                 "login_hosts": "shared login hosts"}
+        for what, by_site in other.items():
+            for s, first in sorted(by_site.items(), key=lambda kv: str(kv[0])):
+                short = " (a short before period)" if first > imp.baseline_from.isoformat() else ""
+                click.echo(f"  {names.get(what, what):<20} {s or 'this site'}: from {first}{short}")
+    click.echo("\nAdvice shown (the Console's record): "
+               + (f"{advice_path}" if advice_path else "none found here; [impact] advice_db "
+                  "names it (the Console account's ~/.nomad-console/activity.db)"))
 
 
 @impact_group.command('report')
 @click.option('--db', type=click.Path(), help='Database (default: the hub\'s, else this host\'s)')
 @click.option('--site', help='One site of a combined database')
+@click.option('--source', type=click.Choice(['all', 'clusters', 'interactive', 'workstations',
+                                             'login', 'advice']), default='all',
+              show_default=True, help='Which part')
+@click.option('--advice-db', type=click.Path(),
+              help="The Console's record of advice shown (default: [impact] advice_db, else "
+                   "~/.nomad-console/activity.db)")
 @click.option('--json', 'as_json', is_flag=True, help='As JSON')
 @click.pass_context
-def impact_report(ctx, db, site, as_json):
-    """Month by month from baseline_from: jobs, people (new ones too), CPU,
-    memory and time used of what was asked for, failures, out-of-memory
-    jobs, median wait; events in their month; then before launch, after it,
-    and the same days a year earlier. Counts and shares only."""
+def impact_report(ctx, db, site, source, advice_db, as_json):
+    """Month by month from baseline_from, then before launch, after it and
+    the same days a year earlier, for each part that has data:
+
+    \b
+    clusters       jobs, people (new ones too), CPU, memory and time used of
+                   what was asked for, failures, out-of-memory jobs, wait
+    interactive    people, hours open, share computing, idle hours
+    workstations   sessions, hours, core-hours, long CPU-heavy runs, sessions
+                   that filled the machine's memory
+    login          flagged heavy use on shared login hosts, people, core-hours
+    advice         advice the Console showed people, and whether their next
+                   jobs (or runs) followed it
+
+    Events appear in their month. Counts and shares only: no names.
+    """
     import json as _json
 
+    from nomad import impact_advice, impact_sources
     from nomad.impact import impact_from, render, report, sites
     config, db_path = _impact_db(ctx, db)
     imp = impact_from(config)
     for p in imp.problems:
         click.echo(click.style(f"! {p}", fg='yellow'), err=True)
+    if not imp.set:
+        click.echo(render({"site": site, "set": False})[0])
+        return
+    want = (lambda part: source in ('all', part))
+    out: dict = {"launch": imp.launch.isoformat(), "baseline_from": imp.baseline_from.isoformat(),
+                 "events": [{"date": e.when.isoformat(), "what": e.what} for e in imp.events]}
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        found = sites(conn)
-        if site is not None:
-            if site not in found:
-                raise click.ClickException(f"no jobs from {site} here; sites: "
-                                           f"{', '.join(str(s) for s in found)}")
-            found = [site]
-        reps = [report(conn, imp, s) for s in found]
+        if want('clusters'):
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            job_sites = sites(conn) if "jobs" in tables and conn.execute(
+                "SELECT 1 FROM jobs LIMIT 1").fetchone() else []
+            if site is not None:
+                job_sites = [s for s in job_sites if s == site]
+            out["clusters"] = [report(conn, imp, s) for s in job_sites]
+        if want('interactive'):
+            out["interactive"] = impact_sources.interactive(conn, imp, site)
+        if want('workstations'):
+            out["workstations"] = impact_sources.workstations(conn, imp, site)
+        if want('login'):
+            out["login_hosts"] = impact_sources.login_hosts(conn, imp, site)
+        if want('advice'):
+            out["advice"] = impact_advice.report(
+                conn, imp, site, path=Path(advice_db).expanduser() if advice_db else None)
     finally:
         conn.close()
+    if site is not None and not any(out.get(k) for k in
+                                    ("clusters", "interactive", "workstations", "login_hosts")) \
+            and source != 'advice':
+        raise click.ClickException(f"nothing from {site} here")
     if as_json:
-        click.echo(_json.dumps(reps if len(reps) > 1 else reps[0], indent=2))
+        click.echo(_json.dumps(out, indent=2))
         return
-    for i, rep in enumerate(reps):
+    blocks = []
+    for rep in out.get("clusters", []):
+        blocks.append(render(rep))
+    for key, kind in (("interactive", "interactive"), ("workstations", "workstations"),
+                      ("login_hosts", "login_hosts")):
+        if out.get(key) or (key in out and source != 'all'):
+            blocks.append(impact_sources.render(kind, out[key]))
+    if "advice" in out:
+        blocks.append(impact_advice.render(out["advice"]))
+    for i, lines in enumerate(blocks):
         if i:
             click.echo("")
-        for line in render(rep):
+        for line in lines:
             click.echo(line)
 
 

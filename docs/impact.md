@@ -51,8 +51,13 @@ Both run on each site, not on the hub; the next sync brings the results.
 ## The report
 
 ```
-nomad impact report [--site SITE] [--json]
+nomad impact report [--site SITE] [--source PART] [--advice-db PATH] [--json]
 ```
+
+`--source` is `clusters`, `interactive`, `workstations`, `login`, `advice`
+or `all` (the default: every part that has data).
+
+### Clusters
 
 Month by month from `baseline_from`: jobs, people and how many were new,
 CPU used of the core-hours measured jobs held, memory peak of what was
@@ -64,8 +69,52 @@ earlier where the data reaches back (students and courses follow the
 academic year). The figures are the ones the Console and `nomad facts`
 use. Counts and shares only: no names.
 
+### Interactive servers
+
+From the interactive collector's daily totals (a person's time with at least
+one session open): people, hours open and per person, the share of the
+measured open time a session was computing, and the measured open hours
+that weren't. Days rebuilt from the raw snapshots (`nomad interactive
+backfill`) have hours but no CPU, so the computing share starts where the
+collector began keeping CPU; the report says from when.
+
+### Lab workstations
+
+From the workstation collector's per-person snapshots: sessions (from
+signing in to the last program ending, counted in the month they ended),
+hours, core-hours used, long CPU-heavy runs (12 hours or more keeping half
+the machine's cores busy: what the Console advises moving to a cluster) and
+sessions that held 80% or more of the machine's memory.
+
+### Shared login hosts
+
+From the per_user collector: heavy-use episodes as `nomad per-user` merges
+them (and how many were actionable), the people flagged, everyone who used
+the host and the core-hours they used there.
+
+### Advice shown and taken
+
+The Console notes, once a day, the advice it showed someone about their own
+work (Console fix 33 and later; the Console account's
+`~/.nomad-console/activity.db`, or `[impact] advice_db = "PATH"`, or
+`--advice-db`). For each piece of advice on a cluster partition, the
+person's typical request there in the 60 days before they first saw it and
+the 60 days after: "took it" when it moved at least half the way to the
+suggestion, "partly", "no change", or "too early" while there aren't three
+later jobs yet. For the advice to move long workstation runs to a cluster:
+whether the person's long runs fell to half or less and their jobs on that
+cluster grew. Plus how many people opened their own pages each month.
+
+There is no comparison group here (people with the same advice who never
+saw it), so part of a change may be requests drifting toward use anyway.
+
+### Reading it
+
 What the report can say is what changed after launch, not why. The people
 and courses change from one term to the next, and the events changed things
 too. The closest thing to cause is whether a person's next jobs changed
-after they were shown advice; that needs a record of who was shown what,
-which the Console keeps from the version that records it.
+after they were shown advice (above). The other sources started at
+different times (workstations and login hosts only recently, at most
+sites), so their before periods can be short: `nomad impact status` says
+from when each has data, and the same months a year apart will say more
+than the first before and after.

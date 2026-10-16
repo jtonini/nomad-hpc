@@ -25,6 +25,10 @@ reads the before period again from Slurm's accounting, the 1.13 way, as far
 back as slurmdbd keeps it (``nomad import sacct --from`` brings the jobs
 themselves). ``nomad impact status`` says what each period has.
 
+Beyond the clusters (1.13.1): interactive servers, lab workstations and
+shared login hosts (nomad.impact_sources), and the advice the Console showed
+people and whether their next jobs followed it (nomad.impact_advice).
+
 What the figures can say: after launch, requests came closer to use, fewer
 jobs failed or waited, by this much. Not that NØMAÐ did it: the people and
 the courses change from one term to the next, and the events change things
@@ -37,7 +41,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-KEYS = ("launch", "baseline_from", "events")
+KEYS = ("launch", "baseline_from", "events", "advice_db")
 MIN_RUNTIME = 10            # seconds: shorter jobs are never measured (job_metrics)
 BACKFILL_DAYS = 7           # one sacct call per week of the before period
 DEFAULT_BEFORE = 365        # days before launch, when baseline_from isn't set
@@ -55,6 +59,7 @@ class Impact:
     baseline_from: date | None = None
     events: tuple = ()
     problems: tuple = ()
+    advice_db: str | None = None       # the Console's record of advice shown (1.13.1)
 
     @property
     def set(self) -> bool:
@@ -121,7 +126,11 @@ def impact_from(config: dict | None) -> Impact:
             continue
         events.append(Event(when, what.strip()))
     events.sort(key=lambda e: e.when)
-    return Impact(launch, baseline, tuple(events), tuple(problems))
+    advice_db = section.get("advice_db")
+    if advice_db is not None and not isinstance(advice_db, str):
+        problems.append("[impact] advice_db should be a path; ignored")
+        advice_db = None
+    return Impact(launch, baseline, tuple(events), tuple(problems), advice_db)
 
 
 # -- reading the database ------------------------------------------------------------
@@ -173,11 +182,13 @@ def coverage(conn, imp: Impact, site=None, today: date | None = None) -> dict:
             new_way = f"({measured} AND js.max_tasks IS NOT NULL)"
     eligible = "j.eligible_time IS NOT NULL" if "eligible_time" in jcols else "0"
 
+    ran = "COALESCE(j.runtime_seconds, 0)" if "runtime_seconds" in jcols else str(MIN_RUNTIME)
+
     def period(start: date, end: date) -> dict:
         r = conn.execute(
             f"SELECT COUNT(*), SUM({measured}), SUM({new_way}), SUM({eligible}) "
             f"FROM jobs j{join} WHERE j.end_time >= ? AND j.end_time < ? "
-            f"AND COALESCE(j.runtime_seconds, 0) >= ?{where}",
+            f"AND {ran} >= ?{where}",
             [_day(start), _day(end), MIN_RUNTIME, *args]).fetchone()
         return {"from": start.isoformat(), "to": (end - timedelta(days=1)).isoformat(),
                 "jobs": r[0], "measured": r[1] or 0, "measured_113": r[2] or 0,
@@ -283,6 +294,24 @@ def _months(start: date, end: date):
         m = n
 
 
+def month_phase(m0: date, m1: date, launch: date) -> str:
+    return "before" if m1 <= launch else "after" if m0 >= launch else "launch"
+
+
+def spans(imp: Impact, today: date, data_from: str | None) -> list:
+    """The periods compared, as (key, first day, day after the last): before
+    launch; after it (none while launch is still to come); the after
+    period's days a year earlier, where the data reaches back to them."""
+    after_end = today + timedelta(days=1)
+    a0, a1 = imp.launch - timedelta(days=365), after_end - timedelta(days=365)
+    out = [("before", imp.baseline_from, min(imp.launch, after_end))]
+    if imp.launch <= today:
+        out.append(("after", imp.launch, after_end))
+        if data_from and data_from <= a0.isoformat():
+            out.append(("year_earlier", a0, a1))
+    return out
+
+
 def _figures(conn, since: date, until: date, site, ceilings) -> dict:
     """nomad.facts.jobs' figures for the jobs that ended in [since, until),
     and how much of their time limits finished jobs used."""
@@ -329,7 +358,7 @@ def report(conn, imp: Impact, site=None, today: date | None = None) -> dict:
     months = []
     for m0, m1 in _months(imp.baseline_from, today):
         f = _figures(conn, m0, m1, site, ceilings)
-        phase = "before" if m1 <= imp.launch else "after" if m0 >= imp.launch else "launch"
+        phase = month_phase(m0, m1, imp.launch)
         # People new that month: not for months the data doesn't reach back
         # before (everyone would look new).
         new = None
@@ -338,16 +367,10 @@ def report(conn, imp: Impact, site=None, today: date | None = None) -> dict:
         months.append({"month": m0.strftime("%Y-%m"), "phase": phase, "new_people": new,
                        "events": [e.what for e in imp.events if m0 <= e.when < m1], **f})
 
-    after_end = today + timedelta(days=1)
-    a0, a1 = imp.launch - timedelta(days=365), after_end - timedelta(days=365)
-    spans = [("before", imp.baseline_from, min(imp.launch, after_end))]
-    if imp.launch <= today:             # a launch still to come has no after yet
-        spans.append(("after", imp.launch, after_end))
-        if data_from and data_from <= a0.isoformat():
-            spans.append(("year_earlier", a0, a1))
     # "to" is the last day in the period.
     periods = {key: {"from": a.isoformat(), "to": (b - timedelta(days=1)).isoformat(),
-                     **_figures(conn, a, b, site, ceilings)} for key, a, b in spans}
+                     **_figures(conn, a, b, site, ceilings)}
+               for key, a, b in spans(imp, today, data_from)}
     return {"site": site, "set": True, "launch": imp.launch.isoformat(),
             "baseline_from": imp.baseline_from.isoformat(), "data_from": data_from,
             "events": [{"date": e.when.isoformat(), "what": e.what} for e in imp.events],
