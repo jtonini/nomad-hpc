@@ -596,6 +596,11 @@ def render(rep: dict) -> list[str]:
             "out of memory, of the jobs",
             "  that ran to an end; wait: median, from when a job could start (its eligible "
             "time, 1.13) or else from submission.", ""]
+    if any((m.get("memory") or {}).get("allocated") is False for m in rep["months"]):
+        out += [f"  memory at {name}: Slurm there doesn't allocate memory to jobs (their "
+                "allocations list none), so a",
+                "  job's --mem isn't held for it, and jobs can use more than they ask for: the "
+                "share can pass 100%.", ""]
     labels = {"before": "Before launch", "after": "After launch",
               "year_earlier": "Same days a year earlier"}
     if "after" not in rep["periods"]:

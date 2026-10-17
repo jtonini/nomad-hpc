@@ -104,6 +104,23 @@ allocated, e.g. `cpu=6,gres/gpu:a40=1,gres/gpu=1,mem=32G,node=1`),
 (`proj/run1`). The whole path is not kept. `squeue` doesn't report these;
 what `sacct` stored stays.
 
+A job's memory request (`req_mem_mb`) is its memory per node as sacct
+records it (1.14.1): what Slurm allocated (the `mem=` of its AllocTRES, the
+job's total, divided by its `node=`), else what was asked (ReqTRES, the same
+way), else ReqMem (`4000Mc`, a Slurm before 21.08's mark for per CPU, counts
+every CPU). `squeue`'s `%m`, stored while a job waits, is the figure per CPU
+for a job submitted with `--mem-per-cpu`, with nothing to say so; until
+1.14.1 it was never replaced, so such a job was stored as asking for one
+CPU's worth and its memory looked used several times over. Now sacct's
+figure replaces it once sacct reports the job. Stored jobs with an AllocTRES
+`mem=` were corrected on upgrading (migration 22); at a site whose AllocTRES
+has none, `nomad import sacct --from DATE --apply` reads them again.
+
+A Slurm that schedules cores only (`SelectTypeParameters` without
+`Memory`, e.g. `CR_Core`) puts no `mem=` in AllocTRES: it doesn't hold a
+job's `--mem` for it, jobs can use more than they ask for, and the impact
+report and `nomad facts` say so beside the memory share.
+
 `node_list` is kept as Slurm writes it, in range form (`n[01-04,07]`). Code
 that needs the nodes themselves reads it with `nomad.hostlist.expand_hostlist`
 (or `node_in`); splitting on commas or matching with LIKE misses ranges.
@@ -167,7 +184,7 @@ as they should. Job steps and pending array ranges are skipped.
 
 A job already stored only gets what it lacks (account, allocation, working
 directory, a partition instead of a list, a failure reason job_metrics left
-at 0). Its outcome changes only when nomad had none -- stored as running,
+at 0), and its memory request as sacct records it (1.14.1, see Jobs). Its outcome changes only when nomad had none -- stored as running,
 pending or `UNKNOWN`, or an outcome assumed before 1.7.19 -- and the records
 show it ended; a stored outcome is never mixed with another. A job the records
 show running or pending, and nomad doesn't have, goes in as `UNKNOWN` with no

@@ -73,7 +73,7 @@ def _select(jcols: set, scols: set) -> str:
         f"{j('runtime_seconds')} AS runtime, {j('submit_time')} AS submit_time, "
         f"{j('start_time')} AS start_time, {wait} AS wait_seconds, "
         f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb, "
-        f"{s('max_tasks')} AS max_tasks "
+        f"{s('max_tasks')} AS max_tasks, {j('alloc_tres')} AS alloc_tres "
     )
 
 
@@ -158,6 +158,21 @@ def summarize(rows: list[dict] | None, ceilings: dict | None = None) -> dict | N
                     and hours(r) > 0]
     mem_held = sum(r["req_mem_mb"] * hours(r) for r in mem_measured)
     mem_used = sum(r["peak_gb"] * 1024 * hours(r) for r in mem_measured)
+    # Whether Slurm allocates memory to jobs, site by site: a site that
+    # schedules cores only (SelectTypeParameters without Memory) lists no
+    # mem= in a job's AllocTRES; there a request isn't held for the job, and
+    # jobs can use more than they ask for. allocated: None when no
+    # allocation is known, False when a site among these doesn't allocate it.
+    from nomad.db.jobkeys import mem_per_node_mb
+    by_site: dict = {}
+    for r in mem_measured:
+        if r.get("alloc_tres"):
+            k = by_site.setdefault(r.get("site"), [0, 0])
+            k[0] += 1
+            k[1] += mem_per_node_mb(r["alloc_tres"]) is not None
+    not_allocated = sorted((s for s, (n, with_mem) in by_site.items() if with_mem * 2 < n),
+                           key=lambda s: str(s))
+    allocated = None if not by_site else not not_allocated
 
     gpu = [r for r in rows if (r.get("req_gpus") or 0) > 0]
     waits = [w / 60 for w in (_wait_seconds(r) for r in rows) if w is not None]
@@ -178,6 +193,8 @@ def summarize(rows: list[dict] | None, ceilings: dict | None = None) -> dict | N
             "used_pct": pct(mem_used, mem_held),
             "jobs_measured": len(mem_measured),
             "set_aside": set_aside,
+            "allocated": allocated,
+            "not_allocated_at": not_allocated,
         },
         "gpus": {
             "jobs": len(gpu),

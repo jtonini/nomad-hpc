@@ -51,11 +51,11 @@ def test_total_cpu_times():
 # -- job_metrics, end to end ------------------------------------------------------------
 
 def jm_row(job_id, *, state="COMPLETED", elapsed="01:00:00", cpus=16, mem="16G", avecpu="",
-           maxrss="", total="", ntasks="", submit_line=""):
+           maxrss="", total="", ntasks="", submit_line="", alloc=""):
     parts = [job_id, "run", "u1", "people", "basic", state, "0:0",
              "2026-10-05T09:00:00", "2026-10-05T09:00:00", "2026-10-05T10:00:00",
              elapsed, "02:00:00", str(cpus), mem, f"cpu={cpus}", avecpu, maxrss, "", "",
-             "", "", "", "", "cn01", total, ntasks, submit_line]
+             "", "", "", "", "cn01", total, ntasks, alloc, submit_line]
     return "|".join(parts)
 
 
@@ -74,7 +74,7 @@ def metrics(tmp_path, monkeypatch):
                 return SimpleNamespace(returncode=1, stdout="",
                                        stderr="sacct: error: Invalid field requested: \"SubmitLine\"")
             out = lines if "SubmitLine" in fmt else [
-                "|".join(x.split("|")[:26]) for x in lines]
+                "|".join(x.split("|")[:27]) for x in lines]
             return SimpleNamespace(returncode=0, stdout="\n".join(out) + "\n", stderr="")
         monkeypatch.setattr(JM.subprocess, "run", fake)
         col = JobMetricsCollector({}, str(db))

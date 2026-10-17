@@ -18,6 +18,7 @@ same name, same number) is the same job and keeps updating in place.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -55,6 +56,57 @@ JOB_COLUMNS = (
     # the queue.
     ("eligible_time", "DATETIME"),
 )
+
+
+_MEM_UNIT = {'K': 1 / 1024, 'M': 1, 'G': 1024, 'T': 1024 ** 2, 'P': 1024 ** 3}
+_TRES_MEM = re.compile(r'(?:^|,)mem=([0-9]+(?:\.[0-9]+)?)([KMGTP]?)', re.IGNORECASE)
+_TRES_NODE = re.compile(r'(?:^|,)node=([0-9]+)')
+
+
+def mem_per_node_mb(tres) -> int | None:
+    """The memory Slurm allocated a job per node, in MB, from its AllocTRES
+    ('cpu=8,mem=32G,node=1'; mem= is the job's total over its nodes).
+
+    It is what a job's memory request is taken to be (1.14.1). ReqMem and
+    squeue's %m give the figure per CPU for a job submitted with
+    --mem-per-cpu, with nothing to say so: a job asking 4G per CPU on 8 CPUs
+    was stored as asking 4G, and peaked "above" it. Per node is what --mem
+    means, so advice in #SBATCH --mem terms stays right for a job on several
+    nodes. None without mem=: no AllocTRES, or a Slurm that doesn't allocate
+    memory to jobs (SelectTypeParameters without Memory)."""
+    if not tres:
+        return None
+    m = _TRES_MEM.search(str(tres))
+    if not m:
+        return None
+    mb = float(m.group(1)) * _MEM_UNIT[(m.group(2) or 'M').upper()]
+    n = _TRES_NODE.search(str(tres))
+    nodes = max(1, int(n.group(1))) if n else 1
+    value = int(round(mb / nodes))
+    return value if value > 0 else None
+
+
+def fix_memory_requests(conn: sqlite3.Connection) -> int:
+    """Set each stored job's req_mem_mb to what Slurm allocated it per node,
+    where its AllocTRES says and the two differ. The number of jobs changed."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if not {"req_mem_mb", "alloc_tres"} <= cols:
+        return 0
+    rows = conn.execute(
+        "SELECT rowid, req_mem_mb, alloc_tres FROM jobs WHERE alloc_tres LIKE '%mem=%'").fetchall()
+    changed = []
+    for rowid, req, tres in rows:
+        value = mem_per_node_mb(tres)
+        if not value:
+            continue
+        try:
+            stored = float(req)
+        except (TypeError, ValueError):          # NULL, or text where a number belongs
+            stored = None
+        if stored is None or abs(stored - value) > max(1.0, 0.001 * value):
+            changed.append((value, rowid))
+    conn.executemany("UPDATE jobs SET req_mem_mb = ? WHERE rowid = ?", changed)
+    return len(changed)
 
 
 def queue_wait_sql(cols: set, alias: str = "") -> str:

@@ -86,7 +86,7 @@ _ENDED = (f"({_NO_OUTCOME} AND COALESCE(excluded.state, '') NOT IN ({_ACTIVE}, '
           f"AND excluded.end_time IS NOT NULL)")
 _OUTCOME = ("state", "end_time", "exit_code", "exit_signal", "runtime_seconds",
             "start_time", "wait_time_seconds", "node_list")
-_SPECIAL = ("job_id", "partition", "failure_reason")
+_SPECIAL = ("job_id", "partition", "failure_reason", "req_mem_mb")
 
 
 def _fill_sql(outcome: bool = True) -> str:
@@ -106,6 +106,11 @@ def _fill_sql(outcome: bool = True) -> str:
                             f"ELSE jobs.{c} END")
         else:
             sets.append(f"{c} = COALESCE(jobs.{c}, excluded.{c})")
+    # sacct's figure when the record has an allocation (1.14.1): what squeue
+    # stored is per CPU for a job asking --mem-per-cpu.
+    sets.append("req_mem_mb = CASE WHEN excluded.alloc_tres IS NOT NULL "
+                "AND COALESCE(excluded.req_mem_mb, 0) > 0 THEN excluded.req_mem_mb "
+                "ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb) END")
     sets.append("partition = CASE WHEN COALESCE(jobs.partition, '') = '' THEN excluded.partition "
                 "WHEN instr(jobs.partition, ',') > 0 AND COALESCE(excluded.partition, '') <> '' "
                 "AND instr(excluded.partition, ',') = 0 THEN excluded.partition "

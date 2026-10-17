@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from nomad.db.jobkeys import ACTIVE_STATES, ensure_job_columns, place, same_job, stored_job
+from nomad.db.jobkeys import (ACTIVE_STATES, ensure_job_columns, mem_per_node_mb, place, same_job,
+                              stored_job)
 
 from .base import BaseCollector, CollectionError, registry
 
@@ -105,6 +106,13 @@ _JOB_UPSERT = f"""
         runtime_seconds = excluded.runtime_seconds,
         wait_time_seconds = excluded.wait_time_seconds,
         account = COALESCE(excluded.account, jobs.account),
+        -- sacct's figure, once sacct reports the job (its records carry an
+        -- allocation; squeue's don't): squeue's %m is per CPU for a job
+        -- asking --mem-per-cpu (1.14.1).
+        req_mem_mb = CASE WHEN excluded.alloc_tres IS NOT NULL
+                               AND COALESCE(excluded.req_mem_mb, 0) > 0
+                          THEN excluded.req_mem_mb
+                          ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb) END,
         alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
         alloc_gpus = COALESCE(excluded.alloc_gpus, jobs.alloc_gpus),
         work_root = COALESCE(excluded.work_root, jobs.work_root),
@@ -554,7 +562,10 @@ class SlurmCollector(BaseCollector):
             exit_signal=exit_signal,
             failure_reason=compute_failure_reason(state, exit_code, exit_signal),
             req_cpus=self._parse_int(get('AllocCPUS')),
-            req_mem_mb=self._parse_memory(get('ReqMem')),
+            # Per node: what Slurm allocated (AllocTRES), else what was asked
+            # (ReqTRES; at a site that allocates no memory), else ReqMem.
+            req_mem_mb=(mem_per_node_mb(alloc_tres) or mem_per_node_mb(get('ReqTRES'))
+                        or self._parse_req_mem(get('ReqMem'), self._parse_int(get('AllocCPUS')))),
             req_gpus=self._parse_gpus(get('ReqTRES')),
             req_time_seconds=self._parse_time(get('Timelimit')),
             runtime_seconds=self._parse_time(get('Elapsed')),
@@ -795,13 +806,15 @@ class SlurmCollector(BaseCollector):
             return 0
 
     def _parse_memory(self, value: str) -> int:
-        """Parse memory string (e.g., '4G', '4096M') to MB."""
+        """Parse memory string (e.g., '4G', '4096M', '1.5T') to MB."""
         try:
             value = value.strip().upper()
             if not value or value == 'N/A':
                 return 0
 
-            if value.endswith('G'):
+            if value.endswith('T'):
+                return int(float(value[:-1]) * 1024 * 1024)
+            elif value.endswith('G'):
                 return int(float(value[:-1]) * 1024)
             elif value.endswith('M'):
                 return int(float(value[:-1]))
@@ -811,6 +824,18 @@ class SlurmCollector(BaseCollector):
                 return int(value)
         except (ValueError, AttributeError):
             return 0
+
+    def _parse_req_mem(self, value: str, cpus: int) -> int:
+        """sacct's ReqMem in MB. A Slurm before 21.08 marks it per CPU
+        ('4000Mc', times the CPUs) or per node ('16Gn'); from 21.08 it is the
+        job's total (ReqTRES's mem=), so for a job on several nodes this is
+        more than a node's; used only when neither TRES has mem=."""
+        text = (value or '').strip()
+        if text[-1:] in ('c', 'C'):
+            return self._parse_memory(text[:-1]) * max(1, cpus or 1)
+        if text[-1:] in ('n', 'N'):
+            return self._parse_memory(text[:-1])
+        return self._parse_memory(text)
 
     def _parse_gpus(self, value: str) -> int:
         """Parse GPU request from ReqTRES or ReqGRES format.

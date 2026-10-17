@@ -24,7 +24,7 @@ def _bootstrap_db_with_migrations(db_path: str) -> None:
     with sqlite3.connect(db_path) as conn:
         for _version, _description, sql in MIGRATIONS:
             try:
-                conn.executescript(sql)
+                sql(conn) if callable(sql) else conn.executescript(sql)
             except sqlite3.OperationalError as e:
                 msg = str(e).lower()
                 if "duplicate column" in msg or "already exists" in msg:

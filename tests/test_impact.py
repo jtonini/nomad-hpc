@@ -141,7 +141,7 @@ def test_backfill_counts_then_reads_the_old_way_measured_again(tmp_path, monkeyp
     line = "|".join(["1", "run", "u1", "people", "basic", "COMPLETED", "0:0",
                      "2025-09-10T08:00:00", "2025-09-10T09:00:00", "2025-09-10T10:00:00",
                      "01:00:00", "02:00:00", "4", "8G", "cpu=4", "", "", "", "", "", "", "", "",
-                     "cn01", "03:00:00", "", "sbatch -c 4 run.sh"])
+                     "cn01", "03:00:00", "", "", "sbatch -c 4 run.sh"])
     step = "|".join(["1.batch", "batch", "", "", "", "COMPLETED", "0:0", "", "", "", "01:00:00",
                      "", "4", "", "", "01:00:00", "3G", "", "", "", "", "", "", "cn01", "",
                      "1", ""])

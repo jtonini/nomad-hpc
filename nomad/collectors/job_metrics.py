@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from nomad.db.jobkeys import norm_time, place
+from nomad.db.jobkeys import ensure_job_columns, mem_per_node_mb, norm_time, place
 from nomad.hostlist import expand_hostlist
 
 from .base import BaseCollector, CollectionError, registry
@@ -155,6 +155,9 @@ class JobMetrics:
     total_cpu_seconds: float | None = None
     max_tasks: int | None = None
     cpu_request: str | None = None
+    # What Slurm allocated (sacct AllocTRES); req_mem_mb is its memory per
+    # node where it has one (1.14.1).
+    alloc_tres: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -192,6 +195,7 @@ class JobMetrics:
             'total_cpu_seconds': self.total_cpu_seconds,
             'max_tasks': self.max_tasks,
             'cpu_request': self.cpu_request,
+            'alloc_tres': self.alloc_tres,
         }
 
 
@@ -231,7 +235,7 @@ class JobMetricsCollector(BaseCollector):
         "ReqCPUS,ReqMem,ReqTRES,"
         "AveCPU,MaxRSS,AveRSS,MaxVMSize,"
         "MaxDiskRead,MaxDiskWrite,AveDiskRead,AveDiskWrite,"
-        "NodeList,TotalCPU,NTasks"
+        "NodeList,TotalCPU,NTasks,AllocTRES"
     )
     SACCT_FORMAT = SACCT_FORMAT_BASE + ",SubmitLine"
 
@@ -426,7 +430,11 @@ class JobMetricsCollector(BaseCollector):
                 elapsed_seconds=self._parse_elapsed(parts[10]),
                 timelimit_seconds=self._parse_elapsed(parts[11]),
                 req_cpus=self._parse_int(parts[12]),
-                req_mem_mb=self._parse_memory(parts[13]),
+                # Per node: what Slurm allocated, else what was asked
+                # (ReqTRES), else ReqMem.
+                req_mem_mb=(mem_per_node_mb(parts[26] if len(parts) > 26 else None)
+                            or mem_per_node_mb(parts[14])
+                            or self._req_mem(parts[13], self._parse_int(parts[12]))),
                 req_gpus=self._parse_gpus(parts[14]),
                 avg_cpu_percent=self._parse_cpu_time(parts[15]),
                 max_rss_mb=self._parse_memory(parts[16]),
@@ -440,7 +448,8 @@ class JobMetricsCollector(BaseCollector):
                 total_cpu_seconds=(self._parse_cpu_seconds(parts[24]) or None)
                 if len(parts) > 24 else None,
                 # SubmitLine is last and may contain '|' itself.
-                cpu_request=_cpu_request_flag('|'.join(parts[26:])) if len(parts) > 26 else None,
+                cpu_request=_cpu_request_flag('|'.join(parts[27:])) if len(parts) > 27 else None,
+                alloc_tres=(parts[26].strip() or None) if len(parts) > 26 else None,
             )
         except Exception as e:
             logger.debug(f"Failed to parse sacct line: {e}")
@@ -570,7 +579,7 @@ class JobMetricsCollector(BaseCollector):
             job.cpu_efficiency = job.avg_cpu_percent / 100.0
 
         # Memory efficiency: max_rss / requested
-        if job.max_rss_mb and job.req_mem_mb > 0:
+        if job.max_rss_mb and (job.req_mem_mb or 0) > 0:
             job.memory_efficiency = job.max_rss_mb / job.req_mem_mb
 
         # GPU usage detection
@@ -668,6 +677,19 @@ class JobMetricsCollector(BaseCollector):
             return float(value) / (1024 * 1024)
         except ValueError:
             return None
+
+    def _req_mem(self, value: str, cpus: int) -> float | None:
+        """sacct's ReqMem in MB. A Slurm before 21.08 marks it per CPU
+        ('4000Mc', times the CPUs) or per node ('16Gn'); from 21.08 it is the
+        job's total (ReqTRES's mem=)."""
+        text = (value or '').strip()
+        per_cpu = text[-1:] in ('c', 'C')
+        if text[-1:] in ('c', 'C', 'n', 'N'):
+            text = text[:-1]
+        mb = self._parse_memory(text)
+        if mb is None:
+            return None
+        return mb * max(1, cpus or 1) if per_cpu else mb
 
     def _parse_elapsed(self, value: str) -> int:
         """Parse elapsed time to seconds."""
@@ -798,6 +820,7 @@ class JobMetricsCollector(BaseCollector):
         """Store job metrics in database."""
 
         with self.get_db_connection() as conn:
+            ensure_job_columns(conn)
             for record in data:
                 if record.get('type') != 'job_metrics':
                     continue
@@ -824,10 +847,18 @@ class JobMetricsCollector(BaseCollector):
                     (job_id, user_name, group_name, partition, job_name, state,
                      submit_time, start_time, end_time, exit_code,
                      req_cpus, req_mem_mb, req_gpus, req_time_seconds, runtime_seconds,
-                     node_list, wait_time_seconds)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     node_list, wait_time_seconds, alloc_tres)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
+                        -- sacct's figure, per node (1.14.1): what squeue
+                        -- stored is per CPU for --mem-per-cpu.
+                        req_mem_mb = CASE WHEN excluded.alloc_tres IS NOT NULL
+                                               AND COALESCE(excluded.req_mem_mb, 0) > 0
+                                          THEN excluded.req_mem_mb
+                                          ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb)
+                                          END,
+                        alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
                         state = excluded.state,
                         end_time = excluded.end_time,
                         exit_code = excluded.exit_code,
@@ -868,6 +899,7 @@ class JobMetricsCollector(BaseCollector):
                         record['elapsed_seconds'],
                         record.get('node_list'),
                         wait,
+                        record.get('alloc_tres'),
                     )
                 )
 

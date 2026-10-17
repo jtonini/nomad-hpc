@@ -8,8 +8,21 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Migration scripts: (version, description, SQL)
-MIGRATIONS: list[tuple[int, str, str]] = [
+
+
+def _memory_from_allocation(conn: sqlite3.Connection) -> None:
+    """1.14.1: memory requests from what Slurm allocated, per node (see
+    nomad.db.jobkeys.mem_per_node_mb)."""
+    from nomad.db.jobkeys import fix_memory_requests
+    n = fix_memory_requests(conn)
+    if n:
+        logger.info(f"Memory requests taken from what Slurm allocated: {n:,} jobs")
+
+
+# Migration scripts: (version, description, SQL), or a function of the
+# connection for a change SQL alone can't make safely (a column that a
+# collector adds, so not every database has it).
+MIGRATIONS: list[tuple[int, str, object]] = [
     (1, "Initial schema", Path(__file__).parent.joinpath("schema.sql").read_text()),
     (2, "Add alert_history table", """
         CREATE TABLE IF NOT EXISTS alert_history (
@@ -374,6 +387,8 @@ MIGRATIONS: list[tuple[int, str, str]] = [
             readings INTEGER
         );
     """),
+    # A job's memory request from what Slurm allocated it, per node (1.14.1).
+    (22, "Memory requests from what Slurm allocated", _memory_from_allocation),
 ]
 
 
@@ -425,8 +440,11 @@ class MigrationManager:
 
         cursor = self.conn.cursor()
         try:
-            # Execute the migration SQL
-            cursor.executescript(sql)
+            # Execute the migration SQL (or function)
+            if callable(sql):
+                sql(self.conn)
+            else:
+                cursor.executescript(sql)
 
             # Record the migration
             cursor.execute(

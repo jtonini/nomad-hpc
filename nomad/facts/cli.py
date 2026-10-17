@@ -63,11 +63,22 @@ def _jobs_line(j: dict | None) -> str:
     parts.append(f"core-hours used {_p(c['used_pct'])} ({c['jobs_measured']} measured)")
     mem = f"memory used at peak {_p(m['used_pct'])} ({m['jobs_measured']} measured"
     aside = m["set_aside"]
-    parts.append(mem + (f", {aside} impossible peak{'s' if aside != 1 else ''} set aside)"
-                        if aside else ")"))
+    parts.append(mem + (f", {aside} impossible peak{'s' if aside != 1 else ''} set aside"
+                        if aside else "")
+                 + _not_allocated(m) + ")")
     if w["median"] is not None:
         parts.append(f"median wait {w['median']:g} min (p90 {w['p90']:g})")
     return "; ".join(parts)
+
+
+def _not_allocated(m: dict) -> str:
+    """Where Slurm doesn't allocate memory to jobs, said beside the share."""
+    sites = [s for s in (m.get("not_allocated_at") or []) if s]
+    if m.get("allocated") is not False:
+        return ""
+    where = f"at {', '.join(sites)}" if sites else "here"
+    return (f"; Slurm doesn't allocate memory {where}, so jobs there can use more than "
+            "they ask for")
 
 
 def _where(path, mask: bool) -> str:

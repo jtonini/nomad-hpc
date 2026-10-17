@@ -5324,8 +5324,9 @@ def import_sacct(ctx, export, since, until, db, apply):
     jobs it still holds (it deletes them after PurgeJobAfter).
 
     A job already stored only gets what it lacks (account, allocation,
-    working directory, ...); a job stored as running or pending that the
-    records show ended takes its outcome. Job numbers Slurm gave out again
+    working directory, ...), and its memory request as sacct records it
+    (1.14.1); a job stored as running or pending that the records show
+    ended takes its outcome. Job numbers Slurm gave out again
     are kept apart (an older job as NUMBER@SUBMIT-TIME). Run it on the head
     node, into that site's database; `nomad sync` carries it to the hub.
     """
