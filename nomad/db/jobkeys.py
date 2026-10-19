@@ -17,6 +17,7 @@ same name, same number) is the same job and keeps updating in place.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -107,6 +108,81 @@ def fix_memory_requests(conn: sqlite3.Connection) -> int:
             changed.append((value, rowid))
     conn.executemany("UPDATE jobs SET req_mem_mb = ? WHERE rowid = ?", changed)
     return len(changed)
+
+
+def with_gpu_flag(vector):
+    """A stored feature vector (JSON) with its GPU element (the third) set."""
+    try:
+        v = json.loads(vector)
+    except (TypeError, ValueError):
+        return vector
+    if isinstance(v, list) and len(v) > 2:
+        v[2] = 1.0
+        return json.dumps(v)
+    return vector
+
+
+def gpu_util_during(conn: sqlite3.Connection, node_list, start, end, site=None) -> float | None:
+    """Mean DCGM utilization (gpu_stats.real_util_pct) on a job's nodes while
+    it ran, or None: no nodes or times, no DCGM samples, or a database without
+    them. The node's GPUs, not the job's: Slurm doesn't say which ones it had.
+    site: a hub's combined database keeps every site's samples."""
+    from nomad.hostlist import expand_hostlist
+    start, end = norm_time(start), norm_time(end)
+    nodes = expand_hostlist(node_list) if node_list else []
+    if not nodes or not start or not end:
+        return None
+    where = f"node_name IN ({','.join('?' * len(nodes))})"
+    args = [*nodes]
+    if site is not None:
+        where += " AND source_site = ?"
+        args.append(site)
+    try:
+        row = conn.execute(
+            "SELECT AVG(real_util_pct) FROM gpu_stats WHERE " + where +
+            " AND data_source = 'dcgm' AND real_util_pct IS NOT NULL"
+            " AND timestamp BETWEEN ? AND ?", (*args, start, end)).fetchone()
+    except sqlite3.OperationalError:          # no gpu_stats, or no DCGM columns
+        return None
+    return row[0] if row and row[0] is not None else None
+
+
+def fix_gpu_summaries(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Stored jobs whose GPUs only their request shows -- read from squeue
+    while they ran, where Slurm wasn't recording GPUs (AccountingStorageTRES
+    without gres/gpu), so sacct reads them as asking for none -- are GPU jobs
+    in their summary too: used_gpu set, the feature vector's GPU element set,
+    and a DCGM utilization where there are samples. (jobs changed, of them
+    given a utilization)."""
+    jcols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    scols = {r[1] for r in conn.execute("PRAGMA table_info(job_summary)")}
+    if not {"req_gpus"} <= jcols or not {"job_id", "used_gpu"} <= scols:
+        return 0, 0
+    by_site = "source_site" in jcols and "source_site" in scols
+    have = [c for c in ("node_list", "start_time", "end_time") if c in jcols]
+    cols = ", ".join(f"j.{c}" for c in have)
+    vec = "s.feature_vector" if "feature_vector" in scols else "NULL"
+    util = "s.avg_gpu_util" if "avg_gpu_util" in scols else "NULL"
+    site = "s.source_site" if by_site else "NULL"
+    rows = conn.execute(
+        f"SELECT s.rowid, {site}, {vec}, {util}{', ' + cols if cols else ''} "
+        "FROM job_summary s JOIN jobs j ON j.job_id = s.job_id"
+        + (" AND j.source_site IS s.source_site" if by_site else "") +
+        " WHERE COALESCE(s.used_gpu, 0) = 0 AND j.req_gpus > 0").fetchall()
+    has_vec, has_util = "feature_vector" in scols, "avg_gpu_util" in scols
+    sets = "used_gpu = 1" + (", feature_vector = ?" if has_vec else "") + (", avg_gpu_util = ?" if has_util else "")
+    changed, measured = [], 0
+    for r in rows:
+        rowid, site_name, vector, value = r[0], r[1], r[2], r[3]
+        rec = dict(zip(have, r[4:]))
+        if value is None and has_util:
+            value = gpu_util_during(conn, rec.get("node_list"), rec.get("start_time"),
+                                    rec.get("end_time"), site_name if by_site else None)
+            measured += value is not None
+        params = ([with_gpu_flag(vector) if vector else vector] if has_vec else []) + ([value] if has_util else [])
+        changed.append((*params, rowid))
+    conn.executemany(f"UPDATE job_summary SET {sets} WHERE rowid = ?", changed)
+    return len(changed), measured
 
 
 def queue_wait_sql(cols: set, alias: str = "") -> str:

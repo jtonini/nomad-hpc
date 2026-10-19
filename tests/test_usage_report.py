@@ -946,3 +946,7 @@ def test_gpu_requests_before_accounting(site, cfg):
     assert fact(report, "s07.gpu_people_asking_before_accounting") == 1
     sec = next(s for s in report.sections if s.number == 7)
     assert any("not in Slurm's accounting" in n for n in sec.notes)
+    # 1.14.4: the jobs too, and the note no longer says no record has them.
+    assert fact(report, "s07.gpu_jobs_asking_before_accounting") >= 1
+    note = next(n for n in sec.notes if n.startswith("GPU allocations exist only from"))
+    assert "known only from NØMAÐ's records of the queue" in note and "not in any job record" not in note

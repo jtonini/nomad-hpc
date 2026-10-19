@@ -773,10 +773,19 @@ def s07_gpus(ctx: Ctx) -> Section:
         s.notes.append("Slurm recorded no GPU allocation in the period: GPU-hours not measured. Card activity "
                        "below comes from NØMAÐ's GPU samples.")
     if g0 is not None and g0 > d.t0:
+        # Jobs that asked for GPUs before then: what squeue showed NØMAÐ while
+        # they waited or ran is their only GPU record (1.14.4).
+        asked = [j for j in d.jobs if j.gpu_request and (j.submit or j.start) and (j.submit or j.start) < g0]
+        if asked:
+            s.fact("gpu_jobs_asking_before_accounting", "jobs that asked for GPUs before Slurm accounted them",
+                   len(asked), "jobs")
         s.notes.append(f"GPU allocations exist only from {fmt.day(g0)}"
                        + (" (the first job with GPUs in its allocation)" if ctx.gpu_start_detected
                           else ", when Slurm began accounting GPUs")
-                       + "; earlier GPU use is not in any job record.")
+                       + ("; earlier GPU use is not in any job record." if not asked else
+                          f"; before then, {fmt.plural(len(asked), 'job')} that asked for GPUs are known only "
+                          "from NØMAÐ's records of the queue. That is a minimum (jobs it never saw there are "
+                          "missing), and none of them has GPU-hours."))
     if d.gpus_from_request:
         s.notes.append(f"{fmt.num(d.gpus_from_request)} jobs have no allocation recorded: their GPUs are "
                        "the ones they asked for.")

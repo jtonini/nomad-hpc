@@ -86,7 +86,7 @@ _ENDED = (f"({_NO_OUTCOME} AND COALESCE(excluded.state, '') NOT IN ({_ACTIVE}, '
           f"AND excluded.end_time IS NOT NULL)")
 _OUTCOME = ("state", "end_time", "exit_code", "exit_signal", "runtime_seconds",
             "start_time", "wait_time_seconds", "node_list")
-_SPECIAL = ("job_id", "partition", "failure_reason", "req_mem_mb")
+_SPECIAL = ("job_id", "partition", "failure_reason", "req_mem_mb", "req_gpus")
 
 
 def _fill_sql(outcome: bool = True) -> str:
@@ -111,6 +111,11 @@ def _fill_sql(outcome: bool = True) -> str:
     sets.append("req_mem_mb = CASE WHEN excluded.alloc_tres IS NOT NULL "
                 "AND COALESCE(excluded.req_mem_mb, 0) > 0 THEN excluded.req_mem_mb "
                 "ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb) END")
+    # GPUs: sacct's count when it records some; when it records none the stored
+    # one stays (1.14.4: before AccountingStorageTRES listed gres/gpu, what
+    # squeue showed is the only record of a job's GPUs).
+    sets.append("req_gpus = CASE WHEN COALESCE(excluded.req_gpus, 0) > 0 THEN excluded.req_gpus "
+                "ELSE COALESCE(jobs.req_gpus, excluded.req_gpus) END")
     sets.append("partition = CASE WHEN COALESCE(jobs.partition, '') = '' THEN excluded.partition "
                 "WHEN instr(jobs.partition, ',') > 0 AND COALESCE(excluded.partition, '') <> '' "
                 "AND instr(excluded.partition, ',') = 0 THEN excluded.partition "

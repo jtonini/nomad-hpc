@@ -19,6 +19,17 @@ def _memory_from_allocation(conn: sqlite3.Connection) -> None:
         logger.info(f"Memory requests taken from what Slurm allocated: {n:,} jobs")
 
 
+def _gpus_from_requests(conn: sqlite3.Connection) -> None:
+    """1.14.4: jobs that asked for GPUs where Slurm wasn't recording them are
+    GPU jobs in their summary, with a DCGM utilization where there are samples
+    (see nomad.db.jobkeys.fix_gpu_summaries)."""
+    from nomad.db.jobkeys import fix_gpu_summaries
+    n, measured = fix_gpu_summaries(conn)
+    if n:
+        logger.info(f"GPU jobs known only from their request: {n:,} summaries marked, "
+                    f"{measured:,} given a DCGM utilization")
+
+
 # Migration scripts: (version, description, SQL), or a function of the
 # connection for a change SQL alone can't make safely (a column that a
 # collector adds, so not every database has it).
@@ -414,6 +425,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
         );
         CREATE INDEX IF NOT EXISTS idx_node_disk_owners ON node_disk_owners(node, path, timestamp);
     """),
+    # GPU jobs from before Slurm recorded GPUs are GPU jobs in their summary (1.14.4).
+    (24, "GPU jobs whose GPUs only their request shows", _gpus_from_requests),
 ]
 
 

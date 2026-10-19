@@ -116,6 +116,23 @@ figure replaces it once sacct reports the job. Stored jobs with an AllocTRES
 `mem=` were corrected on upgrading (migration 22); at a site whose AllocTRES
 has none, `nomad import sacct --from DATE --apply` reads them again.
 
+A job's GPU count (`req_gpus`) is what sacct records when it records GPUs
+(1.14.4), and otherwise what `squeue` showed while the job waited or ran.
+Slurm records GPUs only where `AccountingStorageTRES` lists `gres/gpu`;
+before that, sacct gives a GPU job neither a GPU request nor GPUs in its
+AllocTRES, and nomad's reading of the queue is the only record of its GPUs.
+Until 1.14.4 the first count stored was never replaced, and the job-metrics
+collector built the job's summary from sacct alone: such jobs had
+`used_gpu = 0` and so no DCGM utilization (`avg_gpu_util`). Now a reading
+with GPUs replaces the count, one without keeps it, and a job whose stored
+request has GPUs is a GPU job in its summary. Stored jobs were marked on
+upgrading, with a utilization where DCGM has samples on their nodes while they
+ran (migration 24). Jobs nomad never saw in the queue before GPU accounting
+began (short ones, or from before nomad ran) have no GPU record anywhere: the
+usage report counts them as a minimum and gives them no GPU-hours. To see
+when a site began: `sacct -a -X -n -P -S DATE -o End,AllocTRES | grep
+gres/gpu | sort | head -1`.
+
 A Slurm that schedules cores only (`SelectTypeParameters` without
 `Memory`, e.g. `CR_Core`) puts no `mem=` in AllocTRES: it doesn't hold a
 job's `--mem` for it, jobs can use more than they ask for, and the impact

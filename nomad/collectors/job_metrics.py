@@ -16,13 +16,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from nomad.db.jobkeys import ensure_job_columns, mem_per_node_mb, norm_time, place
-from nomad.hostlist import expand_hostlist
+from nomad.db.jobkeys import (ensure_job_columns, gpu_util_during, mem_per_node_mb, norm_time, place,
+                               with_gpu_flag)
 
 from .base import BaseCollector, CollectionError, registry
 from .slurm import gpu_count
 
 logger = logging.getLogger(__name__)
+
+
+def _positive(value) -> bool:
+    try:
+        return int(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 # Feature weights for health score calculation
@@ -797,24 +804,7 @@ class JobMetricsCollector(BaseCollector):
         per-GPU attribution isn't possible; this blends when jobs share a
         node's GPUs but is directionally correct for an education tool.
         """
-        if not node_list or not start_time or not end_time:
-            return None
-        nodes = expand_hostlist(node_list)
-        if not nodes:
-            return None
-        placeholders = ",".join("?" * len(nodes))
-        row = conn.execute(
-            f"""
-            SELECT AVG(real_util_pct)
-            FROM gpu_stats
-            WHERE node_name IN ({placeholders})
-              AND data_source = 'dcgm'
-              AND real_util_pct IS NOT NULL
-              AND timestamp BETWEEN ? AND ?
-            """,
-            (*nodes, start_time, end_time),
-        ).fetchone()
-        return row[0] if row and row[0] is not None else None
+        return gpu_util_during(conn, node_list, start_time, end_time)
 
     def store(self, data: list[dict[str, Any]]) -> None:
         """Store job metrics in database."""
@@ -859,6 +849,11 @@ class JobMetricsCollector(BaseCollector):
                                           ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb)
                                           END,
                         alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
+                        -- A count of GPUs replaces the stored one; none keeps
+                        -- it (see nomad.collectors.slurm's upsert).
+                        req_gpus = CASE WHEN COALESCE(excluded.req_gpus, 0) > 0
+                                        THEN excluded.req_gpus
+                                        ELSE COALESCE(jobs.req_gpus, excluded.req_gpus) END,
                         state = excluded.state,
                         end_time = excluded.end_time,
                         exit_code = excluded.exit_code,
@@ -903,6 +898,19 @@ class JobMetricsCollector(BaseCollector):
                     )
                 )
 
+                # A job whose GPUs only the stored request shows (read from
+                # squeue while it ran, where Slurm wasn't yet recording GPUs)
+                # is a GPU job all the same: its summary says so, and it gets
+                # a utilization figure where DCGM has one (1.14.4).
+                used_gpu = bool(record['used_gpu'])
+                vector = record['feature_vector']
+                if not used_gpu:
+                    row = conn.execute("SELECT req_gpus FROM jobs WHERE job_id = ?",
+                                       (job_id,)).fetchone()
+                    if row and _positive(row[0]):
+                        used_gpu = True
+                        vector = with_gpu_flag(vector)
+
                 # Update job_summary table. A reading without CPU or memory
                 # (Slurm no longer keeps the steps' usage: an old job read
                 # again) never replaces what was stored; a partial one fills
@@ -922,6 +930,8 @@ class JobMetricsCollector(BaseCollector):
                         avg_cpu_percent = COALESCE(excluded.avg_cpu_percent,
                                                    job_summary.avg_cpu_percent),
                         avg_gpu_util = COALESCE(excluded.avg_gpu_util, job_summary.avg_gpu_util),
+                        used_gpu = MAX(COALESCE(excluded.used_gpu, 0),
+                                       COALESCE(job_summary.used_gpu, 0)),
                         health_score = {score},
                         feature_vector = {vector},
                         max_tasks = COALESCE(excluded.max_tasks, job_summary.max_tasks),
@@ -950,14 +960,14 @@ class JobMetricsCollector(BaseCollector):
                         (record['avg_rss_mb'] or 0) / 1024,
                         (record['max_disk_write_mb'] or 0) / 1024,
                         record['nfs_ratio'],
-                        record['used_gpu'],
+                        used_gpu,
                         (self._compute_avg_gpu_util(
                             conn, record.get('node_list'),
                             record.get('start_time'), record.get('end_time'),
-                        ) if record.get('used_gpu') else None),
+                        ) if used_gpu else None),
                         record['had_swap'],
                         record['health_score'],
-                        record['feature_vector'],
+                        vector,
                         record.get('max_tasks'),
                         record.get('cpu_request'),
                     )

@@ -115,6 +115,13 @@ _JOB_UPSERT = f"""
                           ELSE COALESCE(jobs.req_mem_mb, excluded.req_mem_mb) END,
         alloc_tres = COALESCE(excluded.alloc_tres, jobs.alloc_tres),
         alloc_gpus = COALESCE(excluded.alloc_gpus, jobs.alloc_gpus),
+        -- GPUs: a reading that shows some replaces the stored count; one that
+        -- shows none keeps it (1.14.4). Slurm records GPUs only where
+        -- AccountingStorageTRES lists gres/gpu, so sacct reads a job from
+        -- before that as asking for none, and what squeue showed while it
+        -- ran is the only record of its GPUs.
+        req_gpus = CASE WHEN COALESCE(excluded.req_gpus, 0) > 0 THEN excluded.req_gpus
+                        ELSE COALESCE(jobs.req_gpus, excluded.req_gpus) END,
         work_root = COALESCE(excluded.work_root, jobs.work_root),
         work_tail = COALESCE(excluded.work_tail, jobs.work_tail),
         eligible_time = COALESCE(excluded.eligible_time, jobs.eligible_time)

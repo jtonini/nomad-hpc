@@ -106,7 +106,10 @@ memory peaks larger than any node), and the assumptions.
 - **GPU-hours** = GPUs in the allocation × hours, from when Slurm began
   accounting GPUs (report.toml's `gpu_accounting_start`, else the first job
   with GPUs in its allocation in all the records). A job with no allocation
-  recorded counts the GPUs it asked for. The cards are those of the
+  recorded counts the GPUs it asked for. Jobs that asked for GPUs before
+  then are known only from NØMAÐ's readings of the queue: the report counts
+  them (`gpu_jobs_asking_before_accounting`, a minimum) and gives them no
+  GPU-hours. The cards are those of the
   institution's GPU tiers (institutional tiers whose nodes all have GPUs);
   a lab's GPU node doesn't make its tier a GPU tier. Card activity is not
   the activity of GPU jobs where Slurm doesn't confine devices.
