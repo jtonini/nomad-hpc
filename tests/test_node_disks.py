@@ -141,7 +141,8 @@ def test_one_node_answering_and_another_not_is_a_success(site):
 def test_ssh_to_the_nodes_hostname_and_store_its_name(site):
     site.st.sinfo = "gpu1 gpu1.cluster.example mix\n"
     r = ND.NodeDisksCollector({"alerts_enabled": False}, site.db).run()
-    assert r.success and [c[c.index("--") + 1] for c in ssh_calls(site)] == ["gpu1.cluster.example"]
+    # The df reading, then (1.14.3) the count by owner: both to its hostname.
+    assert r.success and {c[c.index("--") + 1] for c in ssh_calls(site)} == {"gpu1.cluster.example"}
     assert sqlite3.connect(site.db).execute("SELECT node FROM node_disks").fetchall() == [("gpu1",)]
     sinfo, = [c for c in site.calls if c[0].endswith("sinfo")]
     assert sinfo[1:] == ["-a", "-N", "-h", "-o", "%N %n %t"]
@@ -155,8 +156,10 @@ def test_a_sweep_stops_asking_after_max_seconds(site):
         return SimpleNamespace(returncode=0, stderr="", stdout=answer(
             df("/localscratch", 1, 1, "/")))
     site.answers["cn01"] = slow
+    # Without owner counts (1.14.3), which give a sweep their own time.
     col = ND.NodeDisksCollector({"nodes": ["cn01", "cn04", "cn05"], "parallel": 1,
-                                 "max_seconds": 1, "alerts_enabled": False}, site.db)
+                                 "max_seconds": 1, "alerts_enabled": False, "owners": False},
+                                site.db)
     t0 = time.monotonic()
     r = col.run()
     # cn01 was being asked when time ran out: its answer counts; the rest
@@ -179,7 +182,7 @@ def test_a_node_answering_in_another_encoding_is_read(tmp_path, monkeypatch):
     monkeypatch.setattr(ND, "find_tool", lambda name: str(fake) if name == "ssh" else None)
     db = tmp_path / "s.db"
     ensure_database(db)
-    r = ND.NodeDisksCollector({"nodes": ["cn01", "cn02"], "paths": ["/"],
+    r = ND.NodeDisksCollector({"nodes": ["cn01", "cn02"], "paths": ["/"], "owners": False,
                                "alerts_enabled": False}, db).run()
     assert r.success and r.records_collected == 1, r.error_message
     assert "cn02 (Bienvenue" in r.note

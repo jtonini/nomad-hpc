@@ -135,6 +135,22 @@ def workstation_disks(item: dict) -> list[dict]:
     return out
 
 
+def _node_disk_alert_item(item: dict) -> dict:
+    """A node disk reading as its alert carries it: the three largest owners
+    by name and size when they were counted and may be named
+    (owners_in_alerts), never the whole count, which stays in the database."""
+    out = {k: v for k, v in item.items() if k not in ('owners', 'owners_in_alerts')}
+    counted = item.get('owners') if isinstance(item.get('owners'), dict) else None
+    if counted and item.get('owners_in_alerts', True) is not False:
+        top = sorted((o for o in counted.get('top') or []
+                      if isinstance(o, dict) and o.get('user') and o.get('bytes')),
+                     key=lambda o: -o['bytes'])[:3]
+        out['largest'] = [{'user': o['user'], 'bytes': o['bytes']} for o in top]
+        out['count_complete'] = bool(counted.get('complete', True))
+        out['unreadable_by'] = list(counted.get('unreadable_by') or [])[:5]
+    return out
+
+
 def subject_of(collector_name: str, item: dict):
     """What on the host an item is about: the condition's name."""
     if collector_name in ('disk', 'node_disk', 'workstation_disk'):
@@ -256,7 +272,8 @@ class ThresholdChecker:
                               ('warning', 'used_percent_warning')):
             if key in t and value >= t[key]:
                 return [self._create_alert(severity, 'node_disk', item['node'], 'used_percent',
-                                           value, t[key], item, gap_minutes=gap)]
+                                           value, t[key], _node_disk_alert_item(item),
+                                           gap_minutes=gap)]
         return []
 
     def _check_workstation_disks(self, item: dict, host: str = None) -> list[dict]:
@@ -399,6 +416,17 @@ class ThresholdChecker:
             free = f"{_size(free)} free; " if isinstance(free, (int, float)) else ""
             where = (" -- on the node's system disk (/): filling it can take the node down"
                      if mount == '/' else (f" (on {mount})" if mount and mount != path else ""))
+            # Who has the data, when the collector counted it (1.14.3).
+            top = [o for o in (item.get('largest') or [])
+                   if isinstance(o, dict) and o.get('user') and o.get('bytes')]
+            hidden = [u for u in (item.get('unreadable_by') or []) if isinstance(u, str)]
+            if top:
+                where += " -- largest: " + ", ".join(f"{o['user']} {_size(o['bytes'])}"
+                                                     for o in top)
+            if hidden:
+                where += f" (folders of {', '.join(hidden)} could not be read)"
+            elif top and item.get('count_complete') is False:
+                where += " (count not finished)"
             return (f"Node {item.get('node', 'unknown')}: {path} at {value:.1f}% "
                     f"({free}threshold: {threshold:g}%){where}")
 

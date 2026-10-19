@@ -268,6 +268,56 @@ then doesn't raise it anew. A run says which nodes didn't answer, and fails
 only when none did. On the hub the readings are synced
 with the rest; the Console shows each node's latest.
 
+### Who has the data
+
+Since 1.14.3 a full disk comes with whom to ask. After a sweep's `df`
+readings, a few nodes chosen from them total each path by owner, on the node
+itself: `find -xdev` with its own block counts, as `du` (a file with several
+hard links counts once), summed there, so only one line per owner comes back
+over ssh. A path that is a link is counted where it leads. The count stays
+on that filesystem, runs at the lowest CPU and disk priority, ignores files
+that vanish while it runs, and stops after `owners_seconds` per path.
+
+Which nodes, at most `owners_per_sweep` (and no more than `parallel`) per
+sweep:
+
+1. a disk at `owners_above` percent or more that wasn't when last counted:
+   counted in the sweep that sees it full, so its alert names who has the
+   data;
+2. counts due: never counted, or not for `owners_every_hours`;
+3. full disks, counted again at every sweep, the one counted longest ago
+   first.
+
+A node that didn't answer, or doesn't have the path, isn't counted. The
+counts run after the readings, so a sweep that counts takes up to
+`owners_seconds` per path (plus a few seconds) longer than the readings
+alone.
+
+```toml
+[collectors.node_disks]
+# owners = true                # false: no counts
+# owners_every_hours = 6
+# owners_above = 80
+# owners_seconds = 60          # per path
+# owners_top = 5               # owners kept per node and path
+# owners_per_sweep = 8         # default and most: parallel
+# owners_in_alerts = true      # false: no names in alerts
+```
+
+`node_disk_owner_counts` has each count (node, path, how many owners, bytes
+counted, `complete`, and `stopped`: time limit, unreadable folders, no such
+folder, no access, count failed, no answer); `node_disk_owners` its largest
+owners and anyone with folders the count couldn't read (username as the head
+node names the uid, uid, bytes, files, unreadable folders). The collector's
+account reads what it counts: a folder it can't read is not counted, and its
+owner is named instead ("folders of X could not be read"), so an incomplete
+count never passes for the full picture.
+
+A disk's alert names its three largest owners and their sizes. Alerts also
+go to Slack and webhooks when those are set up: `owners_in_alerts = false`
+keeps names out of every alert (the counts are still kept). The NØMAÐ
+Console shows the owners in a node's details, to staff.
+
 To see whether the account reaches a node:
 
     ssh -o BatchMode=yes NODE 'df -P /localscratch | tail -1'

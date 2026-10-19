@@ -136,6 +136,16 @@ check_services = ["slurmd", "munge"]
 # max_seconds = 120              # a sweep stops asking after this long
 # ssh_user = "..."               # default: this account
 # nodes = ["cn01", "cn02"]       # default: every node sinfo lists
+# Who has the data (1.14.3): each path totalled by owner on a few nodes per
+# sweep (full disks at every sweep, the others every 6 hours); the largest
+# owners named in the disk's alert.
+# owners = true
+# owners_every_hours = 6
+# owners_above = 80
+# owners_seconds = 60            # per path
+# owners_top = 5
+# owners_per_sweep = 8           # default and most: parallel
+# owners_in_alerts = true        # false: no names in alerts (Slack, webhooks)
 
 # ============================================
 # LICENSE COLLECTOR

@@ -26,7 +26,10 @@ The disk thresholds also cover the disks of other machines, each alert about
 that machine rather than the host that read it:
 
 - `node_disk` (1.14): a compute node's local disk, read from the head node
-  (`[collectors.node_disks]`).
+  (`[collectors.node_disks]`). Since 1.14.3 the message names the three
+  largest owners of the data when the collector counted them in that sweep
+  (it does for a disk that has just filled): who to ask.
+  `owners_in_alerts = false` keeps the names out.
 - `workstation_disk` (1.14.2): a workstation's own disks (`/`, `/home` on a
   local drive, `/localscratch`, a data disk), from the workstation
   collector's mount readings. Network filesystems, fuse mounts and drives

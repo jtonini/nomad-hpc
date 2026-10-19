@@ -389,6 +389,31 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     """),
     # A job's memory request from what Slurm allocated it, per node (1.14.1).
     (22, "Memory requests from what Slurm allocated", _memory_from_allocation),
+    # Compute nodes' local disks by owner: who has the data (1.14.3).
+    (23, "Create node_disk_owner_counts and node_disk_owners", """
+        CREATE TABLE IF NOT EXISTS node_disk_owner_counts (
+            timestamp TEXT NOT NULL,
+            node TEXT NOT NULL,
+            path TEXT NOT NULL,
+            owners INTEGER,
+            bytes INTEGER,
+            complete INTEGER,
+            stopped TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_disk_owner_counts
+            ON node_disk_owner_counts(node, path, timestamp);
+        CREATE TABLE IF NOT EXISTS node_disk_owners (
+            timestamp TEXT NOT NULL,
+            node TEXT NOT NULL,
+            path TEXT NOT NULL,
+            username TEXT,
+            uid INTEGER,
+            bytes INTEGER,
+            files INTEGER,
+            unreadable INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_disk_owners ON node_disk_owners(node, path, timestamp);
+    """),
 ]
 
 

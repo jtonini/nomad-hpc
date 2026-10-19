@@ -4633,8 +4633,11 @@ def sync(ctx, config_file, output, dry_run):
             ("group_membership", "group_name"),
             ("group_membership", "username"),
             ("oom_kills", "source_site, timestamp"),
-            # Compute nodes' local disks: each node's latest reading (1.14).
+            # Compute nodes' local disks: each node's latest reading (1.14),
+            # and who has the data (1.14.3).
             ("node_disks", "source_site, node, timestamp"),
+            ("node_disk_owner_counts", "source_site, node, path, timestamp"),
+            ("node_disk_owners", "source_site, node, path, timestamp"),
         ]
         click.echo("  Indexing... ", nl=False)
         _built = 0
