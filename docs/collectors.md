@@ -435,6 +435,11 @@ are never put together, even if the same NAS answers on both.
 Only the collecting host needs 1.7.24 for the sizes; the hub's combined
 database gains the columns at its next sync.
 
+A machine's own disks among them (not NFS or other network filesystems, not
+fuse mounts, not drives plugged in under `/media`) raise `workstation_disk`
+alerts at the disk thresholds, one per machine and disk (1.14.2; see
+`docs/alerts.md`), and are the Console's Local disks.
+
 ## Storage servers
 
 ```toml

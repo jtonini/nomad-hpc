@@ -350,7 +350,7 @@ def sites(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
     gap = num((alerts_cfg if isinstance(alerts_cfg, dict) else {}).get("episode_gap_minutes")) or 60
     sync = _sync(conn)
     active = jobfacts.active(conn)
-    ceilings = memory_ceilings(conn)
+    ceilings = memory_ceilings(conn, now)
     out = []
     for name in site_names(conn):
         fresh = freshness(conn, name)

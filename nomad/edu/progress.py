@@ -171,8 +171,9 @@ def summary_join(conn: sqlite3.Connection) -> str:
     return "j.job_id = js.job_id"
 
 
-def memory_ceilings(conn: sqlite3.Connection) -> dict:
-    """The largest node's memory (MB) at each site, from recent node_state.
+def memory_ceilings(conn: sqlite3.Connection, now: datetime | None = None) -> dict:
+    """The largest node's memory (MB) at each site, from node_state of the
+    week before ``now`` (default: the present).
 
     A job's peak memory reading above it is not a measurement: Slurm's
     jobacct_gather/linux adds up the RSS of every process in a job, so memory
@@ -187,7 +188,7 @@ def memory_ceilings(conn: sqlite3.Connection) -> dict:
         site = ("COALESCE(source_site, cluster)" if {"source_site", "cluster"} <= cols
                 else "source_site" if "source_site" in cols
                 else "cluster" if "cluster" in cols else "NULL")
-        since = (datetime.now() - timedelta(days=7)).isoformat()
+        since = ((now or datetime.now()) - timedelta(days=7)).isoformat()
         rows = conn.execute(
             f"SELECT {site}, MAX(memory_total_mb) FROM node_state "
             "WHERE timestamp >= ? GROUP BY 1", (since,)).fetchall()

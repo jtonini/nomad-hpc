@@ -22,6 +22,18 @@ Before 1.7.16 `[alerts.thresholds]` was not read: every site alerted at the
 built-in values. The flat keys the example config used to show for disks
 (`disk_warning_percent`, `disk_critical_percent`) are read too.
 
+The disk thresholds also cover the disks of other machines, each alert about
+that machine rather than the host that read it:
+
+- `node_disk` (1.14): a compute node's local disk, read from the head node
+  (`[collectors.node_disks]`).
+- `workstation_disk` (1.14.2): a workstation's own disks (`/`, `/home` on a
+  local drive, `/localscratch`, a data disk), from the workstation
+  collector's mount readings. Network filesystems, fuse mounts and drives
+  plugged in under `/media` are left out, and a device mounted at several
+  places (btrfs subvolumes, a bind mount) is one disk. A machine collected
+  as `localhost` is named as the host that collects it.
+
 ### Disk fill forecasts
 
 Each disk reading fits the readings of the last `forecast_window_hours`

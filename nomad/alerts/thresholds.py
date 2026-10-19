@@ -92,9 +92,52 @@ _FLAT_KEYS = {
 }
 
 
+# A workstation's own disks, from its mount readings (1.14.2): network
+# filesystems are the storage servers' (their own alerts), a fuse mount is
+# more often someone's remote folder than a disk, and a drive plugged in
+# mounts under /media/<their name>/. As the Console's Local disks.
+REMOTE_FSTYPES = frozenset({"nfs", "nfs3", "nfs4", "cifs", "smb", "smb3", "smbfs", "9p", "afs",
+                            "ceph", "glusterfs", "lustre", "gpfs", "beegfs"})
+
+
+def is_local_disk(fstype, mountpoint) -> bool:
+    """A filesystem on the machine's own drives (fuseblk -- NTFS, exFAT --
+    is one)."""
+    f = str(fstype or "").lower()
+    if f in REMOTE_FSTYPES or f == "fuse" or f.startswith("fuse.") or f in ("iso9660", "udf"):
+        return False
+    return not str(mountpoint or "").startswith("/media/")
+
+
+def workstation_disks(item: dict) -> list[dict]:
+    """The local disks of one workstation reading: each device once (btrfs
+    subvolumes and bind mounts share one), at its shortest mount point with
+    the others in ``also``, with df's Use%."""
+    mounts = [m for m in (item.get("mount_snapshots") or []) if isinstance(m, dict)]
+    mounts.sort(key=lambda m: (len(str(m.get("mountpoint") or "")), str(m.get("mountpoint"))))
+    out, seen = [], {}
+    for m in mounts:
+        total, used, avail = m.get("total_bytes"), m.get("used_bytes"), m.get("avail_bytes")
+        if not (isinstance(total, (int, float)) and total > 0 and isinstance(used, (int, float))
+                and isinstance(avail, (int, float)) and used + avail > 0):
+            continue
+        if not is_local_disk(m.get("fstype"), m.get("mountpoint")):
+            continue
+        key = (m.get("source"), total)
+        if m.get("source") and key in seen:
+            seen[key]["also"].append(m.get("mountpoint"))
+            continue
+        d = {"path": m.get("mountpoint"), "also": [], "fstype": m.get("fstype"),
+             "total_bytes": total, "used_bytes": used, "available_bytes": avail,
+             "used_percent": round(100.0 * used / (used + avail), 2)}
+        seen[key] = d
+        out.append(d)
+    return out
+
+
 def subject_of(collector_name: str, item: dict):
     """What on the host an item is about: the condition's name."""
-    if collector_name in ('disk', 'node_disk'):
+    if collector_name in ('disk', 'node_disk', 'workstation_disk'):
         return item.get('path')
     if collector_name == 'nfs':
         return item.get('mount_point')
@@ -185,6 +228,11 @@ class ThresholdChecker:
                 # Each about its own node, not the head node that read it.
                 alerts.extend(self._check_node_disk(item))
                 continue
+            if collector_name == 'workstation':
+                # Its local disks, about the workstation (1.14.2); nothing
+                # else in a workstation reading has thresholds.
+                alerts.extend(self._check_workstation_disks(item, host))
+                continue
             alerts.extend(self._check_item(collector_name, item, host))
             if collector_name == 'disk':
                 alerts.extend(self._check_forecast(item, host))
@@ -210,6 +258,27 @@ class ThresholdChecker:
                 return [self._create_alert(severity, 'node_disk', item['node'], 'used_percent',
                                            value, t[key], item, gap_minutes=gap)]
         return []
+
+    def _check_workstation_disks(self, item: dict, host: str = None) -> list[dict]:
+        """A workstation's local disks at the disk thresholds: one condition
+        per machine and disk. A machine collected as localhost is the
+        collecting host, and is named as it."""
+        hostname = item.get('hostname')
+        if not hostname or item.get('status') in ('offline', 'error'):
+            return []
+        if hostname in ('localhost', '127.0.0.1') and host:
+            hostname = host
+        t = self.thresholds.get('disk', {})
+        alerts = []
+        for d in workstation_disks(item):
+            value = d['used_percent']
+            for severity, key in (('critical', 'used_percent_critical'),
+                                  ('warning', 'used_percent_warning')):
+                if key in t and value >= t[key]:
+                    alerts.append(self._create_alert(severity, 'workstation_disk', hostname,
+                                                     'used_percent', value, t[key], d))
+                    break
+        return alerts
 
     def _check_item(self, collector_name: str, item: dict, host: str) -> list[dict]:
         """Check a single data item against thresholds."""
@@ -332,6 +401,15 @@ class ThresholdChecker:
                      if mount == '/' else (f" (on {mount})" if mount and mount != path else ""))
             return (f"Node {item.get('node', 'unknown')}: {path} at {value:.1f}% "
                     f"({free}threshold: {threshold:g}%){where}")
+
+        elif source == 'workstation_disk':
+            path = item.get('path', 'unknown')
+            free = item.get('available_bytes')
+            free = f"{_size(free)} free; " if isinstance(free, (int, float)) else ""
+            also = item.get('also') or []
+            where = (" -- the system disk" if path == '/' else "")
+            where += f" (also {', '.join(also)})" if also else ""
+            return f"Local disk {path} at {value:.1f}% ({free}threshold: {threshold:g}%){where}"
 
         elif source == 'nfs':
             mount = item.get('mount_point', 'unknown')
