@@ -20,6 +20,12 @@ class Title:
     title: str
     subtitle: str
     badge: str
+    lines: list = field(default_factory=list)   # the institution and its units ([console.branding])
+    logo: bool = False                          # the institution's logo goes at the top
+
+    @property
+    def masthead(self) -> list:
+        return self.lines or ([self.institution] if self.institution else [])
 
 
 @dataclass
@@ -107,13 +113,13 @@ _WHY = {"guests": "guest jobs were on the nodes", "own": "the lab's own jobs fil
         "other": "neither guests nor the lab's jobs held the nodes"}
 
 
-def owner_doc(fig: dict, delivery) -> list:
+def owner_doc(fig: dict, delivery, brand=None) -> list:
     c, u, o, g, nd = fig["condo"], fig["use"], fig["owner_jobs"], fig["guests"], fig["nodes"]
     cl = fig["cluster"]["label"]
     month = month_name(fig["month"])
     mon = month.split()[0]
     doc = [Title(delivery.institution, f"{c['label']} condo on {cl}", f"Monthly report: {month}",
-                 f"Cluster: {cl}")]
+                 f"Cluster: {cl}", **_brand(brand))]
     hw = f"{plural(len(c['nodes']), 'node')} ({c['node_list']}): {n(c['cores'])} cores, " \
          f"{n(c['memory_gb'])} GB of memory" + (f", {plural(c['gpus'], 'GPU')}" if c["gpus"] else "")
     owners = c.get("owners") or ([c["owner"]] if c.get("owner") else [])
@@ -261,10 +267,16 @@ def owner_doc(fig: dict, delivery) -> list:
     return doc
 
 
-def summary_doc(data: dict, delivery, policy) -> list:
+def _brand(brand) -> dict:
+    if brand is None:
+        return {}
+    return {"lines": list(brand.lines), "logo": brand.logo is not None}
+
+
+def summary_doc(data: dict, delivery, policy, brand=None) -> list:
     month = data["month_name"]
     doc = [Title(delivery.institution, "Condo summary", f"Monthly summary: {month}",
-                 f"{plural(len(data['clusters']), 'cluster')}")]
+                 f"{plural(len(data['clusters']), 'cluster')}", **_brand(brand))]
     gm = policy.owner_start_minutes
     for cl in data["clusters"]:
         doc.append(H(cl["label"]))

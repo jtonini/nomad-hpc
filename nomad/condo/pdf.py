@@ -37,7 +37,7 @@ def _rgb(hexcolor: str) -> tuple[int, int, int]:
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
-def render(doc: list) -> bytes:
+def render(doc: list, logo: bytes | None = None) -> bytes:
     try:
         from fpdf import FPDF
         from fpdf.enums import TableBordersLayout
@@ -73,8 +73,25 @@ def render(doc: list) -> bytes:
 
     for b in doc:
         if isinstance(b, C.Title):
-            text(8, MUTED)
-            pdf.cell(width, 4, _latin(b.institution.upper()), new_x="LMARGIN", new_y="NEXT")
+            top = pdf.get_y()
+            x = pdf.l_margin
+            lines = b.masthead
+            if b.logo and logo:
+                import io
+                try:
+                    info = pdf.image(io.BytesIO(logo), x=x, y=top, h=16)
+                    # Room around a logo: a third of its width (a usual brand rule).
+                    w = float(getattr(info, "rendered_width", 14))
+                    x += w + max(4.0, w / 3)
+                except Exception:          # an image fpdf2 can't read: the words only
+                    pass
+            pdf.set_xy(x, top + (1 if x > pdf.l_margin else 0))
+            for i, line in enumerate(lines):
+                text(10 if i == 0 else 8.5, INK if i == 0 else MUTED, "B" if i == 0 else "")
+                pdf.set_x(x)
+                pdf.cell(width - (x - pdf.l_margin), 4.6 if i == 0 else 4, _latin(line),
+                         new_x="LMARGIN", new_y="NEXT")
+            pdf.set_y(max(pdf.get_y(), top + (16 if x > pdf.l_margin else 0)) + 3)
             text(17, INK, "B")
             pdf.multi_cell(width, 8, _latin(b.title), new_x="LMARGIN", new_y="NEXT")
             text(10, MUTED)

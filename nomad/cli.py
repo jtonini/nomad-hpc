@@ -5754,7 +5754,11 @@ def usage_report_condos(ctx, month, clusters, only, db, report_config, out, form
     fmts = list(formats) or settings.delivery.formats
     if "pdf" in fmts and not cpdf.available():
         click.echo("  (no PDF: fpdf2 isn't installed here; pip install 'nomad-hpc[report]')")
-    owners, summary = crun.build_all(data, settings, fmts)
+    from nomad.condo import branding as cbrand
+    brand = cbrand.read(nomad_config, settings.delivery.branding)
+    for w in brand.warnings:
+        click.echo(f"  (no logo: {w})")
+    owners, summary = crun.build_all(data, settings, fmts, brand)
     if data.get("partial"):
         # A summary of some condos would stand for the month's, and be sent.
         summary = None
@@ -5781,9 +5785,11 @@ def usage_report_condos(ctx, month, clusters, only, db, report_config, out, form
                 return "-" if x is None else f"{x:.0f}%"
             names = ", ".join(r.get("owners") or []) or r["owner"] or "owner ?"
             who = "" if mask else f" ({names}{'' if r['confirmed'] else ', unconfirmed'})"
-            start = (f"{p(r['within_pct'])} of {r['owner_jobs']} owner jobs started within "
+            start = (f"{p(r['within_pct'])} of {r['owner_jobs']} owner job{'' if r['owner_jobs'] == 1 else 's'} "
+                     "started within "
                      f"{settings.policy.owner_start_minutes:g} min" if r["owner_jobs"] else "no owner jobs")
-            click.echo(f"  {shown(r['label'])}{who}: {r['nodes']} nodes; lab {p(r['owner_pct'])}, "
+            nodes = f"{r['nodes']} node{'' if r['nodes'] == 1 else 's'}"
+            click.echo(f"  {shown(r['label'])}{who}: {nodes}; lab {p(r['owner_pct'])}, "
                        f"guests {p(r['guest_pct'])}, idle {p(r['idle_pct'])}; {start}; "
                        f"{r['preempted']} preempted; {r['out_node_hours']:,.0f} node-hours out")
         for f in cl["flags"]:

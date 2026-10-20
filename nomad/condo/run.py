@@ -61,26 +61,35 @@ def _write(path: Path, data: bytes | str) -> None:
 class Built:
     """One report in every format asked for."""
 
-    def __init__(self, key: str, doc: list, facts: dict, formats: list[str]):
+    def __init__(self, key: str, doc: list, facts: dict, formats: list[str], brand=None):
         self.key, self.doc, self.facts = key, doc, facts
-        self.html = render.html(doc)
+        self.brand = brand
+        logo = brand.logo if brand is not None else None
+        # The file carries its logo inside; an email, as an inline part (cid:).
+        self.html = render.html(doc, _data_uri(brand) if logo else None)
         self.text = render.text(doc)
         self.pdf = None
         self.pdf_error = None
         if "pdf" in formats:
             try:
-                self.pdf = pdf.render(doc)
+                self.pdf = pdf.render(doc, logo)
             except pdf.PDFUnavailable as e:
                 self.pdf_error = str(e)
 
 
-def build_all(data: dict, settings: Settings, formats: list[str]) -> tuple[list[Built], Built]:
+def _data_uri(brand) -> str:
+    import base64
+    return f"data:image/{brand.logo_type};base64," + base64.b64encode(brand.logo).decode("ascii")
+
+
+def build_all(data: dict, settings: Settings, formats: list[str], brand=None) -> tuple[list[Built], Built]:
+    """``brand``: nomad.condo.branding.read(), the institution's name and logo."""
     owners = []
     for fig in data["reports"]:
         key = f"{fig['cluster']['name']}/{fig['condo']['name']}"
-        owners.append(Built(key, content.owner_doc(fig, settings.delivery), fig, formats))
-    summary = Built("summary", content.summary_doc(data, settings.delivery, settings.policy),
-                    {k: v for k, v in data.items() if k != "reports"}, formats)
+        owners.append(Built(key, content.owner_doc(fig, settings.delivery, brand), fig, formats, brand))
+    summary = Built("summary", content.summary_doc(data, settings.delivery, settings.policy, brand),
+                    {k: v for k, v in data.items() if k != "reports"}, formats, brand)
     return owners, summary
 
 
@@ -130,7 +139,15 @@ def _message(b: Built, subject: str, to: list[str], cc: list[str], sender: str |
     msg["Message-ID"] = make_msgid(domain="nomad-hpc.com")
     note = "" if b.pdf is not None else (f"\n(No PDF: {b.pdf_error}.)\n" if b.pdf_error else "")
     msg.set_content(render.text(doc) + note)
-    msg.add_alternative(render.html(doc), subtype="html")
+    brand = b.brand
+    if brand is not None and brand.logo:
+        cid = make_msgid(domain="nomad-hpc.com")
+        msg.add_alternative(render.html(doc, "cid:" + cid[1:-1]), subtype="html")
+        msg.get_payload()[1].add_related(brand.logo, maintype="image", subtype=brand.logo_type,
+                                         cid=cid, filename=f"logo.{'jpg' if brand.logo_type == 'jpeg' else 'png'}",
+                                         disposition="inline")
+    else:
+        msg.add_alternative(render.html(doc), subtype="html")
     if b.pdf is not None:
         msg.add_attachment(b.pdf, maintype="application", subtype="pdf", filename=pdf_name)
     return msg

@@ -34,16 +34,34 @@ def _legend(items) -> str:
         f'</span> {escape(label)}' for label, c in items)
 
 
-def html(doc: list) -> str:
+def _masthead(b, logo_src: str | None) -> str:
+    """The institution's logo and lines, as on the Console's sign-in page."""
+    lines = b.masthead
+    words = "".join(
+        f'<div style="font-size:{14 if i == 0 else 12}px;font-weight:{600 if i == 0 else 400};'
+        f'color:{INK if i == 0 else MUTED};line-height:1.35">{escape(t)}</div>'
+        for i, t in enumerate(lines))
+    if not (b.logo and logo_src):
+        return (f'<div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:{MUTED}">'
+                f'{escape(" · ".join(lines))}</div>')
+    alt = escape(lines[0] if lines else "logo")
+    return (f'<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+            f'<td valign="middle" style="padding-right:16px"><img src="{escape(logo_src)}" alt="{alt}" '
+            f'height="56" style="display:block;height:56px;width:auto;border:0"></td>'
+            f'<td valign="middle">{words}</td></tr></table>')
+
+
+def html(doc: list, logo_src: str | None = None) -> str:
+    """``logo_src``: where the logo is (a data: URI in a file, cid: in an
+    email); without it, no logo."""
     title = next((b for b in doc if isinstance(b, C.Title)), None)
     body = []
     for b in doc:
         if isinstance(b, C.Title):
             body.append(
-                f'<tr><td style="padding:24px 28px 8px 28px">'
-                f'<div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:{MUTED}">'
-                f'{escape(b.institution)}</div>'
-                f'<div style="font-size:22px;font-weight:600;color:{INK};margin-top:6px">{escape(b.title)}</div>'
+                '<tr><td style="padding:24px 28px 8px 28px">'
+                + _masthead(b, logo_src) +
+                f'<div style="font-size:22px;font-weight:600;color:{INK};margin-top:14px">{escape(b.title)}</div>'
                 f'<div style="font-size:14px;color:{MUTED};margin-top:4px">{escape(b.subtitle)} &nbsp;'
                 f'<span style="display:inline-block;border:1px solid {OWNER_SOFT};color:{C.OWNER};'
                 f'border-radius:999px;padding:1px 9px;font-size:12px">{escape(b.badge)}</span></div>'
@@ -124,7 +142,7 @@ def text(doc: list) -> str:
     out = []
     for b in doc:
         if isinstance(b, C.Title):
-            out += [f"# {b.title}", "", f"{b.subtitle} ({b.badge}). {b.institution}.", ""]
+            out += [f"# {b.title}", "", f"{b.subtitle} ({b.badge}). {'; '.join(b.masthead)}.", ""]
         elif isinstance(b, C.H):
             out += [f"## {b.text}", ""]
         elif isinstance(b, C.P):

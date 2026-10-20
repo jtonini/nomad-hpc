@@ -658,3 +658,87 @@ def test_several_accounts_that_fit_are_no_guess():
     g = discover.guess_owners(c, "smith", access_from(NOMAD_CONFIG, log=False), "s", ccfg.DEFAULT_PATTERNS,
                               now=datetime(2026, 10, 1))
     assert g.owners == ["bsmith"]                # a lab's PI among them
+
+
+# --- the institution's name and logo, as on the Console's sign-in page (1.15.2) ----
+
+def _png(path):
+    """A 2×2 red PNG."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    raw = b"".join(b"\x00" + b"\xff\x00\x00" * 2 for _ in range(2))
+    data = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    path.write_bytes(data)
+    return path
+
+
+def _branded(tmp_path, logo=True):
+    from nomad.condo import branding
+    cfg = {"console": {"branding": {"institution": "Example University",
+                                    "unit": ["Research Computing", "Office of the Provost"]}}}
+    if logo:
+        cfg["console"]["branding"]["logo"] = str(_png(tmp_path / "logo.png"))
+    return branding.read(cfg)
+
+
+def test_branding_comes_from_the_consoles_settings(tmp_path):
+    from nomad.condo import branding
+    b = _branded(tmp_path)
+    assert b.lines == ["Example University", "Research Computing", "Office of the Provost"]
+    assert b.logo.startswith(b"\x89PNG") and b.logo_type == "png" and not b.warnings
+    b = branding.read({"support": {"institution": "Other U"}, "console": {"branding": {"unit": "RC"}}})
+    assert b.lines == ["Other U", "RC"] and b.logo is None
+    (tmp_path / "logo.svg").write_text("<svg/>")
+    b = branding.read({"console": {"branding": {"logo": str(tmp_path / "logo.svg")}}})
+    assert b.logo is None and "not a PNG or JPEG" in b.warnings[0]
+    b = branding.read({"console": {"branding": {"logo": "logo.png"}}})
+    assert "full path" in b.warnings[0]
+    assert branding.read({"console": {"branding": {"institution": "X"}}}, enabled=False).lines == []
+
+
+def test_the_logo_is_in_the_file_the_email_and_the_pdf(tmp_path, data, settings):
+    brand = _branded(tmp_path)
+    owners, summary = run.build_all(data, settings, ["html", "pdf"], brand)
+    html = owners[0].html
+    assert "data:image/png;base64," in html and 'alt="Example University"' in html
+    assert "Office of the Provost" in html and "Office of the Provost" in summary.html
+    msg = run._message(owners[0], "s", ["rc@example.edu"], [], "rc@example.edu", None, "r.pdf")
+    related = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert len(related) == 1 and related[0]["Content-ID"]
+    body = msg.get_body(("html",)).get_content()
+    assert "cid:" + related[0]["Content-ID"].strip("<>") in body and "data:image" not in body
+    if owners[0].pdf is not None:
+        assert b"/Subtype /Image" in owners[0].pdf
+    plain = msg.get_body(("plain",)).get_content()
+    assert "Example University; Research Computing; Office of the Provost" in plain
+
+
+def test_without_a_logo_the_names_still_head_the_report(tmp_path, data, settings):
+    brand = _branded(tmp_path, logo=False)
+    owners, _ = run.build_all(data, settings, ["html"], brand)
+    assert "<img" not in owners[0].html and "Example University · Research Computing" in owners[0].html
+    msg = run._message(owners[0], "s", ["rc@example.edu"], [], "rc@example.edu", None, "r.pdf")
+    assert not [p for p in msg.walk() if p.get_content_maintype() == "image"]
+    settings_off = ccfg.from_dict({"report": {"labs": {"branding": False, "institution": "ARC"}}})
+    assert settings_off.delivery.branding is False
+
+
+def test_the_command_puts_the_logo_on_the_reports(db, tmp_path, monkeypatch):
+    from nomad.cli import cli
+    monkeypatch.setattr(figures, "datetime", _Frozen)
+    logo = _png(tmp_path / "shield.png")
+    cfg = tmp_path / "nomad.toml"
+    cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n[console.branding]\n'
+                   f'institution = "Example University"\nunit = ["Research Computing"]\nlogo = "{logo}"\n')
+    rt = tmp_path / "report.toml"
+    rt.write_text(REPORT_TOML)
+    out = tmp_path / "out"
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "usage-report", "condos", "--db", str(db), "--config", str(rt),
+                                 "--month", MONTH, "--out", str(out), "--mask"])
+    assert r.exit_code == 0, r.output
+    assert "2 nodes" in r.output and "no logo" not in r.output
+    assert "data:image/png;base64," in (out / "hpc1" / "smith" / f"{MONTH}.html").read_text()

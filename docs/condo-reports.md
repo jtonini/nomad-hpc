@@ -129,8 +129,15 @@ and `OUT/summary/<YYYY-MM>.*`, readable only by the account that writes them:
 they name people. `OUT` is `out_dir` in `[report.labs]`, else
 `reports/condos` in nomad's data directory, else `--out`.
 
-The email is HTML made for mail readers (tables, inline styles, no images),
-with a plain-text part and the PDF attached. The PDF needs fpdf2:
+The email is HTML made for mail readers (tables, inline styles), with a
+plain-text part and the PDF attached. Each report is headed like the
+Console's sign-in page, from `[console.branding]` in nomad.toml: the logo,
+the institution and the unit lines under it (`unit = ["Research
+Computing", "Office of the Provost"]`). The logo must be a PNG or JPEG at a
+full path; it goes inside the HTML file, inline in the email (so mail
+readers show it without fetching anything), and in the PDF. `branding =
+false` in `[report.labs]` leaves it all out; without `[console.branding]`,
+`institution` in `[report.labs]` names the sender. The PDF needs fpdf2:
 
 ```bash
 pip install 'nomad-hpc[report]'
@@ -192,7 +199,8 @@ owner_patterns = ["{name}", "{name}lab", "{name}_lab", "{name}-lab"]
 netid_max_length = 8                   # NetIDs cut short here; 0: never
 contact = "Questions: rc@example.edu"  # the line at the foot of each report
 out_dir = "/var/lib/nomad/reports/condos"
-institution = "Research Computing"     # the name at the top of each report
+institution = "Research Computing"     # the name at the top, without [console.branding]
+branding = true                        # head reports with [console.branding]: logo and lines
 
 [report.policy]                        # what the reports check against
 owner_start_minutes = 5                # an owner's job starts on its own nodes within

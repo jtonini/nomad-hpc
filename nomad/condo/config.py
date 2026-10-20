@@ -14,7 +14,8 @@ might do differently from another.
     netid_max_length = 8                   # NetIDs cut short here ("tanderso"); 0: never
     contact = "Questions: rc@example.edu"
     out_dir = "/var/lib/nomad/reports/condos"
-    institution = "Research Computing"     # the name at the top of each report
+    institution = "Research Computing"     # the name at the top, without [console.branding]
+    branding = true                        # use the Console's [console.branding]: lines and logo
 
     [report.policy]                        # what the reports check against
     owner_start_minutes = 5
@@ -98,6 +99,7 @@ class Delivery:
     formats: list[str] = field(default_factory=lambda: ["html", "pdf", "json"])
     owner_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_PATTERNS))
     netid_max_length: int = 8
+    branding: bool = True          # the Console's [console.branding]: name lines and logo
     contact: str | None = None
     out_dir: Path | None = None
     institution: str = "Research Computing"
@@ -171,7 +173,7 @@ class Settings:
 # --- reading ---------------------------------------------------------------------
 
 _LABS_KEYS = ("mail_domain", "send_from", "review_to", "summary_to", "name_members", "formats",
-              "owner_patterns", "netid_max_length", "contact", "out_dir", "institution")
+              "owner_patterns", "netid_max_length", "contact", "out_dir", "institution", "branding")
 _POLICY_KEYS = ("owner_start_minutes", "guest_max_days", "guest_grace_minutes", "home_quota_gb",
                 "lab_scratch_quota_tb", "scratch_path", "use_below")
 _CONDO_KEYS = ("owner", "partition", "nodes", "members", "email", "cc", "confirmed", "account", "label",
@@ -282,6 +284,10 @@ def _delivery(d: dict) -> Delivery:
         out.out_dir = Path(str(d["out_dir"])).expanduser()
     if d.get("institution"):
         out.institution = str(d["institution"]).strip()
+    if "branding" in d:
+        if not isinstance(d["branding"], bool):
+            raise CondoConfigError("branding must be true or false")
+        out.branding = d["branding"]
     return out
 
 
