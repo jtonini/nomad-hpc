@@ -151,9 +151,9 @@ def test_a_partition_over_every_condo_node_is_another_guest_partition():
     assert one.condos == {"solo": {"a"}}
 
 
-@pytest.mark.parametrize("partition, name", [("parish", "parish"), ("parishlab", "parish"),
-                                             ("parish_lab", "parish"), ("yang2", "yang"),
-                                             ("Parish-Lab", "parish"), ("x", None)])
+@pytest.mark.parametrize("partition, name", [("smith", "smith"), ("smithlab", "smith"),
+                                             ("smith_lab", "smith"), ("lee2", "lee"),
+                                             ("Smith-Lab", "smith"), ("x", None)])
 def test_the_owner_name_in_a_partition_name(partition, name):
     assert discover.last_name(partition, ccfg.DEFAULT_PATTERNS) == name
 
@@ -536,7 +536,7 @@ def test_typos_in_settings_are_refused():
     with pytest.raises(ccfg.CondoConfigError, match="did you mean 'confirmed'"):
         ccfg.from_dict({"report": {"clusters": {"c": {"condos": {"a": {"confirmd": False}}}}}})
     s = ccfg.from_dict({"report": {"labs": {"send_from": ""}, "clusters": {"c": {"condos": {"a": {"email": " "}}}}}})
-    assert s.delivery.send_from is None and s.clusters["c"].condos["a"].email is None
+    assert s.delivery.send_from is None and s.clusters["c"].condos["a"].email == []
 
 
 def test_masked_errors_name_no_condo(tmp_path, db):
@@ -560,3 +560,101 @@ def test_init_never_declares_a_table_twice(tmp_path, db):
     new = tmp_path / "new.toml"
     r = CliRunner().invoke(cli, ["usage-report", "condos", "init", "--db", str(db), "--config", str(new), "--apply"])
     assert r.exit_code == 0 and new.stat().st_mode & 0o077 == 0
+
+
+# --- owners from the name and from the users (1.15.1) ------------------------------
+
+@pytest.mark.parametrize("name, netid, ok", [
+    ("anderson", "tanderso", True),      # cut at 8 letters
+    ("anderson", "manderson", True),
+    ("hughes", "jhughes", True), ("hughes", "hughes", True), ("hughes", "abjhughes", False),
+    ("anderson", "tander", False),       # too short to be cut at 8
+    ("smith", "jsmithx", False),
+    ("smith", "jsmith3", True),          # a number for the second of the name
+    ("anderson", "tanders2", True),      # cut short to make room for it
+    ("smith", "jsmiths2", False),
+])
+def test_netids_cut_short_still_match(name, netid, ok):
+    assert discover._initials_then(name, netid) is ok
+    assert discover._initials_then("anderson", "tanderso", netid_max=0) is False
+
+
+def _owners_db():
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, collected_at TEXT, "
+              "has_account INTEGER, source_site TEXT, cluster TEXT)")
+    c.execute("CREATE TABLE jobs (job_id TEXT, user_name TEXT, partition TEXT, req_cpus INTEGER, "
+              "runtime_seconds INTEGER, end_time TEXT, source_site TEXT)")
+    labs = {"tanderso$": ["tanderso", "e1", "e2", "e3"], "jhughes$": ["jhughes", "h1"],
+            "mcosta$": ["mcosta", "d1", "d2", "d3"], "mgarcia$": ["mgarcia", "y1", "y2"],
+            "dnovak$": ["dnovak", "b0"], "pwhite$": ["pwhite", "k1", "k2", "k3"],
+            "other": ["rkhan"]}
+    for g, people in labs.items():
+        for u in people:
+            c.execute("INSERT INTO group_membership VALUES (?, ?, '2026-10-01', 1, 's', 's')", (u, g))
+    jobs = [("anderson", u, 1) for u in ("e1", "e2", "e3")] + [("anderson", "h1", 100)] \
+        + [("silva", u, 10) for u in ("d1", "d2", "d3")] \
+        + [("garciakhan", u, 10) for u in ("y1", "y2")] \
+        + [("novak", u, 10) for u in ("k1", "k2", "k3")] + [("novak", "y1", 1)]
+    for i, (part, user, cpus) in enumerate(jobs):
+        c.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, 3600, '2026-09-15', 's')", (str(i), user, part, cpus))
+    return c
+
+
+@pytest.mark.parametrize("partition, owners, disagree", [
+    ("anderson", ["tanderso"], False),          # the name, cut short; the users agree (by people)
+    ("silva", ["mcosta"], False),              # the name names nobody: the users' lab
+    ("garciakhan", ["mgarcia", "rkhan"], False),  # two names joined
+    ("novak", ["dnovak"], True),              # the name's lab, but guests' lab uses it most
+    ("johnson", [], False),                     # nothing to go by
+])
+def test_owners_from_the_name_and_the_users(partition, owners, disagree):
+    from nomad.config.access import access_from
+    acc = access_from(NOMAD_CONFIG, log=False)
+    g = discover.guess_owners(_owners_db(), partition, acc, "s", ccfg.DEFAULT_PATTERNS,
+                              now=datetime(2026, 10, 1))
+    assert g.owners == owners and g.disagree is disagree, g.notes
+
+
+def test_two_owners_get_the_report_and_both_labs_are_members(db, tmp_path, monkeypatch):
+    rt = tmp_path / "report.toml"
+    rt.write_text(REPORT_TOML.replace('owner = "jsmith"\n', 'owner = ["jsmith", "rjones"]\n'))
+    s = ccfg.load(rt)
+    smith = s.clusters["hpc1"].condos["smith"]
+    assert smith.owners == ["jsmith", "rjones"] and smith.owner == "jsmith"
+    assert smith.addresses(s.delivery) == ["jsmith@example.edu", "rjones@example.edu"]
+    d = figures.build(sqlite3.connect(db), s, MONTH, nomad_config=NOMAD_CONFIG, now=NOW)
+    r = report(d, "smith")
+    assert r["condo"]["owners"] == ["jsmith", "rjones"]
+    assert "rjones" in r["members"]["how"] and r["members"]["count"] == 4
+    assert "Owners: jsmith and rjones." in render.text(content.owner_doc(r, s.delivery))
+    s.delivery.review_to = []
+    owners, summary = run.build_all(d, s, ["html"])
+    plan = {p["key"]: p for p in run.plan_mail(owners, summary, s, MONTH)}
+    assert plan["hpc1/smith"]["to"] == ["jsmith@example.edu", "rjones@example.edu"]
+
+
+def test_init_writes_two_owners_and_flags_disagreement():
+    f = discover.Found(site="s", partitions={"condos": {"a", "b"}, "garciakhan": {"a"}, "novak": {"b"}})
+    discover.find(f)
+    layouts = [("s", f, [("garciakhan", discover.Guess(["mgarcia", "rkhan"], ["name: two names"])),
+                         ("novak", discover.Guess(["dnovak"], ["users DISAGREE"], True))])]
+    text, _ = discover.draft("", {}, layouts, ccfg.Settings())
+    assert 'owner = ["mgarcia", "rkhan"]' in text and "CHECK" in text
+    from nomad.cli import read_toml_text
+    s = ccfg.from_dict(read_toml_text(text))
+    assert s.clusters["s"].condos["garciakhan"].owners == ["mgarcia", "rkhan"]
+
+
+def test_several_accounts_that_fit_are_no_guess():
+    from nomad.config.access import access_from
+    c = _owners_db()
+    for u in ("asmith2", "bsmith", "csmith3"):
+        c.execute("INSERT INTO group_membership VALUES (?, 'users', '2026-10-01', 1, 's', 's')", (u,))
+    g = discover.guess_owners(c, "smith", access_from(NOMAD_CONFIG, log=False), "s", ccfg.DEFAULT_PATTERNS,
+                              now=datetime(2026, 10, 1))
+    assert g.owners == [] and "3 accounts fit" in g.notes[0]
+    c.execute("INSERT INTO group_membership VALUES ('bsmith', 'bsmith$', '2026-10-01', 1, 's', 's')")
+    g = discover.guess_owners(c, "smith", access_from(NOMAD_CONFIG, log=False), "s", ccfg.DEFAULT_PATTERNS,
+                              now=datetime(2026, 10, 1))
+    assert g.owners == ["bsmith"]                # a lab's PI among them

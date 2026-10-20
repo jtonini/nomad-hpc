@@ -116,7 +116,10 @@ def owner_doc(fig: dict, delivery) -> list:
                  f"Cluster: {cl}")]
     hw = f"{plural(len(c['nodes']), 'node')} ({c['node_list']}): {n(c['cores'])} cores, " \
          f"{n(c['memory_gb'])} GB of memory" + (f", {plural(c['gpus'], 'GPU')}" if c["gpus"] else "")
-    doc.append(P(hw + (f". Owner: {c['owner']}." if c["owner"] else ".")
+    owners = c.get("owners") or ([c["owner"]] if c.get("owner") else [])
+    who = (f". Owner: {owners[0]}." if len(owners) == 1 else
+           f". Owners: {', '.join(owners[:-1])} and {owners[-1]}." if owners else ".")
+    doc.append(P(hw + who
                  + f" Partition {c['partition']} on {cl}."))
 
     doc.append(H(f"Your nodes in {mon}"))
@@ -271,7 +274,8 @@ def summary_doc(data: dict, delivery, policy) -> list:
         else:
             rows = []
             for r in cl["condos"]:
-                rows.append([r["label"], (r["owner"] or "?") + ("" if r["confirmed"] else " (unconfirmed)"),
+                rows.append([r["label"], (", ".join(r.get("owners") or []) or r["owner"] or "?")
+                             + ("" if r["confirmed"] else " (unconfirmed)"),
                              n(r["nodes"]), pct(r["owner_pct"]), pct(r["guest_pct"]), pct(r["idle_pct"]),
                              n(r["guest_core_hours"]), n(r["preempted"]),
                              f"{pct(r['within_pct'])} of {n(r['owner_jobs'])}" if r["owner_jobs"] else "-",

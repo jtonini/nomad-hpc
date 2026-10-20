@@ -6,8 +6,8 @@ Each node reading (node_state) carries the node's partitions. The guest
 partition is the one that lends the condo nodes to everyone (report.toml's
 ``guest_partitions``, or a partition named like "condo"); a condo is a
 partition whose nodes all sit inside it. Its owner is guessed from the
-partition's name (``parish``, ``parishlab``, ``parish_lab`` -> a NetID
-ending in "parish"), and only drafted: `nomad usage-report condos init`
+partition's name (``smith``, ``smithlab``, ``smith_lab`` -> a NetID
+ending in "smith") and from who uses it, and only drafted: `nomad usage-report condos init`
 writes the guess for someone to confirm.
 """
 from __future__ import annotations
@@ -126,8 +126,8 @@ def find(found: Found, guest_partitions: list[str] | None = None) -> Found:
 
 def last_name(partition: str, patterns) -> str | None:
     """The owner's last name in a condo partition's name, by the first of
-    ``patterns`` (most specific first) that fits: 'parish_lab' -> 'parish'.
-    A number at the end is a second condo of the same lab ('yang2')."""
+    ``patterns`` (most specific first) that fits: 'smith_lab' -> 'smith'.
+    A number at the end is a second condo of the same lab ('lee2')."""
     text = re.sub(r"\d+$", "", partition.strip().lower())
     for pat in sorted(patterns, key=lambda p: -len(p.replace("{name}", ""))):
         pre, _, post = pat.lower().partition("{name}")
@@ -137,48 +137,213 @@ def last_name(partition: str, patterns) -> str | None:
     return None
 
 
-def _initials_then(name: str, netid: str) -> bool:
-    """A NetID made of up to two initials then the last name ('cparish')."""
+NETID_MAX = 8      # where an institution's NetIDs are cut short ([report.labs] netid_max_length)
+
+
+def _initials_then(name: str, netid: str, netid_max: int = NETID_MAX) -> bool:
+    """A NetID made of up to two initials then the last name ('jsmith'),
+    perhaps a number after it ('jsmith3', two people of the same name), the
+    name cut short where NetIDs stop ('tanderso' for Anderson, 'tanders2')."""
     netid = netid.lower()
-    if not netid.endswith(name):
-        return False
-    head = netid[:-len(name)]
-    return len(head) <= 2 and head.isalpha() or head == ""
+    core = netid.rstrip("0123456789")
+    for k in (1, 2, 0):
+        head, tail = core[:k], core[k:]
+        if k and not head.isalpha():
+            continue
+        if tail == name:
+            return True
+        if netid_max and len(netid) == netid_max and len(tail) >= 4 and name.startswith(tail):
+            return True
+    return False
+
+
+def _lab_rx(acc):
+    pattern = getattr(acc, "group_pattern", "") if acc is not None else ""
+    if not pattern or "{netid}" not in pattern:
+        return None
+    pre, _, post = pattern.partition("{netid}")
+    return re.compile("^" + re.escape(pre) + r"(.+)" + re.escape(post) + "$")
+
+
+class Pool:
+    """The NetIDs a condo's owner can be among, read once: lab groups' PIs
+    (by [console.labs] group_pattern), those who lead labs in nomad.toml,
+    who ran in the partition, and every account."""
+
+    def __init__(self, conn, acc=None, site: str | None = None, partition: str | None = None):
+        self.labs: dict[str, str] = {}
+        self.leads = {str(n).lower() for n in (getattr(acc, "leads", None) or {})}
+        self.ran: set[str] = set()
+        self.accounts: set[str] = set()
+        gcols = columns(conn, "group_membership")
+        rx = _lab_rx(acc)
+        if "group_name" in gcols and rx is not None:
+            for (g,) in conn.execute("SELECT DISTINCT group_name FROM group_membership"):
+                m = rx.match(str(g or ""))
+                if m:
+                    self.labs.setdefault(m.group(1).lower(), str(g))
+        jcols = columns(conn, "jobs")
+        if partition and {"user_name", "partition"} <= jcols:
+            where = " AND source_site = ?" if site is not None and "source_site" in jcols else ""
+            self.ran = {str(u).lower() for (u,) in conn.execute(
+                f"SELECT DISTINCT user_name FROM jobs WHERE partition = ?{where}",
+                [partition] + ([site] if where else [])) if u}
+        if "username" in gcols:
+            self.accounts = {str(u).lower() for (u,) in conn.execute(
+                "SELECT DISTINCT username FROM group_membership") if u}
+
+    def candidates(self, name: str, partition: str | None = None,
+                   netid_max: int = NETID_MAX) -> list[tuple[str, str, int]]:
+        """(NetID, why, strength) for ``name``, best first."""
+        found: dict[str, tuple[int, str]] = {}
+
+        def add(netid, points, why):
+            if _initials_then(name, netid, netid_max) and points > found.get(netid, (0, ""))[0]:
+                found[netid] = (points, why)
+        for netid, g in self.labs.items():
+            add(netid, 4, f"lab group {g}")
+        for netid in self.leads:
+            add(netid, 4, "leads a lab in nomad.toml")
+        for netid in self.ran:
+            add(netid, 3, f"ran jobs in {partition}")
+        for netid in self.accounts:
+            add(netid, 1, "has an account")
+        return [(n, why, p) for n, (p, why) in sorted(found.items(), key=lambda kv: (-kv[1][0], kv[0]))]
 
 
 def owner_candidates(conn, name: str, acc=None, site: str | None = None,
-                     partition: str | None = None) -> list[tuple[str, str]]:
+                     partition: str | None = None, netid_max: int = NETID_MAX) -> list[tuple[str, str]]:
     """NetIDs that could own a condo named for ``name``, best first, each with
     why: a lab group named for them (by [console.labs] group_pattern), a
     lab they lead in nomad.toml, jobs in the partition, or an account."""
-    score: dict[str, tuple[int, str]] = {}
+    return [(n, why) for n, why, _ in Pool(conn, acc, site, partition).candidates(name, partition, netid_max)]
 
-    def add(netid, points, why):
-        netid = str(netid or "").strip().lower()
-        if netid and _initials_then(name, netid) and points > score.get(netid, (0, ""))[0]:
-            score[netid] = (points, why)
 
-    gcols = columns(conn, "group_membership")
-    if acc is not None and getattr(acc, "group_pattern", "") and "group_name" in gcols:
-        pre, _, post = acc.group_pattern.partition("{netid}")
-        rx = re.compile(re.escape(pre) + r"(.+)" + re.escape(post) + r"$")
-        for (g,) in conn.execute("SELECT DISTINCT group_name FROM group_membership"):
+@dataclass
+class UsageGroup:
+    netid: str          # the PI the lab group is named for
+    group: str
+    people: int         # of those who ran in the partition, how many are in it
+    of: int             # how many ran in the partition
+    share: float        # of their core-hours, the group's members'
+
+
+def usage_groups(conn, acc, site: str | None, partition: str, days: int = 365,
+                 now: datetime | None = None) -> list[UsageGroup]:
+    """The lab groups of the people who ran jobs in ``partition`` in the last
+    ``days``: most of those people first, then most core-hours. A condo's
+    partition is its owner's lab's, so its users' lab group points at the
+    owner, whatever the partition is called."""
+    rx = _lab_rx(acc)
+    jcols = columns(conn, "jobs")
+    if rx is None or not {"user_name", "partition", "end_time"} <= jcols \
+            or "group_name" not in columns(conn, "group_membership"):
+        return []
+    since = ((now or datetime.now()) - timedelta(days=days)).isoformat()[:10]
+    cpu = "COALESCE(req_cpus, 0)" if "req_cpus" in jcols else "1"
+    run = "COALESCE(runtime_seconds, 0)" if "runtime_seconds" in jcols else "0"
+    where = " AND source_site = ?" if site is not None and "source_site" in jcols else ""
+    use: dict = {}
+    for user, ch in conn.execute(
+            f"SELECT user_name, SUM({cpu} * {run}) / 3600.0 FROM jobs WHERE end_time >= ?{where} "
+            f"AND partition = ? GROUP BY user_name", [since] + ([site] if where else []) + [partition]):
+        if user:
+            use[user] = max(0.0, float(ch or 0))
+    if not use:
+        return []
+    total = sum(use.values()) or 1.0
+    groups: dict = {}
+    for user, ch in use.items():
+        for (g,) in conn.execute("SELECT DISTINCT group_name FROM group_membership WHERE username = ?", (user,)):
             m = rx.match(str(g or ""))
             if m:
-                add(m.group(1), 4, f"lab group {g}")
-    for netid in (getattr(acc, "leads", None) or {}):
-        add(netid, 4, "leads a lab in nomad.toml")
-    jcols = columns(conn, "jobs")
-    if partition and {"user_name", "partition"} <= jcols:
-        where = " AND source_site = ?" if site is not None and "source_site" in jcols else ""
-        for (u,) in conn.execute(f"SELECT DISTINCT user_name FROM jobs WHERE partition = ?{where}",
-                                 [partition] + ([site] if where else [])):
-            add(u, 3, f"ran jobs in {partition}")
-    if "username" in gcols:
-        for (u,) in conn.execute("SELECT DISTINCT username FROM group_membership WHERE username LIKE ?",
-                                 (f"%{name}",)):
-            add(u, 1, "has an account")
-    return [(n, why) for n, (p, why) in sorted(score.items(), key=lambda kv: (-kv[1][0], kv[0]))]
+                k = groups.setdefault(g, [m.group(1).lower(), 0, 0.0])
+                k[1] += 1
+                k[2] += ch
+    out = [UsageGroup(n, g, k, len(use), round(c / total, 3)) for g, (n, k, c) in groups.items()]
+    out.sort(key=lambda u: (-u.people, -u.share, u.group))
+    return out
+
+
+@dataclass
+class Guess:
+    owners: list[str]
+    notes: list[str]            # the evidence, in words, for the draft's comments
+    disagree: bool = False      # the name and the condo's users point at different labs
+
+
+def _usage_words(u: UsageGroup) -> str:
+    return (f"lab group {u.group} holds {u.people} of the {u.of} people who ran here "
+            f"({100 * u.share:.0f}% of their core-hours)")
+
+
+def guess_owners(conn, partition: str, acc=None, site: str | None = None, patterns=(),
+                 netid_max: int = NETID_MAX, now: datetime | None = None) -> Guess:
+    """Who owns a condo, from two kinds of evidence: its name (a NetID made
+    of initials and the last name, cut short where NetIDs stop; two last
+    names joined are two owners) and its users (the lab group that holds
+    most of the people who ran in the partition). Each alone misleads: a
+    partition can be named for another of the PI's surnames, and a condo
+    lent out a lot is used mostly by guests' labs."""
+    notes: list[str] = []
+    usage = usage_groups(conn, acc, site, partition, now=now)
+    top = usage[0] if usage else None
+    # The users' lab, when it holds more than half of them (two at least).
+    by_use = top if top is not None and top.people >= 2 and 2 * top.people > top.of else None
+
+    pool = Pool(conn, acc, site, partition)
+
+    def best(name):
+        cands = pool.candidates(name, partition, netid_max)
+        return cands[0] if cands else None
+
+    owners: list[str] = []
+    name = last_name(partition, patterns or ("{name}",))
+    first = best(name) if name else None
+    weak = [n for n, _, p in pool.candidates(name, partition, netid_max) if p == 1] if name else []
+    if first is not None and first[2] == 1 and len(weak) > 1:
+        # Only accounts that happen to fit, several of them: no guess.
+        notes.append(f"name: {len(weak)} accounts fit, none a lab's PI: {', '.join(weak[:6])}")
+        first = None
+    elif first is not None:
+        owners = [first[0]]
+        notes.append(f"name: {first[1]}")
+    elif name and not weak:
+        # Two last names joined ('garciakhan'): two owners, when each half
+        # (three letters at least) names someone; the split with the best
+        # evidence on its weaker side wins.
+        splits = []
+        for i in range(3, len(name) - 2):
+            a, b = best(name[:i]), best(name[i:])
+            # One side at least a lab's PI: two accounts that happen to
+            # spell the halves are no evidence.
+            if a and b and a[0] != b[0] and max(a[2], b[2]) >= 4:
+                splits.append((min(a[2], b[2]), a[2] + b[2], i, a, b))
+        if splits:
+            _, _, i, a, b = max(splits)
+            owners = [a[0], b[0]]
+            notes.append(f"name: two names, {name[:i]} ({a[1]}) and {name[i:]} ({b[1]})")
+    strong = bool(first and first[1].startswith(("lab group", "leads")))
+    disagree = False
+    if by_use is not None:
+        if not owners or (not strong and by_use.netid not in owners):
+            # A name that names nobody, or only an account: the users' lab wins.
+            if owners:
+                notes.append(f"the name gave {', '.join(owners)} on weaker evidence")
+            owners = [by_use.netid]
+            notes.append("users: " + _usage_words(by_use))
+        elif by_use.netid in owners:
+            notes.append("users agree: " + _usage_words(by_use))
+        else:
+            disagree = True
+            notes.append("users DISAGREE: " + _usage_words(by_use) + "; check")
+    elif top is not None:
+        notes.append("users: " + _usage_words(top) + " (too few to go by)")
+    elif not owners:
+        notes.append("nobody ran in the partition this past year, and the name names nobody")
+    else:
+        notes.append("nobody ran in the partition this past year")
+    return Guess(owners, notes, disagree)
 
 
 # --- report.toml draft -------------------------------------------------------------
@@ -201,9 +366,9 @@ def has_header(text: str, dotted: str) -> bool:
 def draft(existing_text: str, existing: dict, layouts: list[tuple[str, Found, list]],
           settings, mail_domain_hint: str | None = None) -> tuple[str, list[str]]:
     """The text to add to report.toml, and what was added in words.
-    ``layouts``: (cluster, Found, [(partition, [(netid, why), ...])], or
-    None for a cluster whose condos aren't drafted this time). A table the
-    file has, in any form, is never declared again."""
+    ``layouts``: (cluster, Found, [(partition, Guess)], or None for a
+    cluster whose condos aren't drafted this time). A table the file has,
+    in any form, is never declared again."""
     report = (existing or {}).get("report") or {}
     out = [f"\n# --- Condos, drafted by `nomad usage-report condos init` on {datetime.now():%Y-%m-%d} "
            "from the nodes' partitions.",
@@ -219,6 +384,7 @@ def draft(existing_text: str, existing: dict, layouts: list[tuple[str, Found, li
                 "name_members = true                # an owner's report names their own lab's members",
                 "formats = [\"html\", \"pdf\", \"json\"]",
                 "owner_patterns = [\"{name}\", \"{name}lab\", \"{name}_lab\", \"{name}-lab\"]",
+                "netid_max_length = 8               # NetIDs cut short here (tanderso for Anderson); 0: never",
                 "# contact = \"Questions: rc@example.edu\"",
                 "# out_dir = \"/var/lib/nomad/reports/condos\"",
                 "# institution = \"Research Computing\""]
@@ -243,7 +409,7 @@ def draft(existing_text: str, existing: dict, layouts: list[tuple[str, Found, li
         ckey = _key(cluster)
         have = (clusters.get(cluster) or {}).get("condos") or {}
         have_parts = {(v or {}).get("partition") or k for k, v in have.items()}
-        new = [(p, cands) for p, cands in (condos or ()) if p not in have_parts]
+        new = [(p, guess) for p, guess in (condos or ()) if p not in have_parts]
         guests = ", ".join(_q(g) for g in found.guest_partitions)
         if cluster not in clusters and not has_header(existing_text, f"report.clusters.{cluster}"):
             out += ["", f"[report.clusters.{ckey}]",
@@ -264,17 +430,21 @@ def draft(existing_text: str, existing: dict, layouts: list[tuple[str, Found, li
         if not new:
             said.append(f"{cluster}: every condo already listed")
             continue
-        for part, cands in new:
+        for part, guess in new:
             nodes = sorted(found.condos[part])
             cores = sum(found.nodes[n].cores for n in nodes if n in found.nodes)
             gpus = sum(found.nodes[n].gpus for n in nodes if n in found.nodes)
             out += ["", f"[report.clusters.{ckey}.condos.{_key(part)}]"]
-            if cands:
-                netid, why = cands[0]
-                others = "; also " + ", ".join(n for n, _ in cands[1:4]) if len(cands) > 1 else ""
-                out.append(f"owner = {_q(netid)}                  # guessed: {why}{others}")
+            for note in guess.notes:
+                out.append(f"# {note}")
+            if len(guess.owners) > 1:
+                out.append(f"owner = [{', '.join(_q(o) for o in guess.owners)}]"
+                           + ("   # CHECK: the name and the users disagree" if guess.disagree else "   # guessed"))
+            elif guess.owners:
+                out.append(f"owner = {_q(guess.owners[0])}"
+                           + ("   # CHECK: the name and the users disagree" if guess.disagree else "   # guessed"))
             else:
-                out.append("owner = \"\"                         # not found from the name: set it")
+                out.append("owner = \"\"   # not found: set it")
             out.append(f"nodes = {_q(compress_hostlist(nodes))}            "
                        f"# {len(nodes)} node{'s' if len(nodes) != 1 else ''}, {cores} cores"
                        + (f", {gpus} GPUs" if gpus else ""))

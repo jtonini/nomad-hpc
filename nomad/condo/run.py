@@ -147,19 +147,19 @@ def plan_mail(owners: list[Built], summary: Built | None, settings: Settings, mo
         c = f["condo"]
         subject = f"{f['cluster']['label']}: {c['label']} condo, {mname}"
         cfg = settings.cluster(f["cluster"]["name"]).condos.get(c["name"])
-        address = cfg.address(d) if cfg else None
+        to = cfg.addresses(d) if cfg else []
         cc = list(cfg.cc) if cfg else []
-        would = ", ".join([address] + cc) if address else None
+        would = ", ".join(to + cc) if to else None
         entry = {"key": b.key, "subject": subject, "to": [], "cc": [], "review_of": None, "skip": None}
         if d.reviewing:
             entry.update(to=list(d.review_to), review_of=would or "no one yet (no owner address)",
                          subject=f"[Review] {subject}")
         elif cfg is None or not c["confirmed"]:
             entry["skip"] = "owner not confirmed in report.toml"
-        elif not address:
+        elif not to:
             entry["skip"] = "no address: set mail_domain, or email for the condo"
         else:
-            entry.update(to=[address], cc=cc)
+            entry.update(to=to, cc=cc)
         out.append(entry)
     if summary is not None:
         to = settings.delivery.summary_recipients()

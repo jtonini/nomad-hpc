@@ -582,13 +582,16 @@ def resolve_members(conn, condo: Condo, acc, members_of, exists, site: str | Non
                 f"SELECT DISTINCT user_name FROM jobs WHERE end_time >= ?{where} AND account = ?",
                 [since] + ([site] if where else []) + [a]) if u}
         how = f"Slurm account {a}, who used it this past year"
-    elif condo.owner and acc is not None:
-        groups = acc.lab_groups(condo.owner, exists) if members_of else []
+    elif condo.owners and acc is not None:
+        groups = []
+        for o in condo.owners:
+            for g in (acc.lab_groups(o, exists) if members_of else []):
+                if g not in groups:
+                    groups.append(g)
         for g in groups:
             people |= set(members_of(g))
-        how = ("lab group " + ", ".join(groups)) if groups else ""
-    if condo.owner:
-        people.add(condo.owner)
+        how = (("lab groups " if len(groups) > 1 else "lab group ") + ", ".join(groups)) if groups else ""
+    people |= set(condo.owners)
     return people, how or "not found: the owner, and who ran in the condo's partition"
 
 
@@ -686,7 +689,7 @@ def condo_figures(ctx: Context, condo: Condo, members: set, members_how: str,
     out = {
         "cluster": {"name": ctx.cluster, "label": ctx.label},
         "condo": {"name": condo.name, "label": condo.label or condo.name, "partition": condo.part,
-                  "owner": condo.owner, "confirmed": condo.confirmed,
+                  "owner": condo.owner, "owners": list(condo.owners), "confirmed": condo.confirmed,
                   "nodes": sorted(nodes), "node_list": discover.compress_hostlist(nodes) if nodes else "",
                   "cores": cores, "gpus": gpus, "memory_gb": round(mem_gb)},
         "month": month, "period": {"from": t0.isoformat(), "to": t1.isoformat(), "hours": hours},
@@ -923,6 +926,7 @@ def build(conn: sqlite3.Connection, settings: Settings, month: str, *, nomad_con
 def _summary_row(fig: dict) -> dict:
     u, o, g, n = fig["use"], fig["owner_jobs"], fig["guests"], fig["nodes"]
     return {"condo": fig["condo"]["name"], "label": fig["condo"]["label"], "owner": fig["condo"]["owner"],
+            "owners": fig["condo"].get("owners") or ([fig["condo"]["owner"]] if fig["condo"]["owner"] else []),
             "confirmed": fig["condo"]["confirmed"], "nodes": len(fig["condo"]["nodes"]),
             "cores": fig["condo"]["cores"], "gpus": fig["condo"]["gpus"],
             "owner_pct": u["owner_pct"], "guest_pct": u["guest_pct"], "idle_pct": u["idle_pct"],

@@ -11,6 +11,7 @@ might do differently from another.
     name_members = true                    # an owner's report names their lab's members
     formats = ["html", "pdf", "json"]
     owner_patterns = ["{name}", "{name}lab", "{name}_lab"]
+    netid_max_length = 8                   # NetIDs cut short here ("tanderso"); 0: never
     contact = "Questions: rc@example.edu"
     out_dir = "/var/lib/nomad/reports/condos"
     institution = "Research Computing"     # the name at the top of each report
@@ -29,11 +30,11 @@ might do differently from another.
     guest_partitions = ["condos"]          # default: partitions named like "condo"
 
     [report.clusters.c1.condos.smith]      # drafted by `nomad usage-report condos init`
-    owner = "jsmith"
+    owner = "jsmith"                       # or two: ["jsmith", "rjones"]
     partition = "smith"                    # default: the table's name
     nodes = "c[01-04]"                     # default: the partition's nodes
     members = "group:smith$"               # or "account:smith", or a list
-    email = "jsmith@example.edu"           # default: owner@mail_domain
+    email = "jsmith@example.edu"           # or a list; default: each owner@mail_domain
     cc = ["manager@example.edu"]
     confirmed = true                       # init writes false: reports wait for it
     lab_scratch_quota_tb = 30              # an agreed larger quota
@@ -96,6 +97,7 @@ class Delivery:
     name_members: bool = True
     formats: list[str] = field(default_factory=lambda: ["html", "pdf", "json"])
     owner_patterns: list[str] = field(default_factory=lambda: list(DEFAULT_PATTERNS))
+    netid_max_length: int = 8
     contact: str | None = None
     out_dir: Path | None = None
     institution: str = "Research Computing"
@@ -112,11 +114,11 @@ class Delivery:
 class Condo:
     name: str
     cluster: str
-    owner: str | None = None
+    owners: list[str] = field(default_factory=list)      # one or more NetIDs
     partition: str | None = None
     nodes: list[str] = field(default_factory=list)       # empty: the partition's nodes
     members: str | list[str] | None = None
-    email: str | None = None
+    email: list[str] = field(default_factory=list)       # empty: each owner@mail_domain
     cc: list[str] = field(default_factory=list)
     confirmed: bool = True
     account: str | None = None
@@ -127,12 +129,19 @@ class Condo:
     def part(self) -> str:
         return self.partition or self.name
 
-    def address(self, delivery: Delivery) -> str | None:
+    @property
+    def owner(self) -> str | None:
+        """The first owner (the condo's name in short)."""
+        return self.owners[0] if self.owners else None
+
+    def addresses(self, delivery: Delivery) -> list[str]:
+        """Where the owners' report goes: ``email``, else each owner at
+        mail_domain; [] when neither is known."""
         if self.email:
-            return self.email
-        if self.owner and delivery.mail_domain:
-            return f"{self.owner}@{delivery.mail_domain}"
-        return None
+            return list(self.email)
+        if self.owners and delivery.mail_domain:
+            return [f"{o}@{delivery.mail_domain}" for o in self.owners]
+        return []
 
 
 @dataclass
@@ -162,7 +171,7 @@ class Settings:
 # --- reading ---------------------------------------------------------------------
 
 _LABS_KEYS = ("mail_domain", "send_from", "review_to", "summary_to", "name_members", "formats",
-              "owner_patterns", "contact", "out_dir", "institution")
+              "owner_patterns", "netid_max_length", "contact", "out_dir", "institution")
 _POLICY_KEYS = ("owner_start_minutes", "guest_max_days", "guest_grace_minutes", "home_quota_gb",
                 "lab_scratch_quota_tb", "scratch_path", "use_below")
 _CONDO_KEYS = ("owner", "partition", "nodes", "members", "email", "cc", "confirmed", "account", "label",
@@ -265,6 +274,8 @@ def _delivery(d: dict) -> Delivery:
             raise CondoConfigError(f"formats: {', '.join(bad)} (choose from {', '.join(FORMATS)})")
         out.formats = fm or ["html"]
     out.owner_patterns = _patterns(d.get("owner_patterns"))
+    if d.get("netid_max_length") is not None:
+        out.netid_max_length = int(_number(d["netid_max_length"], "netid_max_length", 0, 64))
     if d.get("contact") is not None:
         out.contact = str(d["contact"]).strip() or None
     if d.get("out_dir"):
@@ -310,7 +321,17 @@ def _condo(cluster: str, name: str, d: dict) -> Condo:
         raise CondoConfigError(f"{what} must be a table")
     _known(d, _CONDO_KEYS, what)
     c = Condo(name=str(name), cluster=cluster)
-    for key in ("owner", "partition", "account", "label"):
+    owner = d.get("owner")
+    if owner is not None:
+        if isinstance(owner, str):
+            c.owners = [owner.strip()] if owner.strip() else []
+        elif isinstance(owner, list) and all(isinstance(o, str) for o in owner):
+            c.owners = [o.strip() for o in owner if o.strip()]
+        else:
+            raise CondoConfigError(f"{what} owner must be a NetID, or a list of them")
+        if len(set(c.owners)) != len(c.owners):
+            raise CondoConfigError(f"{what} owner lists someone twice")
+    for key in ("partition", "account", "label"):
         v = d.get(key)
         if v is not None:
             if not isinstance(v, str):
@@ -323,10 +344,9 @@ def _condo(cluster: str, name: str, d: dict) -> Condo:
     c.members = _members(d.get("members"), f"{what} members")
     email = d.get("email")
     if email is not None:
-        if not isinstance(email, str):
-            raise CondoConfigError(f"{what} email must be one address")
-        if email.strip():
-            c.email = _addresses([email], f"{what} email")[0]
+        if isinstance(email, str):
+            email = [email] if email.strip() else []
+        c.email = _addresses(email, f"{what} email")
     c.cc = _addresses(d.get("cc"), f"{what} cc")
     if "confirmed" in d:
         if not isinstance(d["confirmed"], bool):

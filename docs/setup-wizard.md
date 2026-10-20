@@ -108,7 +108,7 @@ If you selected HPC cluster, the wizard auto-detects SLURM partitions:
 
 ```
 Detecting SLURM partitions...
-Found partitions: basic, medium, large, gpunodes, dias
+Found partitions: basic, medium, large, gpunodes, chemlab
 ```
 
 If auto-detection fails (SLURM not installed locally, or running in remote mode), you can type partition names manually:
@@ -129,14 +129,14 @@ If you selected workstation group, the wizard asks for department organization:
 
 ```
 Type your department/lab names, separated by commas:
-Departments: parish-lab
+Departments: smith-lab
 ```
 
 Then for each department, provide the hostnames of machines to monitor:
 
 ```
-Type the hostnames for 'parish-lab', separated by commas:
-Nodes for parish-lab: aamy, adam, alexis, boyi, camryn, cooper
+Type the hostnames for 'smith-lab', separated by commas:
+Nodes for smith-lab: ws01, ws02, ws03, ws04, ws05, ws06
 ```
 
 The WorkstationCollector will SSH to each machine and collect CPU, memory, disk, load, and user session data.

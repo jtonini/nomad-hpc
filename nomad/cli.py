@@ -5779,7 +5779,8 @@ def usage_report_condos(ctx, month, clusters, only, db, report_config, out, form
         for r in cl["condos"]:
             def p(x):
                 return "-" if x is None else f"{x:.0f}%"
-            who = "" if mask else f" ({r['owner'] or 'owner ?'}{'' if r['confirmed'] else ', unconfirmed'})"
+            names = ", ".join(r.get("owners") or []) or r["owner"] or "owner ?"
+            who = "" if mask else f" ({names}{'' if r['confirmed'] else ', unconfirmed'})"
             start = (f"{p(r['within_pct'])} of {r['owner_jobs']} owner jobs started within "
                      f"{settings.policy.owner_start_minutes:g} min" if r["owner_jobs"] else "no owner jobs")
             click.echo(f"  {shown(r['label'])}{who}: {r['nodes']} nodes; lab {p(r['owner_pct'])}, "
@@ -5831,8 +5832,9 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
 
     A condo is a partition whose nodes all sit in a guest partition (one
     named like "condo", or guest_partitions in report.toml); its owner is
-    guessed from its name (owner_patterns: parish, parishlab, parish_lab ->
-    a NetID ending in "parish"). Check each, then set confirmed = true.
+    guessed from its name (owner_patterns: smith, smithlab, smith_lab ->
+    a NetID ending in "smith") and from the lab groups of the people who
+    ran in it. Check each, then set confirmed = true.
     Without --apply the draft is printed, and nothing changes.
     """
     from nomad.condo import config as ccfg, discover
@@ -5862,9 +5864,9 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
                 continue
             condos = []
             for part in found.condos:
-                last = discover.last_name(part, settings.delivery.owner_patterns)
-                cands = discover.owner_candidates(conn, last, acc, site, part) if last else []
-                condos.append((part, cands))
+                condos.append((part, discover.guess_owners(
+                    conn, part, acc, site, settings.delivery.owner_patterns,
+                    settings.delivery.netid_max_length)))
             layouts.append((name, found, condos))
     finally:
         conn.close()
@@ -5879,9 +5881,12 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
         for name, found, condos in layouts:
             if condos is None:
                 continue
-            owners = sum(1 for _, c in condos if c)
+            owners = sum(1 for _, g in condos if g.owners)
+            two = sum(1 for _, g in condos if len(g.owners) > 1)
+            disagree = sum(1 for _, g in condos if g.disagree)
             click.echo(f"{name}: {len(found.guest_partitions)} guest partition(s), {len(condos)} condos, "
-                       f"an owner guessed for {owners}")
+                       f"an owner guessed for {owners}" + (f" ({two} with two owners)" if two else "")
+                       + (f"; the name and the users disagree for {disagree}" if disagree else ""))
     elif not apply:
         click.echo(text)
     if not apply:

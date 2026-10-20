@@ -85,9 +85,9 @@ doesn't list, condos whose partition is gone, and owners not confirmed.
   was requeued keeps its job number and only its last run is kept, so the
   count is a lower bound.
 - **Members:** `members` in report.toml (a Unix group, a Slurm account, or a
-  list); else the owner's labs by `[console.labs]` in nomad.toml (the group
+  list); else each owner's labs by `[console.labs]` in nomad.toml (the group
   named for them by `group_pattern`, and the groups they `lead`), and the
-  owner.
+  owners.
 
 ## Finding the condos
 
@@ -97,14 +97,30 @@ one named like "condo". A condo is a partition whose nodes all sit inside
 the guest partition. A partition over every condo node is another way in for
 guests, unless it is the only condo there is.
 
-The owner is guessed from the partition's name by `owner_patterns`:
-`{name}`, `{name}lab`, `{name}_lab` and `{name}-lab` by default, with a
-number at the end taken as a second condo of the same lab (`smith2`). The
-guess is a NetID of up to two initials and that last name: first one with a
-lab group named for it, then one that leads a lab in nomad.toml, then one
-that ran jobs in the partition, then any account. `init` writes the guess
-with `confirmed = false`; a report goes to its owner only once someone sets
-it to true.
+The owner is guessed from two kinds of evidence, because each alone
+misleads: a partition can be named for another of the PI's surnames, and a
+condo lent out a lot is used mostly by other labs.
+
+- **The name.** `owner_patterns` (`{name}`, `{name}lab`, `{name}_lab` and
+  `{name}-lab` by default) give a last name, a number at the end being a
+  second condo of the same lab (`smith2`). The owner is a NetID of up to two
+  initials and that name, perhaps with a number after it (`jsmith3`), cut
+  short where the institution's NetIDs stop (`netid_max_length`, 8:
+  `tanderso` for Anderson): first one with a lab group named for it, then
+  one that leads a lab in nomad.toml, then one that ran jobs in the
+  partition, then an account. Several accounts that fit, none of them a
+  lab's PI, are listed rather than guessed from. Two last names joined
+  (`smithjones`) are two owners, when one of them at least is a lab's PI.
+- **The users.** The lab groups (by `[console.labs] group_pattern`) of the
+  people who ran jobs in the partition over the past year, the one holding
+  the most of them first. When it holds more than half of them (two at
+  least), it names the owner where the name names nobody, or only an
+  account.
+
+When the two point at different labs, the name's owner is kept and the
+draft says to check. `init` writes each guess with its evidence and
+`confirmed = false`; a report goes to its owners only once someone sets it
+to true.
 
 ## Delivery
 
@@ -173,6 +189,7 @@ summary_to = ["rc@example.edu"]        # the summary (default: review_to)
 name_members = true                    # an owner's report names their lab's members
 formats = ["html", "pdf", "json"]      # also "md"
 owner_patterns = ["{name}", "{name}lab", "{name}_lab", "{name}-lab"]
+netid_max_length = 8                   # NetIDs cut short here; 0: never
 contact = "Questions: rc@example.edu"  # the line at the foot of each report
 out_dir = "/var/lib/nomad/reports/condos"
 institution = "Research Computing"     # the name at the top of each report
@@ -191,12 +208,12 @@ label = "Cluster 1"                    # how the reports name the cluster
 guest_partitions = ["condos"]          # default: partitions named like "condo"
 
 [report.clusters.c1.condos.smith]      # drafted by `nomad usage-report condos init`
-owner = "jsmith"
+owner = "jsmith"                       # or several: ["jsmith", "rjones"]
 partition = "smith"                    # default: the table's name
 nodes = "c[01-04]"                     # default: the partition's nodes
 members = "group:smith$"               # or "account:smith", or a list of NetIDs
 account = "smith"                      # the lab's Slurm account, if it has one
-email = "jsmith@example.edu"           # default: owner@mail_domain
+email = "jsmith@example.edu"           # or a list; default: each owner@mail_domain
 cc = ["manager@example.edu"]
 confirmed = true
 lab_scratch_quota_tb = 30              # an agreed larger quota
