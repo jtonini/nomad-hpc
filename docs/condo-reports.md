@@ -8,6 +8,8 @@ condo for research computing, grouped by cluster.
 ```bash
 nomad usage-report condos init               # draft the condos into report.toml
 nomad usage-report condos init --apply       # ... and add them to it
+nomad usage-report condos set --labs mail_domain=example.edu --labs review_to=rc@example.edu \
+                              --confirm smith,jones --owner lee=klee --apply
 nomad usage-report condos                    # last month's reports, written
 nomad usage-report condos --send             # ... and mailed
 nomad usage-report condos --month 2026-09 --cluster c1 --condo smith
@@ -121,6 +123,23 @@ When the two point at different labs, the name's owner is kept and the
 draft says to check. `init` writes each guess with its evidence and
 `confirmed = false`; a report goes to its owners only once someone sets it
 to true.
+
+## Changing the settings
+
+`nomad usage-report condos set` changes report.toml without opening it:
+
+- `--labs KEY=VALUE` and `--policy KEY=VALUE`: a `[report.labs]` or
+  `[report.policy]` setting; lists as `A,B`, numbers and `true`/`false` as such;
+- `--confirm A,B` and `--unconfirm A,B`: which condos' reports may go to their
+  owners;
+- `--owner CONDO=NETID[,NETID]`: a condo's owner, or owners.
+
+A condo is its name, or `CLUSTER/NAME` when two clusters have one of that
+name. Without `--apply` it shows the change and writes nothing. With it, the
+file is copied first and keeps its owner and permissions, and nothing is
+written unless the result reads as condo settings (a misspelled setting or
+an address that isn't one is refused). `--mask` prints counts instead of
+names.
 
 ## Delivery
 

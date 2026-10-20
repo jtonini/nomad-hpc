@@ -432,11 +432,16 @@ def interactive(conn: sqlite3.Connection, since: str, until: str, now: datetime)
 
 # ── Workstations ────────────────────────────────────────────────────────
 
+# Accounts below this uid are the system's (root, the login screen, services).
+SYSTEM_UID_BELOW = 1000
+
+
 def _people_cpu(conn: sqlite3.Connection, since: str, until: str) -> dict:
     """{(site, host): {ten-minute bucket: cores}}: the cores people's sessions
     kept busy, from each person's CPU counter (workstation_user_snapshot).
     Each person's ten minutes is the average of their readings' intervals
-    ending in it; the machine's is the sum over its people.
+    ending in it; the machine's is the sum over its people, and 0 where the
+    probe read only the machine's own accounts (nobody used it).
 
     An interval counts within one life of the person's slice, as
     nomad.workstation_sessions tells them apart: not across a gap longer
@@ -454,13 +459,24 @@ def _people_cpu(conn: sqlite3.Connection, since: str, until: str) -> dict:
                CASE WHEN typeof(cpu_usage_usec) IN ('integer', 'real') THEN cpu_usage_usec END,
                {peak}, substr(timestamp, 1, {BUCKET})
         FROM workstation_user_snapshot
-        WHERE timestamp >= ? AND timestamp <= ? AND uid >= 1000 AND cpu_usage_usec IS NOT NULL
+        WHERE timestamp >= ? AND timestamp <= ? AND cpu_usage_usec IS NOT NULL
         ORDER BY 1, 2, 3, timestamp""", (since, until))
     out: dict = {}
     key = machine = bucket = None
     t0 = c0 = p0 = None
     total, n = 0.0, 0
     for s, host, uid, t, c, pk, b in rows:
+        if not isinstance(uid, int):
+            try:
+                uid = int(float(uid))
+            except (TypeError, ValueError):
+                uid = -1
+        if uid < SYSTEM_UID_BELOW:
+            # The machine's own accounts (its root logins, the login screen):
+            # not people, but they show the probe ran then, so a machine
+            # nobody used reads 0 rather than "not measured".
+            out.setdefault((s, host), {}).setdefault(b, 0.0)
+            continue
         if (s, host, uid) != key:
             if n:
                 machine[bucket] = machine.get(bucket, 0.0) + total / n

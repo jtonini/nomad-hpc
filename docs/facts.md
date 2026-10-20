@@ -266,8 +266,10 @@ hyperthreading).
   cache left out (workstation_state). A machine is busy with a core or more
   in use. The group's figures add each machine's ten-minute averages
   (machines aren't read at the same instant). The workstation collector's
-  own CPU percentages were never measured, and are not used; a machine with
-  no per-person readings says its CPU is not measured.
+  own CPU percentages were never measured, and are not used. A machine whose
+  per-person probe read only its own accounts (the collector's root login,
+  the login screen: uid below 1000) reads 0, nobody used it; one with no
+  per-person readings at all says its CPU is not measured.
 
 An hour of the week is ranked busiest or quietest only with readings on two
 different days or more, and nothing is ranked when every hour is the same.

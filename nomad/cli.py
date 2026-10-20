@@ -5915,6 +5915,79 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
     click.echo("Check each owner, set confirmed = true, then run `nomad usage-report condos`.")
 
 
+@usage_report_condos.command('set')
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml (default: as for the reports).')
+@click.option('--labs', 'labs', multiple=True, metavar='KEY=VALUE',
+              help='A [report.labs] setting (lists as A,B). Repeat for several.')
+@click.option('--policy', 'policy', multiple=True, metavar='KEY=VALUE',
+              help='A [report.policy] setting. Repeat for several.')
+@click.option('--confirm', multiple=True, metavar='A,B', help='Set confirmed = true on these condos.')
+@click.option('--unconfirm', multiple=True, metavar='A,B', help='Set confirmed = false on these condos.')
+@click.option('--owner', 'owner', multiple=True, metavar='CONDO=NETID[,NETID]',
+              help="Set a condo's owner (two or more: a list). Repeat for several condos.")
+@click.option('--apply', is_flag=True, help='Write it (a copy of the file is kept first).')
+@click.option('--mask', is_flag=True, help='Print counts instead of the changes (for sharing the output).')
+@click.pass_context
+def usage_report_condos_set(ctx, report_config, labs, policy, confirm, unconfirm, owner, apply, mask):
+    """Change the condo settings in report.toml: [report.labs] and
+    [report.policy] values, owners, and which condos are confirmed.
+
+    \b
+    nomad usage-report condos set --labs mail_domain=example.edu --labs review_to=rc@example.edu
+    nomad usage-report condos set --confirm smith,jones --owner lee=klee,dkim --apply
+
+    Without --apply it shows what would change, and writes nothing. The file
+    keeps its owner and permissions; nothing is written unless the result
+    reads as condo settings. A condo is NAME, or CLUSTER/NAME when two
+    clusters have one of that name.
+    """
+    from nomad.condo import config as ccfg, edit as cedit
+    try:
+        changes = cedit.Changes(
+            labs=cedit.parse_pairs(labs, "--labs"), policy=cedit.parse_pairs(policy, "--policy"),
+            confirm=[x.strip() for x in ",".join(confirm).split(",") if x.strip()],
+            unconfirm=[x.strip() for x in ",".join(unconfirm).split(",") if x.strip()])
+        for item in owner:
+            name, sep, people = item.partition("=")
+            if not sep or not name.strip():
+                raise cedit.EditError(f"--owner {item!r}: CONDO=NETID[,NETID]")
+            changes.owners[name.strip()] = [p.strip() for p in people.split(",") if p.strip()]
+    except cedit.EditError as e:
+        raise click.ClickException(str(e))
+    if changes.empty():
+        raise click.UsageError("nothing to change: give --labs, --policy, --confirm, --unconfirm or --owner")
+    path = Path(report_config).expanduser() if report_config else \
+        ccfg.load(None, ctx.obj.get('config_target')).path
+    try:
+        plan = cedit.plan(path, changes)
+    except cedit.EditError as e:
+        raise click.ClickException("report.toml: a setting doesn't read (run without --mask to see which)"
+                                   if mask else str(e))
+    if not plan.changed:
+        click.echo("nothing to change: report.toml already says so")
+        return
+    if mask:
+        n = sum(1 for line in plan.diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+        click.echo(f"{n} line{'s' if n != 1 else ''} would change in {path}")
+    else:
+        click.echo(plan.diff.rstrip("\n"))
+    if not apply:
+        click.echo("(not written: --apply writes it)")
+        return
+    try:
+        backup = cedit.save(plan)
+    except cedit.EditError as e:
+        raise click.ClickException(str(e))
+    click.echo(f"written; the old file is {backup}")
+    d = plan.settings.delivery
+    click.echo(f"review_to: {', '.join(d.review_to) or '(none: reports go to their owners)'}")
+    every = [(cname, c) for cname, cc in sorted(plan.settings.clusters.items()) for c in cc.condos.values()]
+    for i, (cname, c) in enumerate(every, 1):
+        who = f"condo {i}" if mask else f"{cname}/{c.name}: {', '.join(c.owners) or '(no owner)'}"
+        click.echo(f"  {who}{'' if c.confirmed else '  (not confirmed)'}")
+
+
 def read_toml_text(text: str) -> dict:
     """TOML text as nomad reads files (tomllib, else toml)."""
     try:

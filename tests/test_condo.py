@@ -742,3 +742,84 @@ def test_the_command_puts_the_logo_on_the_reports(db, tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert "2 nodes" in r.output and "no logo" not in r.output
     assert "data:image/png;base64," in (out / "hpc1" / "smith" / f"{MONTH}.html").read_text()
+
+
+# --- `nomad usage-report condos set` (1.15.3) -------------------------------------
+
+def _drafted(tmp_path):
+    f = discover.Found(site="s", partitions={"condos": {"a", "b", "c"}, "smith": {"a"}, "lee2": {"b"},
+                                             "garciakhan": {"c"}})
+    discover.find(f)
+    layouts = [("s", f, [("smith", discover.Guess(["jsmith"], ["name: lab group jsmith$"])),
+                         ("lee2", discover.Guess([], ["nothing to go by"])),
+                         ("garciakhan", discover.Guess(["mgarcia", "rkhan"], ["two names"]))])]
+    head = '[report.clusters.s]\ntiers = { basic = "a" }\n'
+    text, _ = discover.draft(head, {"report": {"clusters": {"s": {}}}}, layouts, ccfg.Settings())
+    path = tmp_path / "report.toml"
+    path.write_text(head + text)
+    path.chmod(0o640)
+    return path
+
+
+def test_set_plans_then_saves_keeping_comments_and_permissions(tmp_path):
+    from nomad.condo import edit as cedit
+    path = _drafted(tmp_path)
+    before = path.read_text()
+    ch = cedit.Changes(labs=cedit.parse_pairs(["mail_domain=example.edu", "review_to=rc@example.edu,x@example.edu",
+                                               "netid_max_length=10"], "--labs"),
+                       policy=cedit.parse_pairs(["use_below=0.3", "guest_max_days=7"], "--policy"),
+                       confirm=["smith"], owners={"lee2": ["klee", "dkim"]})
+    plan = cedit.plan(path, ch)
+    assert path.read_text() == before                        # planning writes nothing
+    assert 'review_to = ["rc@example.edu", "x@example.edu"]   # while set' in plan.edit.text
+    assert 'owner = ["klee", "dkim"]\n' in plan.edit.text     # the old "set it" comment is gone
+    s = plan.settings
+    assert s.delivery.mail_domain == "example.edu" and s.delivery.netid_max_length == 10
+    assert s.policy.use_below == 0.3 and s.policy.guest_max_days == 7
+    assert s.clusters["s"].condos["smith"].confirmed and not s.clusters["s"].condos["lee2"].confirmed
+    backup = cedit.save(plan)
+    assert backup.read_text() == before and path.stat().st_mode & 0o777 == 0o640
+    assert ccfg.load(path).clusters["s"].condos["lee2"].owners == ["klee", "dkim"]
+    assert not cedit.plan(path, ch).changed                  # a second time: nothing to change
+
+
+@pytest.mark.parametrize("changes, error", [
+    ({"labs": {"reveiw_to": ["a@b.c"]}}, "no setting 'reveiw_to'"),
+    ({"labs": {"review_to": ["nobody"]}}, "not an email address"),
+    ({"confirm": ["nosuch"]}, "no condo nosuch"),
+    ({"owners": {"smith": []}}, "give a NetID"),
+])
+def test_set_refuses_what_wouldnt_read(tmp_path, changes, error):
+    from nomad.condo import edit as cedit
+    path = _drafted(tmp_path)
+    before = path.read_text()
+    with pytest.raises(cedit.EditError, match=error):
+        cedit.plan(path, cedit.Changes(**changes))
+    assert path.read_text() == before
+
+
+def test_set_needs_the_cluster_when_two_have_the_condo(tmp_path):
+    from nomad.condo import edit as cedit
+    path = tmp_path / "report.toml"
+    path.write_text('[report.clusters.a.condos.smith]\nowner = "x"\n[report.clusters.b.condos.smith]\nowner = "y"\n')
+    with pytest.raises(cedit.EditError, match="write CLUSTER/smith"):
+        cedit.plan(path, cedit.Changes(confirm=["smith"]))
+    assert cedit.plan(path, cedit.Changes(confirm=["b/smith"])).settings.clusters["b"].condos["smith"].confirmed
+
+
+def test_the_set_command(tmp_path):
+    from nomad.cli import cli
+    path = _drafted(tmp_path)
+    args = ["usage-report", "condos", "set", "--config", str(path), "--labs", "mail_domain=example.edu",
+            "--confirm", "smith,garciakhan", "--owner", "lee2=klee"]
+    r = CliRunner().invoke(cli, args)
+    assert r.exit_code == 0 and "+confirmed = true" in r.output and "not written" in r.output
+    r = CliRunner().invoke(cli, args + ["--mask"])
+    assert r.exit_code == 0 and "smith" not in r.output and "klee" not in r.output and "would change" in r.output
+    r = CliRunner().invoke(cli, args + ["--apply", "--mask"])
+    assert r.exit_code == 0 and "written" in r.output and "smith" not in r.output, r.output
+    assert "condo 2  (not confirmed)" in r.output or "(not confirmed)" in r.output
+    r = CliRunner().invoke(cli, args)
+    assert r.exit_code == 0 and "nothing to change" in r.output
+    r = CliRunner().invoke(cli, ["usage-report", "condos", "set", "--config", str(path)])
+    assert r.exit_code != 0 and "nothing to change" in r.output
