@@ -8,8 +8,11 @@ workstation collector's readings).
 For each: the most in use at once and when, the average over the window, a
 typical week (each weekday and hour, averaged over the window) and the
 busiest and quietest hours. Aggregates of machines only, never a person.
-Workstations are listed by name, and a lab's machines can be named for
-people, so the answer is for staff; ``names=False`` leaves the names out.
+Workstations go by lab (nomad's rules: [console.labs] in nomad.toml, or the
+collector's tag), and machines in no lab by the site that collects them;
+storage read by the workstation collector is left out. Machines and labs are
+listed by name, and both can be named for people, so the answer is for staff
+and for a lab's own PI; ``names=False`` numbers them instead.
 
 What each figure measures:
 
@@ -52,6 +55,7 @@ Times are as the collectors wrote them: each site's local time.
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import statistics
 from datetime import datetime, timedelta
@@ -479,8 +483,64 @@ def _people_cpu(conn: sqlite3.Connection, since: str, until: str) -> dict:
     return out
 
 
+_ADDRESS = re.compile(r"^[0-9.:]+$")
+
+
+def _machine_key(name) -> str:
+    """A machine's name for matching storage: lower case, without its domain
+    (an address stays whole): "NAS.example.edu" and "nas" are one machine."""
+    n = str(name or "").strip().lower()
+    return n if _ADDRESS.match(n) else n.split(".")[0]
+
+
+def _labs(conn: sqlite3.Connection, config: dict | None, now: datetime) -> tuple:
+    """(host -> set of lab groups, storage keys, group -> the lab's name), by
+    nomad's rules for labs, the same as the Console's My Lab and
+    nomad.facts.labs: a machine is a lab's when [console.labs.resources]
+    lists it, or when its collector tags it with the lab's group (its latest
+    ``department`` in the last TAG_WINDOW), every lab that does. Storage is
+    anything nomad.toml lists as storage: a lab's storage, [console.storage]
+    servers and their names, the storage collector's devices (matched by
+    _machine_key); a NAS the workstation collector reads too is not a
+    workstation."""
+    if not config:
+        return {}, set(), {}
+    from nomad.config.access import TAG_WINDOW, access_from
+    acc = access_from(config, log=False)
+    labs: dict = {}
+    storage: set = set()
+    for group, kinds in acc.resources.items():
+        for host in kinds.get("workstations", ()):
+            labs.setdefault(host, set()).add(group)
+        storage |= {_machine_key(entry.partition(":")[0]) for entry in kinds.get("storage", ())}
+    for server, (name, _note) in acc.servers.items():
+        storage |= {_machine_key(server)} | ({_machine_key(name)} if name else set())
+    st = (config.get("collectors") or {}).get("storage") or {}
+    for entry in (st.get("storage_devices") or config.get("storage_devices") or []):
+        if isinstance(entry, dict) and isinstance(entry.get("hostname"), str):
+            storage.add(_machine_key(entry["hostname"]))
+    cols = columns(conn, "workstation_state")
+    if {"hostname", "timestamp", "department"} <= cols:
+        latest: dict = {}
+        for host, when, dept in conn.execute(
+                "SELECT hostname, timestamp, department FROM workstation_state WHERE timestamp >= ?",
+                ((now - TAG_WINDOW).isoformat(),)):
+            if host not in latest or str(when) > latest[host][0]:
+                latest[host] = (str(when), dept)
+        for host, (_, dept) in latest.items():
+            if isinstance(dept, str) and dept.strip():
+                labs.setdefault(host, set()).add(dept.strip())
+    return labs, storage, dict(acc.lab_names)
+
+
 def workstations(conn: sqlite3.Connection, since: str, until: str, now: datetime,
-                 names: bool = True) -> list:
+                 names: bool = True, config: dict | None = None) -> list:
+    """Each lab's workstations together (nomad's rules for labs: see _labs;
+    a machine two labs share counts in both), and machines in no lab by the
+    site that collects them. Storage the workstation collector also reads is
+    left out. A machine read by two sites (its collection moved, or two
+    collectors read it) is one machine: each ten minutes counts once, with
+    the most either site saw, and its people's CPU from either."""
     cols = columns(conn, "workstation_state")
     if not {"timestamp", "hostname", "cpu_count"} <= cols:
         return []
@@ -497,30 +557,64 @@ def workstations(conn: sqlite3.Connection, since: str, until: str, now: datetime
         WHERE timestamp >= ? AND timestamp <= ? AND cpu_count > 0
         GROUP BY 1, 2, 3 ORDER BY 1, 3""", (since, until)).fetchall()
     cpu = _people_cpu(conn, since, until)
-    by_site: dict = {}
-    for r in rows:
-        by_site.setdefault(r[0], []).append(r)
+    lab_of, storage, lab_names = _labs(conn, config, now)
+    # One reading per machine and ten minutes, whichever sites read it.
+    slots: dict = {}            # (host, bucket) -> [site set, cores, memtot, mem, mem_top, busy cores, measured]
+    machine_sites: dict = {}
+    for _site, host, bucket, cores, memtot_mb, m, m_top in rows:
+        if _machine_key(host) in storage:
+            continue
+        cores, memtot_mb, m, m_top = _n(cores), _n(memtot_mb), _n(m), _n(m_top)
+        if not cores:
+            continue
+        people = cpu.get((_site, host))
+        busy = people.get(bucket) if people else None
+        slot = slots.get((host, bucket))
+        if slot is None:
+            slots[(host, bucket)] = [{_site}, cores, memtot_mb, m, m_top, busy, bool(people)]
+        else:
+            slot[0].add(_site)
+            slot[1] = max(slot[1], cores)
+            slot[2] = max(slot[2] or 0, memtot_mb or 0) or None
+            slot[3] = max(slot[3] or 0, m or 0) if (slot[3] is not None or m is not None) else None
+            slot[4] = max(slot[4] or 0, m_top or 0) if (slot[4] is not None or m_top is not None) else None
+            slot[5] = busy if slot[5] is None else (slot[5] if busy is None else max(slot[5], busy))
+            slot[6] = slot[6] or bool(people)
+        machine_sites.setdefault(host, set()).add(_site)
+    groups: dict = {}
+    for (host, bucket), slot in slots.items():
+        labs = lab_of.get(host)
+        if labs:
+            for lab in labs:
+                groups.setdefault(("lab", lab), []).append((host, bucket, slot))
+        else:
+            # In no lab: by the site that collects it (the first, when two do).
+            first = sorted(machine_sites[host], key=str)[0]
+            groups.setdefault(("site", first), []).append((host, bucket, slot))
     when: dict = {}                         # a ten-minute bucket's text -> its time
     out = []
-    for name, readings in by_site.items():
+    lab_number = 0
+    for (kind, name), readings in sorted(groups.items(), key=lambda kv: (kv[0][0], str(kv[0][1]))):
         hosts: dict = {}
+        sites: set = set()
         buckets: dict = {}
-        for _site, host, bucket, cores, memtot_mb, m, m_top in readings:
+        measured_hosts = {h for h, _b, sl in readings if sl[6]}
+        for host, bucket, (slot_sites, cores, memtot_mb, m, m_top, people_busy, _meas) in readings:
             t = when.get(bucket)
             if t is None and bucket not in when:
                 t = when[bucket] = parse_time(str(bucket) + "0")
-            cores, m, memtot_mb = _n(cores), _n(m), _n(memtot_mb)
-            if t is None or not cores:
+            if t is None:
                 continue
+            sites |= slot_sites
             h = hosts.get(host)
             if h is None:
                 h = hosts[host] = {"cores": 0, "memtot": 0, "peak": Peak(), "peak_mem": Peak(),
-                                   "busy": [], "week": Week(), "cpu": cpu.get((_site, host), {})}
+                                   "busy": [], "week": Week(), "cpu": host in measured_hosts}
             h["cores"] = max(h["cores"], cores)
             h["memtot"] = max(h["memtot"], memtot_mb or 0)
-            busy = min(h["cpu"].get(bucket, 0.0), cores)     # no one's sessions: none
+            busy = min(people_busy or 0.0, cores)          # no one's sessions: none
             h["peak"].add(busy, cores, t)
-            h["peak_mem"].add(_n(m_top), memtot_mb, t)
+            h["peak_mem"].add(m_top, memtot_mb, t)
             share = 100 * busy / cores
             h["busy"].append(share)
             h["week"].add(t, share)
@@ -564,8 +658,22 @@ def workstations(conn: sqlite3.Connection, since: str, until: str, now: datetime
                 "peak_memory_gb": h["peak_mem"].out(1, 1024),
                 "busiest": (top[0] if top else None) if h["cpu"] else None,
             })
+        site_names = sorted(_site_name(x, "this site") for x in sites)
+        lab, label = None, _site_name(name, "this site")
+        if kind == "lab":
+            lab_number += 1
+            # A lab is named for its PI: numbered too when names are left out.
+            lab, label = (name, lab_names.get(name) or name) if names else (f"lab {lab_number}",) * 2
         out.append({
-            "site": _site_name(name, "this site"),
+            # A lab's machines (lab: its group; label: its name), or a site's
+            # machines in no lab (lab None; label: the site).
+            "lab": lab,
+            "label": label,
+            # A lab's own head node can name it: no sites for a lab when
+            # names are left out.
+            "site": (None if kind == "lab" and not names
+                     else site_names[0] if len(site_names) == 1 else ", ".join(site_names)),
+            "sites": [] if kind == "lab" and not names else site_names,
             "machines": len(hosts), **_span(times, now),
             "cores": int(cores_total), "memory_gb": round(mem_total / 1024, 1) if mem_total else None,
             "cpu_measured": measured,
@@ -581,10 +689,11 @@ def workstations(conn: sqlite3.Connection, since: str, until: str, now: datetime
 
 
 def busy(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
-         names: bool = True) -> dict:
+         names: bool = True, config: dict | None = None) -> dict:
     """When each cluster, interactive server and group of workstations is
     busiest over the last ``days``. ``names``: list workstations by name
-    (for staff)."""
+    (for staff). ``config`` (nomad.toml): workstations by lab, storage left
+    out; without it, by the site that collects them."""
     now = now or datetime.now()
     _since, _until, win = window(days, now)
     since = iso(now - timedelta(days=win["days"]))
@@ -594,7 +703,7 @@ def busy(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
     result["clusters"] = clusters(conn, since, until, now, all_out)
     result["clusters_all_out"] = all_out          # every node out of service all window
     result["interactive"] = interactive(conn, since, until, now)
-    result["workstations"] = workstations(conn, since, until, now, names=names)
+    result["workstations"] = workstations(conn, since, until, now, names=names, config=config)
     result["weekdays"] = list(WEEKDAYS)
     result["notes"] = [
         "Cores allocated is what Slurm handed out, of the cores of the nodes in service (down, "
@@ -612,8 +721,12 @@ def busy(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
         "not counted.",
         "Interactive servers: people with a session open, people computing, the memory their "
         "sessions held, and the machine's own busy cores where its collector runs on it.",
-        "Workstations: the cores people's sessions kept busy, from their CPU counters (the "
-        "machines' own services not included); a machine is busy with a core or more in use.",
+        "Workstations, by lab (a machine nomad.toml lists for a lab, or its collector tags with "
+        "the lab's group; others by the site that collects them; storage left out): the CPUs "
+        "people's sessions kept busy, from their CPU counters (the machines' own services not "
+        "included); a machine is busy with a CPU or more in use. A CPU is what the system counts "
+        "as one: a hardware thread, two per core with hyperthreading. Clusters' CPUs are "
+        "Slurm's.",
         f"A typical week averages each weekday's hour over the window; an hour is ranked only "
         f"with readings on {MIN_DAYS} days or more. Times are each site's local time; 'stopped' "
         f"means the last reading is more than {STALE_AFTER_HOURS} hours old.",

@@ -19,6 +19,7 @@ On the command line:
 nomad facts sites                 # every site, jobs over the last 30 days
 nomad facts me NETID --days 90    # one person
 nomad facts lab NETID             # the labs NETID leads
+nomad facts lab NETID --each      # each member too, by NetID
 nomad facts sites --json          # the data itself
 nomad facts lab NETID --mask      # no NetID, lab, machine or storage names, for sharing
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
@@ -130,9 +131,15 @@ Console's My Lab):
 * `storage`: each server or export the lab has, with its size and use;
   `shares_free_with` for exports of one pool (their free space is one).
 
-Lab-wide figures only: no row is about one member. How much a PI sees of
-each student is the institution's decision, and the Console's own pages
-carry whatever it decides. A member's jobs count wholly toward the lab, and
+* `each` (with `names=True`, `--each` on the command line): a row per
+  member by NetID: jobs finished in the window, core-hours held and the
+  share used, memory used of what was asked, GPU-hours, the median wait,
+  and jobs running and waiting now. Most core-hours first.
+
+Lab-wide figures unless names are asked for. How much a PI sees of each
+student is the institution's decision: the Console gives each member's row
+to staff and to the lab's own PI, for that lab. Without names, no row is
+about one member. A member's jobs count wholly toward the lab, and
 someone in two labs counts in both: group membership is all there is to go
 on.
 
@@ -209,9 +216,21 @@ class: in a course of three, the rows are three people.
 For each cluster, interactive server and group of workstations over the
 window: the most in use at once and when, the average, a typical week (each
 weekday's hour averaged over the window) and the three busiest and quietest
-hours. Machines only, never a person; workstations are listed by name
-(`each`), and a lab's machines can be named for people, so the Console
-shows those to staff only and `--mask` numbers them instead.
+hours. Machines only, never a person. Workstations go by lab: a machine
+`[console.labs.resources]` lists for a lab, or its collector tags with the
+lab's group (its latest `department`, as for My Lab), is the lab's, in every
+lab that lists or tags it; machines in no lab go by the site that collects
+them. A machine read by two sites counts once. Anything nomad.toml lists as
+storage (a lab's storage, `[console.storage]` servers and their names, the
+storage collector's devices) is left out, even when the workstation
+collector reads it too; names match in any case and without their domain
+(a NAS another site collects needs its `[console.storage]` entry on the
+hub). Machines and labs are listed by
+name (`each`, `label`), and both can be named for people, so the Console
+shows a lab to staff and to its own PI only, and `--mask` numbers them.
+CPUs are as each system counts them: Slurm's CPUs on the clusters, and a
+hardware thread on servers and workstations (two per core with
+hyperthreading).
 
 - **Clusters** (node_state): cores allocated (CPUAlloc) of the cores of the
   nodes in service. A node down, not responding, failing, in maintenance, or

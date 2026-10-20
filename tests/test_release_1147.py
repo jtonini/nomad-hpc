@@ -344,6 +344,40 @@ def test_a_hub_reads_each_site_by_its_index_and_gets_the_same(tmp_path):
     assert indexed == plain and [x["site"] for x in indexed] == ["hpc1", "hpc2", "untagged"]
 
 
+def test_workstations_go_by_lab_and_storage_is_left_out(data, tmp_path):
+    """A machine nomad.toml lists for a lab, or its collector tags with the
+    lab's group, goes with the lab; the rest by the site that collects them.
+    A NAS the workstation collector reads too is not a workstation."""
+    import shutil
+    path = tmp_path / "labs.db"
+    shutil.copy(data[0], path)
+    c = sqlite3.connect(path)
+    c.execute("ALTER TABLE workstation_state ADD COLUMN department TEXT")
+    c.execute("UPDATE workstation_state SET department = 'smith$' WHERE hostname = 'ws-b'")
+    # A NAS, read by the workstation collector: one CPU, no memory.
+    for i in range(30):
+        c.execute("INSERT INTO workstation_state (timestamp, hostname, status, cpu_count, memory_total_mb, "
+                  "memory_used_mb, source_site) VALUES (?, 'nas1', 'online', 1, 0, 0, 'lab')",
+                  ((NOW - timedelta(minutes=5 * i)).isoformat(),))
+    c.commit()
+    config = {"console": {"labs": {"resources": {
+        "jones$": {"name": "Jones Lab", "workstations": ["ws-c"], "storage": ["nas1:/tank"]},
+        "smith$": {"name": "Smith Lab", "workstations": []}}}}}
+    out = busy(c, days=DAYS, now=NOW, config=config)["workstations"]
+    by = {w["label"]: w for w in out}
+    assert set(by) == {"Jones Lab", "Smith Lab", "lab"}
+    assert by["Jones Lab"]["lab"] == "jones$" and [m["name"] for m in by["Jones Lab"]["each"]] == ["ws-c"]
+    assert by["Smith Lab"]["lab"] == "smith$" and [m["name"] for m in by["Smith Lab"]["each"]] == ["ws-b"]
+    assert by["lab"]["lab"] is None and [m["name"] for m in by["lab"]["each"]] == ["ws-a"]
+    assert "nas1" not in json.dumps(out)
+    # Without names, labs are numbered too (they are named for people).
+    masked = busy(c, days=DAYS, now=NOW, config=config, names=False)["workstations"]
+    assert sorted(w["label"] for w in masked) == ["lab", "lab 1", "lab 2"]
+    assert "Jones" not in json.dumps(masked) and "smith" not in json.dumps(masked)
+    # Without nomad.toml: by site, as before.
+    assert [w["label"] for w in busy(c, days=DAYS, now=NOW)["workstations"]] == ["lab"]
+
+
 def test_a_node_out_of_service_is_left_out_of_the_totals(data):
     _, out = data
     hpc1 = site(out["clusters"], "hpc1")
@@ -439,9 +473,9 @@ def test_the_command(data):
     from nomad.cli import cli
     r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--days", "30", "--each"])
     assert r.exit_code == 0, r.output
-    assert "hpc1 (cluster)" in r.output and "most cores allocated at once" in r.output
+    assert "hpc1 (cluster)" in r.output and "most CPUs allocated at once" in r.output
     assert "not tracked" in r.output and "teach (interactive)" in r.output
-    assert "lab (workstations)" in r.output and "ws-c" in r.output
+    assert "lab (workstations in no lab, collected by lab)" in r.output and "ws-c" in r.output
     r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--mask", "--each"])
     assert r.exit_code == 0 and "ws-" not in r.output and str(path) not in r.output
     r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--json"])

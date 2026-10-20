@@ -1,10 +1,11 @@
 """The labs a person leads: who is in them, what their members ran, and the
 lab's own machines and storage.
 
-Lab-wide figures only: how many members there are and how many ran jobs,
-and the members' jobs taken together. No row is about one member: how much a
-PI sees of each student is a decision for the institution, and the Console's
-own pages carry whatever it decides. Nor is a total one member's in
+Lab-wide figures by default: how many members there are and how many ran
+jobs, and the members' jobs taken together. ``names=True`` adds a row for each
+member by NetID (``each``): how much a PI sees of each student is a decision
+for the institution, and whoever calls with names has made it (the Console:
+staff, and a lab's own PI, for that lab). Nor is a total one member's in
 disguise: with ``min_others``, a total that rests on fewer than that many
 members besides the one asking is left out, with how many ran jobs (a lab of
 a PI and one student: the lab's total less the PI's own would be the
@@ -78,13 +79,62 @@ def _storage(conn, acc, entry: str, now: datetime, sizes: dict) -> dict:
             "shares_free_with": list(size.shares_free_with)}
 
 
+def _now_by_member(conn: sqlite3.Connection, people: list, stale: set) -> dict:
+    """{member: {"running": n, "pending": n}} now, leaving out sites that
+    stopped reporting (their jobs may have ended long ago)."""
+    from nomad.facts._common import chunks, site_label
+    jcols = columns(conn, "jobs")
+    if not {"state", "user_name"} <= jcols or not people:
+        return {}
+    site_col = ("source_site" if "source_site" in jcols else "cluster" if "cluster" in jcols
+                else "NULL")
+    states = sorted(jobfacts.ACTIVE)
+    out: dict = {}
+    for part in chunks(sorted(people)):
+        for r in fetch(conn, f"SELECT user_name AS u, {site_col} AS s, state, COUNT(*) AS n FROM jobs "
+                             f"WHERE state IN ({','.join('?' * len(states))}) "
+                             f"AND user_name IN ({','.join('?' * len(part))}) GROUP BY 1, 2, 3",
+                       states + part):
+            if site_label(r["s"]) in stale:
+                continue
+            e = out.setdefault(r["u"], {"running": 0, "pending": 0})
+            e[jobfacts.ACTIVE[r["state"]]] += r["n"]
+    return out
+
+
+def _each_member(conn, people: set, rows: list | None, ceilings: dict, stale: set) -> list:
+    """A row per member: their finished jobs in the window and what they
+    held and used, and their jobs now. Busiest (core-hours held) first."""
+    by_user: dict = {}
+    for r in rows or ():
+        by_user.setdefault(r.get("user_name"), []).append(r)
+    now = _now_by_member(conn, sorted(people), stale)
+    out = []
+    for user in sorted(people):
+        st = jobfacts.summarize(by_user.get(user, []), ceilings) or {}
+        cores, mem, gpus, waits = (st.get("core_hours") or {}, st.get("memory") or {},
+                                   st.get("gpus") or {}, st.get("wait_minutes") or {})
+        out.append({"user": user, "finished": st.get("finished", 0), "failed_pct": st.get("failed_pct"),
+                    "core_hours": cores.get("requested"), "cpu_used_pct": cores.get("used_pct"),
+                    "memory_used_pct": mem.get("used_pct"),
+                    "gpu_hours": gpus.get("gpu_hours_requested"),
+                    "wait_median_min": waits.get("median"),
+                    **now.get(user, {"running": 0, "pending": 0})})
+    out.sort(key=lambda e: (-(e["core_hours"] or 0), -(e["finished"] or 0), e["user"]))
+    return out
+
+
 def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None = None,
          days: int = 30, now: datetime | None = None, groups: list | None = None,
-         min_others: int = 0) -> dict:
+         min_others: int = 0, names: bool = False) -> dict:
     """The labs ``netid`` leads (or, for staff, the ``groups`` named), each
     with its members, their jobs over ``days`` taken together, its
     workstations and its storage. ``min_others``: leave out a total resting
-    on fewer members than this besides ``netid`` (see the top of the file)."""
+    on fewer members than this besides ``netid`` (see the top of the file).
+    ``names``: each member's own row too (``each``); then no total is left
+    out, since the rows show each member anyway."""
+    if names:
+        min_others = 0
     from nomad.config.access import (access_from, export_sizes, members_lookup, membership_counts,
                                      workstation_tags)
     from nomad.facts.person import now_counts
@@ -124,6 +174,8 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
                          "why": f"fewer than {min_others} members besides you ran jobs in the window"}
             lab["jobs"] = stats
             now_all = now_counts(conn, jobfacts.active(conn, users=sorted(people)), now)
+            if names:
+                lab["each"] = _each_member(conn, people, rows, ceilings, set(now_all["stale_sites"]))
             # Who is busy, at the sites the totals count (not ones gone quiet).
             busy = jobfacts.active_people(conn, sorted(people), exclude_sites=now_all["stale_sites"])
             if 0 < len(busy - me) < min_others:
@@ -145,7 +197,8 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
             lab["storage"] = [{"entry": s, "measured": False} for s in storage]
         out["labs"].append(lab)
     out["notes"] = [
-        "Lab-wide figures only; nothing here is about one member.",
+        ("Each member by NetID (each), as well as the lab's totals." if names else
+         "Lab-wide figures only; nothing here is about one member."),
         "Running and waiting leave out sites that stopped reporting.",
         "A member's jobs count wholly toward the lab, and someone in two labs counts in both.",
         "CPU and memory use are over the jobs nomad measured.",
