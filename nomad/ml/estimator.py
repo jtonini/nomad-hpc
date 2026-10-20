@@ -16,6 +16,7 @@ Key thresholds based on literature and empirical testing:
 """
 
 import math
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -84,16 +85,19 @@ def compute_class_balance_score(n_success: int, n_failure: int) -> tuple:
         return 20, "Critical"
 
 
+FEATURES = (
+    'runtime_sec', 'req_cpus', 'req_mem_mb', 'req_gpus',
+    'avg_cpu_percent', 'peak_cpu_percent', 'avg_memory_gb', 'peak_memory_gb',
+    'avg_io_wait_percent', 'total_nfs_read_gb', 'total_nfs_write_gb',
+    'total_local_read_gb', 'total_local_write_gb', 'nfs_ratio',
+    'exit_code', 'exit_signal', 'failure_reason',
+)
+
+
 def compute_feature_coverage(jobs: list, feature_names: list = None) -> dict:
     """Analyze feature coverage and variance."""
     if feature_names is None:
-        feature_names = [
-            'runtime_sec', 'req_cpus', 'req_mem_mb', 'req_gpus',
-            'avg_cpu_percent', 'peak_cpu_percent', 'avg_memory_gb', 'peak_memory_gb',
-            'avg_io_wait_percent', 'total_nfs_read_gb', 'total_nfs_write_gb',
-            'total_local_read_gb', 'total_local_write_gb', 'nfs_ratio',
-            'exit_code', 'exit_signal', 'failure_reason'
-        ]
+        feature_names = list(FEATURES)
     coverage = {}
     for feature in feature_names:
         values = []
@@ -150,6 +154,39 @@ def compute_feature_score(coverage: dict) -> tuple:
     return int(avg_score), issues
 
 
+_FORMATS = ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S')
+_PLAIN = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})(T| )([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,6}))?")
+
+
+def _when(value):
+    """A job's time as one of _FORMATS reads it (its first 26 characters),
+    or None when none does; a value that isn't text is taken as it is.
+
+    The usual forms are read directly: strptime took half of a readiness
+    assessment's time on a hub's jobs (1.14.6). Anything else goes to
+    strptime as before, so what is read, and what is skipped, is unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value[:26]
+    m = _PLAIN.fullmatch(text)
+    if m and not (m.group(4) == ' ' and m.group(8)):
+        try:
+            if not m.group(8):
+                return datetime.fromisoformat(text)
+            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                            int(m.group(5)), int(m.group(6)), int(m.group(7)),
+                            int(m.group(8).ljust(6, '0')))
+        except ValueError:
+            pass                    # strptime decides, as it did before
+    for fmt in _FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 def compute_recency_score(jobs: list, max_age_days: int = 90) -> tuple:
     """Score data recency from 0-100."""
     if not jobs:
@@ -160,18 +197,9 @@ def compute_recency_score(jobs: list, max_age_days: int = 90) -> tuple:
         end_time = job.get('end_time')
         if end_time:
             try:
-                if isinstance(end_time, str):
-                    dt = None
-                    for fmt in ['%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S']:
-                        try:
-                            dt = datetime.strptime(end_time[:26], fmt)
-                            break
-                        except ValueError:
-                            continue
-                    if dt is None:
-                        continue
-                else:
-                    dt = end_time
+                dt = _when(end_time)
+                if dt is None:
+                    continue
                 age_days = (now - dt).days
                 if age_days <= max_age_days:
                     recent_count += 1
@@ -229,18 +257,9 @@ def estimate_time_to_readiness(report: ReadinessReport, jobs: list) -> dict:
         end_time = job.get('end_time') or job.get('submit_time')
         if end_time:
             try:
-                if isinstance(end_time, str):
-                    dt = None
-                    for fmt in ['%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S']:
-                        try:
-                            dt = datetime.strptime(end_time[:26], fmt)
-                            break
-                        except ValueError:
-                            continue
-                    if dt is None:
-                        continue
-                else:
-                    dt = end_time
+                dt = _when(end_time)
+                if dt is None:
+                    continue
                 dates.append(dt)
                 if job.get('state') in ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED'):
                     failure_dates.append(dt)
@@ -319,26 +338,66 @@ def generate_recommendations(report: ReadinessReport) -> list:
     return recs
 
 
+# What an assessment reads of a job: its outcome, its times and FEATURES.
+_READ = ('job_id', 'source_site', 'state', 'end_time', 'submit_time') + FEATURES
+
+
+def _load_jobs(db_path: str) -> list:
+    """Every job, with its measurements (job_summary) merged in: of each,
+    the columns an assessment reads (_READ), a measurement's value taking
+    the place of the job's own where both tables have the column.
+
+    Read in two passes. Until 1.14.6 every column was read and each job's
+    measurements were asked for one job at a time, which took seconds on a
+    hub (the Console's Readiness page waited for it on every visit). Job IDs
+    repeat across sites, so in a combined database a job is matched to its
+    own site's measurements; until 1.14.6 it could get another site's job of
+    the same ID.
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'jobs' not in tables:
+            return []
+
+        def read(table):
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            names = [c for c in _READ if c in have]
+            # Every row, even of a table with none of these columns.
+            cols = ", ".join(f'"{c}"' for c in names) or "NULL"
+            return names, conn.execute(f"SELECT {cols} FROM {table}")
+
+        names, rows = read('jobs')
+        jobs = [dict(zip(names, row)) for row in rows]
+        if 'job_summary' not in tables or not jobs:
+            return jobs
+        snames, srows = read('job_summary')
+        by_site = 'source_site' in names and 'source_site' in snames
+
+        def key(row):
+            # As SQL compares them: a TEXT column holds 123 as '123'.
+            jid = row.get('job_id')
+            if jid is None:
+                return None
+            return (row.get('source_site'), str(jid)) if by_site else str(jid)
+        measured = {}
+        for row in srows:
+            summary = dict(zip(snames, row))
+            measured.setdefault(key(summary), summary)
+        measured.pop(None, None)
+        for job in jobs:
+            summary = measured.get(key(job))
+            if summary:
+                job.update(summary)
+        return jobs
+    finally:
+        conn.close()
+
+
 def assess_readiness(db_path: str) -> ReadinessReport:
     """Assess data readiness for ML predictions."""
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    tables = [r[0] for r in c.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'"
-    ).fetchall()]
-    jobs = []
-    if 'jobs' in tables:
-        c.execute("SELECT * FROM jobs")
-        for row in c.fetchall():
-            job = dict(row)
-            if 'job_summary' in tables:
-                c.execute("SELECT * FROM job_summary WHERE job_id = ?", (job['job_id'],))
-                summary = c.fetchone()
-                if summary:
-                    job.update(dict(summary))
-            jobs.append(job)
-    conn.close()
+    jobs = _load_jobs(db_path)
     total = len(jobs)
     failures = sum(1 for j in jobs if j.get('state') in ('FAILED', 'TIMEOUT', 'OUT_OF_MEMORY', 'CANCELLED'))
     successes = total - failures

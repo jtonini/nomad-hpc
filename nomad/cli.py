@@ -4665,6 +4665,9 @@ def sync(ctx, config_file, output, dry_run):
             # A lab's machines and storage (nomad console roles, the PI
             # view): each machine's and each export's latest record.
             ("workstation_state", "hostname, timestamp"),
+            # A person's own sessions on the machines (My Activity, nomad edu
+            # me): until 1.14.6 every visit read all of them.
+            ("workstation_user_snapshot", "username, timestamp"),
             ("workstation_mount_state", "source, timestamp"),
             ("workstation_mount_state", "hostname, timestamp"),
             # Interactive servers: a site's days and hours, a course's or a

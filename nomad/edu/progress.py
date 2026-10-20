@@ -297,20 +297,23 @@ def _load_user_sessions(
         # file cache too, so a session reading big files looked full.
         snap_cols = {r[1] for r in conn.execute("PRAGMA table_info(workstation_user_snapshot)")}
         anon = "memory_anon_bytes" if "memory_anon_bytes" in snap_cols else "NULL"
-        hosts = {}
-        for host, mem, cores in conn.execute("""
-                SELECT hostname, memory_total_mb, cpu_count FROM (
-                  SELECT hostname, memory_total_mb, cpu_count,
-                         ROW_NUMBER() OVER (PARTITION BY hostname ORDER BY timestamp DESC) AS rn
-                  FROM workstation_state) WHERE rn = 1"""):
-            hosts[host] = (mem, cores)
         snaps = conn.execute(f"""
             SELECT COALESCE(hostname, '') || char(0) || uid, timestamp, session_epoch, cpu_usage_usec,
                    memory_peak_bytes, hostname, uid, {anon}
             FROM workstation_user_snapshot
             WHERE timestamp >= ? AND uid >= 1000 AND username = ?
             ORDER BY hostname, uid, timestamp
-        """, (cutoff, username))
+        """, (cutoff, username)).fetchall()
+        # The capacity of the machines they used, each from its latest
+        # record. (Until 1.14.6 every machine's latest record was found by
+        # sorting all of workstation_state -- over a million rows on a hub,
+        # two seconds on every My Activity visit.)
+        hosts = {}
+        for host in {r[5] for r in snaps}:
+            row = conn.execute(
+                "SELECT memory_total_mb, cpu_count FROM workstation_state "
+                "WHERE hostname = ? ORDER BY timestamp DESC LIMIT 1", (host,)).fetchone()
+            hosts[host] = tuple(row) if row else (None, None)
         out = []
         for rows in split(snaps):
             first, last = rows[0], rows[-1]
