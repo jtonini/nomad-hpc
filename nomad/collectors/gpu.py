@@ -245,7 +245,8 @@ class GPUCollector(BaseCollector):
 
         self._gpu_available: bool | None = None
         self._dcgm_mode: str | None = None   # 'dcgmi', 'exporter', or None
-        self._dcgm_checked: bool = False
+        self._dcgm_checked: bool = False      # set with _dcgm_mode: one answer for every node
+        self._dcgm_hosts: dict = {}           # node -> (mode, when it was asked)
         self._prev_pcie_replay: dict[tuple[str, int], int] = {}  # (node, gpu_id) -> count
 
         gpu_config = self.config
@@ -329,16 +330,26 @@ class GPUCollector(BaseCollector):
             return 'dcgmi'
         return None
 
+    DCGM_RECHECK_SECONDS = 3600
+
     def _check_dcgm_available(self, host: str | None = None) -> bool:
-        """Check and cache DCGM availability for a node."""
-        if not self._dcgm_checked:
-            self._dcgm_mode = self._detect_dcgm(host)
-            self._dcgm_checked = True
-            if self._dcgm_mode:
-                logger.info(f"DCGM available via {self._dcgm_mode} — using enhanced metrics")
+        """Whether DCGM answers on this node, asked of each node and again
+        every hour (1.14.5). It used to be asked once, of the first node, and
+        that answer used for all: one node without DCGM turned it off for
+        every node, and a node whose DCGM came back was never asked again."""
+        if self._dcgm_checked:                 # set for every node (tests, or a caller)
+            return self._dcgm_mode is not None
+        import time
+        mode, when = self._dcgm_hosts.get(host, (None, None))
+        if when is None or time.monotonic() - when >= self.DCGM_RECHECK_SECONDS:
+            mode = self._detect_dcgm(host)
+            self._dcgm_hosts[host] = (mode, time.monotonic())
+            where = f" on {host}" if host else ""
+            if mode:
+                logger.info(f"DCGM available{where} via {mode} — using enhanced metrics")
             else:
-                logger.info("DCGM not available — using nvidia-smi (standard metrics)")
-        return self._dcgm_mode is not None
+                logger.info(f"DCGM not available{where} — using nvidia-smi (standard metrics)")
+        return mode is not None
 
     # ------------------------------------------------------------------
     # GPU availability check
@@ -438,9 +449,8 @@ class GPUCollector(BaseCollector):
 
         Returns a list of GPUHealthRecord for each GPU.
         """
-        if not self._check_dcgm_available(host):
-            return []
-
+        # Called only after DCGM answered on this node (asking again by its
+        # short name would ssh to a host collecting its own GPUs).
         timestamp = datetime.now().isoformat()
         health_records = []
 

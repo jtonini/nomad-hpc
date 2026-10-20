@@ -371,6 +371,12 @@ How a site's database reaches the hub, and what happens when it doesn't:
 alert_after_minutes = 120
 ```
 
+* A site that syncs but has stopped collecting, a collector that stopped
+  or fails every run, a GPU node gone quiet and a GPU node whose DCGM stopped
+  answering raise `collection` alerts after the sync (1.14.5; see
+  [alerts](alerts.md#collection-stopped-the-hub-1145)); `nomad
+  collection-check` lists them.
+
 ---
 
 ## Configuration Reference

@@ -1629,6 +1629,55 @@ def report(ctx, db, output):
 
 
 
+@cli.command('collection-check')
+@click.option('--db', 'db_path', type=click.Path(), default=None,
+              help="Database to read (default: the hub's combined.db, else this host's)")
+@click.option('--send', is_flag=True,
+              help='Raise what is found as alerts, as the hub does after each sync')
+@click.pass_context
+def collection_check(ctx, db_path, send):
+    """Is every site still collecting? (read-only unless --send)
+
+    Lists sites where nothing was collected lately, collectors that stopped
+    or fail every run, GPU nodes that went quiet and GPU nodes where DCGM
+    stopped answering. The hub checks this after each sync and alerts (source
+    'collection'); settings in [hub]: alert_after_minutes, gpu_fallback_hours,
+    quiet_collectors, quiet_nodes, collection_alerts.
+    """
+    from nomad.collection_health import collection_alerts, collection_problems, settings
+    from nomad.facts.cli import _db
+    config = ctx.obj.get('config') or {}
+    path = _db(ctx, db_path)
+    if not path.exists():
+        raise click.ClickException(f"no database at {path}")
+    s = settings(config)
+    click.echo(f"{path}: judged on the last 30 days; quiet after {s.after_minutes:.0f} min, "
+               f"DCGM missing after {s.fallback_hours:.0f} h"
+               + ("" if s.enabled else " (collection_alerts = false: the hub sends none)"))
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+        try:
+            from nomad.collection_health import disabled_collectors
+            from nomad.config import default_data_dir
+            cache = default_data_dir() / 'sync_cache'
+            problems = collection_problems(conn, config=config,
+                                           disabled=disabled_collectors(cache if cache.is_dir() else None))
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        raise click.ClickException(f"cannot read {path}: {e}")
+    if not problems:
+        click.echo(click.style("  every site collecting; every GPU node reporting", fg="green"))
+    for p in problems:
+        color = "red" if p.severity == "critical" else "yellow"
+        click.echo(click.style(f"  {p.severity:<8}", fg=color) + f" {p.message}")
+    if send and problems:
+        # The same record of what was sent as the hub's sync keeps (run it as
+        # the account that runs the sync).
+        sent = collection_alerts(path, cache if cache.is_dir() else None, config=config)
+        click.echo(f"  sent {len(sent)} (the rest were sent before and aren't due a reminder)")
+
+
 @cli.command('test-alerts')
 @click.option('--email', is_flag=True, help='Test only the email backend')
 @click.option('--slack', is_flag=True, help='Test only the Slack backend')
@@ -4607,6 +4656,8 @@ def sync(ctx, config_file, output, dry_run):
             ("queue_state", "source_site, timestamp"),
             ("iostat_device", "source_site, timestamp"),
             ("gpu_stats", "source_site, timestamp"),
+            # Is each site still collecting (nomad.collection_health, 1.14.5).
+            ("collection_log", "source_site, started_at"),
             ("workstation_state", "source_site, timestamp"),
             ("alerts", "source_site, timestamp"),
             ("jobs", "source_site, end_time"),
@@ -4774,6 +4825,18 @@ def sync(ctx, config_file, output, dry_run):
                      config=ctx.obj.get('config') or None)
     except Exception as _alert_err:          # never let an alert stop a sync
         logging.getLogger("nomad.sync").warning(f"sync alert not sent: {_alert_err}")
+    # Sites that sync but have stopped collecting, collectors, GPU nodes
+    # (1.14.5); not on a combined database this run did not replace.
+    if not _blocked:
+        try:
+            from nomad.collection_health import collection_alerts
+            _cfg = dict(ctx.obj.get('config') or {})
+            if _cfg and hub_cfg.get('alert_after_minutes') is not None:
+                _cfg['hub'] = {**(_cfg.get('hub') or {}),
+                               'alert_after_minutes': hub_cfg['alert_after_minutes']}
+            collection_alerts(combined_path, cache_dir, failing=_failing, config=_cfg or None)
+        except Exception as _alert_err:      # never let an alert stop a sync
+            logging.getLogger("nomad.sync").warning(f"collection alert not sent: {_alert_err}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,
@@ -4795,7 +4858,6 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
     beside the hub's cached copies, so it holds whether or not the hub's
     nomad.toml names a database for alert_state. Returns what was sent.
     """
-    import os
     import socket
     if config is None:
         from nomad.config import load_config
@@ -4805,11 +4867,6 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
         after = float(after if after is not None else hub.get("alert_after_minutes", 120))
     except (TypeError, ValueError):
         after = 120.0
-    alerts_cfg = config.get("alerts") if isinstance(config.get("alerts"), dict) else {}
-    try:
-        reminder = float(alerts_cfg.get("reminder_hours", 24))
-    except (TypeError, ValueError):
-        reminder = 24.0
     now = now or datetime.now()
     combined_path = Path(combined_path)
 
@@ -4881,41 +4938,13 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
                         {"metric": "combined", "reason": blocked}))
 
     stamp = (Path(cache_dir) if cache_dir is not None else combined_path.parent) / "sync_alerts.json"
-    try:
-        sent = json.loads(stamp.read_text())
-        if not isinstance(sent, dict):
-            sent = {}
-    except (OSError, ValueError):
-        sent = {}
-    order = {"warning": 1, "critical": 2}
-    from nomad.alerts.dispatcher import send_alert
+    from nomad.alerts.once import send_once
     host = socket.gethostname().split(".")[0]
-    raised, keep = [], {}
-    for key, subject, severity, message, details in due:
-        prev = sent.get(key) if isinstance(sent.get(key), dict) else None
-        when = parse(prev.get("sent")) if prev else None
-        if (prev is None or order.get(severity, 0) > order.get(prev.get("severity"), 0)
-                or when is None or (now - when).total_seconds() >= reminder * 3600):
-            result = send_alert(severity, "sync", message, host=host, subject=subject,
-                                details=details, config=config)
-            raised.append({"site": subject, "severity": severity, "message": message})
-            # Remembered as sent unless every way of sending failed (a mail
-            # relay down): then it is tried again at the next run.
-            if not result or any(result.values()):
-                keep[key] = {"severity": severity, "sent": now.isoformat()}
-            elif prev is not None:
-                keep[key] = prev
-        else:
-            keep[key] = prev
-    # Anything not due now has recovered (or is not yet due): forgotten.
-    try:
-        if keep or sent:
-            tmp = stamp.with_name(f"{stamp.name}.{os.getpid()}")
-            tmp.write_text(json.dumps(keep, indent=1))
-            os.replace(tmp, stamp)
-    except OSError:
-        pass
-    return raised
+    items = [{"key": key, "host": host, "subject": subject, "severity": severity,
+              "message": message, "details": details}
+             for key, subject, severity, message, details in due]
+    return [{"site": i["subject"], "severity": i["severity"], "message": i["message"]}
+            for i in send_once(items, stamp, "sync", config, now)]
 
 
 @cli.command()

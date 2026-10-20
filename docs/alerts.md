@@ -71,6 +71,65 @@ of daily; a forecast is added only when the rest will be gone within
 `disk_fill_days_warning`, which older configs carry for a forecast that never
 ran, are not read.
 
+### Collection stopped (the hub, 1.14.5)
+
+A site can keep syncing a database nothing writes to any more, and then the
+`sync` alert never fires while the pages show old or partial data. After each
+sync the hub reads the merged database and raises, with source `collection`
+(host = the site):
+
+- **collection**: nothing at all collected at the site for
+  `alert_after_minutes` (120): nomad's cron or service there stopped.
+- **collector NAME**: a collector that runs regularly has not run, has failed
+  every run, or -- one that nearly always collects something -- has collected
+  nothing, for three of its usual intervals and at least
+  `alert_after_minutes`. A failing one quotes its last message, with folders
+  under /home, /scratch and the like, `user@host`, `~user`, `user=...` and
+  the usernames the hub knows taken out.
+- **a GPU node**: no GPU samples from it while the site's other GPU nodes
+  report, for `alert_after_minutes` or three of the gpu collector's usual
+  intervals there; all of them quiet is one alert for the site (or none, when
+  the gpu collector's own alert says why).
+- **DCGM on a GPU node**: no DCGM samples from it for `gpu_fallback_hours`
+  (24) while nvidia-smi still answers. GPU utilization in scores comes only
+  from DCGM, so its jobs say "not measured" until DCGM (nv-hostengine) is
+  back. Critical after a week. A node that never had DCGM is not this. The
+  gpu collector now asks each node whether DCGM answers (and again every
+  hour); it used to ask the first node and use that answer for all.
+
+A warning, critical after a day; sent once, again when worse, then every
+`reminder_hours`, and forgotten when it recovers (kept in
+`collection_alerts.json` beside the hub's cached copies).
+
+What is not raised:
+
+- A site is judged as of the hub's last live pull from it, so a site whose
+  pull failed (the `sync` alert says so), or a combined database the hub held
+  back, is not taken for one that stopped.
+- A collector is watched once it has run six times over more than a day in
+  the last 30 days; its usual interval comes from its latest runs (runs under
+  a minute apart count as one), and the longest gap of its last week counts
+  too, so a collector moved to a longer schedule or tried by hand isn't
+  "stopped". One that has not worked once in 30 days isn't a stop (`nomad
+  collectors` says why). One disabled in the site's own settings (the copy
+  the hub keeps) isn't watched.
+- A GPU node is watched once it has sent samples over more than a day.
+  Collectors and nodes silent for more than 30 days are taken as retired.
+
+To leave some out (`name` or `site:name`, shell wildcards allowed):
+
+```toml
+[hub]
+alert_after_minutes = 120
+gpu_fallback_hours = 24
+quiet_collectors = []          # e.g. ["slurm_usage", "lab:workstation"]
+quiet_nodes = []               # e.g. ["oldgpu07", "lab:*"]
+collection_alerts = true
+```
+
+`nomad collection-check` lists the same, read-only (`--send` raises them; run
+it as the account that runs the sync).
+
 ## Backends
 
 ### Email
