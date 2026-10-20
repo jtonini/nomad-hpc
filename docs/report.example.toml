@@ -69,3 +69,32 @@ regex = "vasp|qchem|gaussian|orca"
 [[report.clusters.c1.families]]
 name = "molecular dynamics"
 regex = "gmx|gromacs|amber|namd|lammps"
+
+# --- Condo reports (nomad usage-report condos; docs/condo-reports.md) --------
+
+[report.labs]                     # how the reports go out
+mail_domain = "example.edu"       # owner's address: NETID@mail_domain
+send_from = "Research Computing <rc@example.edu>"
+review_to = ["rc@example.edu"]    # while set, every report goes here instead
+name_members = true               # an owner's report names their own lab's members
+formats = ["html", "pdf", "json"]
+contact = "Questions: rc@example.edu"
+
+[report.policy]                   # what the reports check against
+owner_start_minutes = 5
+guest_max_days = 10
+home_quota_gb = { soft = 50, hard = 60 }
+lab_scratch_quota_tb = { soft = 20, hard = 24 }
+
+# The guest partition and condos of c1 (`label` and `guest_partitions` go in
+# [report.clusters.c1] above).
+[report.clusters.c1.condos.smith]
+owner = "jsmith"
+nodes = "c[01-02]"
+confirmed = true
+
+[report.clusters.c1.condos.jones]
+owner = "rjones"
+nodes = "c[03-04]"
+members = "group:jones$"
+confirmed = true

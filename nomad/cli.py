@@ -5682,6 +5682,238 @@ def usage_report_people(ctx, since, until, cluster, db, report_config, sacct, ou
     click.echo(f"wrote {target}: {len(data.people_names or [])} people (readable only by you).")
 
 
+def _condo_settings(path, config_target, mask=False, new_ok=False):
+    from nomad.condo import config as ccfg
+    if new_ok and path and not Path(path).expanduser().exists():
+        return ccfg.Settings(path=Path(path).expanduser())
+    try:
+        return ccfg.load(path, config_target)
+    except ccfg.CondoConfigError as e:
+        if mask:
+            # Its messages name condos and owners.
+            raise click.ClickException("report.toml: a condo setting doesn't read "
+                                       "(run without --mask to see which)")
+        raise click.ClickException(f"report.toml: {e}")
+
+
+def _condo_month(month):
+    import re
+    from nomad.condo.figures import previous_month
+    if not month:
+        return previous_month(datetime.now())
+    if not re.match(r"^\d{4}-(0[1-9]|1[0-2])$", month):
+        raise click.UsageError("--month is YYYY-MM")
+    return month
+
+
+@usage_report.group('condos', invoke_without_command=True)
+@click.option('--month', metavar='YYYY-MM', help='The month (default: last month).')
+@click.option('--cluster', 'clusters', multiple=True, help='Only this cluster (repeat for several).')
+@click.option('--condo', 'only', multiple=True, help='Only this condo (repeat for several).')
+@click.option('--db', type=click.Path(dir_okay=False),
+              help="Database (default: the hub's combined.db if there is one, else this host's).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml (default: beside nomad.toml, else ~/.config/nomad, else /etc/nomad).')
+@click.option('--out', type=click.Path(file_okay=False),
+              help="Where to write the reports (default: [report.labs] out_dir, else "
+                   "the data directory's reports/condos).")
+@click.option('--format', 'formats', multiple=True, type=click.Choice(['html', 'pdf', 'json', 'md']),
+              help="Formats to write (default: [report.labs] formats).")
+@click.option('--send', is_flag=True, help='Mail them ([mail] in nomad.toml; review_to while it is set).')
+@click.option('--resend', is_flag=True, help='Mail reports already sent for this month again.')
+@click.option('--mask', is_flag=True, help='Print stand-ins for condos and owners (for sharing the output).')
+@click.pass_context
+def usage_report_condos(ctx, month, clusters, only, db, report_config, out, formats, send, resend, mask):
+    """Each condo's monthly report for its owner, and the summary.
+
+    \b
+    nomad usage-report condos init               draft the condos into report.toml
+    nomad usage-report condos                    last month's reports, written
+    nomad usage-report condos --send             ... and mailed
+    nomad usage-report condos --month 2026-09 --cluster c1 --mask
+
+    An owner's report names the members of their lab (name_members); guests
+    on their nodes are totals only. The files are readable only by you.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from nomad.condo import figures, pdf as cpdf, run as crun
+    from nomad.usage import sources
+    month = _condo_month(month)
+    settings = _condo_settings(report_config, ctx.obj.get('config_target'), mask)
+    db_path = _usage_db(ctx, db)
+    nomad_config = ctx.obj.get('config') or {}
+    conn = sources.open_db(db_path)
+    try:
+        data = figures.build(conn, settings, month, nomad_config=nomad_config,
+                             clusters=list(clusters) or None, only=list(only) or None)
+    except (sqlite3.DatabaseError, ValueError) as e:
+        raise click.ClickException(str(e))
+    finally:
+        conn.close()
+    fmts = list(formats) or settings.delivery.formats
+    if "pdf" in fmts and not cpdf.available():
+        click.echo("  (no PDF: fpdf2 isn't installed here; pip install 'nomad-hpc[report]')")
+    owners, summary = crun.build_all(data, settings, fmts)
+    if data.get("partial"):
+        # A summary of some condos would stand for the month's, and be sent.
+        summary = None
+    target = Path(out).expanduser() if out else crun.default_out(settings, nomad_config)
+    try:
+        paths = crun.write(target, month, owners, summary, fmts)
+    except OSError as e:
+        raise click.ClickException(f"{target}: {e.strerror or e}")
+    stand_in: dict = {}
+
+    def shown(name):
+        if not mask or name is None:
+            return name
+        return stand_in.setdefault(name, f"condo {len(stand_in) + 1}")
+    click.echo(f"{data['month_name']}: condo reports")
+    for cl in data["clusters"]:
+        guests = ", ".join(cl["guest_partitions"]) if not mask else str(len(cl["guest_partitions"]))
+        if not cl["condos"]:
+            click.echo(f"{cl['label']}: no condos" + (f" (guest partitions: {guests})" if cl["guest_partitions"] else ""))
+        else:
+            click.echo(f"{cl['label']}: {len(cl['condos'])} condos (guest partitions: {guests})")
+        for r in cl["condos"]:
+            def p(x):
+                return "-" if x is None else f"{x:.0f}%"
+            who = "" if mask else f" ({r['owner'] or 'owner ?'}{'' if r['confirmed'] else ', unconfirmed'})"
+            start = (f"{p(r['within_pct'])} of {r['owner_jobs']} owner jobs started within "
+                     f"{settings.policy.owner_start_minutes:g} min" if r["owner_jobs"] else "no owner jobs")
+            click.echo(f"  {shown(r['label'])}{who}: {r['nodes']} nodes; lab {p(r['owner_pct'])}, "
+                       f"guests {p(r['guest_pct'])}, idle {p(r['idle_pct'])}; {start}; "
+                       f"{r['preempted']} preempted; {r['out_node_hours']:,.0f} node-hours out")
+        for f in cl["flags"]:
+            items = f.get("partitions") or f.get("condos") or []
+            items = [shown(x) for x in items]
+            words = {"new": "on the nodes, not in report.toml", "not_configured": "not in report.toml yet",
+                     "partition_gone": "in report.toml, gone from the nodes",
+                     "unconfirmed": "owner not confirmed",
+                     "no_readings": "in report.toml, but the cluster has no node readings"}[f["kind"]]
+            click.echo(f"  ! {words}: {', '.join(items)}")
+    click.echo(f"wrote {len(paths)} files under {target} (readable only by you)"
+               + ("; no summary, as --cluster or --condo leaves condos out" if summary is None else ""))
+    if send:
+        try:
+            results = crun.send(owners, summary, settings, nomad_config, month, target, resend=resend)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        for r in results:
+            key = r["key"] if not mask else ("summary" if r["key"] == "summary"
+                                             else shown(r["key"].split("/", 1)[1]))
+            if r["status"] == "sent":
+                to = "review" if r["review_of"] is not None else ("owner" if mask else ", ".join(r["to"] + r["cc"]))
+                click.echo(f"  sent {key} to {to if mask else ', '.join(r['to'])}")
+            elif r["status"] == "skipped":
+                click.echo(f"  not sent {key}: {r['skip']}")
+            elif r["status"] == "already sent":
+                click.echo(f"  {key}: already sent {r.get('when', '')} (--resend sends it again)")
+            else:
+                click.echo(f"  FAILED {key}: {r.get('error')}")
+        if any(r["status"] == "failed" for r in results):
+            raise SystemExit(1)
+    elif settings.delivery.reviewing or settings.delivery.summary_recipients():
+        click.echo("not mailed (--send mails them)")
+
+
+@usage_report_condos.command('init')
+@click.option('--cluster', 'clusters', multiple=True, help='Only this cluster (repeat for several).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the reports).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml to add to (default: as for the reports).')
+@click.option('--apply', is_flag=True, help='Add the draft to report.toml (a copy of the file is kept first).')
+@click.option('--mask', is_flag=True, help='Print counts instead of the draft (for sharing the output).')
+@click.pass_context
+def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
+    """Draft each cluster's condos into report.toml from the nodes' partitions.
+
+    A condo is a partition whose nodes all sit in a guest partition (one
+    named like "condo", or guest_partitions in report.toml); its owner is
+    guessed from its name (owner_patterns: parish, parishlab, parish_lab ->
+    a NetID ending in "parish"). Check each, then set confirmed = true.
+    Without --apply the draft is printed, and nothing changes.
+    """
+    from nomad.condo import config as ccfg, discover
+    from nomad.config import read_toml
+    from nomad.config.access import access_from
+    from nomad.usage import sources
+    settings = _condo_settings(report_config, ctx.obj.get('config_target'), mask, new_ok=True)
+    path = settings.path or ccfg.load(None, ctx.obj.get('config_target')).path
+    existing_text = path.read_text() if path and path.exists() else ""
+    try:
+        existing = read_toml(path) if existing_text else {}
+    except (OSError, ValueError) as e:
+        raise click.ClickException(f"{path}: {e}")
+    db_path = _usage_db(ctx, db)
+    acc = access_from(ctx.obj.get('config') or {}, log=False)
+    conn = sources.open_db(db_path)
+    layouts = []
+    try:
+        for site in discover.node_sites(conn):
+            name = site if site is not None else discover.LOCAL
+            cc = settings.cluster(name)
+            found = discover.find(discover.read_nodes(conn, site), cc.guest_partitions)
+            # --cluster limits which condos are drafted; every cluster still
+            # gets its section, so the usage report finds them all.
+            if clusters and name not in clusters:
+                layouts.append((name, found, None))
+                continue
+            condos = []
+            for part in found.condos:
+                last = discover.last_name(part, settings.delivery.owner_patterns)
+                cands = discover.owner_candidates(conn, last, acc, site, part) if last else []
+                condos.append((part, cands))
+            layouts.append((name, found, condos))
+    finally:
+        conn.close()
+    if not layouts:
+        raise click.ClickException("no node readings in this database: nothing to find condos in")
+    text, said = discover.draft(existing_text, existing, layouts, settings)
+    try:
+        ccfg.from_dict(read_toml_text(existing_text + text))
+    except (ValueError, ccfg.CondoConfigError) as e:
+        raise click.ClickException(f"the draft wouldn't read ({e}); report.toml is unchanged")
+    if mask:
+        for name, found, condos in layouts:
+            if condos is None:
+                continue
+            owners = sum(1 for _, c in condos if c)
+            click.echo(f"{name}: {len(found.guest_partitions)} guest partition(s), {len(condos)} condos, "
+                       f"an owner guessed for {owners}")
+    elif not apply:
+        click.echo(text)
+    if not apply:
+        click.echo(f"(not written: --apply adds this to {path})")
+        return
+    if path.exists():
+        backup = path.with_name(f"{path.name}.bak-{datetime.now():%Y%m%d-%H%M%S}")
+        from nomad.usage.run import private_file
+        with private_file(backup) as f:
+            f.write(existing_text)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+        click.echo(f"added to {path} ({'; '.join(said)}); the old file is {backup}")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        from nomad.usage.run import private_file
+        with private_file(path) as f:
+            f.write(text.lstrip("\n"))
+        click.echo(f"wrote {path} ({'; '.join(said)}), readable only by you")
+    click.echo("Check each owner, set confirmed = true, then run `nomad usage-report condos`.")
+
+
+def read_toml_text(text: str) -> dict:
+    """TOML text as nomad reads files (tomllib, else toml)."""
+    try:
+        import tomllib
+    except ImportError:            # Python 3.10
+        import toml
+        return toml.loads(text)
+    return tomllib.loads(text)
+
+
 @cli.group('config')
 def config_group():
     """nomad.toml: does it read, and if not, where it goes wrong.

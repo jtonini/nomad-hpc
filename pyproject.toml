@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomad-hpc"
-version = "1.14.8"
+version = "1.15.0"
 description = "A lightweight HPC monitoring and predictive analytics tool"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -63,6 +63,11 @@ ml = [
 # Web dashboard
 dashboard = [
     "jinja2>=3.0",
+]
+
+# Condo reports as PDF (nomad usage-report condos)
+report = [
+    "fpdf2>=2.7.6",
 ]
 
 # Alert notifications
