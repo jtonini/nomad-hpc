@@ -42,7 +42,7 @@ jobs:
 
       - name: Install Python and dependencies
         run: |
-          dnf install -y python3.11 python3.11-pip
+          dnf install -y python3.11 python3.11-pip procps-ng openssh-clients
           python3.11 -m pip install --upgrade pip
           python3.11 -m pip install -e ".[dev]"
 

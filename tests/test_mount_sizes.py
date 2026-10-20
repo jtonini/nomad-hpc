@@ -534,8 +534,14 @@ def test_sync_adds_the_size_columns_to_the_combined_database(tmp_path, monkeypat
     # alpha still runs a nomad from before the sizes; beta has them.
     old = sqlite3.connect(cache / "alpha.db")
     _bootstrap_db_with_migrations(str(cache / "alpha.db"))
-    for col in ("total_bytes", "used_bytes", "avail_bytes"):
-        old.execute(f"ALTER TABLE workstation_mount_state DROP COLUMN {col}")
+    # The table as it was before the sizes. Rebuilt rather than with DROP
+    # COLUMN, which SQLite has only from 3.35 (Rocky 9 ships 3.34).
+    sized = ("total_bytes", "used_bytes", "avail_bytes")
+    keep = [r[1] for r in old.execute("PRAGMA table_info(workstation_mount_state)")
+            if r[1] not in sized]
+    old.execute(f"CREATE TABLE wms_old AS SELECT {', '.join(keep)} FROM workstation_mount_state")
+    old.execute("DROP TABLE workstation_mount_state")
+    old.execute("ALTER TABLE wms_old RENAME TO workstation_mount_state")
     old.execute("INSERT INTO workstation_mount_state (timestamp, hostname, mountpoint, source, "
                 "is_mounted, is_responsive) VALUES ('2026-10-05T22:00:00', 'a1', '/h', "
                 "'nas:/h', 1, 1)")

@@ -147,7 +147,7 @@ def _is_interesting(source, mountpoint, fstype):
     return True
 
 
-class _Check(object):
+class _Check:
     """One mount's check, run in a daemon thread: stat(), then statvfs()."""
 
     def __init__(self, mountpoint):

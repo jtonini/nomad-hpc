@@ -5203,7 +5203,7 @@ def _storage_lines(conn, acc, names, mask):
             state = _machine_state(conn, 'storage', full) if conn is not None else None
             line = state or missing
             if full in sizes:
-                line += _size_shown(sizes[full], state, lambda o: label.get(o, o))
+                line += _size_shown(sizes[full], state, lambda o, label=label: label.get(o, o))
             lines.append(f"      {shown_as}: {line}")
         # Exports of one pool: their space together, counted once.
         for group in groups:
@@ -6117,7 +6117,7 @@ def _lab_edit(ctx):
             "nomad.toml.example), then add labs to it")
     edit = TomlEdit(path)
     try:
-        edit.data
+        _ = edit.data                  # reading it is the check
     except Exception as exc:
         from nomad.config.problems import describe_safely
         err = describe_safely(edit.path, edit.text, exc)
@@ -6193,6 +6193,9 @@ def _lab_reach(host, nas=False):
                             host, cmd], capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         r = None
+    except OSError:
+        # No ssh on this machine (1.14.7: the command used to stop here).
+        return "not checked: there is no ssh here to try it with"
     out = _after_mark(r.stdout).splitlines() if r is not None else []
     if not out or out[0].strip() != "ok":
         return ("NOT reachable over ssh with a key now: it will be recorded as offline "
@@ -6222,12 +6225,16 @@ def _lab_finish(edit, changes, apply, check, notes=()):
     except OSError as e:
         raise click.ClickException(f"can't write {edit.path} ({e.strerror or e}); "
                                    "nothing changed")
-    click.echo(f"\nWritten." + (f" Backup: {backup}" if backup else ""))
+    click.echo("\nWritten." + (f" Backup: {backup}" if backup else ""))
 
 
 def _lab_run(ctx, lab_name, action, check, apply, notes=()):
+    """``notes``: lines to show with the change, or a function giving them,
+    called only once nomad.toml reads (it may try the host over ssh)."""
     from nomad.config.labs import LabError, lab_group
     edit = _lab_edit(ctx)
+    if callable(notes):
+        notes = notes()
     group = lab_group(edit.data, lab_name)
     try:
         changes = action(edit, group)
@@ -6267,7 +6274,7 @@ def lab_add_machine(ctx, lab_name, host, apply):
         return ([e for e in ws if e.get("hostname") == host.strip()]
                 == [{"hostname": host.strip(), "department": group}])
     _lab_run(ctx, lab_name, lambda e, g: add_machine(e, g, host), check, apply,
-             [f"{host}: {_lab_reach(host)}"])
+             lambda: [f"{host}: {_lab_reach(host)}"])
 
 
 @lab.command('add-nas')
@@ -6295,21 +6302,23 @@ def lab_add_nas(ctx, lab_name, host, kind, paths, name, note, apply):
                 and not any(e.get("hostname") == host.strip() for e in ws)
                 and (group == SHARED
                      or host.strip() in (listed.get(group) or {}).get("storage", [])))
-    notes = [f"{host}: {_lab_reach(host, nas=(kind == 'zfs'))}"]
-    try:
-        cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
-    except OSError:
-        cron = ""
-    runs = [line for line in cron.splitlines()
-            if "nomad" in line and " collect" in line and not line.lstrip().startswith("#")]
-    if runs and all("-C" in line and "storage" not in line for line in runs):
-        notes.append("cron here runs `nomad collect -C ...` without the storage collector; "
-                     "add `-C storage` to that line, e.g.:")
-        notes.append("  crontab -l | sed 's/collect -C workstation --once/collect -C "
-                     "workstation -C storage --once/' | crontab -")
-    elif not runs:
-        notes.append("no `nomad collect` in this host's crontab: the NAS is read only when "
-                     "`nomad collect -C storage --once` runs (every 5 minutes, say)")
+    def notes():
+        out = [f"{host}: {_lab_reach(host, nas=(kind == 'zfs'))}"]
+        try:
+            cron = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+        except OSError:
+            cron = ""
+        runs = [line for line in cron.splitlines()
+                if "nomad" in line and " collect" in line and not line.lstrip().startswith("#")]
+        if runs and all("-C" in line and "storage" not in line for line in runs):
+            out.append("cron here runs `nomad collect -C ...` without the storage collector; "
+                       "add `-C storage` to that line, e.g.:")
+            out.append("  crontab -l | sed 's/collect -C workstation --once/collect -C "
+                       "workstation -C storage --once/' | crontab -")
+        elif not runs:
+            out.append("no `nomad collect` in this host's crontab: the NAS is read only when "
+                       "`nomad collect -C storage --once` runs (every 5 minutes, say)")
+        return out
     _lab_run(ctx, lab_name,
              lambda e, g: add_nas(e, g, host, kind, list(paths), name, note), check, apply,
              notes)

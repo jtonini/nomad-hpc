@@ -137,6 +137,7 @@ def facts_group():
     nomad facts sites               every site now, and its jobs (last 30 days)
     nomad facts me NETID            one person's work
     nomad facts lab NETID           the labs that person leads, taken together
+    nomad facts busy                when each machine is busiest (last 30 days)
     Add --json for the data itself, --mask before sharing the output.
     Reads the hub's combined.db when there is one, else this host's database.
     """
@@ -545,3 +546,149 @@ def course_cmd(ctx, groups, instructor, names, db, as_json, mask):
         if j and j["students_with_jobs"]:
             click.echo(f"  clusters: {j['students_with_jobs']} student(s) ran jobs; {_jobs_line(j)}")
     _not_shown(data)
+
+
+def _peak(p: dict | None, unit: str = "", fmt: str = "{:,g}") -> str:
+    if not p:
+        return "not measured"
+    text = fmt.format(p["value"])
+    if p.get("of") is not None:
+        text += f" of {fmt.format(p['of'])}"
+    text += unit
+    if p.get("pct") is not None:
+        text += f" ({p['pct']:g}%)"
+    return text + f", {_day(p['at'])}"
+
+
+def _day(t) -> str:
+    from nomad.facts._common import parse_time
+    d = parse_time(t)
+    return d.strftime("%a %d %b %H:%M") if d else "?"
+
+
+def _hours(cells: list, unit: str = "%") -> str:
+    return ", ".join(f"{c['weekday']} {c['hour']:02d}:00 ({c['value']:g}{unit})" for c in cells) or "-"
+
+
+def _g(v) -> str:
+    return "-" if v is None else f"{v:g}"
+
+
+def _week(grid: list | None, weekdays: list, label: str) -> None:
+    if not grid:
+        return
+    top = max((v for row in grid for v in row if v is not None), default=0)
+    if top <= 0:
+        return
+    click.echo(f"    typical week, {label} (scale {_BARS[1]} to {_BARS[8]} = up to {top:g}):")
+    click.echo("          0     6     12    18    ")
+    for day, row in zip(weekdays, grid):
+        click.echo(f"      {day} {_strip(row, top)}")
+
+
+@facts_group.command("busy")
+@click.option("--days", default=30, show_default=True, type=click.IntRange(1, 365))
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.option("--json", "as_json", is_flag=True, help="The answer as JSON.")
+@click.option("--mask", is_flag=True, help="Leave out workstation names and the database's path.")
+@click.option("--each", is_flag=True, help="Each workstation too, not only each group.")
+@click.pass_context
+def busy_cmd(ctx, days, db, as_json, mask, each):
+    """When each cluster, interactive server and group of workstations is
+    busiest: the most in use at once and when, the average, a typical week
+    and the busiest and quietest hours, over --days."""
+    from nomad.facts.busy import busy
+    path, conn = _open(ctx, db)
+    try:
+        data = busy(conn, days=days, names=not mask)
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+    wd = data["weekdays"]
+    click.echo(f"When it's busiest, last {data['window']['days']} days{_where(path, mask)}")
+
+    def span(e):
+        text = f"since {_when(e['from'])}"
+        if e.get("stopped"):
+            text += click.style(f"; readings stopped {_when(e['until'])}", fg="yellow")
+        return text
+    for c in data["clusters"]:
+        out = c["nodes_out"]
+        mean_out = "<0.1" if out["most"] and (out["mean"] or 0) < 0.05 else _g(out["mean"])
+        every = f" about every {c['every_minutes']:g} min" if c["every_minutes"] is not None else ""
+        click.echo(f"\n  {c['site']} (cluster): {c['nodes']} node{'s' * (c['nodes'] != 1)} in service"
+                   + (f" (out of service: {mean_out} on average, at most {out['most']}; "
+                      f"left out of the totals)" if out["most"] else "")
+                   + f", {c['readings']:,} reading{'s' * (c['readings'] != 1)}{every}, {span(c)}")
+        cores, mem = c["cores"], c["memory"]
+        click.echo(f"    most cores allocated at once: {_peak(cores['allocated']['peak'])}")
+        load = cores["load"]
+        over = load.get("over_cores_readings") or 0
+        stall = (load["peak"] or {}).get("nodes_above_cores")
+        click.echo(f"    most load:                    {_peak(load['peak'], fmt='{:,.0f}')}"
+                   + (f" ({stall} node{'s' * (stall != 1)} above {'their' if stall != 1 else 'its'} cores then)"
+                      if stall else "")
+                   + (f"; a node above its cores in {load['over_cores_pct']:g}% of readings"
+                      if load["over_cores_pct"] >= 0.1 else
+                      f"; a node above its cores in {over} reading{'s' * (over != 1)}" if over else ""))
+        if mem["allocated"].get("tracked") is False:
+            click.echo("    memory allocated:             not tracked (Slurm here doesn't count memory)")
+        else:
+            click.echo(f"    most memory allocated:        {_peak(mem['allocated']['peak'], ' GB')}")
+        held = mem["held"]
+        if held:
+            click.echo(f"    most memory held:             {_peak(held['peak'], ' GB')} (on the nodes "
+                       f"running jobs, of the nodes in service; file cache included: jobs used this or less)")
+        click.echo(f"    on average: {_p(cores['allocated']['mean_pct'])} of cores allocated, "
+                   f"load {_p(cores['load']['mean_pct'])} of cores"
+                   + (f", {_p(mem['allocated']['mean_pct'])} of memory allocated"
+                      if mem["allocated"].get("tracked") is not False else "")
+                   + (f", {_p(held['mean_pct'])} of memory held" if held else ""))
+        click.echo(f"    busiest (cores allocated): {_hours(c['busiest'])}")
+        click.echo(f"    quietest:                  {_hours(c['quietest'])}")
+        _week(c["week"]["cores_allocated_pct"], wd, "% of cores allocated")
+    for c in data.get("clusters_all_out", []):
+        click.echo(f"\n  {c['site']} (cluster): every node out of service in all {c['readings']:,} "
+                   f"readings, {_when(c['from'])} to {_when(c['until'])}")
+    for i in data["interactive"]:
+        name = i["site"] + ("" if i["server"] in ("local", None) else f" / {i['server']}")
+        click.echo(f"\n  {name} (interactive): {i['hours']:,} hours, {span(i)}")
+        click.echo(f"    most people on at once:  {_peak(i['people']['peak'])}; "
+                   f"on average {_g(i['people']['mean'])}")
+        if i["computing"]:
+            click.echo(f"    most computing at once:  {_peak(i['computing']['peak'])}; "
+                       f"on average {_g(i['computing']['mean'])}")
+        if i["session_memory_gb"]:
+            click.echo(f"    most memory held:        {_peak(i['session_memory_gb']['peak'], ' GB')}")
+        m = i.get("machine")
+        if m:
+            click.echo(f"    machine's busiest:       {_peak(m['busy_cores']['peak'], ' cores')}; "
+                       f"on average {_p(m['busy_cores']['mean_pct'])} busy")
+        click.echo(f"    busiest (people on): {_hours(i['busiest'], '')}")
+        click.echo(f"    quietest:            {_hours(i['quietest'], '')}")
+        _week(i["week"]["people"], wd, "people on")
+    for w in data["workstations"]:
+        click.echo(f"\n  {w['site']} (workstations): {w['machines']} machines, {w['cores']} cores, {span(w)}")
+        if w["busy_cores"]:
+            click.echo(f"    most cores busy at once: {_peak(w['busy_cores']['peak'])}; "
+                       f"on average {_p(w['busy_cores']['mean_pct'])} (people's sessions)")
+        else:
+            click.echo("    cores busy:              not measured (no per-person CPU readings here)")
+        if w["memory_in_use"]:
+            click.echo(f"    most memory in use:      {_peak(w['memory_in_use']['peak'], ' GB')}")
+        if w["machines_busy"]:
+            click.echo(f"    most machines busy:      {_peak(w['machines_busy']['peak'])}")
+        click.echo(f"    busiest: {_hours(w['busiest'])}")
+        click.echo(f"    quietest: {_hours(w['quietest'])}")
+        _week(w["week"]["busy_cores_pct"], wd, "% of cores busy")
+        if each:
+            for m in w["each"]:
+                if m["cpu_measured"]:
+                    click.echo(f"      {m['name']}: {m['cores']} cores, {_p(m['mean_busy_pct'])} busy on "
+                               f"average; most {_peak(m['peak_cores'])}")
+                else:
+                    click.echo(f"      {m['name']}: {m['cores']} cores; CPU not measured")
+    if not (data["clusters"] or data.get("clusters_all_out") or data["interactive"] or data["workstations"]):
+        click.echo("\n  nothing measured in the window")

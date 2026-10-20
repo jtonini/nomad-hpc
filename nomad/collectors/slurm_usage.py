@@ -306,8 +306,7 @@ class SlurmUsageCollector(BaseCollector):
         a long outage in a cluster's life is not its start)."""
         if self._get(conn, _NOTHING_BEFORE):
             return
-        asked = {m: rep for m, rep in conn.execute(
-            "SELECT month, reported_h FROM cluster_usage_asked")}
+        asked = dict(conn.execute("SELECT month, reported_h FROM cluster_usage_asked").fetchall())
         with_data = sorted(m for m, rep in asked.items() if rep > 0)
         if not with_data:
             return

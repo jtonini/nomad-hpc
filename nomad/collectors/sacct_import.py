@@ -37,7 +37,7 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Iterable, Iterator
+from collections.abc import Iterable, Iterator
 
 from nomad.db.jobkeys import ACTIVE_STATES, decide, ensure_job_columns, place, stored_job
 

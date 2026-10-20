@@ -73,7 +73,6 @@ nav:
   - Development:
     - Contributing: CONTRIBUTING.md
     - Extending NØMAÐ: extending.md
-    - Roadmap: ROADMAP.md
     - Changelog: changelog.md
 
 markdown_extensions:

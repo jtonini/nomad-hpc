@@ -6,6 +6,7 @@ It used to read load_1m, memory_percent and disk_percent, which no table has:
 every workstation showed 0% load, memory and disk, and nothing was flagged.
 """
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -130,6 +131,7 @@ def test_reading_keeps_older_column_names():
     assert (r["load"], r["mem_pct"], r["disk_pct"]) == (2.0, 50.0, 70.0)
 
 
+@pytest.mark.skipif(shutil.which("ps") is None, reason="no ps here (a minimal container)")
 def test_the_zombie_command_counts_zombies_only():
     # A child that has exited and not been waited for is a zombie.
     child = subprocess.Popen([sys.executable, "-c", "pass"])

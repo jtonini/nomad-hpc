@@ -8,6 +8,7 @@ Three questions every front to nomad asks, answered once, as data:
 | **me** | one person's work: their jobs over a window, running and waiting now, score and advice | that person |
 | **lab** | the labs a person leads: members, their jobs taken together, the lab's workstations and storage | the lab's PI; staff for any lab |
 | **course** | the courses a person teaches, this term: the class together, each student as a row, when the class works | the course's instructors; staff for any course |
+| **busy** | when each cluster, interactive server and group of workstations is busiest: the most in use at once and when, a typical week, the busiest and quietest hours (1.14.7) | anyone signed in; each workstation by name for staff only |
 
 The Console serves them at `/api/v1/sites`, `/api/v1/me` and `/api/v1/lab`;
 a dashboard widget elsewhere (an Open OnDemand page, say) or an assistant
@@ -22,6 +23,7 @@ nomad facts sites --json          # the data itself
 nomad facts lab NETID --mask      # no NetID, lab, machine or storage names, for sharing
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
 nomad facts course GROUP              # one course
+nomad facts busy --days 90 --each     # when each machine is busiest, each workstation too
 ```
 
 They read the hub's `combined.db` when there is one, else this host's own
@@ -202,6 +204,57 @@ backfill` has rebuilt them), computing from 1.11, hours of the week from
 counts only. Unnamed rows are not anonymous to an instructor who knows the
 class: in a course of three, the rows are three people.
 
+## busy
+
+For each cluster, interactive server and group of workstations over the
+window: the most in use at once and when, the average, a typical week (each
+weekday's hour averaged over the window) and the three busiest and quietest
+hours. Machines only, never a person; workstations are listed by name
+(`each`), and a lab's machines can be named for people, so the Console
+shows those to staff only and `--mask` numbers them instead.
+
+- **Clusters** (node_state): cores allocated (CPUAlloc) of the cores of the
+  nodes in service. A node down, not responding, failing, in maintenance, or
+  drained with nothing running is out of service: left out of the totals and
+  counted apart (`nodes_out`: on average and at most).
+- **Load** (CPULoad): each node's counts up to its cores, for the most at
+  once as for the average. Load counts threads ready to run as well as
+  running, and processes waiting on storage, so a node whose storage stalls
+  can read far above its cores; `over_cores_pct` and `over_cores_readings`
+  say how often a node read above its cores. Where jobs are held to their
+  cores (task/cgroup), that means jobs started more threads than cores they
+  asked for, or were waiting on storage. Load is not cores in use.
+- **Memory allocated** (AllocMem), or `"tracked": false` where Slurm doesn't
+  count memory (SelectTypeParameters without `_Memory`), never 0%.
+- **Memory held**: on the nodes running jobs, each node's memory less what
+  Slurm reports free, as a share of the memory of all the nodes in service.
+  Slurm's free memory is the kernel's free memory (MemFree), which counts
+  the file cache as used, so this is the most the jobs could have used: jobs
+  used this much or less. Nodes running nothing count as none (whatever they
+  hold is cache, or left behind, not a job's). A free figure of 0 (Slurm's
+  `FreeMem=N/A`, from a node that hasn't reported) is not counted.
+- A cluster whose every reading in the window had every node out of
+  service has no figures; it is listed in `clusters_all_out` instead.
+- Readings that aren't numbers (text in a number column) are not counted.
+- **Interactive servers** (interactive_hourly): people with a session open
+  (the most in an hour, and the hour's average), people computing, the
+  memory their sessions held, and the machine's own busy cores
+  (mpstat_summary) where the collector runs on it (one server at the site).
+- **Workstations**: the cores people's sessions kept busy, from each
+  person's CPU counters (workstation_user_snapshot, accounts from uid 1000):
+  everything in their user slice, logins, terminals and cron jobs; the
+  machine's own services are not included. Memory in use is the machine's,
+  cache left out (workstation_state). A machine is busy with a core or more
+  in use. The group's figures add each machine's ten-minute averages
+  (machines aren't read at the same instant). The workstation collector's
+  own CPU percentages were never measured, and are not used; a machine with
+  no per-person readings says its CPU is not measured.
+
+An hour of the week is ranked busiest or quietest only with readings on two
+different days or more, and nothing is ranked when every hour is the same.
+A site whose last reading is more than two hours old is marked `stopped`. Times
+are as the collectors wrote them: each site's local time.
+
 ## Using the functions
 
 ```python
@@ -212,6 +265,7 @@ facts.person(conn, "jdoe", days=30, config=config, db_path=path)   # db_path: sc
 facts.labs(conn, config, "pi1", days=30, min_others=3)             # what a PI is given
 facts.labs(conn, config, groups=["pi1$"])                            # staff, by group
 facts.sites(conn, reasons=True)                                      # staff: node reasons
+facts.busy(conn, days=30, names=False)                               # machines numbered, not named
 ```
 
 The functions decide nothing about who may ask: the caller does.

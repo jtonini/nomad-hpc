@@ -7,6 +7,7 @@
     questions(conn, config, netid, ...)   the courses to ask a faculty member about
     teaches(conn, config, netid, ...)     which courses a person teaches (no figures)
     every_course(conn, config)            every course this term, for staff to choose from
+    busy(conn, days, names)               when each machine is busiest (staff)
 
 Read-only, from a nomad database (a site's own, or the hub's combined.db),
 whatever its tables hold: a figure that rests on nothing measured is None,
@@ -20,6 +21,7 @@ lead, and /api/v1/sites (aggregates only) for anyone signed in; `nomad
 facts` answers whoever can read the database. See docs/facts.md.
 """
 from nomad.facts._common import API, open_readonly  # noqa: F401
+from nomad.facts.busy import busy  # noqa: F401
 from nomad.facts.courses import (courses, every_course, may_answer, questions,  # noqa: F401
                                  teaches)
 from nomad.facts.labs import labs  # noqa: F401
