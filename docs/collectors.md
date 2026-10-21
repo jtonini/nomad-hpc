@@ -29,6 +29,7 @@ enabled = false
 | `per_user` | off | login nodes, shared interactive hosts | Python `psutil` | `per_user_sample`, `per_user_alert`, `per_user_daily` |
 | `oom` | off | shared hosts without per-user memory limits (login nodes, interactive servers) | `journalctl`, and reading the kernel's messages | `oom_kills` |
 | `storage` | off | a host reaching ZFS/NFS servers over SSH | `ssh` | `storage_state` |
+| `storage_use` | off | a site or the hub reading the files `nomad-storage.sh` writes on storage servers | `ssh`, or the files on this machine | `storage_owners`, `storage_paths`, `storage_tops`, `storage_folders`, ... |
 | `network_perf` | off | any host; tests paths that start there | `ping`; `iperf3` for throughput | `network_perf` |
 | `cloud.aws` | off | sites with AWS resources | Python `boto3` | `cloud_metrics` |
 
@@ -524,5 +525,7 @@ paths = ["/export/home"]
 ```
 
 Reached over SSH with `BatchMode` (a key, no password prompt) unless `hostname` is this host. `type = "zfs"` reads pool health and capacity: the space users have, from each pool's root dataset (`zfs list`), so RAIDZ parity isn't counted as it is in `zpool list`, and a boot pool (`boot-pool`, `freenas-boot`, `bpool`) isn't counted at all. It works on TrueNAS CORE (FreeBSD) as on Linux. Any type reads NFS exports and connected clients. A login banner is skipped, as for workstations. `nomad lab add-nas` adds a NAS (see docs/config.md). Without ZFS, capacity comes only from the `paths` listed (df) — never from the server's root disk. An unreachable server is stored as `offline` with its capacity unknown (NULL), not as an empty server.
+
+Who holds a server's space (each owner's use, quotas, and how old their folders are) is the `storage_use` collector's: see [Storage use](storage.md).
 
 `[[storage_devices]]` and `[[network_tests]]` at the top level of `nomad.toml`, where older examples put them, are still read, with a warning to move them.

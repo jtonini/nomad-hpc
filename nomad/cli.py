@@ -418,6 +418,353 @@ def per_user_cmd(ctx: click.Context, db: str, days: int, mask: bool) -> None:
         conn.close()
 
 
+# ── storage: who uses each storage server's space (1.16) ─────────────────────
+
+def _size(b) -> str:
+    """Decimal units, as df -H and the Console say them."""
+    if b is None:
+        return "-"
+    b = float(b)
+    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
+        if abs(b) < 1000 or unit == "PB":
+            return f"{b:.0f} {unit}" if unit in ("B", "KB") else f"{b:.1f} {unit}"
+        b /= 1000
+    return f"{b:.1f} PB"
+
+
+@cli.group('storage')
+def storage_group():
+    """Who uses each storage server's space, and on what.
+
+    \b
+    nomad storage script > nomad-storage.sh    the part that runs on the server
+    nomad storage cron /home /scratch          how to run it there, and nomad.toml's part
+    nomad storage use                          who holds what, growth, what is old
+    nomad storage status                       what was read from each server, when
+
+    Seeing everyone's files takes root on the storage server (or sudo, or an
+    account given just those rights), and nomad itself never runs with them:
+    nomad-storage.sh only reads (df, xfs_quota report, zfs userspace, find,
+    stat) and writes what it read for the storage_use collector, which picks
+    it up with an ordinary account. See docs/storage.md.
+    """
+
+
+@storage_group.command('script')
+def storage_script():
+    """Print nomad-storage.sh, to install on a storage server."""
+    from nomad.storage import script_text
+    click.echo(script_text(), nl=False)
+
+
+def _sudoers_arg(a: str) -> str:
+    """One argument as sudoers matches it: , : = \\ and spaces escaped."""
+    import re as _re
+    return _re.sub(r'([\\,:= ])', r'\\\1', a)
+
+
+@storage_group.command('cron')
+@click.argument('paths', nargs=-1, required=True)
+@click.option('--run-as', 'run_as', type=click.Choice(['root', 'sudo', 'sudo-readers', 'user']), default='root',
+              show_default=True,
+              help="root: root's crontab (or TrueNAS's Cron Jobs). sudo: --user's crontab, through sudo, "
+                   "for exactly these command lines. sudo-readers: --user's crontab, as --user, asking sudo "
+                   "only for xfs_quota, zfs and du (where sudo already allows them). user: --user with only "
+                   "the right to read every file, through systemd (Linux).")
+@click.option('--user', 'account', default=None, help='The account for --run-as sudo or user.')
+@click.option('--script', 'script_path', default='/usr/local/sbin/nomad-storage.sh', show_default=True,
+              help='Where nomad-storage.sh is on the server.')
+@click.option('--dir', 'out_dir', default='/var/lib/nomad-storage', show_default=True,
+              help='Where it writes (on TrueNAS: a folder on a pool, as /mnt/POOL/nomad-storage/out).')
+@click.option('--group', default=None, help="The group that may read what it writes (the collecting account's).")
+@click.option('--seconds', type=int, default=10800, show_default=True, help="The nightly scan's time budget.")
+@click.option('--server', default=None, help="The server's name in nomad.")
+def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, server):
+    """How to run nomad-storage.sh on a server -- as root, through sudo, or
+    as an account with only the right to read -- and the
+    [collectors.storage_use] part of nomad.toml that reads what it writes."""
+    import re as _re
+    import shlex as _sh
+    for p in paths:
+        if not p.startswith("/"):
+            raise click.UsageError(f"{p}: an absolute path")
+    for v, what in ((script_path, "--script"), (out_dir, "--dir")):
+        if not v.startswith("/"):
+            raise click.UsageError(f"{what}: an absolute path")
+    # Only characters that mean the same to the shell, cron (% is a line
+    # break there), sudoers (* ? [ ] ! # match or end a rule) and systemd ($ %
+    # are expanded): a path outside them can't be allowed exactly.
+    for v in (*paths, script_path, out_dir):
+        if not _re.match(r"^/[A-Za-z0-9._/+@,:=-]*$", v):
+            raise click.UsageError(f"{v!r}: a path of letters, digits and . _ / + @ , : = - only")
+    if group and not _re.match(r"^[A-Za-z0-9._-]+$", group):
+        raise click.UsageError(f"--group {group!r}: a group name")
+    if run_as != "root" and not (account and _re.match(r"^[A-Za-z_][A-Za-z0-9._-]*$", account)):
+        raise click.UsageError(f"--run-as {run_as}: say which account with --user NAME")
+    if run_as == "sudo-readers" and out_dir == "/var/lib/nomad-storage":
+        raise click.UsageError(f"--run-as sudo-readers: give --dir, a folder {account} can make "
+                               f"(as /home/{account}/nomad-storage)")
+    seconds = int(seconds)
+    args = (["-S"] if run_as == "sudo-readers" else []) + ["-d", out_dir] + (["-g", group] if group else [])
+    usage = ["/bin/sh", script_path, *args, "usage", *paths]
+    scan = ["/bin/sh", script_path, *args, "-s", str(seconds), "scan", *paths]
+
+    def line(argv):
+        return " ".join(_sh.quote(a) for a in argv)
+
+    echo = click.echo
+    if run_as == "sudo-readers":
+        echo(f"# On the server: the script, owned by {account} (or root) and writable only by its owner, in")
+        echo(f"# folders only {account} or root can change (as /home/{account}/bin):")
+        echo(f"#   install -m 755 nomad-storage.sh {_sh.quote(script_path)}")
+    else:
+        echo("# On the server, as root: the script, owned by root and writable only by root:")
+        echo(f"#   install -o root -m 755 nomad-storage.sh {_sh.quote(script_path)}")
+    if run_as == "sudo-readers":
+        echo(f"# {account} runs it, as {account}, and asks sudo -n only for the readers that need root:")
+        echo("# xfs_quota (and zfs) for usage, GNU du for the scan. `sudo -l` on the server must list them")
+        echo("# with NOPASSWD; if it doesn't, root adds (visudo -f /etc/sudoers.d/nomad-storage):")
+        echo(f"#   {account} ALL=(root) NOPASSWD: /usr/sbin/xfs_quota, /usr/bin/du")
+        echo(f"# {account}'s crontab (crontab -e as {account}):")
+        echo(f"17 * * * * {line(usage)}")
+        echo(f"30 1 * * * {line(scan)}")
+    elif run_as == "root":
+        echo("# Root's crontab (crontab -e as root): usage hourly, the scan nightly.")
+        echo(f"17 * * * * {line(usage)}")
+        echo(f"30 1 * * * {line(scan)}")
+        echo()
+        echo("# TrueNAS: put the script and the folder on a pool (the system disk is replaced at")
+        echo("# upgrades), then Tasks > Cron Jobs > Add, Run As User root, once for each line:")
+        echo(f"#   Command: {line(usage)}")
+        echo("#   Schedule: hourly")
+        echo(f"#   Command: {line(scan)}")
+        echo("#   Schedule: daily")
+    elif run_as == "sudo":
+        echo(f"# As root: visudo -f /etc/sudoers.d/nomad-storage, with these two lines: {account} may")
+        echo("# run these exact command lines as root, and nothing else (no other folders, no other options).")
+        for argv in (usage, scan):
+            echo(f"{account} ALL=(root) NOPASSWD: " + " ".join(_sudoers_arg(a) for a in argv))
+        echo()
+        echo(f"# {account}'s crontab (crontab -e as {account}):")
+        echo(f"17 * * * * sudo -n {line(usage)}")
+        echo(f"30 1 * * * sudo -n {line(scan)}")
+    else:
+        unit = "/etc/systemd/system/nomad-storage-{}.{}"
+        echo(f"# {account} runs it, with only the right to read every file and folder (CAP_DAC_READ_SEARCH),")
+        echo("# given by systemd: cron can't give it. Linux only (on TrueNAS CORE, run it as root).")
+        if group:
+            echo(f"# {account} must be in {group}: the script gives its files to that group.")
+        echo("# As root, the output folder, owned by the account:")
+        echo(f"#   install -d -o {account}{' -g ' + _sh.quote(group) if group else ''} -m 750 {_sh.quote(out_dir)}"
+             f" && touch {_sh.quote(out_dir + '/.nomad-storage')}"
+             f" && chown {account} {_sh.quote(out_dir + '/.nomad-storage')}")
+        echo("# XFS: each owner's counts (usage) need root (xfs_quota's report). Run usage as root or")
+        echo("# through sudo with a folder of its own (nomad storage cron ... --dir /var/lib/nomad-storage-usage),")
+        echo("# leave out the usage unit below, and give the source usage_dir = that folder.")
+        echo("# ZFS: let the account read the counts:")
+        echo("#   zfs allow -u " + account + " userused,groupused,userquota,groupquota DATASET")
+        for mode, argv, when in (("usage", usage, "*-*-* *:17:00"), ("scan", scan, "*-*-* 01:30:00")):
+            echo()
+            echo(f"# {unit.format(mode, 'service')}")
+            echo("[Unit]")
+            echo(f"Description=NOMAD storage use ({mode}): nomad-storage.sh as {account}")
+            echo("[Service]")
+            echo("Type=oneshot")
+            echo(f"User={account}")
+            echo(f"ExecStart={line(argv)}")
+            echo("AmbientCapabilities=CAP_DAC_READ_SEARCH")
+            echo("CapabilityBoundingSet=CAP_DAC_READ_SEARCH")
+            echo("NoNewPrivileges=yes")
+            echo("ProtectSystem=strict")
+            echo(f"ReadWritePaths={out_dir}")
+            echo("Nice=19")
+            echo("IOSchedulingClass=idle")
+            echo()
+            echo(f"# {unit.format(mode, 'timer')}")
+            echo("[Timer]")
+            echo(f"OnCalendar={when}")
+            echo("Persistent=true")
+            echo("[Install]")
+            echo("WantedBy=timers.target")
+        echo()
+        echo("# Then: systemctl daemon-reload && systemctl enable --now nomad-storage-usage.timer "
+             "nomad-storage-scan.timer")
+    echo()
+    echo("# nomad.toml where the storage_use collector runs (a site, or the hub):")
+    echo("[collectors.storage_use]")
+    echo("enabled = true")
+    echo()
+    echo("[[collectors.storage_use.sources]]")
+    name = server or "SERVER"
+    echo(f'server = "{name}"')
+    echo(f'host = "{name}"           # ssh to it; leave out if the files are on this machine')
+    echo(f'dir = "{out_dir}"')
+    echo('# usage_dir = "..."        # usage.txt\'s own folder, if usage runs apart from the scan')
+    echo('# copy_of = "OTHER"        # it holds copies (replicas, backups) of OTHER\'s files')
+
+
+@storage_group.command('use')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: the hub's combined.db if there is one, else this host's).")
+@click.option('--server', 'only_server', default=None, help='Only this server.')
+@click.option('--top', 'top_n', type=int, default=10, show_default=True, help='Owners shown per path.')
+@click.option('--groups', is_flag=True, help='Groups instead of users.')
+@click.option('--projects', is_flag=True, help='XFS projects instead of users.')
+@click.option('--days', type=click.IntRange(1, 3650), default=30, show_default=True,
+              help='The change over this many days (7, 30, 90...).')
+@click.option('--mask', is_flag=True, help='Stand-ins for names (and for paths below the first folder), for sharing the output.')
+@click.pass_context
+def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
+    """Who holds each path's space: now, the change over 30 days (--days),
+    and what the scans found older than their ages; with each person's last
+    job."""
+    from nomad.storage import views
+    from nomad.usage import sources
+    kind = "project" if projects else "group" if groups else "user"
+    db_path = _usage_db(ctx, db)
+    conn = sources.open_db(db_path)
+    stand: dict = {}
+    spaths: dict = {}
+
+    def who(name):
+        return stand.setdefault(name, f"{kind} {len(stand) + 1}") if mask else name
+
+    def where(path):
+        if not mask or path.count("/") <= 1:
+            return path
+        return spaths.setdefault(path, f"/{path.split('/')[1]}/... (path {len(spaths) + 1})")
+
+    def when(t):
+        return str(t)[:10] if t else "-"
+
+    def at(t):
+        return str(t)[:16].replace("T", " ") if t else "-"
+    try:
+        if not views.available(conn):
+            click.echo("No storage readings yet: the storage_use collector stores them "
+                       "(nomad storage cron, docs/storage.md).")
+            return
+        jobs = views.last_jobs(conn)
+        for p in views.paths(conn):
+            if only_server and p["server"] != only_server:
+                continue
+            used, total = p["used_bytes"], p["total_bytes"]
+            pct = f" ({100 * used / total:.0f}%)" if used and total else ""
+            size = f"  {_size(used)} of {_size(total)}{pct}" if total else ""
+            click.echo(f"{p['server']}:{where(p['path'])}  {p['fs'] or '?'}{size}"
+                       f"  read {str(p['read_at'])[:16].replace('T', ' ')}")
+            if p.get("copy_of"):
+                click.echo(f"  holds copies of {p['copy_of']}'s files: shown here, never added to anyone's totals")
+            if p.get("covers"):
+                click.echo(f"  the per-owner counts are of everything at {where(p['covers'])}, not only this path")
+            if p.get("errors"):
+                click.echo(f"  not read: {p['errors']}")
+            if not p["accounting"]:
+                click.echo(f"  no per-owner counts: {p['note'] or 'the scan counts by folder'}")
+            cov = views.coverage(conn, p["server"], p["path"])
+            if cov["tops"]:
+                extra = ""
+                if cov["unfinished"]:
+                    extra += f"; {cov['unfinished']} never finished in the scan's time (raise -s)"
+                if cov["denied"]:
+                    extra += f"; {cov['denied']:,} files or folders it couldn't read"
+                span = (f", scanned {when(cov['oldest'])} to {when(cov['newest'])}" if cov["oldest"] else "")
+                click.echo(f"  scans: {cov['recent']} of {cov['tops']} top folders finished in the last "
+                           f"{cov['days']} days{span}{extra}")
+            for d in views.datasets(conn, p["server"], p["path"]):
+                q = d["quota_bytes"] or d["refquota_bytes"]
+                if q:
+                    click.echo(f"  dataset {d['dataset'] if not mask else '(masked)'}: "
+                               f"{_size(d['used_bytes'])} of its quota {_size(q)}")
+            rows = views.owners(conn, p["server"], p["path"], kind=kind, days=days, jobs=jobs)
+            if rows:
+                # What time the figures are for: the reading, and the one the change is from.
+                since = (f"; the change is since {at(rows[0]['compared_with'])}" if rows[0]["compared_with"]
+                         else f"; no reading {days} days back yet")
+                click.echo(f"  owners as of {at(rows[0]['read_at'])}{since}")
+                ages = next((r["scan"]["ages"] for r in rows if r.get("scan")), None)
+                head = f"  {'owner':<14} {'used':>10} {str(days) + ' days':>10} {'quota':>9}"
+                if ages:
+                    head += f" {'>' + str(ages[1]) + ' days':>11} {'newest change':>13}"
+                head += f" {'last job':>10}" if kind == "user" else ""
+                click.echo(head)
+                for r in rows[:top_n]:
+                    ch = r["change_bytes"]
+                    quota = r["hard_bytes"] or r["soft_bytes"]
+                    qs = _size(quota) if quota else ("several" if r["quotas"] else "none")
+                    out = (f"  {str(who(r['name']))[:14]:<14} {_size(r['used_bytes']):>10} "
+                           f"{('+' if ch and ch > 0 else '') + _size(ch) if ch is not None else '-':>10} "
+                           f"{qs:>9}")
+                    if ages:
+                        sc = r.get("scan")
+                        out += (f" {_size(sc['older2_bytes']) if sc else '-':>11} "
+                                f"{when(sc['newest']) if sc else '-':>13}")
+                    if kind == "user":
+                        out += f" {when(r.get('last_job')) if r.get('last_job') else 'none':>10}"
+                    click.echo(out)
+                if len(rows) > top_n:
+                    rest = sum(r["used_bytes"] for r in rows[top_n:])
+                    click.echo(f"  ... {len(rows) - top_n} more, {_size(rest)}")
+            elif kind == "user" and cov["tops"]:
+                # No per-owner counts: by what the scans found in each owner's top folders.
+                srows = views.scan_owners(conn, p["server"], p["path"], jobs=jobs)
+                a2 = srows[0]["ages"][1] if srows else 365
+                click.echo(f"  {'owner':<14} {'scanned':>10} {'>' + str(a2) + ' days':>11} "
+                           f"{'newest change':>13} {'last job':>10}")
+                for r in srows[:top_n]:
+                    click.echo(f"  {str(who(r['name']))[:14]:<14} {_size(r['bytes']):>10} "
+                               f"{_size(r['older2_bytes']):>11} {when(r['newest']):>13} "
+                               f"{when(r['last_job']) if r.get('last_job') else 'none':>10}"
+                               + ("" if r["complete"] else "  (not all finished)"))
+                if len(srows) > top_n:
+                    click.echo(f"  ... {len(srows) - top_n} more, {_size(sum(r['bytes'] for r in srows[top_n:]))}")
+    finally:
+        conn.close()
+
+
+@storage_group.command('status')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for use).")
+@click.pass_context
+def storage_status_cmd(ctx, db):
+    """What the storage_use collector read from each server, and when."""
+    from nomad.storage import views
+    from nomad.usage import sources
+    conn = sources.open_db(_usage_db(ctx, db))
+
+    def at(t):
+        return str(t or '-')[:16].replace('T', ' ')
+    try:
+        rows = views.reads(conn)
+        if not rows:
+            click.echo("Nothing read yet: enable [collectors.storage_use] (nomad storage cron).")
+            return
+        for r in rows:
+            head = f"{r['server']}:"
+            if r.get("read_at"):
+                head += f" read {at(r['read_at'])}" + (f" ({r['note']})" if r.get("note") else "")
+            if r.get("copy_of"):
+                head += f"  [copies of {r['copy_of']}]"
+            click.echo(head)
+            if len(r.get("sites") or []) > 1:
+                click.echo(f"  read by {len(r['sites'])} sites ({', '.join(r['sites'])}): only {r['site']}'s "
+                           "readings are shown; read it from one")
+            for mode in ("usage", "scan"):
+                m = r.get(mode)
+                if not m:
+                    click.echo(f"  {mode}: none yet")
+                    continue
+                extra = ""
+                if mode == "scan" and m["not_scanned"]:
+                    extra += f"; {m['not_scanned']} top folders left for the next run"
+                if mode == "scan" and m.get("odd_names"):
+                    extra += f"; {m['odd_names']} left out for a tab, line break or backslash in the name"
+                if mode == "scan" and m.get("unreadable"):
+                    extra += f"; couldn't list {m['unreadable'].replace(chr(10), ', ')}"
+                by = f", by {m['run_by']}" if m.get("run_by") else ""
+                click.echo(f"  {mode}: run of {at(m['started'])}{by}{extra}")
+    finally:
+        conn.close()
+
+
 @cli.command()
 @click.option('--path', '-p', default='/localscratch', help='Filesystem path to analyze')
 @click.option('--hours', '-h', type=int, default=24, help='Hours of history')
@@ -4439,6 +4786,7 @@ def sync(ctx, config_file, output, dry_run):
         'sqlite_sequence', 'config',
         # Counters and cursors from one run to the next: local working state.
         'per_user_state', 'interactive_state', 'oom_state', 'node_disks_sweeps',
+        'storage_reads',
     }
 
     # Build to a temp path so a failed or interrupted sync doesn't destroy
@@ -4736,6 +5084,15 @@ def sync(ctx, config_file, output, dry_run):
             ("node_disks", "source_site, node, timestamp"),
             ("node_disk_owner_counts", "source_site, node, path, timestamp"),
             ("node_disk_owners", "source_site, node, path, timestamp"),
+            # Who uses each storage server's space (1.16).
+            ("storage_owners", "source_site, server, path, kind, timestamp"),
+            ("storage_owners", "name, timestamp"),
+            ("storage_paths", "source_site, server, path, timestamp"),
+            ("storage_datasets", "source_site, server, path, timestamp"),
+            ("storage_reports", "source_site, server, mode, started"),
+            ("storage_tops", "source_site, server, path, top, scanned_at"),
+            ("storage_folders", "source_site, server, path, top"),
+            ("storage_folders", "top_owner"),
         ]
         click.echo("  Indexing... ", nl=False)
         _built = 0

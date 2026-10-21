@@ -96,6 +96,22 @@ Options: `--config` (report.toml), `--db`, `--user-map`, `--exclude-users`,
 `--teaching SITE`, `--format md|json|both`, `--min-cell N`, `--guard-details FILE`, `--allow WORD`.
 See [Usage report](usage-report.md).
 
+## Storage Use
+
+```bash
+# The script for a storage server's root cron, and its cron lines
+nomad storage script > nomad-storage.sh
+nomad storage cron /home /scratch --group GROUP --server fs1
+
+# Who holds each path's space, the change over 30 days, what is old
+nomad storage use [--server fs1] [--groups] [--top N] [--mask]
+
+# What the storage_use collector read from each server, and when
+nomad storage status
+```
+
+See [Storage use](storage.md).
+
 ## Actions
 
 ```bash

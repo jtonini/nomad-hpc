@@ -33,6 +33,11 @@ def _gpus_from_requests(conn: sqlite3.Connection) -> None:
 # Migration scripts: (version, description, SQL), or a function of the
 # connection for a change SQL alone can't make safely (a column that a
 # collector adds, so not every database has it).
+def _storage_use_tables(conn) -> None:
+    from nomad.collectors.storage_use import SCHEMA
+    conn.executescript(SCHEMA)
+
+
 MIGRATIONS: list[tuple[int, str, object]] = [
     (1, "Initial schema", Path(__file__).parent.joinpath("schema.sql").read_text()),
     (2, "Add alert_history table", """
@@ -427,6 +432,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     """),
     # GPU jobs from before Slurm recorded GPUs are GPU jobs in their summary (1.14.4).
     (24, "GPU jobs whose GPUs only their request shows", _gpus_from_requests),
+    # Who uses each storage server's space (1.16): the storage_use collector's tables.
+    (25, "Create storage_use tables", _storage_use_tables),
 ]
 
 
