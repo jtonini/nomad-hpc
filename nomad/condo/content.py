@@ -190,6 +190,10 @@ def owner_doc(fig: dict, delivery, brand=None) -> list:
     st = o.get("summary") or {}
     if st.get("finished"):
         oc = st["outcomes"]
+        # Not only the jobs above: a member's job can reach these nodes
+        # through another partition that includes them.
+        doc.append(P(f"Your lab's jobs that ended on these nodes in {mon}, sent to {c['partition']} or "
+                     "to any other partition that includes them:"))
         doc.append(Table(["Ended in " + mon, "Completed", "Failed", "Out of memory", "Timed out",
                           "Cancelled", "Node failure"],
                          [[n(st["finished"]), n(oc["completed"]), n(oc["failed"]), n(oc["out_of_memory"]),

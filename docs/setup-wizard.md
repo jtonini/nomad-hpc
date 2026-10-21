@@ -241,6 +241,25 @@ Then open `http://localhost:8050` in your browser.
 
 ---
 
+## Step 8: Condo reports
+
+```
+Register condos for the monthly condo reports? [y/N]:
+```
+
+A condo is a set of nodes a lab bought, lent to everyone else through a
+guest partition while the lab isn't using them. Answer yes and the wizard
+asks, for each Slurm cluster, which partition is the guest partition (the
+one named like "condo" by default), lists the condos in it (the partitions
+whose nodes all sit inside it), and asks each one's owner NetID; then the
+owners' mail domain and who should review the reports first. It writes
+report.toml beside nomad.toml, the cluster named as in nomad.toml (condos on
+several clusters monitored from one machine go together as `this-cluster`:
+that machine's database holds them all); written as root, the nomad account
+can read it. See [Condo reports](condo-reports.md).
+
+---
+
 ## Summary and Next Steps
 
 After completing the wizard, you will see a summary:

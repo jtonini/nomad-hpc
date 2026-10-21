@@ -2494,6 +2494,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                    if (saved and resume) else "")
     dash_port = (saved.get('dash_port', 8050)
                  if (saved and resume) else 8050)
+    condo_plan = None              # the condo step's answers (interactive only)
 
     if quick:
         # ── Quick mode: auto-detect everything ───────────────────────
@@ -3315,6 +3316,14 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             "  Dashboard port", type=int, default=8050)
         click.echo()
 
+        # ── Condo reports ────────────────────────────────────────────
+        click.echo(click.style(
+            "  ━━ Step 5: Condo reports ━━", fg="cyan", bold=True))
+        click.echo()
+        from nomad.condo import wizard as condo_wizard
+        condo_plan = condo_wizard.ask(clusters, click.prompt, click.confirm, click.echo)
+        click.echo()
+
     # ══════════════════════════════════════════════════════════════════
     # Generate TOML config file
     # ══════════════════════════════════════════════════════════════════
@@ -3847,11 +3856,14 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
         click.echo()
         click.echo(click.style(
             f"  Would be written to: {config_file}", fg="yellow"))
+        if condo_plan:
+            _init_condo_write(config_file, condo_plan, True)
         click.echo("  Run without --dry-run to save.")
         click.echo()
         return
 
     config_file.write_text(config_content)
+    condo_written = bool(condo_plan) and _init_condo_write(config_file, condo_plan, False)
 
     # Clean up wizard state file
     clear_state()
@@ -3912,9 +3924,41 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
         "    4. Open the dashboard in your browser:")
     click.echo("         nomad dashboard")
     click.echo()
+    import re as _re
+    condo_like = sorted({p for c in clusters for p in (c.get("partitions") or {})
+                         if _re.search("condo", str(p), _re.IGNORECASE)})
+    if condo_written:
+        click.echo("    5. Condo reports: see what is left to set up, and the reports:")
+        click.echo("         nomad usage-report condos status")
+        click.echo("         nomad usage-report condos")
+        click.echo("       They are made where the cluster's data is gathered. On a hub that")
+        click.echo("       syncs this site, set them up there (the Console's Settings > Condo")
+        click.echo("       reports, or nomad usage-report condos init): the hub knows this")
+        click.echo("       site by its name in [hub.sites].")
+        click.echo()
+    elif condo_like:
+        click.echo(f"    5. Condo reports ({', '.join(condo_like)} looks like the guest partition of condos):")
+        click.echo("         where this site's data is gathered (the hub, or here):")
+        click.echo("         nomad usage-report condos init --apply")
+        click.echo("         or the Console: Settings > Condo reports")
+        click.echo()
 
 
 
+
+
+def _init_condo_write(config_file, plan, dry_run) -> bool:
+    """report.toml beside the nomad.toml init writes; a failure here is
+    said and leaves nomad.toml as written."""
+    from nomad.condo import wizard as condo_wizard
+    path = Path(config_file).parent / "report.toml"
+    try:
+        condo_wizard.write(path, plan, dry_run, click.echo)
+    except Exception as e:         # noqa: BLE001 -- init has written nomad.toml; say, don't stop
+        click.echo(click.style(f"  ! report.toml not written ({e}); later: "
+                               "nomad usage-report condos init --apply", fg="yellow"))
+        return False
+    return not dry_run
 
 
 def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None, why=None):
@@ -5832,8 +5876,9 @@ def usage_report_condos(ctx, month, clusters, only, db, report_config, out, form
               help='report.toml to add to (default: as for the reports).')
 @click.option('--apply', is_flag=True, help='Add the draft to report.toml (a copy of the file is kept first).')
 @click.option('--mask', is_flag=True, help='Print counts instead of the draft (for sharing the output).')
+@click.option('--no-input', is_flag=True, help="Don't ask how the reports go out (in a terminal, --apply asks).")
 @click.pass_context
-def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
+def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask, no_input):
     """Draft each cluster's condos into report.toml from the nodes' partitions.
 
     A condo is a partition whose nodes all sit in a guest partition (one
@@ -5841,7 +5886,9 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
     guessed from its name (owner_patterns: smith, smithlab, smith_lab ->
     a NetID ending in "smith") and from the lab groups of the people who
     ran in it. Check each, then set confirmed = true.
-    Without --apply the draft is printed, and nothing changes.
+    Without --apply the draft is printed, and nothing changes. With it, in
+    a terminal, it also asks how the reports go out (the owners' mail
+    domain, who reviews them first, the sender) for those not set yet.
     """
     from nomad.condo import config as ccfg, discover
     from nomad.config import read_toml
@@ -5860,7 +5907,7 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
     layouts = []
     try:
         for site in discover.node_sites(conn):
-            name = site if site is not None else discover.LOCAL
+            name = site if site is not None else discover.local_name(settings, ctx.obj.get('config') or {})
             cc = settings.cluster(name)
             found = discover.find(discover.read_nodes(conn, site), cc.guest_partitions)
             # --cluster limits which condos are drafted; every cluster still
@@ -5912,7 +5959,68 @@ def usage_report_condos_init(ctx, clusters, db, report_config, apply, mask):
         with private_file(path) as f:
             f.write(text.lstrip("\n"))
         click.echo(f"wrote {path} ({'; '.join(said)}), readable only by you")
-    click.echo("Check each owner, set confirmed = true, then run `nomad usage-report condos`.")
+    if not no_input and not mask and sys.stdin.isatty() and sys.stdout.isatty():
+        _ask_delivery(path)
+    click.echo("Next:")
+    click.echo("  1. check each owner, then confirm it: nomad usage-report condos set --confirm NAME --apply")
+    click.echo("     (or in the Console: Settings > Condo reports)")
+    click.echo("  2. look at last month's reports: nomad usage-report condos")
+    click.echo("  3. send them on the 1st: nomad usage-report condos timer --apply (as root)")
+    click.echo("  what is left at any time: nomad usage-report condos status")
+
+
+def _ask_delivery(path):
+    """In a terminal: the [report.labs] settings a first setup needs, those
+    not set yet; written through condos set's own checks."""
+    from nomad.condo import config as ccfg, edit as cedit
+    try:
+        d = ccfg.load(path).delivery
+    except ccfg.CondoConfigError:
+        return
+    questions = [
+        ("mail_domain", not d.mail_domain, "Owners' mail domain (an owner's address is NETID@this)"),
+        ("review_to", not d.review_to, "Send every report here first, for review (addresses, commas "
+                                       "between; blank: straight to owners once confirmed)"),
+        ("send_from", not d.send_from, "Sender, e.g. Research Computing <rc@example.edu> "
+                                       "(blank: [mail] from in nomad.toml)"),
+        ("contact", not d.contact, "A line at the foot of each report, e.g. Questions: rc@example.edu"),
+    ]
+    asked = [q for q in questions if q[1]]
+    if not asked:
+        return
+    click.echo()
+    click.echo("How the reports go out ([report.labs]; Enter leaves one unset):")
+    labs = {}
+    for key, _, words in asked:
+        while True:
+            v = click.prompt(f"  {words}", default="", show_default=False).strip()
+            if not v:
+                if key == "review_to":
+                    click.echo("    (no review: once an owner is confirmed, --send mails their report "
+                               "straight to them)")
+                break
+            value = cedit.parse_value(key, v)
+            try:
+                cedit.plan(path, cedit.Changes(labs={key: value}))   # this answer alone
+            except cedit.EditError as e:
+                click.echo(f"    {e}; again, or Enter to leave it")
+                continue
+            labs[key] = value
+            break
+    if not labs:
+        return
+    try:
+        plan = cedit.plan(path, cedit.Changes(labs=labs))
+    except cedit.EditError as e:
+        click.echo(f"  not written: {e}")
+        click.echo("  set them later with: nomad usage-report condos set --labs KEY=VALUE --apply")
+        return
+    click.echo(plan.diff.rstrip("\n"))
+    if click.confirm("  Write these?", default=True):
+        try:
+            cedit.save(plan)
+        except cedit.EditError as e:
+            click.echo(f"  not written: {e}")
 
 
 @usage_report_condos.command('set')
@@ -5988,6 +6096,213 @@ def usage_report_condos_set(ctx, report_config, labs, policy, confirm, unconfirm
         click.echo(f"  {who}{'' if c.confirmed else '  (not confirmed)'}")
 
 
+def _condo_status(ctx, db=None, report_config=None):
+    """(items, settings, database path) of what is left to set up."""
+    from nomad.condo import config as ccfg, status as cstatus
+    from nomad.usage import sources
+    problem = None
+    try:
+        settings = ccfg.load(report_config, ctx.obj.get('config_target'))
+    except ccfg.CondoConfigError as e:
+        problem = str(e)
+        from nomad.usage.config import default_path
+        settings = ccfg.Settings(path=Path(report_config).expanduser() if report_config
+                                 else default_path(ctx.obj.get('config_target')))
+    db_path = None
+    conn = None
+    try:
+        db_path = _usage_db(ctx, db, need=False)
+        conn = sources.open_db(db_path) if db_path else None
+        items = cstatus.check(conn, settings, ctx.obj.get('config') or {}, problem=problem)
+    except (OSError, sqlite3.Error) as e:
+        where = db_path or "the database"
+        denied = isinstance(e, PermissionError) or "unable to open" in str(e)
+        if denied:
+            # The hub's database is often the nomad account's alone.
+            raise click.ClickException(f"{where} can't be read here ({getattr(e, 'strerror', None) or e}); "
+                                       "run this as the account that owns it (sudo -u nomad ...)")
+        if "locked" in str(e):
+            raise click.ClickException(f"{where} is busy (a sync writing it?): try again in a minute")
+        raise click.ClickException(f"{where} can't be read: {e}")
+    finally:
+        if conn is not None:
+            conn.close()
+    return items, settings, db_path
+
+
+@usage_report_condos.command('status')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the reports).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml (default: as for the reports).')
+@click.option('--mask', is_flag=True, help='Counts instead of condo and owner names (for sharing the output).')
+@click.pass_context
+def usage_report_condos_status(ctx, db, report_config, mask):
+    """What is left to set up before the reports go out as meant.
+
+    Condo partitions on the nodes that report.toml doesn't list, condos it
+    lists that are gone, owners not confirmed, reports without an address or
+    a sender, and the monthly timer; then what is worth knowing (review mode,
+    no PDF). The Console's Settings > Condo reports shows the same list.
+    """
+    items, settings, db_path = _condo_status(ctx, db, report_config)
+    click.echo(f"condo reports: {settings.path}" + (f", nodes from {db_path}" if db_path else ", no database"))
+    if not items:
+        click.echo(click.style("✓ nothing left to set up", fg='green'))
+        return
+    for it in items:
+        mark = click.style("!", fg='yellow') if it.level == "todo" else "·"
+        click.echo(f"  {mark} {it.masked if mask else it.text}")
+        if it.how and not mask:
+            click.echo(f"      {it.how}")
+    todo = sum(1 for i in items if i.level == "todo")
+    click.echo(f"{todo} to do" if todo else "nothing to do; notes only")
+
+
+def _unit_settings(text: str) -> list[str]:
+    """A unit's settings that decide what runs and when (its Description
+    and After lines aside), to tell a unit set up by hand from another."""
+    return sorted(line.strip() for line in text.splitlines()
+                  if line.strip() and not line.lstrip().startswith(("Description=", "After=", "#", ";")))
+
+
+def _unit_safe(value: str, what: str) -> str:
+    """A path or name written into a unit: systemd splits ExecStart at
+    spaces and expands % and $ in it, and a line break would add a line."""
+    bad = [ch for ch in value if ch.isspace() or ord(ch) < 32 or ch in '%$"\'\\;']
+    if bad:
+        raise click.ClickException(f"{what} {value!r} has {bad[0]!r} in it, which a systemd unit would "
+                                   "read otherwise: use a path without spaces, quotes, %, $ or ;")
+    return value
+
+
+def _readable_by(path: Path, account: str) -> bool:
+    """Whether ``account`` can read ``path``: the file by its mode, and every
+    folder above it by its search bit (os.getgrouplist knows directory
+    groups that grp.getgrall doesn't list)."""
+    import os
+    import pwd
+    pw = pwd.getpwnam(account)
+    if pw.pw_uid == 0:
+        return True
+    try:
+        groups = set(os.getgrouplist(account, pw.pw_gid))
+    except OSError:
+        groups = {pw.pw_gid}
+
+    def allowed(st, owner_bit, group_bit, other_bit):
+        if st.st_uid == pw.pw_uid:
+            return bool(st.st_mode & owner_bit)
+        if st.st_gid in groups:
+            return bool(st.st_mode & group_bit)
+        return bool(st.st_mode & other_bit)
+    path = Path(path).resolve()
+    for folder in reversed(path.parents):
+        if not allowed(folder.stat(), 0o100, 0o010, 0o001):
+            return False
+    return allowed(path.stat(), 0o400, 0o040, 0o004)
+
+
+def _timer_units(nomad_exe: str, config: str | None, account: str, when: str) -> tuple[str, str]:
+    """The service and the timer, as `condos timer` installs them."""
+    run = f"{nomad_exe}" + (f" -c {config}" if config else "") + " usage-report condos --send"
+    service = ("[Unit]\nDescription=NOMAD condo reports\nAfter=network-online.target\n\n"
+               f"[Service]\nType=oneshot\nUser={account}\nExecStart={run}\n")
+    said = "on the 1st" if when == "*-*-01 07:00" else when
+    timer = (f"[Unit]\nDescription=NOMAD condo reports, {said}\n\n"
+             f"[Timer]\nOnCalendar={when}\nPersistent=true\n\n"
+             "[Install]\nWantedBy=timers.target\n")
+    return service, timer
+
+
+@usage_report_condos.command('timer')
+@click.option('--user', 'account', help='The account the reports run as (default: nomad, if there is one).')
+@click.option('--at', 'when', default='*-*-01 07:00', show_default=True,
+              help='When, as systemd writes it (OnCalendar): after the night\'s sync on the 1st.')
+@click.option('--apply', is_flag=True, help='Install and start it (as root).')
+@click.option('--force', is_flag=True, help='Replace a timer installed with other settings.')
+@click.pass_context
+def usage_report_condos_timer(ctx, account, when, apply, force):
+    """A systemd timer that makes and mails last month's reports on the 1st.
+
+    It runs `nomad usage-report condos --send` as the nomad account (or
+    --user), with the nomad.toml in use: while review_to is set, everything
+    goes there. A timer set up with the same settings is left as it is.
+    Without --apply it prints the two files and how to install them.
+    """
+    import os
+    import pwd
+    import shutil
+    import subprocess
+    if any(ch in (when + (account or "")) for ch in "\n\r"):
+        raise click.UsageError("--at and --user are one line")
+    if account is None:
+        try:
+            pwd.getpwnam("nomad")
+            account = "nomad"
+        except KeyError:
+            if apply:
+                raise click.ClickException("there is no nomad account here: say which account makes "
+                                           "the reports with --user (not root)")
+            account = pwd.getpwuid(os.geteuid()).pw_name
+            click.echo(f"(no nomad account here: written for {account}; --user names another)")
+    else:
+        try:
+            pwd.getpwnam(account)
+        except KeyError:
+            raise click.ClickException(f"no account {account} here")
+    if shutil.which("systemd-analyze"):
+        r = subprocess.run(["systemd-analyze", "calendar", when], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise click.ClickException(f"--at {when!r}: systemd doesn't read it ({(r.stderr or r.stdout).strip()})")
+    _unit_safe(account, "--user")
+    exe = Path(sys.executable).with_name("nomad")
+    nomad_exe = _unit_safe(str(exe) if exe.exists() else (shutil.which("nomad") or "nomad"), "nomad")
+    target = Path(ctx.obj.get('config_target') or resolve_config_path()).expanduser()
+    config = _unit_safe(str(target.resolve()), "nomad.toml") if target.exists() else None
+    if config and not _readable_by(Path(config), account):
+        msg = f"{account} can't read {config}, so the reports would fail on the 1st"
+        if apply:
+            raise click.ClickException(msg + " (make it readable by that account, or --user another)")
+        click.echo(f"(note: {msg})")
+    service, timer = _timer_units(nomad_exe, config, account, when)
+    unit_dir = Path("/etc/systemd/system")
+    paths = {unit_dir / "nomad-condo-reports.service": service, unit_dir / "nomad-condo-reports.timer": timer}
+    if not apply:
+        for p, text in paths.items():
+            click.echo(f"# {p}")
+            click.echo(text)
+        click.echo("Install with --apply (as root), or by hand:")
+        click.echo("  sudo systemctl daemon-reload")
+        click.echo("  sudo systemctl enable --now nomad-condo-reports.timer")
+        return
+    if not shutil.which("systemctl"):
+        run = service.split("ExecStart=", 1)[1].strip()
+        raise click.ClickException(f"no systemctl here: run it from cron on the 1st instead, as {account}:\n"
+                                   f"  0 7 1 * * {run}")
+    if os.geteuid() != 0:
+        raise click.ClickException("--apply writes to /etc/systemd/system: run it as root (sudo)")
+    # A unit set up by hand with the same settings (another Description, say)
+    # is the same timer.
+    same = [p for p, text in paths.items() if p.exists() and _unit_settings(p.read_text()) == _unit_settings(text)]
+    other = [p for p, text in paths.items() if p.exists() and p not in same]
+    if other and not force:
+        raise click.ClickException(f"{', '.join(map(str, other))} already there with other settings "
+                                   "(--force replaces it; without --apply this prints the new one)")
+    for p, text in paths.items():
+        if p not in same:
+            p.write_text(text)
+            p.chmod(0o644)
+    for cmd in (["systemctl", "daemon-reload"], ["systemctl", "enable", "--now", "nomad-condo-reports.timer"]):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise click.ClickException(f"{' '.join(cmd)}: {(r.stderr or r.stdout).strip()}")
+    click.echo("already installed; enabled" if len(same) == len(paths) else "installed and enabled")
+    r = subprocess.run(["systemctl", "list-timers", "nomad-condo-reports.timer", "--no-pager"],
+                       capture_output=True, text=True)
+    if r.stdout.strip():
+        click.echo(r.stdout.strip().splitlines()[1] if len(r.stdout.strip().splitlines()) > 1 else r.stdout.strip())
+
+
 def read_toml_text(text: str) -> dict:
     """TOML text as nomad reads files (tomllib, else toml)."""
     try:
@@ -6059,6 +6374,41 @@ def config_check(ctx):
     from nomad.impact import impact_from
     for problem in impact_from(data).problems:
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    _config_check_condos(ctx)
+
+
+def _config_check_condos(ctx):
+    """The condo reports' part of `nomad config check`: counts only (the
+    details name condos and owners: `nomad usage-report condos status`)."""
+    from nomad.actions.remote import hub_settings
+    from nomad.condo import config as ccfg
+    try:
+        hub = bool(hub_settings(ctx.obj.get('config_target'))["sites"])
+        try:
+            listed = any(cc.configured for cc in ccfg.load(None, ctx.obj.get('config_target')).clusters.values())
+        except ccfg.CondoConfigError:
+            listed = True               # said below, as report.toml not reading
+    except Exception:              # noqa: BLE001 -- config check itself must not fail here
+        return
+    if not hub and not listed:
+        # A site whose reports are made at the hub: nothing to set up here.
+        return
+    try:
+        items, settings, _ = _condo_status(ctx)
+    except click.ClickException as e:
+        click.echo(f"  · condo reports not checked: {e.message}")
+        return
+    except Exception as e:         # noqa: BLE001
+        click.echo(f"  · condo reports not checked: {type(e).__name__}")
+        return
+    todo = [i for i in items if i.level == "todo"]
+    if not todo:
+        click.echo(click.style("✓ condo reports: nothing left to set up", fg='green'))
+    else:
+        click.echo(click.style(f"⚠ condo reports: {len(todo)} to do "
+                               "(details and what to run: nomad usage-report condos status)", fg='yellow'))
+    for it in items:
+        click.echo(("  ! " if it.level == "todo" else "  · ") + it.masked)
 
 
 @cli.group('impact')

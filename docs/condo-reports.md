@@ -7,13 +7,61 @@ condo for research computing, grouped by cluster.
 
 ```bash
 nomad usage-report condos init               # draft the condos into report.toml
-nomad usage-report condos init --apply       # ... and add them to it
+nomad usage-report condos init --apply       # ... and add them to it (in a terminal, it asks how reports go out)
+nomad usage-report condos status             # what is left to set up
 nomad usage-report condos set --labs mail_domain=example.edu --labs review_to=rc@example.edu \
                               --confirm smith,jones --owner lee=klee --apply
 nomad usage-report condos                    # last month's reports, written
 nomad usage-report condos --send             # ... and mailed
 nomad usage-report condos --month 2026-09 --cluster c1 --condo smith
+sudo nomad usage-report condos timer --apply # make and mail them on the 1st
 ```
+
+The Console does the same for admins, under Settings > Condo reports: the
+settings, the condos with nomad's owner guesses, a preview of each report,
+and sending a month for review.
+
+## Setting it up
+
+`nomad init` asks whether to register condos: for each Slurm cluster, the
+guest partition (the one named like "condo" by default), then each condo it
+finds there with its owner's NetID (an owner typed there is confirmed; left
+blank, it is set later), the owners' mail domain and who reviews the reports
+first. It writes them to report.toml beside nomad.toml. The reports are made
+where a cluster's data is gathered: on that machine, or on the hub that
+syncs it (copy report.toml there, or set it up there as below).
+
+On a hub:
+
+1. `nomad usage-report condos init --apply` drafts every
+   cluster's condos into report.toml, each owner guessed and not confirmed.
+   In a terminal it then asks what a first setup needs and isn't set yet:
+   the owners' mail domain, who reviews the reports first (`review_to`),
+   the sender and the line at the foot (`--no-input` skips this).
+2. Check each owner and confirm it (`condos set --confirm NAME --apply`, or
+   the Console).
+3. Read last month's reports (`nomad usage-report condos`). With
+   `review_to` set, `--send` mails them all there; without it, `--send`
+   mails each confirmed owner theirs.
+4. `nomad usage-report condos timer --apply`, as root, installs the timer
+   that makes and mails them on the 1st.
+5. When the reviewed reports read right, clear `review_to`: from then on
+   each goes to its owner.
+
+`nomad usage-report condos status` says what is left at any point:
+
+- condo partitions on the nodes that report.toml doesn't list (a new
+  condo), and condos it lists that are gone from the nodes;
+- owners not confirmed (their reports don't go out);
+- confirmed condos without an address (no `mail_domain`, no `email`), and
+  no sender;
+- the timer, not installed or not enabled;
+- notes: review mode (every report goes to review_to) and no PDF (fpdf2
+  missing).
+
+Most lines say what to run. `nomad config check` on a hub (or wherever
+report.toml lists condos) shows the same in counts, naming no condos or
+owners, and the Console lists it at the top of Settings > Condo reports.
 
 It reads the hub's combined database (`--db` names another) and the same
 `report.toml` as `nomad usage-report` (`--config` names another).
@@ -176,12 +224,18 @@ report twice (`--resend` does).
 
 ### On the first of each month
 
-A systemd timer on the hub, after the morning sync:
+`nomad usage-report condos timer` prints the timer for this install (the
+nomad in use, its nomad.toml, and the nomad account, or `--user`), and
+`--apply` (as root) installs and starts it; `--at` changes when (systemd's
+OnCalendar, the 1st at 07:00 by default, after the night's syncs). A timer
+already set up with the same settings is left as it is. It is this, on the
+hub:
 
 ```ini
 # /etc/systemd/system/nomad-condo-reports.service
 [Unit]
-Description=NØMAÐ condo reports
+Description=NOMAD condo reports
+After=network-online.target
 
 [Service]
 Type=oneshot
@@ -190,7 +244,7 @@ ExecStart=/opt/nomad/venv/bin/nomad -c /etc/nomad/nomad.toml usage-report condos
 
 # /etc/systemd/system/nomad-condo-reports.timer
 [Unit]
-Description=NØMAÐ condo reports, on the 1st
+Description=NOMAD condo reports, on the 1st
 
 [Timer]
 OnCalendar=*-*-01 07:00
@@ -253,4 +307,5 @@ A cluster with a `condos` table is reported as listed there. One without is
 reported from what its nodes say, every condo unconfirmed, until `init`
 drafts it. A setting nobody reads is refused (`reveiw_to` would otherwise
 send reports to owners). A site's own database, with no hub, is the
-cluster `this-cluster`.
+cluster `this-cluster`, or the one cluster of its nomad.toml that report.toml
+lists condos for (as `nomad init` writes them).

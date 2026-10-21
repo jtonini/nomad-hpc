@@ -50,6 +50,23 @@ class Found:
     when: str | None = None      # the latest reading
 
 
+def local_name(settings, nomad_config: dict | None = None) -> str:
+    """The name a site's own database goes by in report.toml (it has no
+    source_site): "this-cluster" when report.toml says so, else the one
+    cluster of nomad.toml ([clusters.ID], or its name) that report.toml
+    lists condos for, as `nomad init` writes them."""
+    clusters = getattr(settings, "clusters", {}) or {}
+    if LOCAL in clusters:
+        return LOCAL
+    known = set()
+    for cid, c in (((nomad_config or {}).get("clusters") or {}).items()):
+        known.add(str(cid))
+        if isinstance(c, dict) and c.get("name"):
+            known.add(str(c["name"]))
+    hits = sorted(n for n in known if n in clusters and clusters[n].configured)
+    return hits[0] if len(hits) == 1 else LOCAL
+
+
 def node_sites(conn, since: datetime | None = None) -> list[str | None]:
     """The sites with node readings since ``since`` (60 days ago) ([None]
     for a site's own database)."""
@@ -349,7 +366,7 @@ def guess_owners(conn, partition: str, acc=None, site: str | None = None, patter
 # --- report.toml draft -------------------------------------------------------------
 
 def _key(name: str) -> str:
-    return name if re.match(r"^[A-Za-z0-9_-]+$", name) else '"' + name.replace('"', '\\"') + '"'
+    return name if re.match(r"^[A-Za-z0-9_-]+$", name) else _q(name)
 
 
 def _q(text: str) -> str:

@@ -847,7 +847,8 @@ def build(conn: sqlite3.Connection, settings: Settings, month: str, *, nomad_con
     # Clusters with readings since the month began (or lately): an old
     # month's report still has the clusters of then.
     sites = discover.node_sites(conn, since=min(t0, now - timedelta(days=60)))
-    names = {s: (s if s is not None else discover.LOCAL) for s in sites}
+    local = discover.local_name(settings, nomad_config)
+    names = {s: (s if s is not None else local) for s in sites}
     if clusters:
         unknown = sorted(set(clusters) - set(names.values()) - set(settings.clusters))
         if unknown:
