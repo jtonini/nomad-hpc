@@ -25,6 +25,9 @@ here.
     # ssh_user = "..."            # default: this account
     # copy_of = "fs0"             # it holds copies (replicas, backups) of fs0's
     #                             # files: shown, never added to anyone's totals
+    # same_accounts = true        # it and this machine share their accounts (one
+    #                             # directory): owners it gives only as a number
+    #                             # are named as this machine knows them
 
 A file is stored once (by when its run started); one a run didn't finish
 (no #finished line) is left for the next read, and one that can't be stored
@@ -37,6 +40,7 @@ machine knows them.
 """
 from __future__ import annotations
 
+import grp
 import logging
 import pwd
 import re
@@ -54,6 +58,7 @@ logger = logging.getLogger(__name__)
 
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$")
 MARK = "__NOMAD_STORAGE_FILE__"
+UNREADABLE = "__NOMAD_STORAGE_UNREADABLE__"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS storage_reports (
@@ -79,7 +84,8 @@ CREATE INDEX IF NOT EXISTS idx_storage_reports ON storage_reports(server, mode, 
 CREATE TABLE IF NOT EXISTS storage_reads (
     server TEXT NOT NULL,
     read_at TEXT NOT NULL,
-    note TEXT
+    note TEXT,
+    found INTEGER
 );
 CREATE TABLE IF NOT EXISTS storage_paths (
     timestamp TEXT NOT NULL,
@@ -204,12 +210,16 @@ def sources_from(config: dict) -> tuple[list[dict], list[str]]:
         if copy_of is not None and not HOST_RE.match(str(copy_of)):
             problems.append(f"{server}: copy_of {copy_of!r} isn't a server name")
             continue
+        same = s.get("same_accounts", False)
+        if not isinstance(same, bool):
+            problems.append(f"{server}: same_accounts is true or false")
+            continue
         names.add(server)
         user = s.get("ssh_user")
         out.append({"server": server, "host": str(host) if host else None, "dir": d.rstrip("/") or "/",
                     "dirs": {m: x.rstrip("/") or "/" for m, x in dirs.items()},
                     "ssh_user": str(user) if user else None,
-                    "copy_of": str(copy_of) if copy_of else None})
+                    "copy_of": str(copy_of) if copy_of else None, "same_accounts": same})
     return out, problems
 
 
@@ -230,11 +240,15 @@ def split_files(output: str) -> dict[str, str]:
 
 
 def fetch_command(d: str | dict) -> str:
-    """One command that prints both files, each after a mark line."""
+    """One command that prints both files, each after a mark line; a file
+    that is there but can't be read (this account not in the script's -g
+    group) says so, rather than looking like one not written yet."""
     dirs = d if isinstance(d, dict) else {"usage": d, "scan": d}
-    script = "; ".join(f"echo '{MARK} {m}'; cat {shlex.quote(dirs[m] + '/' + m + '.txt')} 2>/dev/null"
-                       for m in ("usage", "scan"))
-    return "sh -c " + shlex.quote(script)
+    parts = []
+    for m in ("usage", "scan"):
+        f = shlex.quote(dirs[m] + "/" + m + ".txt")
+        parts.append(f"echo '{MARK} {m}'; if [ -e {f} ]; then cat {f} 2>/dev/null || echo '{UNREADABLE}'; fi")
+    return "sh -c " + shlex.quote("; ".join(parts))
 
 
 class StorageUseCollector(BaseCollector):
@@ -257,8 +271,20 @@ class StorageUseCollector(BaseCollector):
         return {(s, m): t for s, m, t in conn.execute(
             "SELECT server, mode, MAX(started) FROM storage_reports GROUP BY server, mode")}
 
+    @staticmethod
+    def _working_state(conn) -> None:
+        """storage_reads is this collector's own (not synced): columns added
+        since 1.16.0 are added here."""
+        conn.executescript(SCHEMA)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(storage_reads)")}
+        if "found" not in cols:
+            conn.execute("ALTER TABLE storage_reads ADD COLUMN found INTEGER")
+
     def _read_recently(self, conn, server: str) -> bool:
-        row = conn.execute("SELECT MAX(read_at) FROM storage_reads WHERE server = ?", (server,)).fetchone()
+        # A read that found no file at all (the script not run there yet)
+        # doesn't hold back the next one.
+        row = conn.execute("SELECT MAX(read_at) FROM storage_reads WHERE server = ? "
+                           "AND (found IS NULL OR found > 0)", (server,)).fetchone()
         if not row or not row[0]:
             return False
         try:
@@ -276,6 +302,8 @@ class StorageUseCollector(BaseCollector):
                     out[mode] = p.read_text(encoding="utf-8", errors="replace")
                 except FileNotFoundError:
                     continue
+                except PermissionError:
+                    out[mode] = UNREADABLE + "\n"
                 except OSError as e:
                     raise CollectionError(f"{p}: {e.strerror or e}") from None
             return out
@@ -296,6 +324,22 @@ class StorageUseCollector(BaseCollector):
             raise CollectionError(f"{src['host']}: {why}")
         return split_files(r.stdout)
 
+    def _name_of(self, kind: str, name: str) -> str:
+        """An owner the storage server gave only as a number, on a source
+        with same_accounts: named as this machine knows it (it often has the
+        directory the server lacks), else left a number (an account that no
+        longer exists anywhere here)."""
+        if not name.isdigit():
+            return name
+        if kind == "user":
+            return self._owner(int(name)) or name
+        if kind == "group":
+            try:
+                return grp.getgrgid(int(name)).gr_name
+            except (KeyError, OverflowError, ValueError):
+                return name
+        return name
+
     def _owner(self, uid: int | None) -> str | None:
         if uid is None:
             return None
@@ -312,7 +356,7 @@ class StorageUseCollector(BaseCollector):
             return []
         records, notes, failed = [], list(self.problems), 0
         with self.get_db_connection() as conn:
-            conn.executescript(SCHEMA)
+            self._working_state(conn)
             last = self._last(conn)
             due = [s for s in self.sources if not self._read_recently(conn, s["server"])]
         if not due:
@@ -329,10 +373,16 @@ class StorageUseCollector(BaseCollector):
                 records.append({"type": "storage_read", "server": server, "read_at": now, "note": str(e)})
                 continue
             said = []
+            found = 0
             for mode in ("usage", "scan"):
                 text = files.get(mode)
                 if not text or not text.strip():
                     said.append(f"no {mode}.txt yet")
+                    continue
+                found += 1
+                if text.strip() == UNREADABLE:
+                    said.append(f"{mode}.txt is there but this account can't read it "
+                                "(is it in the group given to the script's -g?)")
                     continue
                 try:
                     rep = parse(text)
@@ -346,10 +396,11 @@ class StorageUseCollector(BaseCollector):
                 if started is None or (last.get((server, mode)) and started <= last[(server, mode)]):
                     continue                     # stored already
                 records.append({"type": "storage_report", "server": server, "read_at": now,
-                                "report": rep, "copy_of": src.get("copy_of")})
+                                "report": rep, "copy_of": src.get("copy_of"),
+                                "same_accounts": src.get("same_accounts", False)})
                 said.append(f"{mode} of {started[:16].replace('T', ' ')}")
             records.append({"type": "storage_read", "server": server, "read_at": now,
-                            "note": "; ".join(said) or None})
+                            "note": "; ".join(said) or None, "found": found})
             if said:
                 notes.append(f"{server}: " + ", ".join(said))
         if failed and failed == len(due):
@@ -362,8 +413,9 @@ class StorageUseCollector(BaseCollector):
     def store(self, data: list[dict[str, Any]]) -> None:
         if not data:
             return
+        self._names = {}             # a lookup that failed once (a directory hiccup) is tried again
         with self.get_db_connection() as conn:
-            conn.executescript(SCHEMA)
+            self._working_state(conn)
             failed: dict[str, list[str]] = {}
             for d in data:
                 if d.get("type") != "storage_report":
@@ -373,7 +425,8 @@ class StorageUseCollector(BaseCollector):
                 # the others go in.
                 conn.execute("SAVEPOINT storage_report")
                 try:
-                    self._store_report(conn, d["server"], d["read_at"], d["report"], d.get("copy_of"))
+                    self._store_report(conn, d["server"], d["read_at"], d["report"], d.get("copy_of"),
+                                       d.get("same_accounts", False))
                 except (sqlite3.Error, ValueError, OverflowError, TypeError) as e:
                     conn.execute("ROLLBACK TO storage_report")
                     failed.setdefault(d["server"], []).append(f"{d['report'].mode}.txt not stored: {e}")
@@ -382,14 +435,15 @@ class StorageUseCollector(BaseCollector):
             for d in data:
                 if d.get("type") == "storage_read":
                     note = "; ".join(x for x in [d.get("note")] + failed.get(d["server"], []) if x) or None
-                    conn.execute("INSERT INTO storage_reads (server, read_at, note) VALUES (?, ?, ?)",
-                                 (d["server"], d["read_at"], note))
+                    conn.execute("INSERT INTO storage_reads (server, read_at, note, found) VALUES (?, ?, ?, ?)",
+                                 (d["server"], d["read_at"], note, d.get("found")))
             conn.execute("DELETE FROM storage_reads WHERE read_at < ?",
                          ((datetime.now() - timedelta(days=7)).isoformat(),))
             self._thin(conn)
             conn.commit()
 
-    def _store_report(self, conn, server: str, read_at: str, rep, copy_of: str | None = None) -> None:
+    def _store_report(self, conn, server: str, read_at: str, rep, copy_of: str | None = None,
+                      same_accounts: bool = False) -> None:
         started = _iso(rep.started)
         if started is None:
             raise ValueError("no start time")
@@ -411,8 +465,9 @@ class StorageUseCollector(BaseCollector):
             conn.executemany(
                 "INSERT INTO storage_owners (timestamp, server, path, dataset, kind, name, used_bytes, "
                 "soft_bytes, hard_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(started, server, o.path, o.dataset, o.kind, o.name, o.used_bytes, o.soft_bytes,
-                  o.hard_bytes) for o in rep.owners])
+                [(started, server, o.path, o.dataset, o.kind,
+                  self._name_of(o.kind, o.name) if same_accounts else o.name, o.used_bytes,
+                  o.soft_bytes, o.hard_bytes) for o in rep.owners])
             conn.executemany(
                 "INSERT INTO storage_datasets (timestamp, server, path, dataset, mountpoint, used_bytes, "
                 "available_bytes, quota_bytes, refquota_bytes, referenced_bytes) "

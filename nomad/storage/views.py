@@ -175,7 +175,8 @@ def owners(conn, server: str, path: str, kind: str = "user", days: int = 30,
         q = r["quotas"][0] if one and r["quotas"] else {}
         r["soft_bytes"], r["hard_bytes"] = q.get("soft_bytes"), q.get("hard_bytes")
         r["change_bytes"] = None if r["was_bytes"] is None else r["used_bytes"] - r["was_bytes"]
-        r["scan"] = scans.get(r["name"])
+        # The scans key an owner no machine can name as "uid N".
+        r["scan"] = scans.get(r["name"]) or (scans.get(f"uid {r['name']}") if r["name"].isdigit() else None)
         r["last_job"] = jobs.get(r["name"])
         r["read_at"] = latest
         r["compared_with"] = before

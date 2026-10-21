@@ -105,17 +105,46 @@ said() { [ -s "$1" ] && clean "$(head -n 1 "$1")"; }
 
 ME=$(id -u)
 
-# Whether every folder from / down to $1 (included) is owned by root or this
-# account and writable by no one else (a sticky folder such as /tmp aside:
-# others can't rename or remove what's in it).
+ME_NAME=$(id -un 2>/dev/null)
+BAD=
+WHY=
+# Whether only root or this account can change $1: owned by one of them,
+# writable by no one else, and without an access list (ACL) that could let
+# someone else write it. A sticky folder (as /tmp) is fine: others can't
+# rename or remove what's in it. WHY says what is wrong, and how to fix it.
+only_us() {
+    # (ls of one path: its owner and its ACL mark, the same on GNU and BSD.)
+    # shellcheck disable=SC2012
+    if [ -z "$(find "$1" -maxdepth 0 \( -user 0 -o -user "$ME" \) 2>/dev/null)" ]; then
+        WHY="it belongs to another account (uid $(ls -ldn "$1" | awk '{ print $3 }')): chown it to $ME_NAME or root, or use another folder"
+        return 1
+    fi
+    # shellcheck disable=SC2012
+    case $(ls -ld "$1" | cut -c11) in
+        +) WHY="it has an access list (ACL) that may let others write it: remove its entries (setfacl -b, or on TrueNAS strip the ACL), or use another folder"
+           return 1 ;;
+    esac
+    [ -n "$(find "$1" -maxdepth 0 -type d -perm -1000 2>/dev/null)" ] && return 0
+    if [ -n "$(find "$1" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) 2>/dev/null)" ]; then
+        WHY="its group or everyone may write it: chmod g-w,o-w $1, or use another folder"
+        return 1
+    fi
+    return 0
+}
+# Whether every folder from / down to $1 (included) is so; BAD names the
+# first that isn't.
 safe() {
     q=$1
     while :; do
-        [ -n "$(find "$q" -maxdepth 0 \( -user 0 -o -user "$ME" \) \
-            \( -perm -1000 -o ! \( -perm -0020 -o -perm -0002 \) \) 2>/dev/null)" ] || return 1
+        only_us "$q" || { BAD=$q; return 1; }
         [ "$q" = / ] && return 0
         q=$(dirname "$q")
     done
+}
+# What to say of BAD.
+changeable() {
+    printf '%s can be changed by accounts other than %s%s: %s' \
+        "$BAD" "$ME_NAME" "$([ "$ME" = 0 ] || printf ' and root')" "$WHY"
 }
 # A folder as it really is, symbolic links resolved.
 real() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
@@ -123,9 +152,12 @@ real() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
 # -- the script itself ------------------------------------------------------------------
 # Whoever can change it can make it do anything its runner can.
 if [ -f "$0" ]; then
-    if ! { [ -n "$(find "$0" -maxdepth 0 \( -user 0 -o -user "$ME" \) ! -perm -0020 ! -perm -0002 2>/dev/null)" ] \
-           && sdir=$(real "$(dirname "$0")") && safe "$sdir"; }; then
-        die "$0, or a folder above it, can be changed by others: install it owned by root (install -o root -m 755)"
+    if ! only_us "$0"; then
+        BAD=$0
+        die "the script: $(changeable)"
+    fi
+    if ! { sdir=$(real "$(dirname "$0")") && safe "$sdir"; }; then
+        die "the script's folder: $(changeable)"
     fi
 fi
 
@@ -135,7 +167,7 @@ if [ ! -e "$DIR" ]; then
     up=$(dirname "$DIR")
     while [ ! -e "$up" ]; do up=$(dirname "$up"); done
     if ! { upr=$(real "$up") && safe "$upr"; }; then
-        die "$up can be changed by others: put $DIR where only root can"
+        die "-d $DIR: $(changeable)"
     fi
     mkdir -p "$DIR" || die "can't make $DIR"
     chmod 750 "$DIR" || die "can't set the permissions of $DIR"
@@ -146,7 +178,7 @@ fi
 # under a path once the folders above it are known to be safe.
 cd -P -- "$DIR" || die "can't go into $DIR"
 HERE=$(pwd -P)
-[ "$HERE" = / ] || safe "$(dirname "$HERE")" || die "a folder above $DIR can be changed by others: put $DIR where only root can"
+[ "$HERE" = / ] || safe "$(dirname "$HERE")" || die "-d $DIR: $(changeable)"
 [ -n "$(find . -maxdepth 0 -user "$ME" 2>/dev/null)" ] || die "$DIR isn't owned by the account running this"
 [ -f .nomad-storage ] && [ ! -L .nomad-storage ] \
     || die "$DIR wasn't made by nomad-storage.sh: give a new folder (or, to use this one, create $DIR/.nomad-storage)"

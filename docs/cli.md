@@ -104,7 +104,10 @@ nomad storage script > nomad-storage.sh
 nomad storage cron /home /scratch --group GROUP --server fs1
 
 # Who holds each path's space, the change over 30 days, what is old
-nomad storage use [--server fs1] [--groups] [--top N] [--mask]
+nomad storage use [--server fs1] [--groups|--projects] [--days N] [--top N] [--mask]
+
+# Who holds more than a size, as lines to paste (1T: 1 TiB; 1TB: 10^12 bytes)
+nomad storage use --over 1T --list [--binary]
 
 # What the storage_use collector read from each server, and when
 nomad storage status

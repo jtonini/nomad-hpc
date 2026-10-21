@@ -304,13 +304,14 @@ def test_folders_others_can_change_are_refused(tmp_path):
     open_dir.mkdir()
     open_dir.chmod(0o777)                                  # writable by all, not sticky
     r = _run(tmp_path, "-d", str(open_dir / "out"), "usage", str(home), check=False)
-    assert r.returncode == 2 and "can be changed by others" in r.stderr and not (open_dir / "out").exists()
+    assert r.returncode == 2 and not (open_dir / "out").exists()
+    assert f"{open_dir} can be changed by accounts other than" in r.stderr and f"chmod g-w,o-w {open_dir}" in r.stderr
     shared = tmp_path / "shared"
     shared.mkdir()
     _run(tmp_path, "-d", str(shared / "out"), "usage", str(home))
     shared.chmod(0o775)                                    # writable by its group, later
     r = _run(tmp_path, "-d", str(shared / "out"), "usage", str(home), check=False)
-    assert r.returncode == 2 and "above" in r.stderr
+    assert r.returncode == 2 and f"chmod g-w,o-w {shared}" in r.stderr
     sticky = tmp_path / "sticky"
     sticky.mkdir()
     sticky.chmod(0o1777)                                   # as /tmp: fine
@@ -320,7 +321,7 @@ def test_folders_others_can_change_are_refused(tmp_path):
     script.chmod(0o664)
     r = subprocess.run([SH, str(script), "-d", str(tmp_path / "o2"), "usage", str(home)],
                        capture_output=True, text=True, timeout=60)
-    assert r.returncode == 2 and "install it owned by root" in r.stderr
+    assert r.returncode == 2 and f"the script: {script} can be changed" in r.stderr
 
 
 def test_usage_from_zfs(tmp_path):
@@ -573,11 +574,11 @@ def test_a_file_that_cannot_be_stored_does_not_hold_up_the_others(tmp_path, monk
     c, db = _collector(tmp_path, out)
     real = c._store_report
 
-    def flaky(conn, server, read_at, rep, copy_of=None):
+    def flaky(conn, server, read_at, rep, *more):
         if rep.mode == "scan":
             conn.execute("INSERT INTO storage_tops (scanned_at, server, path, top) VALUES ('x', 'fs1', '/', 't')")
             raise OverflowError("Python int too large to convert to SQLite INTEGER")
-        return real(conn, server, read_at, rep, copy_of)
+        return real(conn, server, read_at, rep, *more)
     monkeypatch.setattr(c, "_store_report", flaky)
     c.store(c.collect())
     conn = sqlite3.connect(db)
@@ -909,3 +910,181 @@ def test_cron_for_sudo_readers():
     assert "ops ALL=(root) NOPASSWD: /usr/sbin/xfs_quota, /usr/bin/du" in r.output
     r = CliRunner().invoke(cli_main(), ["storage", "cron", "/home", "--run-as", "sudo-readers", "--user", "ops"])
     assert r.exit_code != 0 and "give --dir" in r.output
+
+
+# --- 1.16.1 ---------------------------------------------------------------------------
+
+def _as_nobody(base, script_dir_mode=0o755):
+    """A layout for running the script as nobody (65534): its home, a bin
+    folder, a tree to read."""
+    base.chmod(0o755)
+    home = _tree(base)
+    for x in [base, *base.rglob("*")]:
+        x.chmod(0o755 if x.is_dir() else 0o644)
+    acct = base / "acct"
+    acct.mkdir()
+    os.chown(acct, 65534, 65534)
+    bindir = acct / "bin"
+    bindir.mkdir()
+    script = bindir / "nomad-storage.sh"
+    script.write_text(storage.script_text().replace(REAL_PATH, 'PATH=${PATH:+$PATH:}' + REAL_PATH[5:]))
+    script.chmod(0o755)
+    for x in (bindir, script):
+        os.chown(x, 65534, 65534)
+    bindir.chmod(script_dir_mode)
+    return home, acct, bindir, script
+
+
+def _run_as_nobody(script, *args):
+    return subprocess.run(["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups", SH, str(script), *args],
+                          capture_output=True, text=True, timeout=60, cwd="/")
+
+
+@pytest.mark.skipif(os.getuid() != 0 or not shutil.which("setpriv"), reason="needs root and setpriv")
+def test_a_folder_its_group_may_write_is_refused_and_named(tmp_path):
+    # Even a private group: other accounts may share the gid (a primary group,
+    # two groups with one number) without getent showing them.
+    import tempfile
+    base = Path(tempfile.mkdtemp(prefix="nomad-storage-grp-"))
+    try:
+        home, acct, bindir, script = _as_nobody(base, 0o775)
+        r = _run_as_nobody(script, "-d", str(acct / "o"), "usage", str(home))
+        assert r.returncode == 2
+        assert f"{bindir} can be changed by accounts other than" in r.stderr
+        assert f"its group or everyone may write it: chmod g-w,o-w {bindir}" in r.stderr
+        bindir.chmod(0o755)
+        r = _run_as_nobody(script, "-d", str(acct / "o"), "usage", str(home))
+        assert r.returncode == 0, r.stderr
+        # A folder of another account's: chown, not chmod.
+        other = base / "other"
+        other.mkdir(mode=0o755)
+        os.chown(other, 4242, 4242)
+        r = _run_as_nobody(script, "-d", str(other / "o"), "usage", str(home))
+        assert r.returncode == 2 and "belongs to another account (uid 4242): chown it" in r.stderr
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+@pytest.mark.skipif(not shutil.which("setfacl"), reason="needs setfacl")
+def test_a_folder_with_an_access_list_is_refused(tmp_path):
+    home = _tree(tmp_path)
+    aclled = tmp_path / "acl"
+    aclled.mkdir(mode=0o755)
+    subprocess.run(["setfacl", "-m", "u:65534:rwx", str(aclled)], check=True)
+    r = _run(tmp_path, "-d", str(aclled / "o"), "usage", str(home), check=False)
+    assert r.returncode == 2 and "access list" in r.stderr
+
+
+def test_a_read_that_found_no_file_does_not_hold_back_the_next(tmp_path):
+    home = _tree(tmp_path)
+    out = tmp_path / "out"
+    db = tmp_path / "site.db"
+    c = su.StorageUseCollector({"sources": [{"server": "fs1", "dir": str(out)}]}, db)    # every hour
+    c.store(c.collect())                                   # nothing there yet
+    _run(tmp_path, "-d", str(out), "usage", str(home))
+    data = c.collect()
+    assert any(d["type"] == "storage_report" for d in data)
+    c.store(data)
+    assert c.collect() == []                               # this one found a file: an hour now
+    conn = sqlite3.connect(db)
+    assert [f for (f,) in conn.execute("SELECT found FROM storage_reads ORDER BY read_at, rowid")] == [0, 1]
+
+
+def test_the_working_table_of_1_16_0_gains_its_column(tmp_path):
+    db = tmp_path / "site.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE storage_reads (server TEXT NOT NULL, read_at TEXT NOT NULL, note TEXT)")
+    conn.commit()
+    c = su.StorageUseCollector({"sources": [{"server": "fs1", "dir": str(tmp_path / "none")}]}, db)
+    c.store(c.collect())
+    assert "found" in {r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(storage_reads)")}
+
+
+def test_owners_the_server_could_only_number_are_named_here_when_known(tmp_path):
+    import pwd as _pwd
+    text = ("#nomad-storage\t1\tusage\n#started\t1700000000\n#path\t/home\txfs\t-\n#xfs-users\n"
+            "#0          2048      0      0     00 [--------]\n"
+            "#4242999    1024      0      0     00 [--------]\n#finished\t1700000001\n")
+    rep = storage.parse(text)
+    for same, expected in ((False, {"0", "4242999"}), (True, {_pwd.getpwuid(0).pw_name, "4242999"})):
+        db = tmp_path / f"site-{same}.db"
+        c = su.StorageUseCollector({"sources": []}, db)
+        c.store([{"type": "storage_report", "server": "fs1", "read_at": "2026-10-21T16:00:00", "report": rep,
+                  "same_accounts": same}])
+        conn = sqlite3.connect(db)
+        assert {n for (n,) in conn.execute("SELECT name FROM storage_owners")} == expected
+        out = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db)]).output
+        assert "uid 4242999" in out
+    ok, problems = su.sources_from({"sources": [{"server": "fs1", "same_accounts": "yes"}]})
+    assert not ok and "true or false" in problems[0]
+
+
+def test_a_file_this_account_cannot_read_is_not_taken_for_a_missing_one(tmp_path, monkeypatch):
+    db = tmp_path / "site.db"
+    c = su.StorageUseCollector({"sources": [{"server": "fs1", "dir": str(tmp_path)}]}, db)
+    monkeypatch.setattr(c, "_fetch", lambda src: {"usage": su.UNREADABLE + "\n"})
+    c.store(c.collect())
+    note, found = sqlite3.connect(db).execute("SELECT note, found FROM storage_reads").fetchone()
+    assert "can't read it" in note and found == 1
+    assert c.collect() == []                               # it counts as found: the hour holds
+    cmd = su.fetch_command("/x")
+    assert "if [ -e /x/usage.txt ]" in cmd and su.UNREADABLE in cmd
+
+
+def test_sizes_as_people_write_them():
+    assert storage.parse_size("1T") == storage.parse_size("1TiB") == 1024 ** 4
+    assert storage.parse_size("1TB") == 10 ** 12
+    assert storage.parse_size("500M") == 500 * 1024 ** 2 and storage.parse_size("500MB") == 500 * 10 ** 6
+    assert storage.parse_size("20 GB") == 20 * 10 ** 9 and storage.parse_size("1.5g") == int(1.5 * 1024 ** 3)
+    assert storage.parse_size("4096") == 4096
+    for bad in ("", "1X", "T", "-1G", "1 2G", "9" * 400 + "T"):
+        with pytest.raises(ValueError):
+            storage.parse_size(bad)
+    assert storage.format_size(1.55 * 1024 ** 4, binary=True) == "1.6 TiB"
+    assert storage.format_size(1.7e12) == "1.7 TB"
+
+
+def test_storage_use_over_a_size_as_a_list(tmp_path):
+    db, conn, _ = _hub(tmp_path)
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--over", "5T"])
+    assert r.exit_code == 0, r.output
+    assert "jsmith" in r.output and "rjones" not in r.output and "1 of 2 hold more than 5.5 TB" in r.output
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--over", "500GB", "--list"])
+    assert r.exit_code == 0, r.output
+    lines = r.output.splitlines()
+    assert lines[0].startswith("# folders\towner")
+    assert lines[1].split("\t")[1:3] == ["jsmith", "12.0 TB"]
+    assert lines[2].split("\t")[:3] == ["/home/rjones", "rjones", "1.0 TB"]      # its folder, from the scan
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--binary"])
+    assert "10.9 TiB" in r.output                           # 12e12 bytes
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--over", "lots"])
+    assert r.exit_code != 0 and "a size such as" in r.output
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--list", "--mask"])
+    assert "jsmith" not in r.output and "rjones" not in r.output
+    # Every owner in a list, unless --top; a copy says so in its note.
+    for i in range(15):
+        conn.execute("INSERT INTO storage_owners (timestamp, server, path, kind, name, used_bytes, source_site) "
+                     "VALUES ('2026-10-21T12:00:00', 'fs1', '/home', 'user', ?, 5, 's1')", (f"u{i}",))
+    conn.execute("UPDATE storage_reports SET copy_of = 'fs0'")
+    conn.commit()
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--list"])
+    lines = [x for x in r.output.splitlines() if not x.startswith("#")]
+    assert len(lines) == 17 and all(x.endswith("copies of fs0's files, not added to totals") for x in lines)
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--list", "--top", "3"])
+    assert "# fs1:/home: 14 more (--top)" in r.output
+
+
+def test_an_owner_no_one_can_name_keeps_its_folders_and_kind(tmp_path):
+    db, conn, now = _hub(tmp_path)
+    conn.execute("INSERT INTO storage_owners (timestamp, server, path, kind, name, used_bytes, source_site) "
+                 "VALUES (?, 'fs1', '/home', 'user', '4242999', 3e12, 's1')", (now.isoformat(),))
+    conn.execute("INSERT INTO storage_owners (timestamp, server, path, kind, name, used_bytes, source_site) "
+                 "VALUES (?, 'fs1', '/home', 'group', '777', 3e12, 's1')", (now.isoformat(),))
+    conn.execute("INSERT INTO storage_tops (scanned_at, server, path, top, top_uid, top_owner, bytes, files, "
+                 "complete, source_site) VALUES (?, 'fs1', '/home', 'oldphd', 4242999, NULL, 3e12, 1, 1, 's1')",
+                 (now.isoformat(),))
+    conn.commit()
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--list", "--over", "2TB"])
+    assert "/home/oldphd\tuid 4242999\t3.0 TB" in r.output
+    r = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db), "--groups"])
+    assert "gid 777" in r.output and "uid 777" not in r.output

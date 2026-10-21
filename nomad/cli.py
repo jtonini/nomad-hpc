@@ -420,16 +420,20 @@ def per_user_cmd(ctx: click.Context, db: str, days: int, mask: bool) -> None:
 
 # ── storage: who uses each storage server's space (1.16) ─────────────────────
 
-def _size(b) -> str:
-    """Decimal units, as df -H and the Console say them."""
-    if b is None:
-        return "-"
-    b = float(b)
-    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
-        if abs(b) < 1000 or unit == "PB":
-            return f"{b:.0f} {unit}" if unit in ("B", "KB") else f"{b:.1f} {unit}"
-        b /= 1000
-    return f"{b:.1f} PB"
+def _size(b, binary: bool = False) -> str:
+    """Decimal units, as df -H and the Console say them (binary: TiB, as du -h)."""
+    from nomad.storage import format_size
+    return format_size(b, binary)
+
+
+def _size_option(ctx, param, value):
+    if value is None:
+        return None
+    from nomad.storage import parse_size
+    try:
+        return parse_size(value)
+    except (ValueError, ArithmeticError) as e:
+        raise click.BadParameter(str(e)) from None
 
 
 @cli.group('storage')
@@ -601,6 +605,7 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
     echo(f'dir = "{out_dir}"')
     echo('# usage_dir = "..."        # usage.txt\'s own folder, if usage runs apart from the scan')
     echo('# copy_of = "OTHER"        # it holds copies (replicas, backups) of OTHER\'s files')
+    echo('# same_accounts = true     # it and this machine share their accounts (one directory)')
 
 
 @storage_group.command('use')
@@ -611,12 +616,18 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
 @click.option('--projects', is_flag=True, help='XFS projects instead of users.')
 @click.option('--days', type=click.IntRange(1, 3650), default=30, show_default=True,
               help='The change over this many days (7, 30, 90...).')
+@click.option('--over', 'over', default=None, callback=_size_option, metavar='SIZE',
+              help='Only owners holding more than SIZE: 500M, 20G, 1T (powers of 1024, as du -h and '
+                   'xfs_quota -h) or 500MB, 20GB, 1TB (powers of 1000).')
+@click.option('--list', 'as_list', is_flag=True,
+              help='Plain tab-separated lines to paste: folders (or path), owner, used, last job, change.')
+@click.option('--binary', is_flag=True, help='Sizes in KiB, MiB, GiB, TiB (as du -h and xfs_quota -h show them).')
 @click.option('--mask', is_flag=True, help='Stand-ins for names (and for paths below the first folder), for sharing the output.')
 @click.pass_context
-def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
+def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, as_list, binary, mask):
     """Who holds each path's space: now, the change over 30 days (--days),
     and what the scans found older than their ages; with each person's last
-    job."""
+    job. --over 1T --list gives the plain list of who holds more than 1 TiB."""
     from nomad.storage import views
     from nomad.usage import sources
     kind = "project" if projects else "group" if groups else "user"
@@ -625,8 +636,16 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
     stand: dict = {}
     spaths: dict = {}
 
+    def sz(b):
+        return _size(b, binary)
+
     def who(name):
-        return stand.setdefault(name, f"{kind} {len(stand) + 1}") if mask else name
+        if mask:
+            return stand.setdefault(name, f"{kind} {len(stand) + 1}")
+        # A bare number: an account (group, project) no one could name.
+        if str(name).isdigit():
+            return {"user": "uid", "group": "gid", "project": "project"}[kind] + f" {name}"
+        return name
 
     def where(path):
         if not mask or path.count("/") <= 1:
@@ -638,20 +657,55 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
 
     def at(t):
         return str(t)[:16].replace("T", " ") if t else "-"
+
+    def change(ch):
+        return ('+' if ch and ch > 0 else '') + sz(ch) if ch is not None else '-'
     try:
         if not views.available(conn):
             click.echo("No storage readings yet: the storage_use collector stores them "
                        "(nomad storage cron, docs/storage.md).")
             return
         jobs = views.last_jobs(conn)
+        # A list is every owner (over SIZE), unless --top is given.
+        list_all = as_list and ctx.get_parameter_source("top_n") is not click.core.ParameterSource.COMMANDLINE
+        if as_list:
+            click.echo(f"# folders\towner\tused\tlast job\t{days}-day change\tnote")
         for p in views.paths(conn):
             if only_server and p["server"] != only_server:
                 continue
+            cov = views.coverage(conn, p["server"], p["path"])
+            rows = views.owners(conn, p["server"], p["path"], kind=kind, days=days, jobs=jobs)
+            by_scan = not rows and kind == "user" and cov["tops"]
+            if by_scan:
+                rows = [dict(r, used_bytes=r["bytes"], change_bytes=None, scan=r) for r in
+                        views.scan_owners(conn, p["server"], p["path"], jobs=jobs)]
+            shown = [r for r in rows if over is None or (r["used_bytes"] or 0) > over]
+            if over is None and not list_all:
+                shown = shown[:top_n]
+            if as_list:
+                note = "; ".join(x for x in (
+                    f"copies of {p['copy_of']}'s files, not added to totals" if p.get("copy_of") else "",
+                    f"counts cover all of {where(p['covers'])}" if p.get("covers") else "",
+                    "by the scans" if by_scan else "") if x)
+                for r in shown:
+                    tops = (r.get("scan") or {}).get("tops") or []
+                    if mask:
+                        folders = where(p["path"]) + "/(masked)"
+                    elif tops:
+                        folders = ",".join(f"{p['path'].rstrip('/')}/{t}" for t in tops)
+                    else:
+                        folders = f"{p['server']}:{p['path']}"
+                    click.echo(f"{folders}\t{who(r['name'])}\t{sz(r['used_bytes'])}\t"
+                               f"{when(r.get('last_job')) if r.get('last_job') else 'none'}\t"
+                               f"{change(r.get('change_bytes'))}\t{note}")
+                if len(shown) < len(rows) and over is None:
+                    click.echo(f"# {p['server']}:{where(p['path'])}: {len(rows) - len(shown)} more (--top)")
+                continue
             used, total = p["used_bytes"], p["total_bytes"]
             pct = f" ({100 * used / total:.0f}%)" if used and total else ""
-            size = f"  {_size(used)} of {_size(total)}{pct}" if total else ""
+            size = f"  {sz(used)} of {sz(total)}{pct}" if total else ""
             click.echo(f"{p['server']}:{where(p['path'])}  {p['fs'] or '?'}{size}"
-                       f"  read {str(p['read_at'])[:16].replace('T', ' ')}")
+                       f"  read {at(p['read_at'])}")
             if p.get("copy_of"):
                 click.echo(f"  holds copies of {p['copy_of']}'s files: shown here, never added to anyone's totals")
             if p.get("covers"):
@@ -660,7 +714,6 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
                 click.echo(f"  not read: {p['errors']}")
             if not p["accounting"]:
                 click.echo(f"  no per-owner counts: {p['note'] or 'the scan counts by folder'}")
-            cov = views.coverage(conn, p["server"], p["path"])
             if cov["tops"]:
                 extra = ""
                 if cov["unfinished"]:
@@ -674,49 +727,44 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, mask):
                 q = d["quota_bytes"] or d["refquota_bytes"]
                 if q:
                     click.echo(f"  dataset {d['dataset'] if not mask else '(masked)'}: "
-                               f"{_size(d['used_bytes'])} of its quota {_size(q)}")
-            rows = views.owners(conn, p["server"], p["path"], kind=kind, days=days, jobs=jobs)
-            if rows:
+                               f"{sz(d['used_bytes'])} of its quota {sz(q)}")
+            if not rows:
+                continue
+            if by_scan:
+                click.echo("  owners by what the scans found in their top folders")
+            else:
                 # What time the figures are for: the reading, and the one the change is from.
                 since = (f"; the change is since {at(rows[0]['compared_with'])}" if rows[0]["compared_with"]
                          else f"; no reading {days} days back yet")
                 click.echo(f"  owners as of {at(rows[0]['read_at'])}{since}")
-                ages = next((r["scan"]["ages"] for r in rows if r.get("scan")), None)
-                head = f"  {'owner':<14} {'used':>10} {str(days) + ' days':>10} {'quota':>9}"
-                if ages:
-                    head += f" {'>' + str(ages[1]) + ' days':>11} {'newest change':>13}"
-                head += f" {'last job':>10}" if kind == "user" else ""
-                click.echo(head)
-                for r in rows[:top_n]:
-                    ch = r["change_bytes"]
+            if over is not None:
+                click.echo(f"  {len(shown)} of {len(rows)} hold more than {sz(over)}")
+            ages = next((r["scan"]["ages"] for r in rows if r.get("scan")), None)
+            head = f"  {'owner':<14} {'scanned' if by_scan else 'used':>10}"
+            if not by_scan:
+                head += f" {str(days) + ' days':>10} {'quota':>9}"
+            if ages:
+                head += f" {'>' + str(ages[1]) + ' days':>11} {'newest change':>13}"
+            head += f" {'last job':>10}" if kind == "user" else ""
+            click.echo(head)
+            for r in shown:
+                out = f"  {str(who(r['name']))[:14]:<14} {sz(r['used_bytes']):>10}"
+                if not by_scan:
                     quota = r["hard_bytes"] or r["soft_bytes"]
-                    qs = _size(quota) if quota else ("several" if r["quotas"] else "none")
-                    out = (f"  {str(who(r['name']))[:14]:<14} {_size(r['used_bytes']):>10} "
-                           f"{('+' if ch and ch > 0 else '') + _size(ch) if ch is not None else '-':>10} "
-                           f"{qs:>9}")
-                    if ages:
-                        sc = r.get("scan")
-                        out += (f" {_size(sc['older2_bytes']) if sc else '-':>11} "
-                                f"{when(sc['newest']) if sc else '-':>13}")
-                    if kind == "user":
-                        out += f" {when(r.get('last_job')) if r.get('last_job') else 'none':>10}"
-                    click.echo(out)
-                if len(rows) > top_n:
-                    rest = sum(r["used_bytes"] for r in rows[top_n:])
-                    click.echo(f"  ... {len(rows) - top_n} more, {_size(rest)}")
-            elif kind == "user" and cov["tops"]:
-                # No per-owner counts: by what the scans found in each owner's top folders.
-                srows = views.scan_owners(conn, p["server"], p["path"], jobs=jobs)
-                a2 = srows[0]["ages"][1] if srows else 365
-                click.echo(f"  {'owner':<14} {'scanned':>10} {'>' + str(a2) + ' days':>11} "
-                           f"{'newest change':>13} {'last job':>10}")
-                for r in srows[:top_n]:
-                    click.echo(f"  {str(who(r['name']))[:14]:<14} {_size(r['bytes']):>10} "
-                               f"{_size(r['older2_bytes']):>11} {when(r['newest']):>13} "
-                               f"{when(r['last_job']) if r.get('last_job') else 'none':>10}"
-                               + ("" if r["complete"] else "  (not all finished)"))
-                if len(srows) > top_n:
-                    click.echo(f"  ... {len(srows) - top_n} more, {_size(sum(r['bytes'] for r in srows[top_n:]))}")
+                    qs = sz(quota) if quota else ("several" if r["quotas"] else "none")
+                    out += f" {change(r['change_bytes']):>10} {qs:>9}"
+                if ages:
+                    sc = r.get("scan")
+                    out += (f" {sz(sc['older2_bytes']) if sc else '-':>11} "
+                            f"{when(sc['newest']) if sc else '-':>13}")
+                if kind == "user":
+                    out += f" {when(r.get('last_job')) if r.get('last_job') else 'none':>10}"
+                if by_scan and not r["complete"]:
+                    out += "  (not all finished)"
+                click.echo(out)
+            if len(rows) > len(shown):
+                rest = [r for r in rows if r not in shown]
+                click.echo(f"  ... {len(rest)} more, {sz(sum(r['used_bytes'] or 0 for r in rest))}")
     finally:
         conn.close()
 

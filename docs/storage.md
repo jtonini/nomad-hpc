@@ -59,7 +59,12 @@ The script makes its folder itself, with a `.nomad-storage` file in it, and
 refuses an existing folder it didn't make, so that a mistyped `--dir` can't
 change the permissions of a pool or a home. The script, its folder and every
 folder above them must be changeable only by root (or the account running
-it), or it refuses to run: anyone else could swap them for something else.
+it), or it refuses to run, naming the folder and what to do: anyone else
+could swap them for something else. A folder its group may write is refused
+(even a group of one: accounts sharing its number don't always show), as is
+one with an access list (ACL) that may let others write it; a umask of 002
+leaves new folders group-writable, so `chmod g-w` the folders you make for
+it.
 It sets its own PATH, whatever the caller's. One run of each kind goes at a
 time: a scan still going when the next is due is left to finish. Folders at
 the top of a path whose names hold a tab, a line break or a backslash, and
@@ -171,6 +176,7 @@ dir = "/var/lib/nomad-storage"
 # usage_dir = "..."           # usage.txt's own folder, when it isn't dir
 # scan_dir = "..."            # (usage run as root, the scan as another account)
 # copy_of = "fs0"             # it holds copies of fs0's files (see below)
+# same_accounts = true        # it and this machine share their accounts (see Names)
 ```
 
 The account needs a key for `ssh` with no password prompt (`BatchMode`), as
@@ -200,6 +206,9 @@ added to anyone's totals.
 ```bash
 nomad storage use                  # each path, its owners, largest first
 nomad storage use --days 7         # the change over 7 days (30 by default; 90...)
+nomad storage use --over 1T        # only owners holding more than 1 TiB
+nomad storage use --over 500GB --list   # tab-separated lines to paste: folders, owner, used, last job, change
+nomad storage use --binary         # sizes in KiB, MiB, GiB, TiB, as du -h and xfs_quota -h show them
 nomad storage use --groups         # by group instead (--projects: XFS projects)
 nomad storage use --server fs1 --top 30
 nomad storage use --mask           # stand-ins for names and long paths, for sharing the output
@@ -224,10 +233,27 @@ without per-owner counts lists its owners by what the scans found in their
 top folders instead. ZFS datasets with a quota are listed under their path;
 an owner with space in several datasets shows `several` for quota.
 
+### Sizes
+
+nomad shows sizes in powers of 1000 (KB, MB, GB, TB), as `df -H` does;
+`--binary` shows them in powers of 1024 (KiB, MiB, GiB, TiB), as `du -h` and
+`xfs_quota -h` do, so 1.7 TB is 1.5 TiB, which `xfs_quota -h` writes `1.5T`.
+`--over` takes either way of writing a size: a bare letter (`500M`, `20G`,
+`1T`) or `MiB`, `GiB`, `TiB` count in powers of 1024, as those tools write
+them; `500MB`, `20GB`, `1TB` count in powers of 1000. `--list` gives one line
+per owner (all of them, or those over `--over`; `--top` cuts it), its folders
+as the scans found them (`/home/USER`, or wherever its top folders are; the
+server and path until the first scan), and a note when the server holds
+copies or the counts cover more than the path.
+
 ### Names
 
 The usage file names owners as the storage server knows them, and a number
-for an account it can't name (often one since deleted). The scan records
+for an account it can't name, shown as `uid N` (`gid N`, `project N`): often
+an account since deleted. When the server and the collecting machine share
+their accounts (one directory), `same_accounts = true` on the source names
+those numbers as the collecting machine knows them; a NAS with accounts of
+its own should leave it out, or another person's name would be put on them. The scan records
 each folder's owner as a number, named by the machine that collects it. When
 the server and that machine share the same directory (LDAP, AD), the names
 agree; a NAS with accounts of its own may number them differently, and its

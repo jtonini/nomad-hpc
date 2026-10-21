@@ -33,6 +33,39 @@ SCRIPT = "nomad-storage.sh"
 VERSION = 1
 
 
+# Sizes as people write them: a bare letter (500M, 20G, 1T) or KiB, MiB...
+# counts in powers of 1024, as du -h and xfs_quota -h do; KB, MB, GB, TB, PB
+# in powers of 1000, as df -H and nomad show them.
+_UNITS = {"": 1, "B": 1}
+for _i, _p in enumerate("KMGTP", 1):
+    _UNITS[_p] = _UNITS[_p + "IB"] = 1024 ** _i
+    _UNITS[_p + "B"] = 1000 ** _i
+
+
+def parse_size(text) -> int:
+    """'1T', '1.5TiB', '500GB', '20 G', '1048576' -> bytes. ValueError otherwise."""
+    from decimal import Decimal
+    m = re.fullmatch(r"\s*([0-9]{1,30}(?:\.[0-9]{0,30})?|\.[0-9]{1,30})\s*([A-Za-z]*)\s*", str(text))
+    if not m or m.group(2).upper() not in _UNITS:
+        raise ValueError(f"{text!r}: a size such as 500M, 20GB or 1T")
+    return int(Decimal(m.group(1)) * _UNITS[m.group(2).upper()])
+
+
+def format_size(b, binary: bool = False) -> str:
+    """Bytes as nomad says them: decimal (TB, as df -H), or with binary
+    powers of 1024 (TiB, as du -h and xfs_quota -h)."""
+    if b is None:
+        return "-"
+    b = float(b)
+    step = 1024 if binary else 1000
+    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB") if binary else ("B", "KB", "MB", "GB", "TB", "PB")
+    for unit in units:
+        if abs(b) < step or unit == units[-1]:
+            return f"{b:.0f} {unit}" if unit in ("B", "KB", "KiB") else f"{b:.1f} {unit}"
+        b /= step
+    return f"{b:.1f} {units[-1]}"
+
+
 def script_text() -> str:
     return resources.files("nomad.storage").joinpath(SCRIPT).read_text(encoding="utf-8")
 
