@@ -350,7 +350,10 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
     """(node, month) -> NodeMonth over ``months`` (consecutive), from node_state.
 
     Each reading stands for the time until the node's next one, up to twice
-    the node's usual interval; the rest is "not read". A node is counted
+    the node's usual interval that month, and never less than twice
+    DEFAULT_SAMPLE; the rest is "not read". The interval is the month's:
+    a site that once read its nodes every minute and now every five has
+    each of today's readings stand for five minutes, not two. A node is counted
     from its first reading only when the site's other nodes were reporting
     before it (a new node), and until its last only when they went on
     reporting after it (a node retired); a collector that stopped for the
@@ -384,8 +387,8 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
     first: dict = {}
     last: dict = {}
     core: dict = {}
-    gaps: dict = defaultdict(Counter)        # node -> half-minutes -> readings
-    for node, _, _, _, b, n, c, a, z in rows:
+    gaps: dict = defaultdict(Counter)        # (node, month) -> half-minutes -> readings
+    for node, month, _, _, b, n, c, a, z in rows:
         a, z = parse_time(a), parse_time(z)
         if a and (node not in first or a < first[node]):
             first[node] = a
@@ -393,27 +396,32 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
             last[node] = z
         core[node] = max(core.get(node, 0), _int(c))
         if b is not None:
-            gaps[node][int(b)] += n
+            gaps[(node, month)][int(b)] += n
+    # The most a reading may stand for, by node and month: twice the month's
+    # usual interval (the median gap), at least twice DEFAULT_SAMPLE (a
+    # collector's usual run), so that a site whose interval changed over the
+    # year isn't measured by the interval it had before.
+    floor = 2 * DEFAULT_SAMPLE.total_seconds()
     cap = {}
-    for node in first:
-        g = gaps.get(node)
-        if g:
-            half = sum(g.values()) / 2.0
-            seen = 0
-            usual = 0
-            for b in sorted(g):
-                seen += g[b]
-                if seen >= half:
-                    usual = b
-                    break
-            cap[node] = max(2 * usual * 30.0, 60.0)
-        else:
-            cap[node] = DEFAULT_SAMPLE.total_seconds()
+    for key, g in gaps.items():
+        half = sum(g.values()) / 2.0
+        seen = 0
+        usual = 0
+        for b in sorted(g):
+            seen += g[b]
+            if seen >= half:
+                usual = b
+                break
+        cap[key] = max(2 * usual * 30.0, floor)
+
+    def cap_of(node, month):
+        return cap.get((node, month), floor)
     out: dict = {}
     for node, month, st, is_idle, b, n, *_ in rows:
         nm = out.setdefault((node, month), NodeMonth(cores=core.get(node, 0),
                                                        gpus=(gpus or {}).get(node, 0)))
-        secs = cap[node] / 2.0 if b is None else min(b * 30.0, cap[node])
+        limit = cap_of(node, month)
+        secs = limit / 2.0 if b is None else min(b * 30.0, limit)
         h = n * secs / 3600.0
         cls = node_class(st, bool(is_idle)) if has_state else "in_service"
         nm.classes[cls] += h
@@ -427,7 +435,7 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
         # jobs do).
         begin = first[node] if new else max(lo, datetime(site_first.year, site_first.month, 1)
                                             if site_first else lo)
-        stop = last[node] + timedelta(seconds=cap[node]) if gone else hi
+        stop = last[node] + timedelta(seconds=cap_of(node, last[node].strftime("%Y-%m"))) if gone else hi
         if until is not None:
             stop = min(stop, max(until, begin))
         for month in months:

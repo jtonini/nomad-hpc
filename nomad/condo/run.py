@@ -179,9 +179,16 @@ def plan_mail(owners: list[Built], summary: Built | None, settings: Settings, mo
             entry.update(to=to, cc=cc)
         out.append(entry)
     if summary is not None:
-        to = settings.delivery.summary_recipients()
-        out.append({"key": "summary", "subject": f"Condo summary, {mname}", "to": to, "cc": [],
-                    "review_of": None, "skip": None if to else "no summary_to or review_to"})
+        to = d.summary_recipients()
+        entry = {"key": "summary", "subject": f"Condo summary, {mname}", "to": to, "cc": [],
+                 "review_of": None, "skip": None if to else "no summary_to or review_to"}
+        if d.reviewing and list(to) != list(d.review_to):
+            # While reviewing, the summary goes to review_to as well, marked
+            # with whom it would go to (summary_to may be someone who should
+            # see only a reviewed one).
+            entry.update(to=list(d.review_to), review_of=", ".join(to),
+                         subject=f"[Review] Condo summary, {mname}")
+        out.append(entry)
     return out
 
 

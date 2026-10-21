@@ -68,9 +68,11 @@ doesn't list, condos whose partition is gone, and owners not confirmed.
 ## How the figures are made
 
 - **Node-hours** come from the node readings (every 5 minutes). Each reading
-  stands for the time until the node's next one, up to twice its usual
-  interval; the rest is "not read", counted as in service, and the report
-  says how much there was. A node counts from its first reading only when
+  stands for the time until the node's next one, up to twice the node's
+  usual interval that month (the median gap, and at least 10 minutes); the
+  rest is "not read", counted as in service, and the report says how much
+  there was. The interval is each month's own, so a site that read its nodes
+  more often earlier in the year isn't measured by that interval now. A node counts from its first reading only when
   the cluster's other nodes were reporting before it (a new node), and until
   its last only when they went on after it (a node retired). Months before
   a cluster's first reading have no readings.
@@ -166,8 +168,9 @@ Without it the reports are written and sent without a PDF, and the email
 says so.
 
 Mail goes through `[mail]` in nomad.toml. While `review_to` is set, every
-report goes there, marked with whom it would have gone to; clear it to send
-reports to their owners. What was sent each month is kept in
+report goes there, marked with whom it would have gone to, and so does the
+summary when `summary_to` names someone else; clear it to send reports to
+their owners and the summary to `summary_to`. What was sent each month is kept in
 `OUT/summary/<YYYY-MM>.sent.json`, so a second run doesn't mail the same
 report twice (`--resend` does).
 

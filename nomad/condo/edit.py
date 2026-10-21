@@ -52,6 +52,16 @@ class Plan:
         return self.edit.text != self.edit.original
 
 
+def _one_line(v, what: str) -> None:
+    """Text values are one line: control characters, line and paragraph
+    separators (Python ends lines there and TOML doesn't, so the file would
+    read otherwise than the edit meant) and lone surrogates are refused."""
+    for x in (v if isinstance(v, list) else [v]):
+        if isinstance(x, str) and any(ord(c) < 32 or 0x7F <= ord(c) <= 0x9F or c in "\u2028\u2029"
+                                      or 0xD800 <= ord(c) <= 0xDFFF for c in x):
+            raise EditError(f"{what}: one line of text, without control characters")
+
+
 def parse_value(key: str, raw: str):
     """A value from the command line: A,B for a list setting; true/false;
     a number; else text."""
@@ -142,6 +152,12 @@ def plan(path, changes: Changes) -> Plan:
             raise EditError(f"condo {spec} is on {', '.join(hits)}: write CLUSTER/{spec}")
         return ("report", "clusters", hits[0], "condos", spec)
 
+    for key, v in list(changes.labs.items()) + list(changes.policy.items()):
+        _one_line(v, key)
+    for spec in list(changes.confirm) + list(changes.unconfirm) + list(changes.owners):
+        _one_line(spec, "condo")
+    for spec, people in changes.owners.items():
+        _one_line(list(people), f"owner of {spec}")
     for key, v in changes.labs.items():
         if key not in ccfg._LABS_KEYS:
             raise EditError(f"[report.labs] has no setting {key!r} ({', '.join(ccfg._LABS_KEYS)})")

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 from click.testing import CliRunner
 
-from nomad.condo import config as ccfg, content, discover, figures, render, run
+from nomad.condo import config as ccfg, content, discover, edit, figures, render, run
 
 NOW = datetime(2026, 10, 1, 7, 0)       # the morning of the 1st
 MONTH = "2026-09"
@@ -330,6 +330,35 @@ def test_review_sends_everything_to_review(monkeypatch, tmp_path, data, settings
     assert [r["status"] for r in res] == ["already sent"] * 3
 
 
+def test_while_reviewing_the_summary_goes_to_review_to_too(monkeypatch, tmp_path, data, settings):
+    sent = []
+    import nomad.mail
+    monkeypatch.setattr(nomad.mail, "send", lambda msg, cfg: sent.append(msg))
+    settings.delivery.summary_to = ["dean@example.edu"]
+    owners, summary = run.build_all(data, settings, ["html"])
+    res = {r["key"]: r for r in run.send(owners, summary, settings, {}, MONTH, tmp_path)}
+    assert res["summary"]["to"] == ["rc@example.edu"] and res["summary"]["review_of"] == "dean@example.edu"
+    assert all(m["To"] == "rc@example.edu" for m in sent)
+    s = next(m for m in sent if "summary" in m["Subject"])
+    assert s["Subject"].startswith("[Review] Condo summary")
+    assert "dean@example.edu" in s.get_body(("plain",)).get_content()
+    # Once review_to is cleared, summary_to gets it: the review copy doesn't count.
+    settings.delivery.review_to = []
+    res = {r["key"]: r for r in run.send(owners, summary, settings, {}, MONTH, tmp_path)}
+    assert res["summary"]["status"] == "sent" and res["summary"]["to"] == ["dean@example.edu"]
+
+
+def test_a_setting_is_one_line(tmp_path):
+    p = tmp_path / "report.toml"
+    p.write_text('[report.labs]\nreview_to = ["rc@example.edu"]\n'
+                 '[report.clusters.c1.condos.smith]\nowner = "jsmith"\n')
+    for changes in (edit.Changes(labs={"institution": "x\u2028review_to = 1 #"}),
+                    edit.Changes(labs={"contact": "a\nb"}),
+                    edit.Changes(owners={"smith": ["js\u0085mith"]})):
+        with pytest.raises(edit.EditError, match="one line"):
+            edit.plan(p, changes)
+
+
 def test_after_review_only_confirmed_owners_get_theirs(monkeypatch, tmp_path, data, settings):
     sent = []
     import nomad.mail
@@ -424,6 +453,24 @@ def test_a_gap_in_the_readings_is_not_read():
     nm = figures.node_months(c, "s", ["c1"], ["2026-08", "2026-09"])
     sep = nm[("c1", "2026-09")]
     assert sep.hours == 720 and abs(sep.not_read - 240) < 0.2 and abs(sep.classes["down"] - 24) < 0.2
+
+
+def test_an_interval_that_changed_over_the_year_counts_each_month_by_its_own():
+    # Read every minute in August, every five minutes from September (as on a
+    # site whose collector was slowed): September is read in full, not as 2 of
+    # every 5 minutes.
+    c = _mini(":memory:", _every(datetime(2026, 8, 1), datetime(2026, 9, 1), minutes=1)
+              + _every(datetime(2026, 9, 1), datetime(2026, 10, 1), minutes=5))
+    nm = figures.node_months(c, "s", ["c1"], ["2026-08", "2026-09"])
+    assert nm[("c1", "2026-08")].not_read < 0.2
+    sep = nm[("c1", "2026-09")]
+    assert sep.hours == 720 and sep.not_read < 0.2
+    # A gap is still a gap: two hours without readings in September.
+    c = _mini(":memory:", _every(datetime(2026, 8, 1), datetime(2026, 9, 1), minutes=1)
+              + _every(datetime(2026, 9, 1), datetime(2026, 10, 1), minutes=5,
+                       skip=(datetime(2026, 9, 10), datetime(2026, 9, 10, 2))))
+    sep = figures.node_months(c, "s", ["c1"], ["2026-08", "2026-09"])[("c1", "2026-09")]
+    assert abs(sep.not_read - (2 - 10 / 60)) < 0.2
 
 
 def test_a_site_that_stopped_reporting_leaves_hours_not_read():
