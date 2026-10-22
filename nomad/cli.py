@@ -274,6 +274,7 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
             why = result.error_message or result.note
             click.echo(f"  {status} {c.name}: {result.records_collected} records"
                        + (f" -- {why}" if why else ""))
+        _expire_change_log(db_path)
     else:
         # Continuous collection
         click.echo(f"Starting continuous collection (interval: {interval}s)")
@@ -288,10 +289,31 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
                     click.echo(f"[{datetime.now():%H:%M:%S}] {status} {c.name}: "
                                f"{result.records_collected} records"
                                + (f" -- {why}" if why else ""))
+                _expire_change_log(db_path)
 
                 time.sleep(interval)
         except KeyboardInterrupt:
             click.echo("\nStopping collectors")
+
+
+def _expire_change_log(db_path) -> None:
+    """The change log a hub's incremental sync keeps in this database (see
+    nomad.db.delta_site), taken out once no hub has read it for a week: a
+    site taken out of the hub's [hub] sites, or a hub retired, would leave it
+    growing forever. Never stops collection."""
+    try:
+        from nomad.db import delta_site
+        conn = sqlite3.connect(str(db_path), timeout=5, isolation_level=None)
+        try:
+            done = delta_site.expire(conn)
+        finally:
+            conn.close()
+        if done:
+            click.echo(f"The change log for a hub's sync {done}: no hub has read it for "
+                       f"{delta_site.EXPIRE_DAYS} days" if done == "removed" else
+                       f"The change log for a hub's sync {done}: it grew too long unread")
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"change log not checked: {e}")
 
 
 @cli.command('collectors')
@@ -4356,12 +4378,54 @@ def _init_condo_write(config_file, plan, dry_run) -> bool:
     return not dry_run
 
 
-def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None, why=None):
+def _pull_via_backup(user, host, remote_db, local_copy, ssh_key=None, why=None, how=None,
+                     refuse_live=False):
     """Copy a site's database to the hub as a consistent snapshot; True when
     ``local_copy`` is a complete new copy, False with it untouched (and the
-    reason appended to ``why``). See nomad.db.pull."""
+    reason appended to ``why``). ``how`` gets "live" when the live file had
+    to be copied instead, or "no snapshot" when that was refused. See
+    nomad.db.pull."""
     from nomad.db.pull import pull
-    return pull(user, host, remote_db, local_copy, ssh_key, why=why)
+    if refuse_live:
+        return pull(user, host, remote_db, local_copy, ssh_key, why=why, how=how, refuse_live=True)
+    return pull(user, host, remote_db, local_copy, ssh_key, why=why, how=how)
+
+
+def _publish_combined(tmp_path, combined_path):
+    """A freshly built combined database in place of the published one.
+
+    One the Console may have open is never replaced by renaming a file over
+    it: a reader still holding the old file, and the write-ahead log and its
+    index (named after the file, so shared by old and new), would mix the
+    two ("database disk image is malformed"), and fold the old frames into
+    the new file when those readers close. Instead the new build is copied
+    into the open database with SQLite's backup, as one write that readers
+    see whole or not at all, and the write-ahead log is emptied after. Only
+    when there is no published file yet is the build renamed into place."""
+    import os
+    import sqlite3
+    from nomad.db import delta_hub
+    tmp_path, combined_path = Path(tmp_path), Path(combined_path)
+    if not combined_path.exists():
+        for suffix in ("-wal", "-shm"):          # left by some earlier file: not this one's
+            stale = Path(f"{combined_path}{suffix}")
+            if stale.exists():
+                stale.unlink()
+        os.replace(str(tmp_path), str(combined_path))
+        return
+    src = sqlite3.connect(str(tmp_path))
+    dst = delta_hub.connect(combined_path)
+    try:
+        src.backup(dst)
+        delta_hub.shrink_wal(dst)
+    finally:
+        src.close()
+        dst.close()
+    for p in (tmp_path, Path(f"{tmp_path}-wal"), Path(f"{tmp_path}-shm")):
+        try:
+            p.unlink()
+        except OSError:
+            pass
 
 
 def _load_hub_config(config_file_override=None, config_path=None):
@@ -4485,6 +4549,133 @@ def _load_hub_config(config_file_override=None, config_path=None):
     return None
 
 
+SYNC_INDEXES = [
+        ("node_state", "cluster, timestamp"),
+        ("node_state", "timestamp"),
+        ("interactive_sessions", "timestamp"),
+        ("interactive_summary", "timestamp"),
+        ("jobs", "source_site"),
+        ("jobs", "user_name"),
+        ("jobs", "state"),
+        ("job_summary", "job_id"),
+        ("gpu_stats", "timestamp"),
+        ("workstation_state", "timestamp"),
+        # Per-site reads (nomad.db.scope: WHERE source_site = ? AND
+        # timestamp >= ?) for the Insight and Dynamics engines.
+        ("node_state", "source_site, timestamp"),
+        ("filesystems", "source_site, timestamp"),
+        ("queue_state", "source_site, timestamp"),
+        ("iostat_device", "source_site, timestamp"),
+        ("gpu_stats", "source_site, timestamp"),
+        # Is each site still collecting (nomad.collection_health, 1.14.5).
+        ("collection_log", "source_site, started_at"),
+        ("workstation_state", "source_site, timestamp"),
+        ("alerts", "source_site, timestamp"),
+        ("jobs", "source_site, end_time"),
+        ("jobs", "source_site, submit_time"),
+        # A lab's machines and storage (nomad console roles, the PI
+        # view): each machine's and each export's latest record.
+        ("workstation_state", "hostname, timestamp"),
+        # A person's own sessions on the machines (My Activity, nomad edu
+        # me): until 1.14.6 every visit read all of them.
+        ("workstation_user_snapshot", "username, timestamp"),
+        ("workstation_mount_state", "source, timestamp"),
+        ("workstation_mount_state", "hostname, timestamp"),
+        # Interactive servers: a site's days and hours, a course's or a
+        # lab's people over a term (nomad facts, the usage report).
+        ("interactive_sessions", "source_site, timestamp"),
+        ("interactive_daily", "source_site, day"),
+        ("interactive_daily", "user, day"),
+        ("interactive_hourly", "source_site, hour"),
+        ("interactive_person_hourly", "source_site, hour"),
+        ("interactive_person_hourly", "user, hour"),
+        # Who used which environment (a course's kernel) this term.
+        ("interactive_env_daily", "source_site, day"),
+        ("interactive_env_daily", "environment, day"),
+        # Who is in a group, and which groups a person is in: every
+        # course, lab and Console sign-in asks (nomad course discover asks
+        # of every group).
+        ("group_membership", "group_name"),
+        ("group_membership", "username"),
+        ("oom_kills", "source_site, timestamp"),
+        # Compute nodes' local disks: each node's latest reading (1.14),
+        # and who has the data (1.14.3).
+        ("node_disks", "source_site, node, timestamp"),
+        ("node_disk_owner_counts", "source_site, node, path, timestamp"),
+        ("node_disk_owners", "source_site, node, path, timestamp"),
+        # Who uses each storage server's space (1.16).
+        ("storage_owners", "source_site, server, path, kind, timestamp"),
+        ("storage_owners", "name, timestamp"),
+        ("storage_paths", "source_site, server, path, timestamp"),
+        ("storage_datasets", "source_site, server, path, timestamp"),
+        ("storage_reports", "source_site, server, mode, started"),
+        ("storage_tops", "source_site, server, path, top, scanned_at"),
+        ("storage_folders", "source_site, server, path, top"),
+        ("storage_folders", "top_owner"),
+]
+
+
+def _site_configs(sites, cache_dir, ctx) -> dict:
+    """Each site's partitions, filesystems and kind, from its nomad.toml (the
+    hub's own for a site on the hub), for sync_sites."""
+    import subprocess as sp
+    from nomad.config import read_toml
+    from nomad.db.pull import is_local
+    site_configs = {}
+    for site in sites:
+        name = site.get('name', 'unknown')
+        host = site.get('host', 'localhost')
+        user = site.get('ssh_user') or site.get('user', '')
+        ssh_key = site.get('ssh_key')
+        # Derive config path from user's home
+        if user == 'root':
+            remote_toml = '/root/.config/nomad/nomad.toml'
+        else:
+            remote_toml = f'/home/{user}/.config/nomad/nomad.toml'
+        local_toml = cache_dir / f'{name}.toml'
+        try:
+            if is_local(host):
+                # The hub's own collectors: the settings this run uses (a
+                # service account's are in /etc/nomad, not its home).
+                local_toml = Path(ctx.obj.get('config_target') or resolve_config_path())
+                fetched = local_toml.is_file()
+            else:
+                toml_cmd = ['scp', '-o', 'ConnectTimeout=5',
+                            '-o', 'BatchMode=yes']
+                if ssh_key:
+                    toml_cmd += ['-i', ssh_key]
+                toml_cmd += [f'{user}@{host}:{remote_toml}',
+                             str(local_toml)]
+                r = sp.run(toml_cmd, capture_output=True,
+                           text=True, timeout=15)
+                fetched = r.returncode == 0
+            if fetched and local_toml.exists():
+                cfg = read_toml(local_toml)
+                partitions = (cfg.get('collectors', {})
+                              .get('slurm', {})
+                              .get('partitions', []))
+                filesystems = (cfg.get('collectors', {})
+                               .get('disk', {})
+                               .get('filesystems', []))
+                cluster_type = 'hpc'
+                for cn, cv in cfg.get('clusters', {}).items():
+                    ct = cv.get('type', 'hpc')
+                    if ct in ('workstations', 'workstation'):
+                        cluster_type = 'workstation'
+                    break
+                site_configs[name] = {
+                    'partitions': ','.join(partitions)
+                        if partitions else '',
+                    'filesystems': ','.join(filesystems)
+                        if filesystems else '',
+                    'cluster_type': cluster_type,
+                }
+        except Exception:
+            pass
+
+    return site_configs
+
+
 @cli.command()
 @click.option('--config-file', '-c', type=click.Path(),
               help='Sync config file (default: read [hub] from nomad.toml, '
@@ -4492,8 +4683,15 @@ def _load_hub_config(config_file_override=None, config_path=None):
 @click.option('--output', '-o', type=click.Path(),
               default=None, help='Output combined database path')
 @click.option('--dry-run', is_flag=True, help='Show what would be synced')
+@click.option('--full', is_flag=True,
+              help='Copy every site whole instead of applying only what changed (in place, '
+                   'into the combined database the Console reads; the first sync after an '
+                   'upgrade builds it whole once).')
+@click.option('--remove-logs', is_flag=True,
+              help="Take the change log and its triggers out of every site's database (before "
+                   'going back to a nomad older than 1.17, which copies whole databases), then stop.')
 @click.pass_context
-def sync(ctx, config_file, output, dry_run):
+def sync(ctx, config_file, output, dry_run, full, remove_logs):
     """Sync remote NØMAÐ databases into a combined local database.
 
     \b
@@ -4572,6 +4770,37 @@ def sync(ctx, config_file, output, dry_run):
 
     sites = hub_cfg['sites']
 
+    if remove_logs:
+        from nomad.db import delta_hub
+        for site in sites:
+            name = site.get('name', 'unknown')
+            try:
+                n = delta_hub.remove_log(site)
+                click.echo(f"  {name}: change log removed ({n} triggers)")
+            except delta_hub.DeltaError as e:
+                click.echo(click.style(f"  {name}: not removed: {e}", fg="red"))
+        click.echo("  The next `nomad sync` copies every site whole (and puts the logs back, "
+                   "unless the hub runs a nomad older than 1.17).")
+        # A nomad older than 1.17 replaces the combined database by renaming a
+        # new file over it, which is safe only with its write-ahead log empty.
+        from nomad.config import combined_db_path
+        _combined = (Path(output).expanduser() if output
+                     else combined_db_path(hub_cfg.get('output_db')))
+        if _combined.exists():
+            _c = delta_hub.connect(_combined)
+            try:
+                _empty = delta_hub.shrink_wal(_c, wait_seconds=60)
+            finally:
+                _c.close()
+            if _empty:
+                click.echo(f"  {_combined}: its write-ahead log is folded in and empty.")
+            else:
+                click.echo(click.style(
+                    f"  {_combined}: its write-ahead log could not be emptied (something kept "
+                    "reading it). Stop the Console before the first sync with an older nomad.",
+                    fg="yellow"))
+        return
+
     # Output path
     from nomad.config import combined_db_path, default_data_dir
     default_data = default_data_dir()
@@ -4621,7 +4850,15 @@ def sync(ctx, config_file, output, dry_run):
             else:
                 click.echo(f"    scp {user}@{host}:{db} -> {cache_dir}/{name}.db")
         click.echo()
-        click.echo(f"  Would merge into: {combined_path}")
+        from nomad.db import delta_hub
+        if delta_hub.is_incremental(combined_path):
+            if full:
+                click.echo(f"  Would copy every site whole into: {combined_path} (in place)")
+            else:
+                click.echo(f"  Would ask each site for what changed and apply it to: {combined_path}")
+                click.echo("  (a site seen for the first time, or whose log started over, is copied whole once)")
+        else:
+            click.echo(f"  Would merge into: {combined_path}")
         return
 
     # Only one sync may run at a time. A full sync can take many minutes (7m23s
@@ -4648,6 +4885,21 @@ def sync(ctx, config_file, output, dry_run):
             f"  Could not take sync lock ({_lock_err}) — continuing anyway.",
             fg="yellow"))
         _lock_fh = None
+
+    from nomad.db import delta_hub
+    if delta_hub.is_incremental(combined_path):
+        # --full too: every site copied whole, but into the database in place
+        # (never a new file renamed over one the Console has open).
+        return _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=full)
+    if combined_path.exists():
+        click.echo("  The combined database was built by an older nomad: building it once more, "
+                   "whole, in the form later syncs update in place.")
+        click.echo()
+    _hub = delta_hub.hub_id(combined_path)
+    # Sites whose copy says truly where in its log it stands (the log was set
+    # up just before, and the copy is a snapshot, not the live file), and
+    # what the site called that copy.
+    trusted, tokens = {}, {}
 
     # Phase 1: Pull remote databases
     click.echo(click.style(
@@ -4720,9 +4972,19 @@ def sync(ctx, config_file, output, dry_run):
         # Use SQLite .backup for atomic snapshot to fix corruption from
         # WAL mid-write during scp. Falls back to direct scp.
         try:
-            _why = []
+            # The site's change log first, so the copy says where in it it
+            # stands and the next sync asks only for what came after.
+            _logged = True
+            try:
+                tokens[name] = delta_hub.init_site(site, hub=_hub).get("token")
+            except Exception as _no_log:          # never stops the copy
+                _logged = False
+                logging.getLogger("nomad.sync").info(
+                    f"{name}: no change log there ({_no_log}); copied whole each time")
+            _why, _how = [], []
             ok = _pull_via_backup(
-                user, host, remote_db, local_copy, ssh_key, why=_why)
+                user, host, remote_db, local_copy, ssh_key, why=_why, how=_how)
+            trusted[name] = ok and _logged and "live" not in _how
             if not ok:
                 pull_errors[name] = _why[-1] if _why else "pull failed (see log)"
             if ok:
@@ -4763,90 +5025,23 @@ def sync(ctx, config_file, output, dry_run):
     click.echo()
 
     # Phase 1b: Pull site configs (for partition metadata)
-    from nomad.config import read_toml
-    from nomad.db.pull import is_local
-    site_configs = {}
-    for site in sites:
-        name = site.get('name', 'unknown')
-        host = site.get('host', 'localhost')
-        user = site.get('ssh_user') or site.get('user', '')
-        ssh_key = site.get('ssh_key')
-        # Derive config path from user's home
-        if user == 'root':
-            remote_toml = '/root/.config/nomad/nomad.toml'
-        else:
-            remote_toml = f'/home/{user}/.config/nomad/nomad.toml'
-        local_toml = cache_dir / f'{name}.toml'
-        try:
-            if is_local(host):
-                # The hub's own collectors: the settings this run uses (a
-                # service account's are in /etc/nomad, not its home).
-                local_toml = Path(ctx.obj.get('config_target') or resolve_config_path())
-                fetched = local_toml.is_file()
-            else:
-                toml_cmd = ['scp', '-o', 'ConnectTimeout=5',
-                            '-o', 'BatchMode=yes']
-                if ssh_key:
-                    toml_cmd += ['-i', ssh_key]
-                toml_cmd += [f'{user}@{host}:{remote_toml}',
-                             str(local_toml)]
-                r = sp.run(toml_cmd, capture_output=True,
-                           text=True, timeout=15)
-                fetched = r.returncode == 0
-            if fetched and local_toml.exists():
-                cfg = read_toml(local_toml)
-                partitions = (cfg.get('collectors', {})
-                              .get('slurm', {})
-                              .get('partitions', []))
-                filesystems = (cfg.get('collectors', {})
-                               .get('disk', {})
-                               .get('filesystems', []))
-                cluster_type = 'hpc'
-                for cn, cv in cfg.get('clusters', {}).items():
-                    ct = cv.get('type', 'hpc')
-                    if ct in ('workstations', 'workstation'):
-                        cluster_type = 'workstation'
-                    break
-                site_configs[name] = {
-                    'partitions': ','.join(partitions)
-                        if partitions else '',
-                    'filesystems': ','.join(filesystems)
-                        if filesystems else '',
-                    'cluster_type': cluster_type,
-                }
-        except Exception:
-            pass
+    site_configs = _site_configs(sites, cache_dir, ctx)
 
-    # Phase 2: Merge into combined database
+    # Phase 2: Merge into combined database: every site's copy, whole, into a
+    # new database (nomad.db.delta_hub.apply_snapshot), in the form later syncs
+    # update in place; each row keeps its site and its rowid there.
     click.echo(click.style(
         "  Phase 2: Merging databases", bold=True))
     click.echo()
-
-    # Every merged table gets a source_site column (see needs_site below),
-    # so the dashboard and the analysis engines can read one site at a time.
-
-    # No longer needed — all tables get source_site
-    SAFE_TABLES = set()
-
-    # Schema-only tables (don't merge data)
-    SKIP_TABLES = {
-        'schema_version', 'schema_migrations',
-        'sqlite_sequence', 'config',
-        # Counters and cursors from one run to the next: local working state.
-        'per_user_state', 'interactive_state', 'oom_state', 'node_disks_sweeps',
-        'storage_reads',
-    }
 
     # Build to a temp path so a failed or interrupted sync doesn't destroy
     # the existing combined.db. Swap into place only after successful merge.
     import os as _os
     combined_tmp_path = combined_path.with_suffix(combined_path.suffix + ".tmp")
-    if combined_tmp_path.exists():
-        combined_tmp_path.unlink()
-
-    # Open a fresh connection per site (below) rather than holding one
-    # across the whole loop. This prevents one site's failure from
-    # polluting subsequent iterations with leaked ATTACH/lock state.
+    for _leftover in (combined_tmp_path, Path(f"{combined_tmp_path}-wal"),
+                      Path(f"{combined_tmp_path}-shm")):
+        if _leftover.exists():
+            _leftover.unlink()
     _init = sqlite3.connect(combined_tmp_path)
     _init.execute("PRAGMA journal_mode=WAL")
     _init.close()
@@ -4861,135 +5056,51 @@ def sync(ctx, config_file, output, dry_run):
 
     for site_name, db_path in pulled:
         click.echo(f"  Merging {site_name}... ", nl=False)
-        site_records = 0
-
-        # Open a fresh connection per site. If a previous iteration's
-        # DETACH failed (e.g., because the source was locked due to a
-        # malformed DB error mid-read), that state cannot leak into this
-        # iteration because we start with a new connection.
-        combined = sqlite3.connect(combined_tmp_path)
-        # Track whether ATTACH succeeded, so we know whether to DETACH
-        attached = False
+        # A fresh connection per site, so one site's failure leaves nothing
+        # behind for the next (apply_snapshot rolls its own transaction back).
+        combined = delta_hub.connect(combined_tmp_path)
         try:
-            # Checkpoint WAL on the cached copy before attaching
             try:
                 _tmp = sqlite3.connect(str(db_path))
                 _tmp.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 _tmp.close()
             except Exception:
                 pass
-
-            combined.execute(
-                "ATTACH DATABASE ? AS source", (str(db_path),))
-            attached = True
-
-            # Get list of tables in source
-            tables = [row[0] for row in combined.execute(
-                "SELECT name FROM source.sqlite_master "
-                "WHERE type='table'"
-            ).fetchall()]
-
-            for table in tables:
-                if table in SKIP_TABLES or table.startswith('sqlite_'):
-                    continue
-
-                # Get source columns
-                cols_info = combined.execute(
-                    f"PRAGMA source.table_info({table})"
-                ).fetchall()
-                col_names = [c[1] for c in cols_info]
-                col_defs = []
-                for c in cols_info:
-                    cname, ctype = c[1], c[2] or 'TEXT'
-                    col_defs.append(f"{cname} {ctype}")
-
-                # Every data table is tagged with its site -- alerts and
-                # nodes too, which a fixed list used to leave out, so a
-                # combined database could not say which site raised an
-                # alert. A source table that already carries source_site
-                # keeps its own.
-                needs_site = 'source_site' not in col_names
-
-                # Create table in combined if not exists
-                if needs_site:
-                    all_defs = col_defs + ["source_site TEXT"]
-                    all_cols = col_names + ["source_site"]
-                else:
-                    all_defs = col_defs
-                    all_cols = col_names
-
-                # Skip autoincrement id column for inserts
-                insert_cols = [c for c in all_cols if c != 'id']
-                insert_defs = [d for d, c in zip(all_defs, all_cols)
-                               if c != 'id']
-
-                create_cols = ", ".join(
-                    ["id INTEGER PRIMARY KEY AUTOINCREMENT"]
-                    + insert_defs
-                )
-                combined.execute(
-                    f"CREATE TABLE IF NOT EXISTS {table} "
-                    f"({create_cols})"
-                )
-                # Migrate schema: add any columns present in source but missing in combined
-                existing_cols = {r[1] for r in combined.execute(f"PRAGMA table_info({table})").fetchall()}
-                for col_def, col_name in zip(all_defs, all_cols):
-                    if col_name != "id" and col_name not in existing_cols:
-                        combined.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
-
-                # Build insert query
-                src_cols = [c for c in col_names if c != 'id']
-                if needs_site:
-                    select_part = ", ".join(
-                        [f"source.{table}.{c}" for c in src_cols]
-                        + [f"'{site_name}'"]
-                    )
-                    dest_cols = ", ".join(
-                        src_cols + ["source_site"])
-                else:
-                    select_part = ", ".join(
-                        [f"source.{table}.{c}" for c in src_cols])
-                    dest_cols = ", ".join(src_cols)
-
-                combined.execute(
-                    f"INSERT INTO {table} ({dest_cols}) "
-                    f"SELECT {select_part} FROM source.{table}"
-                )
-
-                count = combined.execute(
-                    "SELECT changes()").fetchone()[0]
-                site_records += count
-
-            combined.commit()
-            total_records += site_records
+            # A cached copy stands in from an earlier run: copied whole again next time.
+            _got = delta_hub.apply_snapshot(combined, site_name, db_path,
+                                            trust_log=trusted.get(site_name, False)
+                                            and site_name not in from_cache,
+                                            token=tokens.get(site_name))
+            # Where it is, to tell it if it is taken out of [hub] sites later.
+            delta_hub.remember_site(combined, next(
+                (s for s in sites if s.get('name', 'unknown') == site_name), {"name": site_name}))
+            total_records += _got["records"]
             merge_results[site_name] = {
-                "merged": 1, "records": site_records, "error": None}
+                "merged": 1, "records": _got["records"], "error": None}
             click.echo(click.style(
-                f"OK ({site_records:,} records)", fg="green"))
-
+                f"OK ({_got['records']:,} records)", fg="green"))
         except Exception as e:
             merge_results[site_name] = {
                 "merged": 0, "records": 0, "error": str(e)[:200]}
             click.echo(click.style(f"ERROR: {e}", fg="red"))
-            try:
-                combined.rollback()
-            except Exception:
-                pass
-
         finally:
-            # Release 'source' name if we attached it. If DETACH fails
-            # (e.g., source locked after a mid-merge error), closing the
-            # connection below releases it anyway, and the next iteration
-            # opens a fresh one so no state leaks.
-            if attached:
-                try:
-                    combined.execute("DETACH DATABASE source")
-                except Exception:
-                    pass
             try:
                 combined.close()
             except Exception:
                 pass
+    # (``datetime`` is imported again further down in this function, which
+    # makes it local here: hence the module's own name.)
+    import datetime as _dtmod
+    _m = None
+    try:
+        _m = delta_hub.connect(combined_tmp_path)
+        delta_hub.set_meta(_m, "format", delta_hub.FORMAT)
+        delta_hub.set_meta(_m, "analyzed_at", _dtmod.datetime.now().isoformat())
+    except Exception as _meta_err:
+        logging.getLogger("nomad.sync").warning(f"sync bookkeeping not written: {_meta_err}")
+    finally:
+        if _m is not None:
+            _m.close()
 
     # Write sync_sites metadata table (fresh connection, matching the
     # per-site pattern above).
@@ -5078,70 +5189,7 @@ def sync(ctx, config_file, output, dry_run):
     # for ~12s of index build. A missing table is not an error — sites differ
     # in which collectors they run — so each index is attempted independently.
     if total_records > 0:
-        _INDEXES = [
-            ("node_state", "cluster, timestamp"),
-            ("node_state", "timestamp"),
-            ("interactive_sessions", "timestamp"),
-            ("interactive_summary", "timestamp"),
-            ("jobs", "source_site"),
-            ("jobs", "user_name"),
-            ("jobs", "state"),
-            ("job_summary", "job_id"),
-            ("gpu_stats", "timestamp"),
-            ("workstation_state", "timestamp"),
-            # Per-site reads (nomad.db.scope: WHERE source_site = ? AND
-            # timestamp >= ?) for the Insight and Dynamics engines.
-            ("node_state", "source_site, timestamp"),
-            ("filesystems", "source_site, timestamp"),
-            ("queue_state", "source_site, timestamp"),
-            ("iostat_device", "source_site, timestamp"),
-            ("gpu_stats", "source_site, timestamp"),
-            # Is each site still collecting (nomad.collection_health, 1.14.5).
-            ("collection_log", "source_site, started_at"),
-            ("workstation_state", "source_site, timestamp"),
-            ("alerts", "source_site, timestamp"),
-            ("jobs", "source_site, end_time"),
-            ("jobs", "source_site, submit_time"),
-            # A lab's machines and storage (nomad console roles, the PI
-            # view): each machine's and each export's latest record.
-            ("workstation_state", "hostname, timestamp"),
-            # A person's own sessions on the machines (My Activity, nomad edu
-            # me): until 1.14.6 every visit read all of them.
-            ("workstation_user_snapshot", "username, timestamp"),
-            ("workstation_mount_state", "source, timestamp"),
-            ("workstation_mount_state", "hostname, timestamp"),
-            # Interactive servers: a site's days and hours, a course's or a
-            # lab's people over a term (nomad facts, the usage report).
-            ("interactive_sessions", "source_site, timestamp"),
-            ("interactive_daily", "source_site, day"),
-            ("interactive_daily", "user, day"),
-            ("interactive_hourly", "source_site, hour"),
-            ("interactive_person_hourly", "source_site, hour"),
-            ("interactive_person_hourly", "user, hour"),
-            # Who used which environment (a course's kernel) this term.
-            ("interactive_env_daily", "source_site, day"),
-            ("interactive_env_daily", "environment, day"),
-            # Who is in a group, and which groups a person is in: every
-            # course, lab and Console sign-in asks (nomad course discover asks
-            # of every group).
-            ("group_membership", "group_name"),
-            ("group_membership", "username"),
-            ("oom_kills", "source_site, timestamp"),
-            # Compute nodes' local disks: each node's latest reading (1.14),
-            # and who has the data (1.14.3).
-            ("node_disks", "source_site, node, timestamp"),
-            ("node_disk_owner_counts", "source_site, node, path, timestamp"),
-            ("node_disk_owners", "source_site, node, path, timestamp"),
-            # Who uses each storage server's space (1.16).
-            ("storage_owners", "source_site, server, path, kind, timestamp"),
-            ("storage_owners", "name, timestamp"),
-            ("storage_paths", "source_site, server, path, timestamp"),
-            ("storage_datasets", "source_site, server, path, timestamp"),
-            ("storage_reports", "source_site, server, mode, started"),
-            ("storage_tops", "source_site, server, path, top, scanned_at"),
-            ("storage_folders", "source_site, server, path, top"),
-            ("storage_folders", "top_owner"),
-        ]
+        _INDEXES = SYNC_INDEXES
         click.echo("  Indexing... ", nl=False)
         _built = 0
         try:
@@ -5222,16 +5270,24 @@ def sync(ctx, config_file, output, dry_run):
         except Exception:
             pass
     else:
+        # The sites' copies are not kept: later syncs ask only for changes
+        # (and the room they take is wanted while the new build goes in).
+        for _name, _copy in pulled:
+            for _p in (Path(_copy), Path(f"{_copy}-wal"), Path(f"{_copy}-shm")):
+                try:
+                    _p.unlink()
+                except OSError:
+                    pass
         try:
-            _os.replace(str(combined_tmp_path), str(combined_path))
+            _publish_combined(combined_tmp_path, combined_path)
         except Exception as swap_err:
             _blocked = f"replacing it failed: {swap_err}"
             click.echo()
             click.echo(click.style(
-                f"  Atomic swap failed: {swap_err}",
+                f"  Putting the new build in place failed: {swap_err}",
                 fg="red"))
             click.echo(click.style(
-                f"  Combined DB remains at: {combined_tmp_path}",
+                f"  The new build remains at: {combined_tmp_path}",
                 fg="yellow"))
 
     # Summary
@@ -5289,6 +5345,269 @@ def sync(ctx, config_file, output, dry_run):
             collection_alerts(combined_path, cache_dir, failing=_failing, config=_cfg or None)
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"collection alert not sent: {_alert_err}")
+
+
+# Asking a site for its changes failing this many times in a row: it is copied
+# whole instead (an exporter that stopped working there would otherwise leave
+# the hub's copy of it frozen, however many syncs ran).
+FAILURES_BEFORE_COPY = 3
+
+
+def _sync_copy_site(conn, site, cache_dir, hub=None) -> dict:
+    """One site copied whole into the combined database in place (the first
+    time, when its log started over, or when its changes can't be had): its
+    log set up first, so the copy says where in it it stands. The copy's
+    place is taken only when that worked and the copy is a snapshot (not the
+    live file); otherwise the site is copied whole again next time
+    (``why_whole`` says why). The copy is removed once applied."""
+    import os
+    from nomad.db import delta_hub, delta_site
+    name = site.get('name', 'unknown')
+    hub = hub or delta_site.DEFAULT_HUB
+    why_whole, token = None, None
+    try:
+        token = delta_hub.init_site(site, hub=hub).get("token")
+    except Exception as e:                    # never stops the copy
+        why_whole = f"its change log can't be set up there ({e})"
+        logging.getLogger("nomad.sync").info(f"{name}: no change log there ({e}); copied whole each time")
+    # This run's own (another hub on this host may be copying the same site).
+    local_copy = cache_dir / f"{name}.{os.getpid()}.copy.db"
+    why, how = [], []
+    # A whole export that failed lately is not tried again for a day (it can
+    # run for an hour, holding up the other sites): the live file instead.
+    whole_failed = delta_hub.get_meta(conn, f"whole_failed:{name}")
+    try:
+        whole_ok = whole_failed is None or (
+            datetime.now() - datetime.fromisoformat(whole_failed) > timedelta(days=1))
+    except ValueError:
+        whole_ok = True
+    path = site.get('db_path', '~/.local/share/nomad/nomad.db')
+    user = site.get('ssh_user') or site.get('user')
+    ok = _pull_via_backup(user, site.get('host'), path, local_copy, site.get('ssh_key'), why=why,
+                          how=how, refuse_live=why_whole is None and whole_ok)
+    if not ok and "no snapshot" in how:
+        # No snapshot can be taken there (no sqlite3 command, and a python3
+        # older than 3.7): its exporter sends every table whole instead, as
+        # of a place in its log, so from then on only changes come.
+        try:
+            with delta_hub.fetch_whole(site, hub=hub, spool_dir=cache_dir) as answer:
+                got = delta_hub.apply_delta(conn, name, answer.records())
+            state = delta_hub.get_state(conn, name) or {}
+            return {"records": got["rows"], "epoch": state.get("epoch"), "seq": got["to"],
+                    "why_whole": None, "via": "its exporter (no snapshot can be taken there)"}
+        except delta_hub.DeltaError as e:
+            logging.getLogger("nomad.sync").warning(
+                f"{name}: its exporter could not send it whole ({e}); copying its live file")
+            delta_hub.set_meta(conn, f"whole_failed:{name}", datetime.now().isoformat())
+            why_whole = f"its exporter could not send it whole ({e})"
+            why, how = [], []
+            ok = _pull_via_backup(user, site.get('host'), path, local_copy, site.get('ssh_key'),
+                                  why=why, how=how)
+    if not ok:
+        raise delta_hub.DeltaError(why[-1] if why else "the copy failed")
+    if "live" in how and why_whole is None:
+        why_whole = ("it has no sqlite3 command, nor a python3 that can take a snapshot, so its "
+                     "live file is copied (install sqlite there)")
+    try:
+        for suffix in ("-wal", "-shm"):
+            stale = Path(f"{local_copy}{suffix}")
+            if stale.exists():
+                stale.unlink()
+        got = delta_hub.apply_snapshot(conn, name, local_copy, trust_log=why_whole is None,
+                                       token=token)
+        got["why_whole"] = why_whole or ("its copy has no change log (a nomad older than 1.17 "
+                                         "copied it)" if not got["epoch"] else None)
+        return got
+    finally:
+        for p in (local_copy, Path(f"{local_copy}-wal"), Path(f"{local_copy}-shm")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
+def _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=False):
+    """`nomad sync` on a combined database this version updates in place: each
+    site's changes since the last sync (nomad.db.delta_hub), in one
+    transaction per site; a site that fails keeps what the hub had of it, and
+    is asked again next time. A site seen for the first time, or whose log
+    started over, is copied whole once; one whose changes can't be had (no
+    python3 there, or asking keeps failing) is copied whole until they can.
+    ``copy_all`` (--full): every site copied whole, in place."""
+    import os
+    import sqlite3
+    from nomad.db import delta_hub, delta_site
+    log = logging.getLogger("nomad.sync")
+    click.echo(click.style("  Every site copied whole, in place" if copy_all
+                           else "  Changes since the last sync", bold=True))
+    click.echo()
+    hub = delta_hub.hub_id(combined_path)
+    delta_hub.remove_old_spools(cache_dir)
+    results, pull_errors, total = {}, {}, 0
+    conn = delta_hub.connect(combined_path)
+    try:
+        delta_hub.ensure_bookkeeping(conn)
+        configured = {s.get('name', 'unknown') for s in sites}
+        for (gone,) in conn.execute(f"SELECT site FROM {delta_hub.STATE}").fetchall():
+            if gone in configured:
+                continue
+            told = ""
+            where = delta_hub.stored_site(conn, gone)
+            if where:
+                try:
+                    n = delta_hub.forget_at_site(where, hub)
+                    told = ("; its change log taken out there" if n
+                            else "; told it this hub no longer reads it")
+                except Exception as e:
+                    told = (f"; it could not be told ({e}): its own nomad takes its change log out "
+                            f"after {delta_site.EXPIRE_DAYS} days unread")
+            n = delta_hub.forget_site(conn, gone)
+            click.echo(click.style(f"  {gone}: no longer in [hub] sites; its {n:,} rows removed{told}",
+                                   fg="yellow"))
+        for site in sites:
+            name = site.get('name', 'unknown')
+            click.echo(f"  {name}: ", nl=False)
+            state = delta_hub.get_state(conn, name)
+            try:
+                got, why_copy = None, None
+                if copy_all:
+                    why_copy = None
+                elif state and state.get("mode") == "delta" and state.get("epoch"):
+                    try:
+                        with delta_hub.fetch_delta(site, state, hub=hub, spool_dir=cache_dir) as answer:
+                            got = delta_hub.apply_delta(conn, name, answer.records())
+                            size = answer.size
+                    except delta_hub.DeltaError as e:
+                        n = delta_hub.note_failure(conn, name)
+                        if not (e.cant_run or n >= FAILURES_BEFORE_COPY):
+                            raise
+                        why_copy = (f"its exporter can't run there: {e}" if e.cant_run else
+                                    f"asking for its changes failed {n} times in a row: {e}")
+                        got = None
+                    if got is not None and "need_copy" in got:
+                        why_copy, got = got["need_copy"], None
+                    elif got is not None:
+                        n = got["rows"] + got["deleted"]
+                        total += n
+                        note = f"; sent whole: {', '.join(got['reset'])}" if got["reset"] else ""
+                        click.echo(click.style(
+                            f"OK ({got['rows']:,} rows, {got['deleted']:,} removed, "
+                            f"{size / 1024:,.0f} KB{note})", fg="green"))
+                        results[name] = {"merged": 1, "records": n, "error": None, "source": "delta"}
+                if got is None:
+                    if why_copy:
+                        click.echo(click.style(f"copying it whole ({why_copy})... ", fg="yellow"), nl=False)
+                    got = _sync_copy_site(conn, site, cache_dir, hub=hub)
+                    total += got["records"]
+                    how = ((f"copied whole, by {got['via']}" if got.get("via") else "copied whole")
+                           + "; from now on only its changes" if got["epoch"] else
+                           f"copied whole, and again at each sync while {got['why_whole']}")
+                    click.echo(click.style(f"OK ({got['records']:,} records, {how})",
+                                           fg="green" if got["epoch"] else "yellow"))
+                    results[name] = {"merged": 1, "records": got["records"], "error": None,
+                                     "source": "copy"}
+                delta_hub.remember_site(conn, site)
+                # The copy the full rebuild kept as a fallback: not needed now.
+                old = cache_dir / f"{name}.db"
+                if old.exists():
+                    try:
+                        old.unlink()
+                    except OSError:
+                        pass
+            except Exception as e:
+                why = str(e) or type(e).__name__
+                pull_errors[name] = why
+                results[name] = {"merged": 0, "records": 0, "error": why[:200], "source": None}
+                click.echo(click.style(f"FAILED, the hub keeps what it had: {why}", fg="red"))
+
+        site_configs = _site_configs(sites, cache_dir, ctx)
+        now = datetime.now().isoformat()
+        conn.execute(
+            'CREATE TABLE IF NOT EXISTS sync_sites (name TEXT PRIMARY KEY, partitions TEXT, '
+            'filesystems TEXT, cluster_type TEXT, synced_at TEXT, merged INTEGER, records INTEGER, '
+            'error TEXT, source TEXT, last_success TEXT)')
+        prior = {r[0]: r[1:] for r in conn.execute(
+            'SELECT name, last_success, synced_at, partitions, filesystems, cluster_type '
+            'FROM sync_sites').fetchall()}
+        conn.execute("BEGIN IMMEDIATE")
+        for sname in sorted(set(results) | set(site_configs)):
+            res = results.get(sname, {})
+            meta = site_configs.get(sname)
+            last_ok, synced, *pm = prior.get(sname, (None, None, None, None, None))
+            merged = int(res.get("merged", 0))
+            conn.execute(
+                'INSERT OR REPLACE INTO sync_sites (name, partitions, filesystems, cluster_type, '
+                'synced_at, merged, records, error, source, last_success) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (sname, meta['partitions'] if meta else pm[0], meta['filesystems'] if meta else pm[1],
+                 meta['cluster_type'] if meta else pm[2],
+                 # when its data was last brought up to date: a site that
+                 # failed keeps its time (what the hub's own alert reads)
+                 now if merged else synced, merged, res.get("records", 0),
+                 res.get("error"), res.get("source") or "kept",
+                 now if merged else last_ok))
+        conn.execute("COMMIT")
+
+        for table, cols in SYNC_INDEXES:
+            name = "idx_{}_{}".format(table, cols.replace(", ", "_").replace(" ", ""))
+            try:
+                conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table}({cols})")
+            except sqlite3.Error:
+                pass            # table absent at every site
+        last = delta_hub.get_meta(conn, "analyzed_at")
+        try:
+            stale = last is None or datetime.now() - datetime.fromisoformat(last) > timedelta(days=1)
+        except ValueError:
+            stale = True
+        if stale:
+            try:
+                conn.execute("ANALYZE")
+                delta_hub.set_meta(conn, "analyzed_at", now)
+            except sqlite3.Error as e:
+                log.warning(f"ANALYZE skipped: {e}")
+        delta_hub.set_meta(conn, "synced_at", now)
+        # Folded in and cut back (a whole copy leaves it a site's size).
+        delta_hub.shrink_wal(conn)
+    finally:
+        conn.close()
+    ok = [s for s, r in results.items() if r["merged"]]
+    # Whatever caches on the file's time (the Console, nomad edu) sees it changed.
+    if ok:
+        try:
+            os.utime(combined_path)
+        except OSError:
+            pass
+
+    bad = [(s, r["error"]) for s, r in results.items() if not r["merged"]]
+    click.echo()
+    click.echo(click.style("  ══════════════════════════════════════", fg="cyan"))
+    if bad:
+        click.echo(click.style(f"  Done: {len(ok)} of {len(sites)} site(s) updated", fg="yellow", bold=True))
+        for s, err in bad:
+            click.echo(click.style(f"    {s}: not updated: {err}", fg="red"))
+    else:
+        click.echo(click.style(f"  Done: {len(ok)} site(s) updated", fg="green", bold=True))
+    click.echo()
+    size_mb = combined_path.stat().st_size / (1024 * 1024)
+    click.echo(f"  Combined DB: {combined_path} ({size_mb:.1f} MB)")
+    click.echo(f"  Rows applied: {total:,}")
+    click.echo()
+    blocked = None if ok else "no site could be synced"
+    try:
+        _sync_alerts(combined_path, dict(pull_errors), cache_dir,
+                     after=hub_cfg.get('alert_after_minutes'), blocked=blocked,
+                     config=ctx.obj.get('config') or None)
+    except Exception as e:                   # never let an alert stop a sync
+        log.warning(f"sync alert not sent: {e}")
+    if ok:
+        try:
+            from nomad.collection_health import collection_alerts
+            cfg = dict(ctx.obj.get('config') or {})
+            if cfg and hub_cfg.get('alert_after_minutes') is not None:
+                cfg['hub'] = {**(cfg.get('hub') or {}), 'alert_after_minutes': hub_cfg['alert_after_minutes']}
+            collection_alerts(combined_path, cache_dir, failing=dict(pull_errors), config=cfg or None)
+        except Exception as e:               # never let an alert stop a sync
+            log.warning(f"collection alert not sent: {e}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,

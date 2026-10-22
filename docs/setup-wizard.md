@@ -368,18 +368,95 @@ nomad dashboard --db ~/.local/share/nomad/combined.db
 
 How a site's database reaches the hub, and what happens when it doesn't:
 
+* **Only what changed (1.17).** Each site keeps a log of the rows its
+  collectors add, change and delete (triggers on its tables, in its own
+  database: the tables `_nomad_changes`, `_nomad_capture` and
+  `_nomad_capture_meta`, and triggers named `_nomad_*`). Each sync asks for
+  what is in the log past the point the hub has, and the hub applies it to
+  the combined database in place, one transaction per site; the log is then
+  dropped up to that point. A run writes megabytes. Until 1.16 every sync
+  copied every site's whole database and rebuilt the combined database: on a
+  four-site hub about 24 GB of writes a run, which wore out the hub's SSD,
+  and each site wrote a full snapshot of its database for every pull.
+* The site needs only `python3` (3.6 or later): the hub sends the exporter
+  (`nomad/db/delta_site.py`) with each request and runs it there with
+  `python3 -`, so nothing else is installed for it. A site where it can't
+  run (no python3, or one without its sqlite3 module) is copied whole at
+  every sync, as before, and so is one whose changes could not be had three
+  syncs in a row; each sync tries the log again first.
+* The exporter never keeps a collector waiting: it reads a batch per
+  statement and holds nothing open while the hub reads its answer, and it
+  drops the log a batch at a time; it reads the log a part at a time, so
+  it needs a few tens of MB however far behind the hub is. The hub spools
+  each answer to a file and
+  applies it a record at a time, so a table sent whole (after a migration)
+  takes no more memory than a few rows.
+* A site is copied whole once (a snapshot, as below, removed when applied):
+  the first time; when its log was put back (its database replaced); when
+  its database was restored from a backup (each answer carries a token the
+  hub sends back, which a restored database doesn't know); when the hub is
+  more than 3 million changes behind (silent for a day or more); or when the
+  log no longer reaches back to where the hub is. A hub whose combined
+  database moved, or that moved to another host, is a new hub to the sites:
+  each is copied whole once. A table recreated, renamed or
+  given new columns or unique keys by a migration is sent whole, once. A
+  migration that drops a column must first call
+  `nomad.db.delta_site.untrack(conn, table)` (the triggers name the
+  columns); the next sync puts the triggers back and sends the table whole.
+* `nomad sync --full` copies every site whole again, into the combined
+  database in place. The first sync after upgrading to 1.17 builds the
+  combined database whole once, in the form later syncs update, and copies
+  it into the published file with SQLite's backup (one write the Console
+  sees whole or not at all) instead of renaming a new file over it: a file
+  renamed over one in use, under its write-ahead log, comes out corrupted
+  once the hub writes in place. The site copies it was built from are not
+  kept.
+* Each hub has its own place in a site's log (by host and combined
+  database), so a trial `nomad sync -o /tmp/x.db` does not make the real hub
+  copy everything again; the log is kept back to the oldest place among the
+  hubs heard from in the last two days. Once more than 6 million changes
+  wait, the hubs more than 3 million behind stop holding the log back (each
+  copies the site if it comes back); the others are not affected.
+* A site whose sync fails keeps what the hub had of it (`sync_sites.source`
+  says `kept`, `synced_at` and `last_success` stay at the last good sync) and
+  is asked again next time, from where it was. A site taken out of
+  `[hub] sites` has its rows removed at the next sync, and is told: its log
+  and triggers are taken out there unless another hub reads it. If it can't
+  be told, its own `nomad collect` (1.17) takes out a log no hub has read
+  for a week.
+* After each sync the hub folds its write-ahead log into the combined
+  database and cuts it back (after a whole copy it would otherwise stay the
+  size of that site's data).
+* Going back to a nomad older than 1.17: run `nomad sync --remove-logs` on
+  the hub first (with 1.17). It takes the log and triggers out of every
+  site's database and empties the combined database's write-ahead log, which
+  the older nomad's rebuild needs (it renames its new file over the old
+  one); if something kept reading it, stop the Console before that first
+  older sync.
+
+The copies the full rebuild, and a site's first sync, are made of:
+
 * Each site writes a consistent snapshot of its database (SQLite's
-  `.backup`, safe while its collectors keep writing) **beside the database**,
-  or in `/tmp` when there is no room there, and the hub copies it. A login
+  `.backup`, safe while its collectors keep writing; with the `sqlite3`
+  command, or with its python3 3.7+ when it has no `sqlite3` command)
+  in `/tmp` when it has ample room, otherwise **beside the database**, and
+  the hub copies it. A site with neither is copied as its live file, which can
+  be torn without looking it: such a copy is not trusted to say where the
+  site's log stands: instead, when the log could be set up there, the
+  site's exporter sends every table whole, as of a place in its log, and
+  from then on only changes come. If that fails (it can take long on a big
+  database), the live file is copied after all, and the exporter is not
+  asked again for a day. A login
   node's `/tmp` is often a few GB shared by everyone, smaller than the
   database. When there is room in neither, the reason says so ("no room for
   a snapshot: the database is 6.0 GB; …").
 * The snapshot is always removed afterwards; any left by a run that died
   are removed after two hours. Time limits follow the database's size.
 * The copy replaces the hub's cached copy of that site only once it is
-  complete. When a site's pull fails, its cached copy stands in (marked as
-  such in `sync_sites`, its `last_success` left at the last live pull), so
-  one site's trouble doesn't hold back the others.
+  complete. In a full rebuild, when a site's pull fails, its cached copy
+  stands in (marked as such in `sync_sites`, its `last_success` left at the
+  last live pull), so one site's trouble doesn't hold back the others. Once
+  the hub syncs only changes it keeps no copies (`sync_cache` is emptied).
 * A site whose last live pull is older than `alert_after_minutes` (120 by
   default) raises a `sync` alert through the hub's `[alerts]` settings:
   a warning, critical after a day, with the reason, then reminders while it

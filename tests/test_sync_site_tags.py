@@ -60,7 +60,8 @@ def test_sync_tags_alerts_and_every_table_with_the_site(tmp_path, monkeypatch):
     assert rows == [("alpha", "alpha-head"), ("beta", "beta-head")]
     untagged = []
     for (table,) in c.execute("SELECT name FROM sqlite_master WHERE type='table' "
-                              "AND name NOT LIKE 'sqlite_%' AND name != 'sync_sites'"):
+                              "AND name NOT LIKE 'sqlite_%' AND name != 'sync_sites' "
+                              "AND name NOT LIKE '\\_nomad\\_%' ESCAPE '\\'"):
         cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
         if "source_site" not in cols:
             untagged.append(table)

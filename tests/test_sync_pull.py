@@ -330,9 +330,31 @@ def test_without_sqlite3_the_database_itself_is_copied(site, monkeypatch, tmp_pa
         if shutil.which(tool):
             (tools / tool).symlink_to(shutil.which(tool))
     monkeypatch.setenv("FAKE_REMOTE_PATH", str(tools))
-    assert P.pull("u", "site", "~/.local/share/nomad/site.db", site.copy)
+    how = []
+    assert P.pull("u", "site", "~/.local/share/nomad/site.db", site.copy, how=how)
     assert site.calls("scp") == [str(site.db)]
     assert _rows(site.copy) == 50
+    assert how == ["live"]                    # so the hub does not trust it to say where its log stands
+
+
+def test_without_sqlite3_its_python3_takes_the_snapshot(site, monkeypatch, tmp_path):
+    """A live file copied while a collector writes can be torn and still
+    pass quick_check (found in 1.17.0's review): a site with python3 takes a
+    snapshot with SQLite's backup instead."""
+    import shutil
+    tools = tmp_path / "remote-bin"
+    tools.mkdir()
+    for tool in ("bash", "sh", "dirname", "find", "id", "stat", "wc", "df", "awk", "rm",
+                 "cat", "timeout", "env"):
+        if shutil.which(tool):
+            (tools / tool).symlink_to(shutil.which(tool))
+    (tools / "python3").symlink_to(sys.executable)
+    monkeypatch.setenv("FAKE_REMOTE_PATH", str(tools))
+    how = []
+    assert P.pull("u", "site", "~/.local/share/nomad/site.db", site.copy, how=how)
+    assert how == [] and _rows(site.copy) == 50
+    assert site.calls("scp")[0].startswith(f"{site.tmp}/nomad_sync_")   # the snapshot, not the database
+    assert site.leftovers() == []
 
 
 def test_an_unreachable_site(site, monkeypatch):
@@ -367,6 +389,13 @@ def _hub_site(path, host):
                   " VALUES (?, ?, 'IDLE', 1)", (datetime.now().isoformat(), f"{host}-n01"))
 
 
+def _as_built_by_an_older_nomad(path):
+    """A combined database as a nomad older than 1.17 left it (rebuilt whole
+    at every sync)."""
+    with sqlite3.connect(path) as c:
+        c.execute("DELETE FROM _nomad_sync_meta WHERE key = 'format'")
+
+
 def test_a_failing_site_is_merged_from_its_cached_copy_and_said_so(tmp_path, monkeypatch):
     import shutil
     import nomad.cli as cli_mod
@@ -389,7 +418,7 @@ def test_a_failing_site_is_merged_from_its_cached_copy_and_said_so(tmp_path, mon
     monkeypatch.setattr(disp, "send_alert", lambda *a, **k: raised.append((a, k)) or {})
     out = tmp_path / "combined.db"
 
-    def live(user, host, remote_db, local_copy, ssh_key=None, why=None):
+    def live(user, host, remote_db, local_copy, ssh_key=None, why=None, how=None):
         shutil.copyfile(good[host.split("-")[0]], local_copy)
         return True
     monkeypatch.setattr(cli_mod, "_pull_via_backup", live)
@@ -398,12 +427,17 @@ def test_a_failing_site_is_merged_from_its_cached_copy_and_said_so(tmp_path, mon
     first = dict(sqlite3.connect(out).execute("SELECT name, last_success FROM sync_sites"))
     assert raised == []
 
-    def beta_full(user, host, remote_db, local_copy, ssh_key=None, why=None):
+    def beta_full(user, host, remote_db, local_copy, ssh_key=None, why=None, how=None):
         if host.startswith("beta"):
             why.append("snapshot failed: Error: database or disk is full")
             return False
         return live(user, host, remote_db, local_copy)
     monkeypatch.setattr(cli_mod, "_pull_via_backup", beta_full)
+    # The full rebuild (the first sync after an upgrade) is what falls back
+    # on cached copies -- the ones an older nomad kept; later syncs keep what
+    # the hub had, and keep no copies.
+    _as_built_by_an_older_nomad(out)
+    shutil.copyfile(good["beta"], home / ".local/share/nomad/sync_cache/beta.db")
     r = CliRunner().invoke(cli_mod.cli, ["sync", "-c", str(cfg), "-o", str(out)])
     assert r.exit_code == 0, r.output
     assert "beta: from its cached copy (live pull failed: snapshot failed: Error: database or disk is full)" in r.output
@@ -521,22 +555,25 @@ def test_a_site_with_no_cached_copy_is_reported_and_the_old_build_kept(tmp_path,
     monkeypatch.setattr(cli_mod, "_sync_alerts",
                         lambda *a, **k: seen.append((a, k)) or [])
 
-    def live(user, host, remote_db, local_copy, ssh_key=None, why=None):
+    def live(user, host, remote_db, local_copy, ssh_key=None, why=None, how=None):
         shutil.copyfile(good[host.split("-")[0]], local_copy)
         return True
     monkeypatch.setattr(cli_mod, "_pull_via_backup", live)
     out = tmp_path / "combined.db"
     assert CliRunner().invoke(cli_mod.cli, ["sync", "-c", str(cfg), "-o", str(out)]).exit_code == 0
+    _as_built_by_an_older_nomad(out)
     before = out.stat().st_mtime_ns
-    (cache / "beta.db").unlink()                       # no cached copy to stand in
+    (cache / "beta.db").unlink(missing_ok=True)        # no cached copy to stand in
 
-    def beta_down(user, host, remote_db, local_copy, ssh_key=None, why=None):
+    def beta_down(user, host, remote_db, local_copy, ssh_key=None, why=None, how=None):
         if host.startswith("beta"):
             why.append("ssh failed: Connection timed out")
             return False
         return live(user, host, remote_db, local_copy)
     monkeypatch.setattr(cli_mod, "_pull_via_backup", beta_down)
     seen.clear()
+    # The completeness guard is the full rebuild's (the first sync after an
+    # upgrade): it does not publish a build that left a site out.
     r = CliRunner().invoke(cli_mod.cli, ["sync", "-c", str(cfg), "-o", str(out)])
     assert r.exit_code == 0, r.output
     assert "beta: pull failed, no cached copy: ssh failed: Connection timed out" in r.output

@@ -535,12 +535,10 @@ def test_an_interactive_server_gets_its_own_rules():
 
 
 def test_the_hub_keeps_working_state_out_of_the_combined_database():
-    import inspect
-
-    import nomad.cli as cli
-    src = inspect.getsource(cli.sync.callback)
+    # The full rebuild and the incremental sync both skip these (1.17: one list).
+    from nomad.db.delta_hub import SKIP_TABLES
     for table in ("per_user_state", "interactive_state", "oom_state"):
-        assert f"'{table}'" in src
+        assert table in SKIP_TABLES
 
 
 def test_oom_is_a_collector_nomad_plans():

@@ -23,8 +23,11 @@ it. What this module adds to that, each from something that went wrong:
   minutes, which a growing database outgrows.
 * **A failed snapshot is never followed by copying the live database**,
   whatever the failure (a file copied while it is written looks complete and
-  is malformed). Only a site without sqlite3 at all is copied directly, as
-  before.
+  is malformed). A site without the sqlite3 command takes the snapshot with
+  its python3 (SQLite's backup, Python 3.7 or later); only a site with
+  neither is copied directly, as before, and the caller is told so (such a
+  copy can be torn without looking it: it is not trusted to say where the
+  site's change log stands).
 * **The reason given is the error**, not the site's login banner: a banner
   comes first in what ssh prints, the error last.
 * **A site on the hub itself** (``host = "localhost"``) is read directly,
@@ -70,6 +73,13 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 def is_local(host) -> bool:
     return str(host or "").strip().lower() in LOCAL_HOSTS
+
+
+# The site's own python3, as nomad's exporter runs it (not a module path
+# meant for another Python).
+PY = "env -u PYTHONHOME -u PYTHONPATH python3"
+_PY_BACKUP = ("import sqlite3,sys; s=sqlite3.connect(sys.argv[1], timeout=20); "
+              "d=sqlite3.connect(sys.argv[2]); s.backup(d, pages=100); d.close(); s.close()")
 
 
 def checkpoint_command(remote_db: str) -> str:
@@ -177,6 +187,8 @@ def probe_command(remote_db: str) -> str:
         f"-name '.{PREFIX}*.db*' -mmin +{STALE_MINUTES} -delete 2>/dev/null; fi; "
         f"echo {BEGIN}; "
         f"if command -v sqlite3 >/dev/null 2>&1; then echo SQLITE=1; else echo SQLITE=0; fi; "
+        f"if {PY} -c 'import sqlite3; getattr(sqlite3.Connection, \"backup\")' >/dev/null 2>&1; "
+        f"then echo PYBACKUP=1; else echo PYBACKUP=0; fi; "
         f"if [ -f \"$db\" ]; then echo SIZE=$(stat -L -c %s -- \"$db\" 2>/dev/null "
         f"|| wc -c < \"$db\"); fi; "
         f"echo DIR=\"$r\"; "
@@ -187,13 +199,17 @@ def probe_command(remote_db: str) -> str:
     )
 
 
-def snapshot_command(remote_db: str, snap: str, seconds: int) -> str:
+def snapshot_command(remote_db: str, snap: str, seconds: int, python: bool = False) -> str:
     """Write the snapshot (private from the start: other users share /tmp),
-    stopped on the site too if it overruns, and say how big it is."""
+    stopped on the site too if it overruns, and say how big it is: with the
+    sqlite3 command, or (``python``) with the site's python3."""
     q = shlex.quote(snap)
-    # .timeout: wait out a collector's write instead of failing at once.
-    backup = (f"sqlite3 -cmd '.timeout 20000' {remote_word(remote_db)} "
-              f"{shlex.quote('.backup ' + snap)}")
+    if python:
+        backup = f"{PY} -c {shlex.quote(_PY_BACKUP)} {remote_word(remote_db)} {q}"
+    else:
+        # .timeout: wait out a collector's write instead of failing at once.
+        backup = (f"sqlite3 -cmd '.timeout 20000' {remote_word(remote_db)} "
+                  f"{shlex.quote('.backup ' + snap)}")
     return (
         f"umask 077; if command -v timeout >/dev/null 2>&1; "
         f"then timeout {max(seconds - 10, 10)} {backup}; else {backup}; fi "
@@ -206,10 +222,14 @@ _NO_ROOM = ("full", "quota", "no space", "i/o error")
 
 
 def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None = None,
-         why: list | None = None, tag: str | None = None) -> bool:
+         why: list | None = None, tag: str | None = None, how: list | None = None,
+         refuse_live: bool = False) -> bool:
     """Copy ``host``'s database to ``local_copy``. True when ``local_copy`` is
     a complete new copy; False otherwise, with ``local_copy`` untouched (the
-    hub's last good copy) and the reason appended to ``why``."""
+    hub's last good copy) and the reason appended to ``why``. ``how`` gets
+    "live" when the live file was copied (no snapshot could be taken); with
+    ``refuse_live`` it is not, and ``how`` gets "no snapshot" instead (the
+    caller has another way)."""
     local_copy = Path(local_copy)
     if is_local(host):
         return copy_local(remote_db, local_copy, why)
@@ -257,9 +277,17 @@ def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None =
     if size is None:
         return fail(f"no database at {remote_db}")
 
-    if facts.get("SQLITE") != "1":
+    python = facts.get("SQLITE") != "1" and facts.get("PYBACKUP") == "1"
+    if facts.get("SQLITE") != "1" and not python:
         # No sqlite3 there: the database itself is all there is to copy (as
         # before), checked whole before it replaces the cached copy.
+        if refuse_live:
+            if how is not None:
+                how.append("no snapshot")
+            return fail("no snapshot can be taken there (no sqlite3 command, and no python3 "
+                        "3.7 or later)")
+        if how is not None:
+            how.append("live")
         logger.info(f"sqlite3 not available on {host}, copying the database directly")
         try:
             done = ssh(checkpoint_command(remote_db), timeout=60)
@@ -289,7 +317,8 @@ def pull(user: str, host: str, remote_db: str, local_copy, ssh_key: str | None =
             result, err = None, ""
             for attempt in range(3):
                 try:
-                    result = ssh(snapshot_command(remote_db, snap, seconds), timeout=seconds)
+                    result = ssh(snapshot_command(remote_db, snap, seconds, python=python),
+                                 timeout=seconds)
                 except sp.TimeoutExpired:
                     return fail(f"snapshot not finished within {seconds} s")
                 if result.returncode == 0:
