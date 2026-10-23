@@ -25,6 +25,8 @@ SITE, HUB = "site", "hub"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _LAB = re.compile(r"[A-Za-z0-9][A-Za-z0-9._$-]{0,63}")      # research groups end in $
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_PATH = re.compile(r"/[A-Za-z0-9._/+@,:=-]{0,1023}")        # as `nomad storage cron` takes them
+_SIZE = re.compile(r"[0-9]{1,15}(?:\.[0-9]{1,6})?(?:[KMGTPkmgtp](?:i?[Bb])?|[Bb])?")
 
 
 class ActionError(ValueError):
@@ -34,7 +36,7 @@ class ActionError(ValueError):
 @dataclass(frozen=True)
 class Param:
     name: str
-    kind: str                         # int, choice, date, name, lab, site
+    kind: str                         # int, choice, date, name, lab, site, path, size
     help: str
     flag: str | None = None           # "--days"; None: a positional argument
     required: bool = False
@@ -110,6 +112,20 @@ ACTIONS: tuple[Action, ...] = (
     Action("lab.show", "Labs", "What nomad.toml says about labs, or about one lab.",
            frozenset({HUB}), ("lab", "show"),
            (Param("lab", "lab", "A lab: its PI's NetID, group or name"),), names=True),
+    Action("storage.use", "Storage use",
+           "Who holds each storage server's space: now, the change over the days, what is old, quotas, "
+           "and from the scans each top folder's owner with when it was measured.",
+           frozenset({SITE, HUB}), ("storage", "use"),
+           (Param("server", "name", "Only this storage server", flag="--server"),
+            Param("path", "path", "Only this path, as /home", flag="--path"),
+            Param("over", "size", "Only owners holding more than this: 500G, 1T, 2TB", flag="--over"),
+            Param("top", "int", "Owners shown per path", flag="--top", min=1, max=1000),
+            Param("days", "int", "The change over this many days", flag="--days", default=30, min=1, max=3650)),
+           hub_db=True, names=True),
+    Action("sync.status", "Sync status",
+           "How each site's last syncs to the hub went: when its data was last brought up to date, how, "
+           "how many rows, and why the last one failed.",
+           frozenset({HUB}), ("sync", "status"), hub_db=True, timeout=60),
     Action("usage.report", "Usage report",
            "The administrators' period report for one site, as Markdown and JSON.",
            frozenset({HUB}), ("usage-report", "--format", "both"),
@@ -168,6 +184,19 @@ def _check_one(p: Param, v: Any, sites: list[str] | None) -> Any:
     if p.kind == "lab":
         if not _LAB.fullmatch(v):
             raise ActionError(f"{p.name} may hold letters, digits, '.', '_', '-' and '$' only")
+        return v
+    if p.kind == "path":
+        if not _PATH.fullmatch(v) or "/../" in v + "/" or "//" in v:
+            raise ActionError(f"{p.name} must be an absolute path of letters, digits and . _ / + @ , : = - only")
+        return v.rstrip("/") or "/"
+    if p.kind == "size":
+        from nomad.storage import parse_size
+        if not _SIZE.fullmatch(v):
+            raise ActionError(f"{p.name} must be a size such as 500G, 1T or 2TB")
+        try:
+            parse_size(v)
+        except (ValueError, ArithmeticError):
+            raise ActionError(f"{p.name} must be a size such as 500G, 1T or 2TB") from None
         return v
     if p.kind == "site":
         if not _NAME.fullmatch(v):

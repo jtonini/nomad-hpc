@@ -662,7 +662,9 @@ def test_old_readings_are_thinned_to_one_whole_reading_a_day(tmp_path):
     rows = {r["name"]: r for r in views.owners(conn, "fs1", "/home")}
     assert rows["alice"]["change_bytes"] == 0                 # all three datasets kept
     assert rows["alice"]["was_bytes"] == 3 * 10**12
-    assert rows["bob"]["change_bytes"] is None                # wasn't there then
+    # Not there then (1.17.1): new since, all of bob's use is the change.
+    assert rows["bob"]["new"] and rows["bob"]["was_bytes"] is None and rows["bob"]["change_bytes"] == 5
+    assert not rows["alice"]["new"]
 
 
 def test_the_migration_and_the_plan_know_it(tmp_path):
@@ -1006,11 +1008,17 @@ def test_owners_the_server_could_only_number_are_named_here_when_known(tmp_path)
             "#0          2048      0      0     00 [--------]\n"
             "#4242999    1024      0      0     00 [--------]\n#finished\t1700000001\n")
     rep = storage.parse(text)
-    for same, expected in ((False, {"0", "4242999"}), (True, {_pwd.getpwuid(0).pw_name, "4242999"})):
-        db = tmp_path / f"site-{same}.db"
+    # 1.17.1: only numbers at or above account_floor (1000) are named; below
+    # it, each machine's own system accounts.
+    for same, floor, expected in ((False, 0, {"0", "4242999"}), (True, 0, {_pwd.getpwuid(0).pw_name, "4242999"}),
+                                  (True, None, {"0", "4242999"})):
+        db = tmp_path / f"site-{same}-{floor}.db"
         c = su.StorageUseCollector({"sources": []}, db)
-        c.store([{"type": "storage_report", "server": "fs1", "read_at": "2026-10-21T16:00:00", "report": rep,
-                  "same_accounts": same}])
+        rec = {"type": "storage_report", "server": "fs1", "read_at": "2026-10-21T16:00:00", "report": rep,
+               "same_accounts": same}
+        if floor is not None:
+            rec["account_floor"] = floor
+        c.store([rec])
         conn = sqlite3.connect(db)
         assert {n for (n,) in conn.execute("SELECT name FROM storage_owners")} == expected
         out = CliRunner().invoke(cli_main(), ["storage", "use", "--db", str(db)]).output

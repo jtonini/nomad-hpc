@@ -21,7 +21,10 @@ Two kinds of file:
   (``/home/USER``), the folders inside it: size, files, the newest change,
   and how much is older than two ages (180 and 365 days by default). Each
   run scans for at most its time budget, the folders scanned longest ago
-  first, so a large filesystem is covered over a few nights.
+  first, so a large filesystem is covered over a few nights. With -O it
+  measures each top folder as its owner (``sudo -n -u OWNER find``), for an
+  account that may act as the others but not as root: each folder weekly,
+  nightly when it is large or changed.
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ from dataclasses import dataclass, field
 from importlib import resources
 
 SCRIPT = "nomad-storage.sh"
+FIND_WRAPPER = "nomad-storage-find.sh"
 VERSION = 1
 
 
@@ -66,8 +70,9 @@ def format_size(b, binary: bool = False) -> str:
     return f"{b:.1f} {units[-1]}"
 
 
-def script_text() -> str:
-    return resources.files("nomad.storage").joinpath(SCRIPT).read_text(encoding="utf-8")
+def script_text(name: str | None = None) -> str:
+    """nomad-storage.sh, or another of the scripts next to it."""
+    return resources.files("nomad.storage").joinpath(name or SCRIPT).read_text(encoding="utf-8")
 
 
 class ReportError(ValueError):
@@ -133,11 +138,25 @@ class Top:
     rc: int | None = None
     denied: int = 0              # folders or files it couldn't read
     folders: list[Folder] = field(default_factory=list)
+    # Measured as its owner (-O): what it couldn't read, its owner made so,
+    # and a figure short of it is no whole one.
+    as_owner: bool = False
 
     @property
     def complete(self) -> bool:
         # find's 1: files that vanished or couldn't be read, the rest counted.
-        return self.rc in (0, 1)
+        return self.why_short is None
+
+    @property
+    def why_short(self) -> str | None:
+        """Why the figure is short of the folder, or None: "time" (the scan
+        stopped at its budget, or find failed), "unreadable" (measured as its
+        owner, who can't read all of it)."""
+        if self.rc not in (0, 1):
+            return "time"
+        if self.as_owner and self.denied:
+            return "unreadable"
+        return None
 
 
 @dataclass
@@ -159,6 +178,16 @@ class Report:
     present: dict[str, list[str]] = field(default_factory=dict)  # path -> its top folders now
     unreadable: list[str] = field(default_factory=list)          # paths the scan couldn't list
     odd_names: int = 0           # top folders left out for a tab, line break or backslash
+    # Top folders left out for being another of the run's paths (path, name,
+    # that path; name "" for a path given twice).
+    nested: list[tuple[str, str, str]] = field(default_factory=list)
+    # Top folders that hold another of the run's paths deeper down, whose
+    # files are counted in both (path, name, that path).
+    contains: list[tuple[str, str, str]] = field(default_factory=list)
+    scan_as: str | None = None   # "owner": each top folder measured as its owner (-O)
+    carried: int = 0             # -O: top folders not due tonight, their last measurement standing
+    # -O: top folders whose owner it couldn't act as (path, name, uid, why).
+    not_measured: list[tuple[str, str, int | None, str]] = field(default_factory=list)
 
 
 def _int(v) -> int | None:
@@ -172,6 +201,15 @@ def _int(v) -> int | None:
 # Figures past these are not a real filesystem's: a made-up line.
 MAX_BYTES = 1 << 60              # an exbibyte
 MAX_EPOCH = 32503680000          # the year 3000
+
+
+MAX_ID = (1 << 32) - 1           # a uid or gid
+
+
+def _id(v) -> int | None:
+    """An account number, else None (a made-up line's can't be stored)."""
+    n = _int(v)
+    return n if n is not None and 0 <= n <= MAX_ID else None
 
 
 def _size(v) -> int | None:
@@ -268,7 +306,8 @@ def parse(text: str) -> Report:
                 if a is not None and b is not None:
                     rep.ages = (a, b)
             elif key == "#top" and len(f) >= 5:
-                top = Top(path=f[1], name=f[2], owner_uid=_int(f[3]), scanned_at=_int(f[4]) or 0)
+                top = Top(path=f[1], name=f[2], owner_uid=_id(f[3]), scanned_at=_int(f[4]) or 0,
+                          as_owner=rep.scan_as == "owner")
                 rep.tops.append(top)
             elif key == "#rc" and top is not None:
                 top.rc = _int(f[1]) if len(f) > 1 else None
@@ -277,6 +316,16 @@ def parse(text: str) -> Report:
                 top = None
             elif key == "#not-scanned":
                 rep.not_scanned = _int(f[1]) or 0
+            elif key == "#nested" and len(f) >= 4:
+                rep.nested.append((f[1], f[2], f[3]))
+            elif key == "#contains" and len(f) >= 4:
+                rep.contains.append((f[1], f[2], f[3]))
+            elif key == "#scan-as" and len(f) > 1:
+                rep.scan_as = f[1] or None
+            elif key == "#carried":
+                rep.carried = (_int(f[1]) or 0) if len(f) > 1 else 0
+            elif key == "#not-measured" and len(f) >= 4:
+                rep.not_measured.append((f[1], f[2], _id(f[3]), f[4] if len(f) > 4 else ""))
             if key != "#present":
                 present = None
             continue
@@ -316,7 +365,7 @@ def parse(text: str) -> Report:
             size, files, newest, old1, old2 = nums
             if newest > MAX_EPOCH:
                 newest = 0                       # a file dated centuries ahead: no date
-            top.folders.append(Folder(name=f[1], owner_uid=_int(f[2]), bytes=size, files=files,
+            top.folders.append(Folder(name=f[1], owner_uid=_id(f[2]), bytes=size, files=files,
                                       newest=newest or None, older1_bytes=old1, older2_bytes=old2))
     if rep.finished is None:
         raise ReportError("cut short: no #finished line (the run died, or is still writing)")

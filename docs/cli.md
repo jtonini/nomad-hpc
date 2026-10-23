@@ -13,6 +13,8 @@
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |
 | `nomad config check` | Does nomad.toml read? If not, the line and what is wrong ([Configuration](config.md)) |
+| `nomad sync` | On the hub: bring the combined database up to date from every site ([Setup](setup-wizard.md)) |
+| `nomad sync status` | On the hub: how each site's last syncs went (reads only) |
 
 ## Educational Analytics
 
@@ -103,8 +105,11 @@ See [Usage report](usage-report.md).
 nomad storage script > nomad-storage.sh
 nomad storage cron /home /scratch --group GROUP --server fs1
 
+# Measuring each top folder as its owner (sudo -n -u OWNER find), where sudo allows that
+nomad storage cron /home --run-as owners --user NAME --dir /home/NAME/nomad-storage [--large GB]
+
 # Who holds each path's space, the change over 30 days, what is old
-nomad storage use [--server fs1] [--groups|--projects] [--days N] [--top N] [--mask]
+nomad storage use [--server fs1] [--path /home] [--groups|--projects] [--days N] [--top N] [--mask]
 
 # Who holds more than a size, as lines to paste (1T: 1 TiB; 1TB: 10^12 bytes)
 nomad storage use --over 1T --list [--binary]

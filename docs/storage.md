@@ -50,7 +50,15 @@ is (BSD find and stat); it needs nothing else installed. It writes:
   over a few nights, and a folder too big for one night can't hold up the
   others (`nomad storage use` says how many never finish; give the scan more
   time with `-s`). A file with several hard links counts once in its top
-  folder.
+  folder. A folder at the top of a path that is itself another of the paths
+  given to the same run (`/mnt/pool/home` when the run has `/mnt/pool` and
+  `/mnt/pool/home`, or a symbolic link to it) is left to that path, so its
+  files are counted once, and a path given twice is scanned once; `nomad
+  storage status` lists both. A top folder that holds another of the paths
+  deeper down (`/mnt/pool/labs` when the run also has
+  `/mnt/pool/labs/shared`) is still counted whole, so that path's files are
+  counted in both: `nomad storage status` says so, and the fix is to leave
+  one of the two out of the run.
 
 Sizes are the space files take on disk (as `du` says, after ZFS
 compression), in both files. Snapshots aren't counted.
@@ -94,6 +102,7 @@ files go; `--run-as` who runs it.
 | `root` (default) | root's crontab; on TrueNAS, Cron Jobs with *Run As User* `root` | a server where you are root |
 | `sudo --user NAME` | NAME's crontab runs it with `sudo -n`; the sudoers lines it prints allow exactly those two command lines and nothing else | a server where you work through sudo |
 | `sudo-readers --user NAME --dir D` | NAME's crontab runs it as NAME (`-S`), and it asks `sudo -n` only for `xfs_quota` and `zfs` (usage) and GNU `du` (the scan) | a Linux server where sudo already lets NAME run those, and nothing else as root |
+| `owners --user NAME --dir D` | NAME's crontab runs it as NAME, and the scan measures each top folder as its owner (`-O`: `sudo -n -u OWNER find`) | a Linux server where sudo lets NAME act as the other accounts but not as root (see [Measuring as each owner](#measuring-as-each-owner)) |
 | `user --user NAME` | systemd runs it as NAME with only the right to read every file and folder (`CAP_DAC_READ_SEARCH`), writing only to its folder | a Linux server where nothing should run as root |
 
 In every case the script is owned by root and writable only by root
@@ -119,6 +128,93 @@ owns), and the scan as the account; give the source `usage_dir` for the
 usage folder. On ZFS, `zfs allow -u NAME
 userused,groupused,userquota,groupquota DATASET` lets the account read the
 counts. Every file says which account wrote it (`nomad storage status`).
+
+### Measuring as each owner
+
+Some servers give an account the right to act as the other accounts through
+sudo (to install software for them, say), but not as root. There, `-O` (`nomad
+storage cron --run-as owners`) measures each top folder as the account that
+owns it, which may read all of it even when no one else may.
+
+- **What it runs:** for each owner, one `sudo -n -u '#UID' find` (by number,
+  so it is exactly the folder's owner), for all of that owner's top folders
+  on every path, from `/`, read only, at the lowest priority (`nice 19`,
+  `ionice` idle) and within the scan's budget. It prints each folder's depth,
+  owner and path and each file's size, time, links and inode, nothing else.
+  Paths are passed as arguments, never through a shell, and an owner is acted
+  as only when the system gives it a name made of letters, digits and `. _ -`.
+  A folder of the account running the script is read without sudo.
+- **The sudo rule it relies on:** either one sudo already has, letting the
+  account run commands as people's accounts (`sudo -l` as the account shows a
+  rule such as `(%GROUP) ALL`), or, where there is none, a rule for
+  `nomad-storage-find` alone. Never give it `find` itself: find can run any
+  program (`-exec`), delete and write files, so a rule for find is a rule for
+  anything, as any account it names, slurm's and munge's included.
+  `nomad-storage-find` is a few lines of `sh` that take absolute folder paths
+  and run find over them with the fixed, printing-only expression above. As
+  root (sudo 1.8.28 or later):
+
+  ```
+  nomad storage script --find > nomad-storage-find
+  install -o root -g root -m 755 nomad-storage-find /usr/local/sbin/nomad-storage-find
+  visudo -f /etc/sudoers.d/nomad-storage
+      NAME ALL=(ALL,!root) NOPASSWD: /usr/local/sbin/nomad-storage-find
+  ```
+
+  and give the script `-F /usr/local/sbin/nomad-storage-find` (`nomad storage
+  cron --run-as owners --find-wrapper /usr/local/sbin/nomad-storage-find`).
+  It refuses a wrapper that isn't nomad-storage-find, or that anyone but
+  root could change or swap: give its real path, with no link in it (sudoers
+  names that path), and the file and every folder from `/` down to it must
+  be root's and writable by root only.
+  `(%GROUP)` in place of `(ALL,!root)` narrows it to one group's accounts.
+  Where sudoers has `Defaults requiretty` (older RHEL), add
+  `Defaults:NAME !requiretty`: cron has no terminal, and sudo would refuse
+  every owner.
+- **How often:** each top folder weekly, on a night of its own (spread over
+  the seven by its path), and nightly when it is large (10 GB or more, `-L GB`,
+  `--large`) or changed since it was last measured (a plain `stat` of it: an
+  entry made, removed or renamed directly in it, or a new owner or mode; not
+  its ctime, which backups that keep access times change every night). A folder whose last
+  measurement didn't finish is measured again the next night, and one missed
+  for more than a week is caught up. The others keep their last measurement,
+  shown with when it was taken (`measured` in `nomad storage use`). Each
+  night's file holds only that night's measurements, so the collector must
+  read it before the next night's run (it reads every few minutes): a night
+  it misses leaves those folders at their earlier figures until they are
+  measured again.
+- **What isn't measured:** top folders of root and of system accounts
+  (numbered below 1000, `-U UID`, `--min-uid`), for which sudo isn't even
+  asked; of owners sudo refuses (an account the rule leaves out), asked again
+  only after a week, or sooner if the folder changes hands, since sudo logs
+  every refusal; and of owners with no name. Their last figures stand, if
+  there are any, and `nomad storage status` says how many owners and top
+  folders weren't measured, and why. A folder inside
+  a top folder that belongs to someone else is read only as far as the owner
+  of the top folder may read it (`couldn't read`, counted from find's own
+  output, in any locale). Such a measurement is short of what is there:
+  `nomad storage status` and `nomad storage use` flag it. It is still at
+  least what is there, so it stands when it is larger than the folder's last
+  whole measurement (the folder grew); when it is smaller (an owner may make
+  a folder unreadable to hide it), the last whole one stands, for four weeks
+  at most (a lab folder holding a member's private folder is never read
+  whole, and a real cleanup has to show), and never once the top folder has
+  a new owner (the old owner's figure says nothing of the new one's). A
+  folder with no earlier figure (new, or renamed: where people make their
+  own top folders, as on a shared scratch) has nothing to hold, so its first
+  short figure stands, flagged. When the
+  scan's time runs out, the folders the owner's find had finished count as
+  measured, the one it was in is short, and the rest wait for the next
+  night.
+- **Each owner's total** comes from the scan, as on a filesystem without
+  per-owner accounting (`usage`, run as an ordinary account, reads only `df`).
+  The collector reads the files on the server itself (a source without
+  `host`) or over ssh, as for the other ways of running it.
+
+It needs GNU find (Linux), and can't be combined with `-S`. The alternative is
+one line in sudoers that lets the account run the script itself as root
+(`--run-as sudo`): root owns the script, and the account can't change it.
+That reads everything, every night, within the budget, in one pass.
 
 ### On a Linux file server
 
@@ -176,7 +272,9 @@ dir = "/var/lib/nomad-storage"
 # usage_dir = "..."           # usage.txt's own folder, when it isn't dir
 # scan_dir = "..."            # (usage run as root, the scan as another account)
 # copy_of = "fs0"             # it holds copies of fs0's files (see below)
+# copies = {"/backup/home" = "fs0:/home"}   # or only some of its paths do
 # same_accounts = true        # it and this machine share their accounts (see Names)
+# account_floor = 1000        # ... from this number up (see Names); also above, for all
 ```
 
 The account needs a key for `ssh` with no password prompt (`BatchMode`), as
@@ -201,6 +299,17 @@ the homes, a transition copy kept until it is checked) is listed with
 old, which helps when deciding what to keep — and marked as copies, never
 added to anyone's totals.
 
+When only some of its paths hold copies (a backup of the homes beside a
+scratch area of its own), name them with `copies`, each with the server and
+path it copies (or just the server, when the path is the same there):
+
+```toml
+copies = {"/backup/home" = "fs0:/home"}
+```
+
+Those paths are shown as copies of `fs0:/home` and left out of totals; the
+server's other paths count as usual.
+
 ## What it shows
 
 ```bash
@@ -211,6 +320,7 @@ nomad storage use --over 500GB --list   # tab-separated lines to paste: folders,
 nomad storage use --binary         # sizes in KiB, MiB, GiB, TiB, as du -h and xfs_quota -h show them
 nomad storage use --groups         # by group instead (--projects: XFS projects)
 nomad storage use --server fs1 --top 30
+nomad storage use --path /home     # one path, on every server that has it
 nomad storage use --mask           # stand-ins for names and long paths, for sharing the output
 nomad storage status               # what was read from each server, by whom, and when
 ```
@@ -230,7 +340,8 @@ scans behind the folders' figures. `last job` is
 the latest job anyone with that username submitted on a cluster nomad
 collects, so `none` can also mean someone who only uses the storage. A path
 without per-owner counts lists its owners by what the scans found in their
-top folders instead. ZFS datasets with a quota are listed under their path;
+top folders instead, each with when it was measured (the oldest scan behind
+its figures). ZFS datasets with a quota are listed under their path;
 an owner with space in several datasets shows `several` for quota.
 
 ### Sizes
@@ -250,14 +361,26 @@ copies or the counts cover more than the path.
 
 The usage file names owners as the storage server knows them, and a number
 for an account it can't name, shown as `uid N` (`gid N`, `project N`): often
-an account since deleted. When the server and the collecting machine share
-their accounts (one directory), `same_accounts = true` on the source names
-those numbers as the collecting machine knows them; a NAS with accounts of
-its own should leave it out, or another person's name would be put on them. The scan records
-each folder's owner as a number, named by the machine that collects it. When
-the server and that machine share the same directory (LDAP, AD), the names
-agree; a NAS with accounts of its own may number them differently, and its
-scan's owners are then best read by folder name.
+an account since deleted. The scan records each folder's owner as a number.
+Which numbers the collecting machine names, as it knows them:
+
+- **The files of the machine itself** (a source without `host`, written by
+  this machine): all of them. A source without `host` whose files another
+  machine wrote (a folder shared over NFS, say: the file names the machine
+  that ran the script) is named as a server sharing its accounts, below.
+- **A server sharing its accounts** (one directory, LDAP or AD:
+  `same_accounts = true` on the source): those from `account_floor` up (1000
+  by default, where most Linux systems start their people's accounts; set it
+  for every source under `[collectors.storage_use]`, or on one). Below it are
+  each machine's own system accounts, which may be other accounts on the
+  server than here, so they stay numbers.
+- **Any other server** (a NAS with accounts of its own): none, or another
+  person's name could be put on them. Its owners are shown as `uid N`, and are
+  best read by folder name; `nomad storage status` says so, for a server that
+  in fact shares this machine's accounts and only lacks `same_accounts =
+  true`. (Before 1.17.1 a scan's owners were named whatever the server, so
+  after the upgrade such a server's scan owners turn to numbers until it is
+  set.)
 
 Folder names one level inside each top folder are stored (`/home/USER/FOLDER`),
 never anything deeper, and stay where nomad's other data does. A top folder
@@ -279,14 +402,16 @@ by the scan.
 
 | Table | Holds |
 |---|---|
-| `storage_reports` | each file read: server, usage or scan, when its run started and finished, who ran it, `copy_of` |
+| `storage_reports` | each file read: server, usage or scan, when its run started and finished, who ran it, `copy_of`, `copies` (per path), how numbered owners were named (`naming`: local, same or none); for a scan, the folders left out as other paths (`nested`), those holding another path (`contains`), how many were measured short (`short_tops`), and with `-O` (`scan_as` owner) those kept from earlier nights (`carried`) and those not measured |
 | `storage_paths` | each path's filesystem, size and use, what the counts cover, at each reading |
 | `storage_owners` | each owner's space on each path (and ZFS dataset), quotas, at each reading |
 | `storage_datasets` | ZFS filesystems under each path: use, quota, refquota |
-| `storage_tops` | each scan of a top folder: owner, size, files, older than the two ages, whether it finished, what it couldn't read |
+| `storage_tops` | each scan of a top folder: owner, size, files, older than the two ages, whether it finished (and if not, why: `why_short`, time or unreadable), what it couldn't read, when |
 | `storage_folders` | the latest scan of each top folder's folders |
 | `storage_reads` | each read, and what it found (working state, not copied to the hub) |
 
 Every reading is kept for `keep_days` (30); after that, one whole reading a
-day. A scan stopped at its budget doesn't replace a finished one of the same
-folder.
+day, and one scan of each top folder a week (the week's latest finished one,
+else its latest). A short scan (stopped at its budget, or as an owner who
+can't read everything) replaces a finished one of the same folder only when
+it found more.

@@ -18,6 +18,9 @@ from datetime import datetime, timedelta, timezone
 
 GB = 1024 ** 3
 
+# What each role is called beside the host's name.
+ROLE_LABEL = {"headnode": "login node", "interactive": "interactive server", "compute": "compute node"}
+
 _WHAT = {
     "cpu": "CPU ≥ {:g}%",
     "memory": "memory ≥ {:g} GB",
@@ -131,7 +134,7 @@ def report(conn: sqlite3.Connection, days: int = 7, mask: bool = False,
     since_utc = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     since_day = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    hosts: dict[tuple, dict] = defaultdict(lambda: {"alerts": [], "users": [], "io": None})
+    hosts: dict[tuple, dict] = defaultdict(lambda: {"alerts": [], "users": [], "io": None, "role": None})
     for row in conn.execute(
             f"SELECT {site}, hostname, process_session_id, username, command, rule_type, "
             "threshold_value, severity, last_seen, sustained_for_seconds, "
@@ -156,6 +159,20 @@ def report(conn: sqlite3.Connection, days: int = 7, mask: bool = False,
                 (since_utc,)):
             hosts[(s, h)]["io"] = (measured, stored)
 
+    # Each host's role as per_user last stored it (its settings' role): its
+    # latest sample's or flag's in the window, whichever is newer.
+    seen: dict[tuple, str] = {}
+    for table, col, cols in (("per_user_alert", "last_seen", alert_cols),
+                             ("per_user_sample", "timestamp", sample_cols)):
+        if "role" not in cols:
+            continue
+        for s, h, role, when in conn.execute(
+                f"SELECT {site}, hostname, role, MAX({col}) FROM {table} WHERE {col} >= ? GROUP BY 1, 2",
+                (since_utc,)):
+            if (s, h) in hosts and role and str(when or "") >= seen.get((s, h), ""):
+                seen[(s, h)] = str(when or "")
+                hosts[(s, h)]["role"] = role
+
     out = [f"Heavy use of shared hosts, last {days} days"
            + (f" ({db_label})" if db_label else "")]
     if not hosts:
@@ -165,7 +182,8 @@ def report(conn: sqlite3.Connection, days: int = 7, mask: bool = False,
 
     for (s, h), d in sorted(hosts.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
         out.append("")
-        out.append(f"{s} · {h}" if hub else str(h))
+        role = ROLE_LABEL.get(d["role"] or "", d["role"])
+        out.append((f"{s} · {h}" if hub else str(h)) + (f" ({role})" if role else ""))
 
         episodes = _episodes(d["alerts"])
         if episodes:

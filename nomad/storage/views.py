@@ -11,6 +11,7 @@ are never added up twice; `reads()` says when that happens.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -60,25 +61,47 @@ class _Scope:
         return f" AND {col} = ?", [self.sites.get(server, "")]
 
 
-def _copies(conn, scope: _Scope) -> dict[str, str | None]:
-    """server -> what it holds copies of (its latest report says), or None."""
-    if "copy_of" not in _cols(conn, "storage_reports"):
+def _json(text, default):
+    try:
+        v = json.loads(text) if text else default
+    except (TypeError, ValueError):
+        return default
+    return v if isinstance(v, type(default)) else default
+
+
+def _copies(conn, scope: _Scope) -> dict[str, tuple[str | None, dict]]:
+    """server -> (what all of it holds copies of, {its path: what that path
+    holds copies of, "OTHER" or "OTHER:/path"}), as its latest report says."""
+    rc = _cols(conn, "storage_reports")
+    if "copy_of" not in rc:
         return {}
+    per = "r.copies" if "copies" in rc else "NULL"
     out = {}
     if scope.sites:
         rows = conn.execute(
-            "SELECT r.server, r.copy_of, r.source_site FROM storage_reports r JOIN (SELECT server, source_site, "
-            "MAX(started) AS s FROM storage_reports GROUP BY server, source_site) l ON r.server = l.server "
-            "AND r.source_site = l.source_site AND r.started = l.s")
+            f"SELECT r.server, r.copy_of, {per}, r.source_site FROM storage_reports r JOIN (SELECT server, "
+            "source_site, MAX(started) AS s FROM storage_reports GROUP BY server, source_site) l "
+            "ON r.server = l.server AND r.source_site = l.source_site AND r.started = l.s")
     else:
         rows = conn.execute(
-            "SELECT r.server, r.copy_of, NULL FROM storage_reports r JOIN (SELECT server, MAX(started) AS s "
-            "FROM storage_reports GROUP BY server) l ON r.server = l.server AND r.started = l.s")
-    for server, copy_of, site in rows:
+            f"SELECT r.server, r.copy_of, {per}, NULL FROM storage_reports r JOIN (SELECT server, "
+            "MAX(started) AS s FROM storage_reports GROUP BY server) l ON r.server = l.server AND r.started = l.s")
+    for server, copy_of, copies, site in rows:
         if scope.sites and site != scope.sites.get(server):
             continue
-        out[server] = copy_of
+        out[server] = (copy_of, _json(copies, {}))
     return out
+
+
+def copy_of(copies: dict, server: str, path: str) -> tuple[str | None, str | None]:
+    """(the server a path holds copies of, and its path there when given),
+    or (None, None): from its own copies entry, else its server's copy_of."""
+    whole, per = copies.get(server, (None, {}))
+    of = per.get(path)
+    if of:
+        other, _, opath = str(of).partition(":")
+        return other, opath or None
+    return whole, None
 
 
 def paths(conn) -> list[dict]:
@@ -104,7 +127,8 @@ def paths(conn) -> list[dict]:
             out[(r[0], r[1])] = {
                 "server": r[0], "path": r[1], "fs": r[2], "dataset": r[3], "total_bytes": r[4],
                 "used_bytes": r[5], "available_bytes": r[6], "accounting": bool(r[7]), "note": r[8],
-                "read_at": r[9], "covers": r[10], "errors": r[11], "copy_of": copies.get(r[0])}
+                "read_at": r[9], "covers": r[10], "errors": r[11]}
+            out[(r[0], r[1])]["copy_of"], out[(r[0], r[1])]["copy_of_path"] = copy_of(copies, r[0], r[1])
     if {"server", "path"} <= _cols(conn, "storage_tops"):
         site = ", source_site" if scope.sites else ", NULL"
         for server, path, when, s in conn.execute(
@@ -116,7 +140,8 @@ def paths(conn) -> list[dict]:
                 "server": server, "path": path, "fs": None, "dataset": None, "total_bytes": None,
                 "used_bytes": None, "available_bytes": None, "accounting": False,
                 "note": "no usage file read yet: the scan's figures only", "read_at": when,
-                "covers": None, "errors": None, "copy_of": copies.get(server)}
+                "covers": None, "errors": None}
+            out[(server, path)]["copy_of"], out[(server, path)]["copy_of_path"] = copy_of(copies, server, path)
     return [out[k] for k in sorted(out)]
 
 
@@ -154,17 +179,22 @@ def owners(conn, server: str, path: str, kind: str = "user", days: int = 30,
             "SELECT name, dataset, used_bytes, soft_bytes, hard_bytes FROM storage_owners WHERE server = ? "
             f"AND path = ? AND kind = ? AND timestamp = ?{sql}", (server, path, kind, latest, *args)):
         r = rows.setdefault(name, {"name": name, "used_bytes": 0, "datasets": [], "quotas": [],
-                                   "was_bytes": None, "_n": 0})
+                                   "was_bytes": None, "_n": 0, "by_dataset": {}})
         r["used_bytes"] += used or 0
         r["_n"] += 1
+        # Each dataset's share (ZFS): a path above another on the same pool
+        # holds the lower one's datasets too.
+        r["by_dataset"][dataset or ""] = r["by_dataset"].get(dataset or "", 0) + (used or 0)
         if dataset and dataset not in r["datasets"]:
             r["datasets"].append(dataset)
         if soft or hard:
             r["quotas"].append({"dataset": dataset, "used_bytes": used, "soft_bytes": soft, "hard_bytes": hard})
+    then_names: set = set()
     if before:
         for name, used in conn.execute(
                 "SELECT name, SUM(used_bytes) FROM storage_owners WHERE server = ? AND path = ? AND kind = ? "
                 f"AND timestamp = ?{sql} GROUP BY name", (server, path, kind, before, *args)):
+            then_names.add(name)
             if name in rows:
                 rows[name]["was_bytes"] = used or 0
     scans = folders_by_owner(conn, server, path) if kind == "user" else {}
@@ -175,6 +205,11 @@ def owners(conn, server: str, path: str, kind: str = "user", days: int = 30,
         q = r["quotas"][0] if one and r["quotas"] else {}
         r["soft_bytes"], r["hard_bytes"] = q.get("soft_bytes"), q.get("hard_bytes")
         r["change_bytes"] = None if r["was_bytes"] is None else r["used_bytes"] - r["was_bytes"]
+        # Not in the reading the change is from (that reading has every owner
+        # then): new since, all their use is the change. was_bytes stays None.
+        r["new"] = bool(before) and r["name"] not in then_names
+        if r["new"]:
+            r["change_bytes"] = r["used_bytes"]
         # The scans key an owner no machine can name as "uid N".
         r["scan"] = scans.get(r["name"]) or (scans.get(f"uid {r['name']}") if r["name"].isdigit() else None)
         r["last_job"] = jobs.get(r["name"])
@@ -184,22 +219,45 @@ def owners(conn, server: str, path: str, kind: str = "user", days: int = 30,
 
 
 def _latest_tops(conn, server: str, path: str) -> list[tuple]:
-    """Each top folder's scan that stands for it: the latest finished one,
-    else the latest (a scan stopped at its budget, until one finishes)."""
+    """Each top folder's scan that stands for it: the latest. When that one
+    is short (stopped at the budget, or measured as an owner who can't read
+    all of it), it is still at least what is there, so the latest whole one
+    stands instead only while it is larger. Each row ends with why the
+    figure is short ("time", "unreadable"), or None."""
     tc = _cols(conn, "storage_tops")
     if not {"server", "top"} <= tc:
         return []
     sql, args = _Scope(conn).of(server)
     denied = "denied" if "denied" in tc else "0"
-    best: dict[str, tuple] = {}
+    why = "why_short" if "why_short" in tc else "NULL"
+    stands = "stands" if "stands" in tc else "NULL"
+    latest: dict[str, tuple] = {}
+    whole: dict[str, tuple] = {}
+    standing: dict[str, tuple] = {}
     for row in conn.execute(
             "SELECT top, top_owner, bytes, files, newest, older1_bytes, older2_bytes, age1_days, age2_days, "
-            f"scanned_at, complete, {denied}, top_uid FROM storage_tops WHERE server = ? AND path = ?{sql}",
-            (server, path, *args)):
-        cur = best.get(row[0])
-        if cur is None or (row[10] or 0, row[9] or "") > (cur[10] or 0, cur[9] or ""):
-            best[row[0]] = row
-    return list(best.values())
+            f"scanned_at, complete, {denied}, top_uid, {why}, {stands} FROM storage_tops "
+            f"WHERE server = ? AND path = ?{sql}", (server, path, *args)):
+        # A short row from before 1.17.1 says no why: it was the time.
+        flag, row = row[14], row[:13] + (None if row[10] else (row[13] or "time"),)
+        if flag:
+            standing[row[0]] = row             # decided when it was stored
+        for best, ok in ((latest, True), (whole, bool(row[10]))):
+            cur = best.get(row[0])
+            if ok and (cur is None or (row[9] or "") > (cur[9] or "")):
+                best[row[0]] = row
+    out = []
+    for top, row in latest.items():
+        if top in standing:
+            out.append(standing[top])
+            continue
+        # Stored before 1.17.1 (or by an older collector): the latest, or
+        # the latest whole one when the latest is short and smaller.
+        w = whole.get(top)
+        if not row[10] and w is not None and (w[2] or 0) > (row[2] or 0):
+            row = w
+        out.append(row)
+    return out
 
 
 def folders_by_owner(conn, server: str, path: str) -> dict[str, dict]:
@@ -208,7 +266,7 @@ def folders_by_owner(conn, server: str, path: str) -> dict[str, dict]:
     every one of them has a finished scan."""
     out: dict[str, dict] = {}
     for (top, owner, size, files, newest, o1, o2, a1, a2, when, complete,
-         denied, uid) in _latest_tops(conn, server, path):
+         denied, uid, _why) in _latest_tops(conn, server, path):
         # An owner the collecting machine can't name goes by number, never by
         # the folder's name: a folder named after someone isn't theirs.
         key = owner or (f"uid {uid}" if uid is not None else "owner unknown")
@@ -287,13 +345,15 @@ def coverage(conn, server: str, path: str, days: int = 7, now: datetime | None =
     return {"tops": len(tops), "recent": sum(1 for t in done if (t[9] or "") >= since),
             "oldest": min((t[9] for t in done if t[9]), default=None),
             "newest": max((t[9] for t in done if t[9]), default=None),
-            "unfinished": len(tops) - len(done), "denied": sum(t[11] or 0 for t in tops), "days": days}
+            "unfinished": sum(1 for t in tops if not t[10] and t[13] != "unreadable"),
+            "unreadable": sum(1 for t in tops if not t[10] and t[13] == "unreadable"),
+            "denied": sum(t[11] or 0 for t in tops), "days": days}
 
 
 def person(conn, name: str, jobs: dict | None = None) -> list[dict]:
-    """One person's space on every path, copies apart (``copy_of``): what
-    the filesystem counts for them, the change, quotas, and their top
-    folders' scans. For their own page."""
+    """One person's space on every path, copies apart (``copy_of``, a path
+    at a time): what the filesystem counts for them, the change, quotas,
+    and their top folders' scans. For their own page; ``totals`` adds it up."""
     out = []
     jobs = {} if jobs is None else jobs
     for p in paths(conn):
@@ -302,12 +362,45 @@ def person(conn, name: str, jobs: dict | None = None) -> list[dict]:
         if row is None and scan is None:
             continue
         out.append({"server": p["server"], "path": p["path"], "copy_of": p["copy_of"],
+                    "copy_of_path": p.get("copy_of_path"), "covers": p.get("covers"),
                     "used_bytes": row["used_bytes"] if row else None,
+                    "by_dataset": row.get("by_dataset") if row else None,
                     "change_bytes": row["change_bytes"] if row else None,
                     "quotas": row["quotas"] if row else [],
                     "soft_bytes": row["soft_bytes"] if row else None,
                     "hard_bytes": row["hard_bytes"] if row else None,
                     "scan": scan, "read_at": row["read_at"] if row else p["read_at"]})
+    return out
+
+
+def totals(rows: list[dict]) -> dict:
+    """What ``person`` rows add up to: total_bytes on paths that aren't
+    copies, copies_bytes on paths that are; the filesystem's counts where
+    there are some, else the scans'; one filesystem's counts once (two paths
+    on it carry the same counts: ``covers``), and one ZFS dataset's once (a
+    path above another on the same pool holds the lower one's datasets)."""
+    out = {"total_bytes": 0, "copies_bytes": 0}
+    counted = set()
+    # Copies first: a dataset a copy path holds is a copy, even when a path
+    # above it on the same pool (not one) holds it too.
+    for r in sorted(rows, key=lambda r: not r.get("copy_of")):
+        byds = r.get("by_dataset") or {}
+        if r.get("used_bytes") is not None and byds and "" not in byds:
+            for ds, b in byds.items():
+                key = (r["server"], "dataset", ds)
+                if key not in counted:
+                    counted.add(key)
+                    out["copies_bytes" if r.get("copy_of") else "total_bytes"] += b or 0
+            continue
+        used = r.get("used_bytes")
+        if used is None:
+            used = (r.get("scan") or {}).get("bytes")
+        key = (r["server"], r.get("covers") or r["path"]) if r.get("used_bytes") is not None \
+            else (r["server"], r["path"])
+        if used is None or key in counted:
+            continue
+        counted.add(key)
+        out["copies_bytes" if r.get("copy_of") else "total_bytes"] += used
     return out
 
 
@@ -325,17 +418,34 @@ def reads(conn) -> list[dict]:
     rc = _cols(conn, "storage_reports")
     if "server" in rc:
         scope = _Scope(conn)
-        more = {c: f"r.{c}" if c in rc else "NULL" for c in ("run_by", "copy_of", "odd_names", "unreadable")}
-        for server, mode, started, finished, host, ns, run_by, copy_of, odd, unread in conn.execute(
-                "SELECT r.server, r.mode, r.started, r.finished, r.host, r.not_scanned, "
-                f"{more['run_by']}, {more['copy_of']}, {more['odd_names']}, {more['unreadable']} "
+        cols = ("run_by", "copy_of", "odd_names", "unreadable", "copies", "nested", "scan_as", "carried",
+                "not_measured", "contains", "naming", "short_tops")
+        more = ", ".join(f"r.{c}" if c in rc else "NULL" for c in cols)
+        for (server, mode, started, finished, host, ns, run_by, whole, odd, unread, copies, nested, scan_as,
+             carried, unmeasured, contains, naming, short) in conn.execute(
+                f"SELECT r.server, r.mode, r.started, r.finished, r.host, r.not_scanned, {more} "
                 "FROM storage_reports r "
                 "JOIN (SELECT server, mode, MAX(started) AS s FROM storage_reports GROUP BY server, mode) l "
                 "ON r.server = l.server AND r.mode = l.mode AND r.started = l.s"):
             r = out.setdefault(server, {"server": server, "read_at": None, "note": None})
+            # naming: how owners given only as numbers were named (local: this
+            # machine's files; same: shared accounts, from the floor; none).
             r[mode] = {"started": started, "finished": finished, "host": host, "not_scanned": ns,
-                       "run_by": run_by, "odd_names": odd, "unreadable": unread}
-            r["copy_of"] = copy_of
+                       "run_by": run_by, "odd_names": odd, "unreadable": unread, "naming": naming}
+            if mode == "scan":
+                # Top folders left out as another of the run's paths, and with
+                # -O (scan_as "owner"): those kept from an earlier night, and
+                # those whose owner it couldn't act as.
+                nm = [{"path": x[0], "top": x[1], "uid": x[2], "why": x[3]}
+                      for x in _json(unmeasured, []) if isinstance(x, list) and len(x) >= 4]
+                r[mode].update(nested=[{"path": x[0], "top": x[1], "is": x[2]} for x in _json(nested, [])
+                                       if isinstance(x, list) and len(x) >= 3],
+                               contains=[{"path": x[0], "top": x[1], "holds": x[2]} for x in _json(contains, [])
+                                         if isinstance(x, list) and len(x) >= 3],
+                               scan_as=scan_as, carried=carried, not_measured=nm,
+                               not_measured_owners=len({x["uid"] for x in nm}), short_tops=short)
+            r["copy_of"] = whole
+            r["copies"] = _json(copies, {})
         if scope.sites:
             for server, sites in conn.execute(
                     "SELECT server, GROUP_CONCAT(DISTINCT source_site) FROM storage_reports GROUP BY server"):

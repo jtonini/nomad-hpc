@@ -477,10 +477,13 @@ def storage_group():
 
 
 @storage_group.command('script')
-def storage_script():
+@click.option('--find', 'find_wrapper', is_flag=True,
+              help="Print nomad-storage-find instead: the only command sudo need allow for --run-as owners "
+                   "(nomad storage cron --run-as owners --find-wrapper).")
+def storage_script(find_wrapper):
     """Print nomad-storage.sh, to install on a storage server."""
-    from nomad.storage import script_text
-    click.echo(script_text(), nl=False)
+    from nomad.storage import FIND_WRAPPER, script_text
+    click.echo(script_text(FIND_WRAPPER if find_wrapper else None), nl=False)
 
 
 def _sudoers_arg(a: str) -> str:
@@ -491,24 +494,38 @@ def _sudoers_arg(a: str) -> str:
 
 @storage_group.command('cron')
 @click.argument('paths', nargs=-1, required=True)
-@click.option('--run-as', 'run_as', type=click.Choice(['root', 'sudo', 'sudo-readers', 'user']), default='root',
-              show_default=True,
+@click.option('--run-as', 'run_as', type=click.Choice(['root', 'sudo', 'sudo-readers', 'owners', 'user']),
+              default='root', show_default=True,
               help="root: root's crontab (or TrueNAS's Cron Jobs). sudo: --user's crontab, through sudo, "
                    "for exactly these command lines. sudo-readers: --user's crontab, as --user, asking sudo "
-                   "only for xfs_quota, zfs and du (where sudo already allows them). user: --user with only "
+                   "only for xfs_quota, zfs and du (where sudo already allows them). owners: --user's "
+                   "crontab, as --user, measuring each top folder as its owner (sudo -n -u OWNER find, where "
+                   "sudo lets --user act as the others but not as root; Linux). user: --user with only "
                    "the right to read every file, through systemd (Linux).")
-@click.option('--user', 'account', default=None, help='The account for --run-as sudo or user.')
+@click.option('--user', 'account', default=None,
+              help='The account for --run-as sudo, sudo-readers, owners or user.')
 @click.option('--script', 'script_path', default='/usr/local/sbin/nomad-storage.sh', show_default=True,
               help='Where nomad-storage.sh is on the server.')
 @click.option('--dir', 'out_dir', default='/var/lib/nomad-storage', show_default=True,
               help='Where it writes (on TrueNAS: a folder on a pool, as /mnt/POOL/nomad-storage/out).')
 @click.option('--group', default=None, help="The group that may read what it writes (the collecting account's).")
 @click.option('--seconds', type=int, default=10800, show_default=True, help="The nightly scan's time budget.")
+@click.option('--large', type=click.IntRange(0, 10 ** 6), default=10, show_default=True,
+              help="--run-as owners: a top folder of this many GB or more is measured nightly (the others "
+                   "weekly, or when they change).")
+@click.option('--find-wrapper', 'find_wrapper', default=None,
+              help="--run-as owners: where nomad-storage-find is (root's, 755; `nomad storage script --find`): "
+                   "sudo then need allow only it, never find itself.")
+@click.option('--min-uid', 'min_uid', type=click.IntRange(1, 2 ** 31), default=1000, show_default=True,
+              help="--run-as owners: folders of accounts numbered below this (system accounts) aren't "
+                   "measured, and sudo isn't asked to act as them (nor ever as root).")
 @click.option('--server', default=None, help="The server's name in nomad.")
-def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, server):
-    """How to run nomad-storage.sh on a server -- as root, through sudo, or
-    as an account with only the right to read -- and the
-    [collectors.storage_use] part of nomad.toml that reads what it writes."""
+def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, large, find_wrapper, min_uid,
+                 server):
+    """How to run nomad-storage.sh on a server -- as root, through sudo, as
+    an account with only the right to read, or measuring each top folder as
+    its owner -- and the [collectors.storage_use] part of nomad.toml that
+    reads what it writes."""
     import re as _re
     import shlex as _sh
     for p in paths:
@@ -527,19 +544,27 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
         raise click.UsageError(f"--group {group!r}: a group name")
     if run_as != "root" and not (account and _re.match(r"^[A-Za-z_][A-Za-z0-9._-]*$", account)):
         raise click.UsageError(f"--run-as {run_as}: say which account with --user NAME")
-    if run_as == "sudo-readers" and out_dir == "/var/lib/nomad-storage":
-        raise click.UsageError(f"--run-as sudo-readers: give --dir, a folder {account} can make "
+    if run_as in ("sudo-readers", "owners") and out_dir == "/var/lib/nomad-storage":
+        raise click.UsageError(f"--run-as {run_as}: give --dir, a folder {account} can make "
                                f"(as /home/{account}/nomad-storage)")
     seconds = int(seconds)
     args = (["-S"] if run_as == "sudo-readers" else []) + ["-d", out_dir] + (["-g", group] if group else [])
     usage = ["/bin/sh", script_path, *args, "usage", *paths]
-    scan = ["/bin/sh", script_path, *args, "-s", str(seconds), "scan", *paths]
+    if find_wrapper is not None:
+        if run_as != "owners":
+            raise click.UsageError("--find-wrapper: for --run-as owners")
+        if not _re.match(r"^/[A-Za-z0-9._/+-]+$", find_wrapper) or "/../" in find_wrapper + "/":
+            raise click.UsageError(f"--find-wrapper {find_wrapper!r}: an absolute path")
+    owner_args = (["-O"] + (["-L", str(large)] if large != 10 else [])
+                  + (["-U", str(min_uid)] if min_uid != 1000 else [])
+                  + (["-F", find_wrapper] if find_wrapper else [])) if run_as == "owners" else []
+    scan = ["/bin/sh", script_path, *args, *owner_args, "-s", str(seconds), "scan", *paths]
 
     def line(argv):
         return " ".join(_sh.quote(a) for a in argv)
 
     echo = click.echo
-    if run_as == "sudo-readers":
+    if run_as in ("sudo-readers", "owners"):
         echo(f"# On the server: the script, owned by {account} (or root) and writable only by its owner, in")
         echo(f"# folders only {account} or root can change (as /home/{account}/bin):")
         echo(f"#   install -m 755 nomad-storage.sh {_sh.quote(script_path)}")
@@ -554,6 +579,35 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
         echo(f"# {account}'s crontab (crontab -e as {account}):")
         echo(f"17 * * * * {line(usage)}")
         echo(f"30 1 * * * {line(scan)}")
+    elif run_as == "owners":
+        echo(f"# {account} runs it, as {account}, and the scan measures each top folder as the account that owns")
+        echo("# it: sudo -n -u '#UID', read only, at the lowest priority, one find per owner.")
+        if find_wrapper:
+            echo(f"# sudo runs only {find_wrapper} as them: a fixed find that lists names and sizes and changes")
+            echo("# nothing. As root, install it and allow only it (visudo -f /etc/sudoers.d/nomad-storage):")
+            echo("#   nomad storage script --find > nomad-storage-find")
+            echo(f"#   install -o root -g root -m 755 nomad-storage-find {_sh.quote(find_wrapper)}")
+            echo(f"#   {account} ALL=(ALL,!root) NOPASSWD: {_sudoers_arg(find_wrapper)}")
+            echo("# (its real path, with no link in it: the script refuses a link, which could be swapped; sudo")
+            echo("# 1.8.28 or later; (%GROUP) in place of (ALL,!root) narrows it to one group's accounts).")
+        else:
+            echo(f"# It relies on sudo already letting {account} run commands as people's accounts: `sudo -l` as")
+            echo(f"# {account} shows a rule such as (%GROUP) ALL. Where there is none, don't allow find itself")
+            echo("# (find runs other programs, deletes and writes files): use --find-wrapper, which sudo may")
+            echo("# allow alone.")
+        echo(f"# Each top folder is measured weekly, on a night of its own; nightly when it is {large} GB or")
+        echo("# more (--large) or changed (an entry made, removed or renamed in it, or its owner or mode).")
+        echo("# The others keep their last measurement, with its time. Folders of root and of accounts")
+        echo(f"# numbered below {min_uid} (--min-uid) are listed as not measured without asking sudo; an owner")
+        echo("# sudo refuses is asked again after a week (sudo logs each refusal). A folder its owner can't")
+        echo("# read all of is flagged short, and replaces a larger earlier figure only for a new owner or")
+        echo("# after four weeks. Each owner's counts come from the scan (usage, as an ordinary account,")
+        echo("# reads only df).")
+        echo(f"# {account}'s crontab (crontab -e as {account}):")
+        echo(f"17 * * * * {line(usage)}")
+        echo(f"30 1 * * * {line(scan)}")
+        echo("# Instead, one sudoers line that lets it run the script itself as root (root owns the script")
+        echo(f"# and {account} can't change it): nomad storage cron --run-as sudo --user {account} ...")
     elif run_as == "root":
         echo("# Root's crontab (crontab -e as root): usage hourly, the scan nightly.")
         echo(f"17 * * * * {line(usage)}")
@@ -627,12 +681,15 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
     echo(f'dir = "{out_dir}"')
     echo('# usage_dir = "..."        # usage.txt\'s own folder, if usage runs apart from the scan')
     echo('# copy_of = "OTHER"        # it holds copies (replicas, backups) of OTHER\'s files')
+    echo('# copies = {"/its/path" = "OTHER:/path"}   # or only these paths do')
     echo('# same_accounts = true     # it and this machine share their accounts (one directory)')
+    echo('# account_floor = 1000     # ... from this number up (below it, each machine\'s own)')
 
 
 @storage_group.command('use')
 @click.option('--db', type=click.Path(dir_okay=False), help="Database (default: the hub's combined.db if there is one, else this host's).")
 @click.option('--server', 'only_server', default=None, help='Only this server.')
+@click.option('--path', 'only_path', default=None, help="Only this path (as /home), on every server that has it.")
 @click.option('--top', 'top_n', type=int, default=10, show_default=True, help='Owners shown per path.')
 @click.option('--groups', is_flag=True, help='Groups instead of users.')
 @click.option('--projects', is_flag=True, help='XFS projects instead of users.')
@@ -646,7 +703,7 @@ def storage_cron(paths, run_as, account, script_path, out_dir, group, seconds, s
 @click.option('--binary', is_flag=True, help='Sizes in KiB, MiB, GiB, TiB (as du -h and xfs_quota -h show them).')
 @click.option('--mask', is_flag=True, help='Stand-ins for names (and for paths below the first folder), for sharing the output.')
 @click.pass_context
-def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, as_list, binary, mask):
+def storage_use_cmd(ctx, db, only_server, only_path, top_n, groups, projects, days, over, as_list, binary, mask):
     """Who holds each path's space: now, the change over 30 days (--days),
     and what the scans found older than their ages; with each person's last
     job. --over 1T --list gives the plain list of who holds more than 1 TiB."""
@@ -682,6 +739,9 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
 
     def change(ch):
         return ('+' if ch and ch > 0 else '') + sz(ch) if ch is not None else '-'
+
+    def copies_of(p):
+        return p["copy_of"] + (f":{where(p['copy_of_path'])}" if p.get("copy_of_path") else "")
     try:
         if not views.available(conn):
             click.echo("No storage readings yet: the storage_use collector stores them "
@@ -695,6 +755,8 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
         for p in views.paths(conn):
             if only_server and p["server"] != only_server:
                 continue
+            if only_path and p["path"] != (only_path.rstrip("/") or "/"):
+                continue
             cov = views.coverage(conn, p["server"], p["path"])
             rows = views.owners(conn, p["server"], p["path"], kind=kind, days=days, jobs=jobs)
             by_scan = not rows and kind == "user" and cov["tops"]
@@ -706,10 +768,12 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
                 shown = shown[:top_n]
             if as_list:
                 note = "; ".join(x for x in (
-                    f"copies of {p['copy_of']}'s files, not added to totals" if p.get("copy_of") else "",
+                    f"copies of {copies_of(p)}'s files, not added to totals" if p.get("copy_of") else "",
                     f"counts cover all of {where(p['covers'])}" if p.get("covers") else "",
                     "by the scans" if by_scan else "") if x)
                 for r in shown:
+                    # By the scans: when each owner's figures were measured.
+                    measured = (f"measured {when(r['scanned_at'])}" if by_scan and r.get("scanned_at") else "")
                     tops = (r.get("scan") or {}).get("tops") or []
                     if mask:
                         folders = where(p["path"]) + "/(masked)"
@@ -719,7 +783,7 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
                         folders = f"{p['server']}:{p['path']}"
                     click.echo(f"{folders}\t{who(r['name'])}\t{sz(r['used_bytes'])}\t"
                                f"{when(r.get('last_job')) if r.get('last_job') else 'none'}\t"
-                               f"{change(r.get('change_bytes'))}\t{note}")
+                               f"{change(r.get('change_bytes'))}\t{'; '.join(x for x in (note, measured) if x)}")
                 if len(shown) < len(rows) and over is None:
                     click.echo(f"# {p['server']}:{where(p['path'])}: {len(rows) - len(shown)} more (--top)")
                 continue
@@ -729,7 +793,7 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
             click.echo(f"{p['server']}:{where(p['path'])}  {p['fs'] or '?'}{size}"
                        f"  read {at(p['read_at'])}")
             if p.get("copy_of"):
-                click.echo(f"  holds copies of {p['copy_of']}'s files: shown here, never added to anyone's totals")
+                click.echo(f"  holds copies of {copies_of(p)}'s files: shown here, never added to anyone's totals")
             if p.get("covers"):
                 click.echo(f"  the per-owner counts are of everything at {where(p['covers'])}, not only this path")
             if p.get("errors"):
@@ -740,6 +804,9 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
                 extra = ""
                 if cov["unfinished"]:
                     extra += f"; {cov['unfinished']} never finished in the scan's time (raise -s)"
+                if cov.get("unreadable"):
+                    extra += (f"; {cov['unreadable']} short of what is there: their owner can't read all "
+                              "of them (more time won't help)")
                 if cov["denied"]:
                     extra += f"; {cov['denied']:,} files or folders it couldn't read"
                 span = (f", scanned {when(cov['oldest'])} to {when(cov['newest'])}" if cov["oldest"] else "")
@@ -753,7 +820,7 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
             if not rows:
                 continue
             if by_scan:
-                click.echo("  owners by what the scans found in their top folders")
+                click.echo("  owners by what the scans found in their top folders, each as of when measured")
             else:
                 # What time the figures are for: the reading, and the one the change is from.
                 since = (f"; the change is since {at(rows[0]['compared_with'])}" if rows[0]["compared_with"]
@@ -763,7 +830,9 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
                 click.echo(f"  {len(shown)} of {len(rows)} hold more than {sz(over)}")
             ages = next((r["scan"]["ages"] for r in rows if r.get("scan")), None)
             head = f"  {'owner':<14} {'scanned' if by_scan else 'used':>10}"
-            if not by_scan:
+            if by_scan:
+                head += f" {'measured':>10}"
+            else:
                 head += f" {str(days) + ' days':>10} {'quota':>9}"
             if ages:
                 head += f" {'>' + str(ages[1]) + ' days':>11} {'newest change':>13}"
@@ -771,7 +840,9 @@ def storage_use_cmd(ctx, db, only_server, top_n, groups, projects, days, over, a
             click.echo(head)
             for r in shown:
                 out = f"  {str(who(r['name']))[:14]:<14} {sz(r['used_bytes']):>10}"
-                if not by_scan:
+                if by_scan:
+                    out += f" {when(r.get('scanned_at')):>10}"
+                else:
                     quota = r["hard_bytes"] or r["soft_bytes"]
                     qs = sz(quota) if quota else ("several" if r["quotas"] else "none")
                     out += f" {change(r['change_bytes']):>10} {qs:>9}"
@@ -807,6 +878,9 @@ def storage_status_cmd(ctx, db):
         if not rows:
             click.echo("Nothing read yet: enable [collectors.storage_use] (nomad storage cron).")
             return
+        known: dict[str, set] = {}
+        for p in views.paths(conn):
+            known.setdefault(p["server"], set()).add(p["path"])
         for r in rows:
             head = f"{r['server']}:"
             if r.get("read_at"):
@@ -814,6 +888,12 @@ def storage_status_cmd(ctx, db):
             if r.get("copy_of"):
                 head += f"  [copies of {r['copy_of']}]"
             click.echo(head)
+            for path, of in sorted((r.get("copies") or {}).items()):
+                if path in known.get(r["server"], set()):
+                    click.echo(f"  {path} holds copies of {of}'s files: never added to anyone's totals")
+                else:
+                    click.echo(f"  copies: {path} isn't one of its paths ({', '.join(sorted(known.get(r['server'], set()))) or 'none read yet'}): "
+                               "nothing is marked as copies there; use the path exactly as the script reads it")
             if len(r.get("sites") or []) > 1:
                 click.echo(f"  read by {len(r['sites'])} sites ({', '.join(r['sites'])}): only {r['site']}'s "
                            "readings are shown; read it from one")
@@ -831,6 +911,35 @@ def storage_status_cmd(ctx, db):
                     extra += f"; couldn't list {m['unreadable'].replace(chr(10), ', ')}"
                 by = f", by {m['run_by']}" if m.get("run_by") else ""
                 click.echo(f"  {mode}: run of {at(m['started'])}{by}{extra}")
+                if m.get("naming") == "none":
+                    click.echo(f"    owners {r['server']} gives only as numbers are shown as numbers (uid N): if it "
+                               "shares this machine's accounts, set same_accounts = true for it")
+                if mode != "scan":
+                    continue
+                for n in m.get("nested") or []:
+                    if n["top"]:
+                        click.echo(f"    left out {n['path'].rstrip('/')}/{n['top']}: it is {n['is']}, scanned as that path")
+                    else:
+                        click.echo(f"    left out {n['path']}: the same as {n['is']}, scanned once")
+                for n in m.get("contains") or []:
+                    click.echo(f"    {n['path'].rstrip('/')}/{n['top']} holds {n['holds']}, also scanned: what is "
+                               "there is counted in both")
+                if m.get("short_tops"):
+                    click.echo(f"    {m['short_tops']} top folders measured short (time ran out, or "
+                               + ("their owner can't read all of them" if m.get("scan_as") == "owner"
+                                  else "find stopped early") + "): their last whole measurement stands")
+                if m.get("scan_as") == "owner":
+                    nm = m.get("not_measured") or []
+                    click.echo(f"    measured as each owner (sudo -n -u): {m['carried'] or 0} top folders kept "
+                               "from earlier nights, each with the time it was measured")
+                    if nm:
+                        whys = {"sudo": "sudo wouldn't act as them (asked again after a week)",
+                                "name": "no account name to act as", "root": "root's (never acted as)",
+                                "system": "system accounts' (below the lowest user number)",
+                                "unreadable": "unreadable", "unreachable": "gone or unreadable as the owner"}
+                        said = sorted({whys.get(x["why"], x["why"]) for x in nm})
+                        click.echo(f"    not measured: {m['not_measured_owners']} owners, {len(nm)} top folders "
+                                   f"({'; '.join(said)})")
     finally:
         conn.close()
 
@@ -4556,6 +4665,9 @@ SYNC_INDEXES = [
         ("interactive_summary", "timestamp"),
         ("jobs", "source_site"),
         ("jobs", "user_name"),
+        # Each person's latest job (storage views' last_jobs: MAX(submit_time)
+        # per user_name), read on every storage page (1.17.1).
+        ("jobs", "user_name, submit_time"),
         ("jobs", "state"),
         ("job_summary", "job_id"),
         ("gpu_stats", "timestamp"),
@@ -4676,7 +4788,7 @@ def _site_configs(sites, cache_dir, ctx) -> dict:
     return site_configs
 
 
-@cli.command()
+@cli.group(invoke_without_command=True)
 @click.option('--config-file', '-c', type=click.Path(),
               help='Sync config file (default: read [hub] from nomad.toml, '
                    'falls back to ~/.config/nomad/sync.toml)')
@@ -4737,7 +4849,15 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
       nomad sync                     Sync all configured sites
       nomad sync --dry-run           Show what would happen
       nomad sync -o /tmp/combined.db Custom output path
+      nomad sync status              How each site's last syncs went (reads only)
     """
+    if ctx.invoked_subcommand:
+        # `nomad sync -c FILE -o DB status`: the subcommand reads the same hub.
+        if dry_run or full or remove_logs:
+            raise click.UsageError(f"--dry-run, --full and --remove-logs are for a sync, not for "
+                                   f"`nomad sync {ctx.invoked_subcommand}`")
+        ctx.obj["sync_config_file"], ctx.obj["sync_output"] = config_file, output
+        return
     import shutil
     import sqlite3
     import subprocess as sp
@@ -5351,6 +5471,109 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
 # whole instead (an exporter that stopped working there would otherwise leave
 # the hub's copy of it frozen, however many syncs ran).
 FAILURES_BEFORE_COPY = 3
+
+
+@sync.command('status')
+@click.option('--db', type=click.Path(dir_okay=False),
+              help="The combined database (default: the hub's, from [hub] output_db).")
+@click.pass_context
+def sync_status(ctx, db):
+    """How each site's last syncs went: when its data was last brought up to
+    date, how (only what changed, or copied whole), how many rows, and why
+    the last one failed. Reads only; on the hub."""
+    import sqlite3
+    from nomad.actions.remote import hub_settings
+    from nomad.config import combined_db_path
+    from nomad.db import delta_hub
+    config_file, output = ctx.obj.get("sync_config_file"), ctx.obj.get("sync_output")
+    if config_file:
+        cfg = _load_hub_config(config_file, ctx.obj.get('config_target'))
+        if not cfg:
+            raise click.ClickException(f"no hub settings in {config_file}")
+        hub = {"sites": [s for s in cfg["sites"] if s.get("name")],
+               "combined_db": combined_db_path(cfg.get("output_db"))}
+    else:
+        hub = hub_settings(ctx.obj.get('config_target'))
+    db = db or output
+    path = Path(db).expanduser() if db else hub["combined_db"]
+    if not path.exists():
+        raise click.ClickException(f"no combined database at {path}" + (
+            "" if db or hub["sites"] else ": this host is no hub (no [hub] sites in nomad.toml)"))
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(sync_sites)")}
+    except sqlite3.Error as e:
+        raise click.ClickException(f"{path}: {e}") from None
+    try:
+        rows = {}
+        if "name" in cols:
+            want = ("synced_at", "merged", "records", "error", "source", "last_success")
+            sel = ", ".join(c if c in cols else "NULL" for c in want)
+            rows = {r[0]: dict(zip(want, r[1:])) for r in conn.execute(f"SELECT name, {sel} FROM sync_sites")}
+        state = {}
+        try:
+            for site, mode, failures, updated in conn.execute(
+                    f"SELECT site, mode, failures, updated_at FROM {delta_hub.STATE}"):
+                state[site] = {"mode": mode, "failures": failures or 0, "updated_at": updated}
+        except sqlite3.Error:
+            pass                            # a combined database rebuilt whole (before 1.17)
+        synced = delta_hub.get_meta(conn, "synced_at")
+    finally:
+        conn.close()
+    cfg = ctx.obj.get('config') or {}
+    try:
+        after = float(((cfg.get("hub") or {}) if isinstance(cfg.get("hub"), dict) else {})
+                      .get("alert_after_minutes", 120))
+    except (TypeError, ValueError):
+        after = 120.0
+
+    def at(t):
+        return str(t)[:16].replace("T", " ") if t else "never"
+
+    def mb(p):
+        try:
+            return f"{p.stat().st_size / 1e6:,.0f} MB"
+        except OSError:
+            return "-"
+    wal = Path(str(path) + "-wal")
+    click.echo(f"{path}: {mb(path)}" + (f", write-ahead log {mb(wal)}" if wal.exists() else "")
+               + (f"; updated in place, last sync {at(synced)}" if synced or state else
+                  "; rebuilt whole at each sync (before 1.17)"))
+    named = [s["name"] for s in hub["sites"]]
+    how = {"delta": "only what changed", "copy": "copied whole", "whole": "sent whole by its exporter",
+           "live": "copied whole", "cache": "from the hub's cached copy", "kept": "kept what the hub had"}
+    now = datetime.now()
+    late = 0
+    for name in named + sorted(n for n in set(rows) | set(state) if n not in named):
+        r, st = rows.get(name, {}), state.get(name, {})
+        if not r and not st:
+            click.echo(f"  {name}: never synced")
+            late += 1
+            continue
+        line = f"  {name}: brought up to date {at(r.get('synced_at'))}"
+        if r.get("source"):
+            line += f" ({how.get(r['source'], r['source'])}"
+            line += f", {r['records']:,} rows)" if r.get("records") else ")"
+        if r.get("last_success") and r.get("last_success") != r.get("synced_at"):
+            line += f"; last live pull {at(r['last_success'])}"
+        try:
+            ok = datetime.fromisoformat(str(r.get("last_success") or r.get("synced_at")))
+            if (now - ok).total_seconds() / 60 >= after:
+                line += f"; late (over {after:.0f} minutes)"
+                late += 1
+        except ValueError:
+            pass
+        if name not in named:
+            line += "; no longer in [hub] sites (its rows go at the next sync)"
+        click.echo(line)
+        if st.get("mode"):
+            nxt = "only what changed" if st["mode"] == "delta" else "a whole copy"
+            click.echo(f"    next sync asks for {nxt}" + (f"; {st['failures']} failed in a row"
+                                                          if st.get("failures") else ""))
+        if r.get("error"):
+            click.echo(f"    last error: {str(r['error'])[:300]}")
+    click.echo(f"{len(named)} site(s) in [hub]" + (f", {late} late or never synced" if late else ", all up to date"))
 
 
 def _sync_copy_site(conn, site, cache_dir, hub=None) -> dict:
@@ -6219,20 +6442,29 @@ def import_sacct(ctx, export, since, until, db, apply):
                    "see what the import itself would change: a number used twice in it, say.)")
 
 
-def _usage_db(ctx, db, need: bool = True):
-    """--db, else the hub's combined.db, else this host's database (None if
-    none exists and ``need`` is False)."""
+def _usage_db(ctx, db, need: bool = True, say: bool = True):
+    """--db, else the hub's combined.db (on a hub: [hub] lists sites), else
+    this host's database (None if none exists and ``need`` is False). Says on
+    stderr which one it chose, unless ``say`` is False.
+
+    On a site, a combined.db is only ever a leftover (an old hub, a test): a
+    stale, even empty, one there used to be read instead of the site's own."""
     if db:
         p = Path(db).expanduser()
         if not p.exists():
             raise click.ClickException(f"no database at {p}")
         return p
     from nomad.actions.remote import hub_settings
-    combined = hub_settings(ctx.obj.get('config_target'))["combined_db"]
-    if combined.exists():
+    hub = hub_settings(ctx.obj.get('config_target'))
+    combined = hub["combined_db"]
+    if hub["sites"] and combined.exists():
+        if say:
+            click.echo(f"Reading the hub's combined database, {combined}", err=True)
         return combined
     p = get_db_path(ctx.obj.get('config') or {})
     if p.exists():
+        if say:
+            click.echo(f"Reading this host's database, {p}", err=True)
         return p
     if need:
         raise click.ClickException(f"no database at {p} (give one with --db)")
@@ -6835,7 +7067,7 @@ def _condo_status(ctx, db=None, report_config=None):
     db_path = None
     conn = None
     try:
-        db_path = _usage_db(ctx, db, need=False)
+        db_path = _usage_db(ctx, db, need=False, say=False)
         conn = sources.open_db(db_path) if db_path else None
         items = cstatus.check(conn, settings, ctx.obj.get('config') or {}, problem=problem)
     except (OSError, sqlite3.Error) as e:

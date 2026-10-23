@@ -106,6 +106,27 @@ def test_catalog_is_read_only_json():
     assert {a["name"] for a in cat} >= {"collectors", "usage.report", "syscheck"}
 
 
+def test_the_storage_and_sync_actions():
+    """1.17.1: storage use (sites and the hub) and sync status (the hub)."""
+    a = spec.get("storage.use")
+    assert a.where == frozenset({spec.SITE, spec.HUB}) and a.hub_db and a.names
+    assert spec.check(a, {}) == {"days": 30}
+    ok = spec.check(a, {"server": "fs1", "path": "/home/", "over": "1T", "top": "20", "days": 7})
+    assert ok == {"server": "fs1", "path": "/home", "over": "1T", "top": 20, "days": 7}
+    argv = runner.build_argv(a, ok, hub_db=Path("/h/combined.db"))
+    assert argv[3:] == ["storage", "use", "--server", "fs1", "--path", "/home", "--over", "1T", "--top", "20",
+                        "--days", "7", "--db", "/h/combined.db"]
+    for bad in ({"path": "home"}, {"path": "/home/../etc"}, {"path": "/home dir"}, {"path": "/a//b"},
+                {"path": "/home\n"}, {"over": "1 T"}, {"over": "-1T"}, {"over": "1X"}, {"over": "--db=/x"},
+                {"top": 0}, {"top": 1001}, {"days": 0}, {"days": 3651}, {"server": "-x"}, {"mask": True}):
+        with pytest.raises(ActionError):
+            spec.check(a, bad)
+    s = spec.get("sync.status")
+    assert s.where == frozenset({spec.HUB}) and s.hub_db and not s.names and not s.params
+    assert runner.build_argv(s, {}, hub_db=Path("/h/c.db"))[3:] == ["sync", "status", "--db", "/h/c.db"]
+    assert {"storage.use", "sync.status"} <= {x["name"] for x in spec.catalog()}
+
+
 # --- building and running a command ------------------------------------------------------
 
 def test_argv_positional_after_double_dash():

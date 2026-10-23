@@ -32,12 +32,16 @@ change something will come as a dry run followed by an apply, the way
 | `insights.brief` | hub | `nomad insights brief` (`site`, `hours`) |
 | `console.roles` | hub | `nomad console roles --mask` (`netid`) |
 | `lab.show` | hub | `nomad lab show` (`lab`) |
+| `storage.use` | hub, sites | `nomad storage use` (`server`, `path`, `over`, `top`, `days`) |
+| `sync.status` | hub | `nomad sync status` |
 | `usage.report` | hub | `nomad usage-report` (`from`, `to`, `cluster`, `min_cell`) |
 
 How parameters are checked:
 - **Numbers** must fall within their bounds.
 - **Dates** must be real dates; a period can be at most five years and can't end after tomorrow.
 - **Names** use letters, digits, `.`, `_` and `-` (plus `$` for a lab), and can't start with a dash.
+- **Paths** are absolute (`/home`), of letters, digits and `. _ / + @ , : = -` only.
+- **Sizes** are written as `--over` takes them: `500G`, `1T`, `2TB`.
 - **Sites** must be among the hub's sites.
 - **Unknown parameters** are refused, not ignored.
 
@@ -46,8 +50,9 @@ report writes into `~/.local/share/nomad/reports/` (readable only by its
 owner). The Console offers those files by name and nothing outside that
 directory.
 
-`alerts` and `lab.show` can name people or groups, as the commands do. The
-catalog marks them (`names`) so the Console shows them to administrators only.
+`alerts`, `per_user`, `lab.show` and `storage.use` can name people or groups,
+as the commands do. The catalog marks them (`names`) so the Console shows them
+to administrators only.
 
 ## How the hub reaches a site
 

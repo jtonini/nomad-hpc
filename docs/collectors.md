@@ -404,7 +404,7 @@ nomad per-user --db ~/.local/share/nomad/combined.db --days 30   # every site, o
 nomad per-user --mask                # user and command names replaced, for sharing
 ```
 
-Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
+Each host is named with its role, as its `role` setting says (from its latest sample or flag): `login1 (login node)`, `rstudio1 (interactive server)`, `node01 (compute node)`. Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
 
 ## Interactive servers (RStudio, JupyterHub)
 

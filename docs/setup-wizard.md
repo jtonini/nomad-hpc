@@ -366,6 +366,22 @@ nomad dashboard --db ~/.local/share/nomad/combined.db
 */10 * * * * /path/to/nomad sync 2>/dev/null
 ```
 
+5. See how the syncs go (it only reads; the Console's `sync.status` action
+   runs it):
+
+```bash
+nomad sync status
+```
+
+   For each site in `[hub] sites`: when its data was last brought up to date,
+   how (only what changed, copied whole, or kept what the hub had because the
+   sync failed), how many rows, the last live pull, whether it is late (more
+   than `alert_after_minutes`, 120), what the next sync will ask for, how many
+   attempts failed in a row and the last error. A site never synced, and one
+   no longer in `[hub] sites` (its rows go at the next sync), are said too.
+   `nomad sync -c FILE -o DB status` reads the hub a sync with those options
+   would.
+
 How a site's database reaches the hub, and what happens when it doesn't:
 
 * **Only what changed (1.17).** Each site keeps a log of the rows its
