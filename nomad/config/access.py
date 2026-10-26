@@ -5,6 +5,7 @@
     [console.roles]
     admin = ["jtonini"]            # everything, settings included
     operator = []                  # everything, no settings
+    viewer = []                    # named: their own work, whatever else says so
 
     [console.labs]
     group_pattern = "{netid}$"     # the group a faculty member leads, by its name
@@ -36,7 +37,9 @@ server shared by everyone should say so, or its use reads as the lab's.
 
 The file names people. The Console's users.json keeps only what is private or
 automatic: the break-glass password, and the record made at someone's first
-login. For anyone named here, the file wins.
+login. For anyone named here, the file wins: ``viewer`` names someone who is
+a viewer whatever else would make them more (a directory admin group, an
+older role in the Console's own records).
 """
 from __future__ import annotations
 
@@ -48,6 +51,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 ROLES = ("admin", "operator")       # what the file can grant; anyone else is a viewer
+FILE_ROLES = ROLES + ("viewer",)    # the lists [console.roles] may have
 _LABS_KEYS = ("group_pattern", "leads", "resources")
 RESOURCE_KINDS = ("workstations", "storage")
 OTHER_USER = "another user"
@@ -82,6 +86,7 @@ def _names(value, where: str, problems: list) -> list[str]:
 class Access:
     admins: frozenset = frozenset()
     operators: frozenset = frozenset()
+    viewers: frozenset = frozenset()                # named viewers: the file says so
     group_pattern: str = ""
     leads: dict = field(default_factory=dict)       # netid -> tuple of group names
     resources: dict = field(default_factory=dict)   # group -> {kind: tuple of names}
@@ -99,9 +104,15 @@ class Access:
             return "operator"
         return None
 
+    def file_role(self, netid) -> str | None:
+        """The role the file gives: 'admin', 'operator', 'viewer' (named as
+        one), or None when it names no role for this person."""
+        n = _netid(netid)
+        return self.role(n) or ("viewer" if n in self.viewers else None)
+
     def named(self) -> set:
         """Everyone the file names: their access is the file's, not users.json's."""
-        return set(self.admins) | set(self.operators) | set(self.leads)
+        return set(self.admins) | set(self.operators) | set(self.viewers) | set(self.leads)
 
     def lab_label(self, group: str) -> str:
         """"Smith Lab (jsmith$)" when the lab has a name, else the group."""
@@ -158,13 +169,13 @@ def access_from(config: dict | None, log: bool = True) -> Access:
     if not isinstance(roles, dict):
         problems.append("[console.roles] is not a table; ignored")
         roles = {}
-    found = {r: set() for r in ROLES}
+    found = {r: set() for r in FILE_ROLES}
     for key, value in roles.items():
-        if key not in ROLES:
+        if key not in FILE_ROLES:
             hint = (" (a PI comes from [console.labs]: group_pattern or leads)"
                     if key.lower() in ("pi", "pis", "lead", "leads") else "")
             problems.append(f"[console.roles] {key}: not a role; roles are "
-                            f"{', '.join(ROLES)}{hint}")
+                            f"{', '.join(FILE_ROLES)}{hint}")
             continue
         for name in _names(value, f"[console.roles] {key}", problems):
             found[key].add(_netid(name))
@@ -172,6 +183,10 @@ def access_from(config: dict | None, log: bool = True) -> Access:
     for n in sorted(both):
         problems.append(f"{n} is both admin and operator: admin")
     found["operator"] -= found["admin"]
+    for n in sorted(found["viewer"] & (found["admin"] | found["operator"])):
+        problems.append(f"{n} is listed as a viewer and as {'admin' if n in found['admin'] else 'operator'}: "
+                        f"{'admin' if n in found['admin'] else 'operator'}")
+    found["viewer"] -= found["admin"] | found["operator"]
 
     labs = console.get("labs") or {}
     if not isinstance(labs, dict):
@@ -234,6 +249,7 @@ def access_from(config: dict | None, log: bool = True) -> Access:
     for p in problems if log else ():
         logger.warning("nomad.toml: %s", p)
     return Access(admins=frozenset(found["admin"]), operators=frozenset(found["operator"]),
+                  viewers=frozenset(found["viewer"]),
                   group_pattern=pattern, leads=leads, resources=resources,
                   servers=servers, lab_names=lab_names, problems=tuple(problems))
 

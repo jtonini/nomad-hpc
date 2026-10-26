@@ -27,6 +27,13 @@ except ModuleNotFoundError:                    # Python 3.10: the toml package
 def loads(text: str) -> dict:
     return _parser.loads(text)
 
+
+def lines_of(text: str) -> list:
+    """The lines of ``text``, each with its newline: split at newlines
+    only, as TOML is (str.splitlines also splits at U+2028, U+0085 and
+    others, which TOML allows inside strings and comments)."""
+    return re.findall(r"[^\n]*\n|[^\n]+$", text)
+
 _HEADER = re.compile(r'^\s*(\[\[?)\s*(.+?)\s*\]\]?\s*(#.*)?$')
 _KEY = re.compile(r'\s*(?:"((?:[^"\\]|\\.)*)"|\'([^\']*)\'|([A-Za-z0-9_-]+))\s*(?:\.|$)')
 
@@ -82,7 +89,12 @@ class TomlEdit:
     def __init__(self, path):
         # A symlinked nomad.toml is edited where it points.
         self.path = Path(path).expanduser().resolve()
-        self.original = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
+        # As it is on disk, to tell at save() whether someone else changed it
+        # meanwhile; the text is edited with plain newlines, and written back
+        # with the file's own (CRLF stays CRLF).
+        self.raw = self.path.read_bytes() if self.path.exists() else None
+        self.original = self.raw.decode("utf-8").replace("\r\n", "\n") if self.raw is not None else ""
+        self.crlf = self.raw is not None and b"\r\n" in self.raw
         self.text = self.original
         if self.text and not self.text.endswith("\n"):
             self.text += "\n"
@@ -96,7 +108,7 @@ class TomlEdit:
         """(lines, [(start, end, path, is_array)]): each table's line range,
         from its header to the next header. Comment lines just before the
         next header are left to that table."""
-        lines = self.text.splitlines(keepends=True)
+        lines = lines_of(self.text)
         heads = []
         for i, line in enumerate(lines):
             m = _HEADER.match(line)
@@ -218,7 +230,7 @@ class TomlEdit:
         rather than guess."""
         from nomad.config.problems import _before_equals
         out, table = [], ()
-        for i, line in enumerate(self.text.splitlines(keepends=True)):
+        for i, line in enumerate(lines_of(self.text)):
             m = _HEADER.match(line)
             if m and line.lstrip().startswith("["):
                 table = key_path(m.group(2))
@@ -249,7 +261,7 @@ class TomlEdit:
     def remove_line(self, index: int) -> None:
         """Remove one line; ValueError (nothing removed) if the file then
         doesn't parse -- a value spread over several lines."""
-        lines = self.text.splitlines(keepends=True)
+        lines = lines_of(self.text)
         before = self.text
         self.text = "".join(lines[:index] + lines[index + 1:])
         try:
@@ -259,44 +271,130 @@ class TomlEdit:
             raise ValueError(f"line {index + 1} of {self.path.name} goes on over several "
                              "lines") from e
 
-    def save(self, check, stamp: str | None = None) -> Path | None:
+    def _lock(self):
+        """The file, open and locked (None when it doesn't exist yet): the
+        one at the path once the lock is held -- if another save replaced
+        it meanwhile, its replacement is locked instead."""
+        try:
+            import fcntl
+        except ImportError:
+            return None
+        for _ in range(20):
+            try:
+                held = open(self.path, "rb")
+            except FileNotFoundError:
+                return None
+            fcntl.flock(held, fcntl.LOCK_EX)
+            try:
+                st, now = os.fstat(held.fileno()), os.stat(self.path)
+                if (st.st_ino, st.st_dev) == (now.st_ino, now.st_dev):
+                    return held
+            except FileNotFoundError:
+                pass
+            held.close()
+        raise ValueError(f"{self.path} keeps being replaced; try again")
+
+    def save(self, check, stamp: str | None = None, tag: str = "lab",
+             keep: int | None = None) -> Path | None:
         """Write the edit if it parses and check(data) holds; the backup's path
-        (None for a new file). Raises ValueError, writing nothing, otherwise."""
+        (None for a new file). Raises ValueError, writing nothing, otherwise,
+        and when the file changed on disk since it was read (someone else's
+        edit is never overwritten). Backups are FILE.bak-TAG-STAMP; with
+        ``keep``, only the newest that many of this tag's stay."""
         try:
             data = loads(self.text)
         except DecodeError as e:
             raise ValueError(f"{self.path} would not be valid TOML ({e})") from e
         if not check(data):
             raise ValueError(f"{self.path} would not read back as intended")
-        backup = None
-        mode = 0o600
-        owner = None
-        if self.path.exists():
-            st = self.path.stat()
-            mode = st.st_mode & 0o777
-            owner = (st.st_uid, st.st_gid)
-            stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
-            backup = self.path.with_name(f"{self.path.name}.bak-lab-{stamp}")
-            n = 1
-            while backup.exists():               # two edits in one second
-                n += 1
-                backup = self.path.with_name(f"{self.path.name}.bak-lab-{stamp}-{n}")
-            shutil.copy2(self.path, backup)
-        # The new file keeps the old one's permissions (it may hold passwords).
-        tmp = self.path.with_name(self.path.name + ".new")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(self.text)
-        os.chmod(tmp, mode)
-        # And its owner: written as root, it must stay readable by the account
-        # that runs nomad and the Console. (Not root: chown fails, as before.)
-        if owner is not None and hasattr(os, "chown"):
+        # One save at a time on this file (a lock on it, held to the
+        # replace), and only if nobody changed it since it was read.
+        held = self._lock()
+        try:
+            now = self.path.read_bytes() if self.path.exists() else None
+            if now != self.raw:
+                raise ValueError(f"{self.path} changed since it was read (someone else's edit); "
+                                 "read it again and redo the change")
+            backup = None
+            mode = 0o600
+            owner = None
+            if self.path.exists():
+                st = self.path.stat()
+                mode = st.st_mode & 0o777
+                owner = (st.st_uid, st.st_gid)
+                stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+                backup = self.path.with_name(f"{self.path.name}.bak-{tag}-{stamp}")
+                n = 1
+                while backup.exists():               # two edits in one second
+                    n += 1
+                    backup = self.path.with_name(f"{self.path.name}.bak-{tag}-{stamp}-{n}")
+                shutil.copy2(self.path, backup)
+            # The new file keeps the old one's permissions (it may hold
+            # passwords), and is made afresh under a name of its own: never
+            # written through something already there, nor shared with
+            # another save.
+            import tempfile
+            fd, tmp_name = tempfile.mkstemp(prefix=f".{self.path.name}.", suffix=".new",
+                                            dir=self.path.parent)
+            tmp = Path(tmp_name)
             try:
-                os.chown(tmp, *owner)
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                    f.write(self.text.replace("\n", "\r\n") if self.crlf else self.text)
+                    f.flush()
+                    os.fsync(f.fileno())         # on disk before it takes the file's place
+                os.chmod(tmp, mode)
+                # And its owner: written as root, it must stay readable by the
+                # account that runs nomad and the Console. (Not root: chown
+                # fails, as before.)
+                if owner is not None and hasattr(os, "chown"):
+                    try:
+                        os.chown(tmp, *owner)
+                    except OSError:
+                        try:                     # not root: at least the group, if ours
+                            os.chown(tmp, -1, owner[1])
+                        except OSError:
+                            pass
+                # Last look, still under the lock: the file is the one locked
+                # and as it was read (a writer that doesn't lock, an editor
+                # saving, can swap it meanwhile).
+                if held is not None:
+                    st, now_st = os.fstat(held.fileno()), os.stat(self.path)
+                    if ((st.st_ino, st.st_dev) != (now_st.st_ino, now_st.st_dev)
+                            or self.path.read_bytes() != self.raw):
+                        raise ValueError(f"{self.path} changed while this was saving (someone "
+                                         "else's edit); read it again and redo the change")
+                os.replace(tmp, self.path)
+            except BaseException:
+                tmp.unlink(missing_ok=True)
+                if backup is not None:
+                    backup.unlink(missing_ok=True)   # nothing was saved: no backup of it
+                raise
+            try:                                 # and the swap itself
+                dfd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
             except OSError:
-                try:                     # not root: at least the group, if ours
-                    os.chown(tmp, -1, owner[1])
+                pass
+        finally:
+            if held is not None:
+                held.close()
+        if keep is not None and backup is not None:
+            # Only the ones this made (FILE.bak-TAG-STAMP[-N]), by stamp then
+            # -N: a backup someone named by hand stays.
+            ours = re.compile(rf"{re.escape(self.path.name)}\.bak-{re.escape(tag)}-(\d{{8}}-\d{{6}})(?:-(\d+))?")
+
+            def order(p):
+                m = ours.fullmatch(p.name)
+                return (m.group(1), int(m.group(2) or 1))
+            old = sorted((p for p in self.path.parent.glob(f"{self.path.name}.bak-{tag}-*")
+                          if p != backup and ours.fullmatch(p.name)), key=order)
+            for stale in old[:max(0, len(old) - (keep - 1))] if keep > 0 else old:
+                try:
+                    stale.unlink()
                 except OSError:
                     pass
-        os.replace(tmp, self.path)
+        self.raw = self.path.read_bytes()
+        self.original = self.raw.decode("utf-8").replace("\r\n", "\n")
         return backup

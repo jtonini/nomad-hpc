@@ -101,8 +101,8 @@ def _render(v) -> str:
 def _set_key(edit, table: tuple, key: str, v, keep_comment: bool = True) -> None:
     """key = v in [table]: on the line that sets it now, else as a new first
     line of the table (or a new table)."""
-    from nomad.config.edit import quoted_key
-    lines = edit.text.splitlines(keepends=True)
+    from nomad.config.edit import lines_of, quoted_key
+    lines = lines_of(edit.text)            # as key_lines counts them: at newlines only
     for i, t, k in edit.key_lines():
         if t == table and k == (key,):
             old = lines[i]
@@ -179,8 +179,8 @@ def plan(path, changes: Changes) -> Plan:
         settings = ccfg.from_dict(loads(edit.text), path)
     except (DecodeError, ccfg.CondoConfigError) as e:
         raise EditError(f"the result wouldn't read ({e}); nothing changed") from None
-    diff = "".join(difflib.unified_diff(edit.original.splitlines(keepends=True),
-                                        edit.text.splitlines(keepends=True),
+    from nomad.config.edit import lines_of
+    diff = "".join(difflib.unified_diff(lines_of(edit.original), lines_of(edit.text),
                                         str(path), f"{path} (new)", n=1))
     return Plan(path, edit, diff, settings)
 

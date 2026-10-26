@@ -341,6 +341,7 @@ from = "hpc@your-institution.edu"   # must be an address the server accepts;
 [console.roles]
 admin = []                   # NetIDs: everything, settings included
 operator = []                # everything, no settings
+viewer = []                  # named: their own work, whatever else says
 
 [console.labs]
 # A PI also sees the members of the labs they lead: the group named by

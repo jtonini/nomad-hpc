@@ -115,7 +115,7 @@ def test_cli_roles(tmp_path, db):
 
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(db)])
     assert r.exit_code == 0, r.output
-    assert "viewer, and a PI: leads 2 labs" in r.output
+    assert "(a viewer unless given a role there), and a PI: leads 2 labs" in r.output
     assert "chemlab$: 2 members" in r.output and "carol$: 4 members" in r.output
     assert "their own work and 4 lab members" in r.output
 

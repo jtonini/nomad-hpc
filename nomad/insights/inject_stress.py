@@ -18,9 +18,29 @@ from datetime import datetime, timedelta
 import random
 
 
+# The stress jobs' numbers, far above the generated ones (1001 on).
+STRESS_JOBS = 7700000
+
+
+def _times(end, wait_s, run_s):
+    """(submitted, started, ended) as text, for a job that ended at end."""
+    start = end - timedelta(seconds=run_s)
+    return ((start - timedelta(seconds=wait_s)).isoformat(), start.isoformat(), end.isoformat())
+
+
 def inject_stress_scenarios(db_path: str):
     """Inject stress data into an existing demo database."""
     conn = sqlite3.connect(db_path)
+    try:
+        _inject(conn)
+        conn.commit()
+    finally:
+        # Closed whatever happens: a failure left the database locked for
+        # the rest of the process (`nomad demo --console` writes to it next).
+        conn.close()
+
+
+def _inject(conn):
     c = conn.cursor()
     now = datetime.now()
     random.seed(42)
@@ -44,14 +64,17 @@ def inject_stress_scenarios(db_path: str):
 
     # ── 2. GPU OOM + partition failures ──────────────────────────────
     # GPU jobs that fail with OOM in the gpu partition
+    # (Numbers of their own, replaced when the demo is made again: a second
+    # run's duplicates used to undo all of this. Times that add up: submitted,
+    # waited, started, ran, ended.)
     for i in range(15):
-        ts = (now - timedelta(hours=random.uniform(0, 48))).isoformat()
-        c.execute("""INSERT INTO jobs
+        end = now - timedelta(hours=random.uniform(0, 48))
+        c.execute("""INSERT OR REPLACE INTO jobs
             (job_id, cluster, user_name, partition, state, submit_time, start_time,
              end_time, runtime_seconds, wait_time_seconds, req_cpus, req_gpus, req_mem_mb)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f"stress-gpu-{i}", "demo-cluster", f"mluser{i%3}", "gpu", "OUT_OF_MEMORY",
-             ts, ts, ts, 600, 300, 8, random.choice([1, 2]), 32000))
+            (str(STRESS_JOBS + i), "demo-cluster", f"mluser{i%3}", "gpu", "OUT_OF_MEMORY",
+             *_times(end, 300, 600), 600, 300, 8, random.choice([1, 2]), 32000))
 
     # ── 3. Network latency spike ─────────────────────────────────────
     for h in range(12):
@@ -75,14 +98,14 @@ def inject_stress_scenarios(db_path: str):
 
     # High wait times on gpu partition jobs
     for i in range(20):
-        ts = (now - timedelta(hours=random.uniform(0, 12))).isoformat()
-        wait = random.uniform(7200, 14400)  # 2-4 hours wait, above 1h threshold
-        c.execute("""INSERT INTO jobs
+        end = now - timedelta(hours=random.uniform(0, 12))
+        wait = int(random.uniform(7200, 14400))  # 2-4 hours wait, above 1h threshold
+        c.execute("""INSERT OR REPLACE INTO jobs
             (job_id, cluster, user_name, partition, state, submit_time, start_time,
              end_time, runtime_seconds, wait_time_seconds, req_cpus, req_gpus, req_mem_mb)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f"stress-wait-{i}", "demo-cluster", f"gpuuser{i%5}", "gpu", "COMPLETED",
-             ts, ts, ts, 3600, wait, 8, 1, 16000))
+            (str(STRESS_JOBS + 100 + i), "demo-cluster", f"gpuuser{i%5}", "gpu", "COMPLETED",
+             *_times(end, wait, 3600), 3600, wait, 8, 1, 16000))
 
     # ── 5. Cloud: underutilized expensive instances ──────────────────
     for h in range(24):
@@ -105,23 +128,20 @@ def inject_stress_scenarios(db_path: str):
     for h in range(6):
         ts = (now - timedelta(hours=h)).isoformat()
         # Two workstations maxed out
-        c.execute("""INSERT INTO workstation_state
-            (timestamp, hostname, department, status, cpu_percent, memory_percent,
-             disk_percent, users_logged_in, load_1m, load_5m, load_15m)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (ts, "login-node-01", "research", "online",
-             92 + random.uniform(0, 5), 94 + random.uniform(0, 4),
-             45, 8, 32.5, 28.1, 24.3))
-        c.execute("""INSERT INTO workstation_state
-            (timestamp, hostname, department, status, cpu_percent, memory_percent,
-             disk_percent, users_logged_in, load_1m, load_5m, load_15m)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (ts, "login-node-02", "research", "online",
-             88 + random.uniform(0, 8), 91 + random.uniform(0, 6),
-             52, 6, 28.7, 25.2, 22.8))
-
-    conn.commit()
-    conn.close()
+        # (The workstation table's own columns: until 1.17.4 these named
+        # others, so the insert failed and the scenarios above were lost.)
+        for host, cpu, mem, disk, users, loads in (
+                ("login-node-01", 92 + random.uniform(0, 5), 94 + random.uniform(0, 4), 45, 8,
+                 (32.5, 28.1, 24.3)),
+                ("login-node-02", 88 + random.uniform(0, 8), 91 + random.uniform(0, 6), 52, 6,
+                 (28.7, 25.2, 22.8))):
+            c.execute("""INSERT INTO workstation_state
+                (timestamp, hostname, department, status, cpu_count, cpu_user_pct, cpu_idle_pct,
+                 memory_total_mb, memory_used_mb, memory_free_mb, disk_usage_pct, users_logged_in,
+                 load_avg_1m, load_avg_5m, load_avg_15m)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (ts, host, "research", "online", 32, cpu, 100 - cpu, 131072,
+                 int(131072 * mem / 100), int(131072 * (100 - mem) / 100), disk, users, *loads))
 
     print("  Stress scenarios injected:")
     print("    - Disk: scratch-nfs filling 82%->98% over 12h")

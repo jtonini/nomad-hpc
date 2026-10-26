@@ -105,6 +105,7 @@ runs it:
 [console.roles]
 admin = ["jtonini"]            # everything, settings included
 operator = []                  # everything, no settings
+viewer = []                    # named: their own work, whatever else says
 
 [console.labs]
 group_pattern = "{netid}$"     # the group a faculty member leads, by its name
@@ -119,6 +120,22 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 name = "sarahvaughan"
 note = "community $HOME, all users"
 ```
+
+`nomad console role NETID admin|operator|viewer|none` changes one person's
+role here (`--apply` writes it): only their name in the `admin`, `operator`
+and `viewer` lists changes, and each list's line and comment stay. `viewer`
+names them a viewer whatever else would make them more (a directory admin
+group, an older role in the Console's own records); `none` takes them off
+every list, so the Console's own record decides. Roles written inline
+(`roles = {...}`), a list spread over several lines, or a multi-line string
+are left to be changed by hand. It refuses to write when the file changed
+since it was read, keeps the file's line endings, and keeps the newest 20 of
+its backups (`nomad.toml.bak-role-*`; ones named by hand stay). Give it the
+file the Console reads. Saving writes in the file's folder (the backup, then
+the new file swapped in), so run it as an account that can write that folder,
+or as root (`sudo -u nomad nomad -c /etc/nomad/nomad.toml console role jdoe
+operator --apply` where the nomad account or its group may write /etc/nomad;
+else `sudo nomad -c ...`).
 
 - **Viewer:** anyone the file does not name who signs in. They see their own
   work, and the aggregates (queues, capacity, storage) everyone sees.

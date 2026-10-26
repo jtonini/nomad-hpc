@@ -14,6 +14,7 @@ Usage:
 
 import random
 import sqlite3
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -112,7 +113,9 @@ class DemoGenerator:
         job_name = random.choice(DEMO_CLUSTER["job_names"])
 
         # User behavior profile
-        user_skill = hash(user) % 3
+        # crc32, not hash(): Python varies str hashes per process, so --seed
+        # gave other users other skills on every run (1.17.4).
+        user_skill = zlib.crc32(user.encode()) % 3
         base_failure_rate = [0.05, 0.12, 0.25][user_skill]
         nfs_heavy_prob = [0.1, 0.3, 0.6][user_skill]
 
@@ -1456,15 +1459,20 @@ def run_demo(
     seed: int | None = None,
     launch_dashboard: bool = True,
     port: int = 5000,
+    db_path: str | Path | None = None,
+    clear: bool = True,
 ) -> str:
     """
     Run NØMAÐ demo mode.
 
     Generates synthetic data and optionally launches the dashboard.
+    db_path: where (default ~/nomad_demo.db).
     """
-    db_path = get_demo_db_path()
+    db_path = Path(db_path) if db_path else get_demo_db_path()
 
-    import os; os.system("clear" if os.name != "nt" else "cls")
+    import os
+    if clear:
+        os.system("clear" if os.name != "nt" else "cls")
     print()
     print("  ┌─────────────────────────────────────────┐")
     print("  │                                         │")
@@ -1521,6 +1529,71 @@ def run_demo(
 # timeline with a behavioural shift partway through) so `nomad energy compare`
 # can show that targeted interventions measurably reduce energy waste --
 # the core result for the energy paper.
+
+def make_console_demo(where, n_jobs: int = 1000, days: int = 7, seed: int | None = None) -> dict:
+    """A demo the Console runs on (1.17.4, nomad.demo_cast): the demo
+    cluster's data with the cast in it in WHERE/nomad_demo.db, and the
+    cast's nomad.toml in WHERE/.config/nomad/nomad.toml, where a Console
+    started with HOME=WHERE reads both.
+
+    WHERE is made if missing. Never in a real home: not this account's
+    own, and not where a database or a nomad.toml is that the demo didn't
+    make (each is replaced only when it is the demo's). The new database is
+    built beside the old one and put in its place at the end, so a run cut
+    short leaves the last demo as it was."""
+    import os
+    from nomad.demo_cast import TOML_MARK, add_cast, demo_toml, is_demo_db
+    where = Path(where).expanduser().resolve()
+    homes = {Path.home().resolve()}
+    try:
+        import pwd
+        homes |= {Path(a.pw_dir).resolve() for a in pwd.getpwall() if a.pw_dir not in ("", "/")}
+    except (ImportError, OSError, KeyError):
+        pass
+    if where in homes:
+        raise ValueError(f"{where} is an account's home folder, whose nomad.toml nomad and the Console "
+                         "read there: make the demo in a folder of its own (nomad demo --console "
+                         "~/nomad-demo)")
+    db = where / "nomad_demo.db"
+    toml = where / ".config" / "nomad" / "nomad.toml"
+    if db.exists() or db.is_symlink():
+        if not is_demo_db(db):
+            raise ValueError(f"{db} is there and isn't a demo `nomad demo --console` made "
+                             "(plain `nomad demo` writes one too): make the demo in another folder")
+    if toml.exists() or toml.is_symlink():
+        try:
+            ours = toml.read_text(encoding="utf-8").startswith(TOML_MARK)
+        except OSError:
+            ours = False
+        if not ours or toml.is_symlink():
+            raise ValueError(f"{toml} is there and isn't the demo's: make the demo in another folder")
+    # A folder with other things in it is someone's: a new or empty one, or
+    # the last demo's.
+    building = where / ".nomad_demo.db.building"
+    scraps = {building.name, *(f"{building.name}{x}" for x in ("-journal", "-wal", "-shm"))}
+    if where.is_dir() and not (db.exists() or toml.exists()) and \
+            any(p.name not in scraps for p in where.iterdir()):
+        raise ValueError(f"{where} has other things in it and no demo: make the demo in a new or "
+                         "empty folder")
+    where.mkdir(parents=True, exist_ok=True)
+    for name in scraps:                       # a run cut short leaves these
+        (where / name).unlink(missing_ok=True)
+    try:
+        run_demo(n_jobs=n_jobs, days=days, seed=seed, launch_dashboard=False, db_path=building,
+                 clear=False)
+        added = add_cast(building, seed=seed, days=days)
+        for x in ("-journal", "-wal", "-shm"):
+            Path(f"{db}{x}").unlink(missing_ok=True)
+        os.replace(building, db)              # a symlink there is replaced, not followed
+    finally:
+        for name in scraps:
+            (where / name).unlink(missing_ok=True)
+    toml.parent.mkdir(parents=True, exist_ok=True)
+    fresh = toml.with_name(".nomad.toml.building")
+    fresh.write_text(demo_toml(), encoding="utf-8")
+    os.replace(fresh, toml)
+    return {"dir": str(where), "db": str(db), "toml": str(toml), **added}
+
 
 def get_intervention_db_path() -> Path:
     """Path for the intervention-scenario database."""

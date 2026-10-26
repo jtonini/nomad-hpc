@@ -6077,7 +6077,11 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
 @click.option('--seed', '-s', type=int, default=None, help='Random seed for reproducibility')
 @click.option('--port', '-p', type=int, default=5000, help='Dashboard port')
 @click.option('--no-launch', is_flag=True, help='Generate data only, do not launch dashboard')
-def demo(jobs, days, seed, port, no_launch):
+@click.option('--console', 'console_dir', type=click.Path(file_okay=False), default=None,
+              help='Make a demo for the Console in this folder instead: the data with a cast '
+                   '(a student, a research assistant, a PI, an instructor, an operator, an admin) '
+                   'and their nomad.toml.')
+def demo(jobs, days, seed, port, no_launch, console_dir):
     """Run demo mode with synthetic data.
 
     Generates realistic HPC job data and launches the dashboard.
@@ -6088,7 +6092,38 @@ def demo(jobs, days, seed, port, no_launch):
         nomad demo --jobs 500       # Generate 500 jobs
         nomad demo --no-launch      # Generate only, don't launch dashboard
         nomad demo --seed 42        # Reproducible data
+        nomad demo --console ~/nomad-demo    # a demo for the Console
     """
+    if console_dir is not None:
+        import shlex
+        from click.core import ParameterSource
+        from nomad.demo import make_console_demo
+        from nomad.demo_cast import CAST
+        if not str(console_dir).strip():
+            raise click.UsageError("--console needs a folder: nomad demo --console ~/nomad-demo")
+        ctx = click.get_current_context()
+        for name in ("port", "no_launch"):
+            if ctx.get_parameter_source(name) is not ParameterSource.DEFAULT:
+                click.echo(f"  (--{name.replace('_', '-')} is for the dashboard; not used with --console)")
+        try:
+            made = make_console_demo(console_dir, n_jobs=jobs, days=days, seed=seed)
+        except (ValueError, OSError) as e:
+            raise click.ClickException(str(e))
+        home = shlex.quote(made["dir"])
+        click.echo()
+        click.echo(f"  The Console's demo is in {made['dir']}:")
+        click.echo(f"    {made['db']}   the demo cluster, with its cast")
+        click.echo(f"    {made['toml']}   their lab, course and roles")
+        click.echo()
+        click.echo("  Start the Console on it, from the Console's backend folder, with the")
+        click.echo("  Python the Console runs on (its venv's, say):")
+        click.echo(f"    HOME={home} NOMAD_CONSOLE_DEMO=1 python3 -m uvicorn app.main:app --port 8000")
+        click.echo("  The demo is \"now\" as it was made: make it again for another day.")
+        click.echo()
+        click.echo("  Its sign-in page then offers, with no password:")
+        for p in CAST:
+            click.echo(f"    {p.user:<7} {p.label}: {p.about}")
+        return
     from nomad.demo import run_demo
     run_demo(
         n_jobs=jobs,
@@ -6341,6 +6376,65 @@ def _storage_lines(conn, acc, names, mask):
     return lines
 
 
+@console.command('role')
+@click.argument('netid')
+@click.argument('role', type=click.Choice(['admin', 'operator', 'viewer', 'none']))
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def console_role(ctx, netid, role, apply):
+    """Give one person a Console role in nomad.toml ([console.roles]).
+
+    \b
+    nomad console role jdoe operator            show the change
+    nomad console role jdoe operator --apply    write it (with a backup)
+    nomad console role jdoe viewer --apply      a viewer: their own work, whatever else says
+    nomad console role jdoe none --apply        on no list: the Console's own record decides
+
+    Only that person's name in the admin, operator and viewer lists
+    changes; the file's comments and layout stay. Give the file the Console
+    reads with -c, as an account that can write it and its folder (the
+    backup and the new file go there), or as root (e.g. sudo -u nomad nomad
+    -c /etc/nomad/nomad.toml console role ...). For anyone the file names, the
+    file decides their role in the Console (Console fix 58 on); `nomad
+    console roles NETID` shows what they see.
+    """
+    from nomad.config.access import access_from
+    from nomad.config.edit import loads
+    from nomad.config.roles import BACKUPS, RoleError, check_for, netid_of, role_of, set_role
+    edit = _lab_edit(ctx)
+    try:
+        n = netid_of(netid)
+        was = role_of(edit.data, n)
+        changes = set_role(edit, n, role)
+    except RoleError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    if not changes:
+        click.echo(f"{edit.path}: {n} is {'on no list' if role == 'none' else 'listed as ' + role} "
+                   "already; nothing to change.")
+        return
+    before = loads(edit.original) if edit.original.strip() else {}
+    click.echo(f"{edit.path}:")
+    for c in changes:
+        click.echo(f"  + {c}")
+    click.echo(f"  (was: {'on no list' if was == 'none' else was})")
+    if was == "admin" and not access_from(edit.data, log=False).admins:
+        click.echo("  The file names no administrator now: the Console's own (its break-glass "
+                   "account) still are.")
+    if not apply:
+        click.echo("\nNothing changed. Run again with --apply to write it.")
+        return
+    try:
+        backup = edit.save(check_for(before, n, role), tag="role", keep=BACKUPS)
+    except ValueError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    except OSError as e:
+        raise click.ClickException(
+            f"can't write {edit.path} ({e.strerror or e}): saving needs its folder writable too (the "
+            "backup and the new file go there), so run it as root or as an account that can; "
+            "nothing changed")
+    click.echo("\nWritten." + (f" Backup: {backup}" if backup else ""))
+
+
 @console.command('roles')
 @click.argument('netid', required=False)
 @click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
@@ -6375,6 +6469,8 @@ def console_roles(ctx, netid, db, mask):
         f"nothing: {err.path} can't be read" if err is not None else 'no config file')))
     click.echo(f"  admin:     {show(acc.admins)}")
     click.echo(f"  operator:  {show(acc.operators)}")
+    if acc.viewers:
+        click.echo(f"  viewer:    {show(acc.viewers)} (named: their own work, whatever else says)")
     rule = f'group_pattern "{acc.group_pattern}"' if acc.group_pattern else \
         "no group_pattern (labs only from leads)"
     click.echo(f"  labs:      {rule}; leads listed for {len(acc.leads)} "
@@ -6389,7 +6485,8 @@ def console_roles(ctx, netid, db, mask):
         named = sorted(name or server for server, (name, _note) in acc.servers.items())
         click.echo(f"  storage:   {len(named)} server{'' if len(named) == 1 else 's'} named"
                    + ("" if mask else f" ({', '.join(named)})"))
-    click.echo("  anyone else who signs in: viewer (their own work)")
+    click.echo("  anyone else who signs in: as the Console's own records say (a viewer, their own "
+               "work, unless given a role there)")
     for p in acc.problems:
         click.echo(click.style(f"  ! {p}", fg='yellow'))
     if not netid:
@@ -6406,12 +6503,13 @@ def console_roles(ctx, netid, db, mask):
     click.echo(f"\n{who}:")
     role = acc.role(netid)
     labs = acc.lab_groups(netid, exists, tagged)
+    pi = f", and a PI: leads {len(labs)} lab{'' if len(labs) == 1 else 's'}" if labs else ""
     if role:
         line = role
-    elif labs:
-        line = f"viewer, and a PI: leads {len(labs)} lab{'' if len(labs) == 1 else 's'}"
+    elif acc.file_role(netid) == "viewer":
+        line = "viewer (named one in the file, whatever else says)" + pi
     else:
-        line = "viewer"
+        line = "as the Console's own record says (a viewer unless given a role there)" + pi
     click.echo(f"  role: {line}")
     # Every group listed for them; the one their name gives only if it exists.
     listed = list(acc.leads.get(netid.strip().lower(), ()))
