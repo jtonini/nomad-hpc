@@ -141,6 +141,52 @@ doesn't list, condos whose partition is gone, and owners not confirmed.
   named for them by `group_pattern`, and the groups they `lead`), and the
   owners.
 
+## Idle condos while jobs waited elsewhere
+
+`nomad usage-report condos idle [--month 2026-09] [--json] [--mask]` measures
+what sharing condos more widely would offer, before anything changes in Slurm:
+
+- **Idle core-hours:** free cores (CPUTot - CPUAlloc) on the condo's nodes
+  while in service, each reading standing for the time until the next one, as
+  the monthly report counts them. **Open:** those on nodes that take jobs (not
+  draining, reserved or planned for a job); only open cores can take a waiting
+  job.
+- **Waiting elsewhere:** jobs waiting in partitions that don't reach the
+  condo's nodes (not the condo's own, not a guest partition over it). Once a
+  job runs Slurm keeps only the partition it ran in, so a job that also listed
+  a guest partition while it waited, and ran elsewhere, is counted.
+- **Waiting for the cluster:** since squeue last began showing the job waiting
+  for Resources or Priority (or its partition's nodes down) without a break. A
+  job held by its own limits (QOS, association, a dependency, a hold, nodes it
+  named) waited for those, and one never seen waiting for the cluster is left
+  out. This is recorded from nomad 1.18 on; older jobs count from when they
+  could start, and the command says how many had no reason recorded. Jobs
+  submitted in the month that started after it count too.
+- **Wanted by a waiting job:** at each reading, the waiting jobs whose request
+  fits on one free node -- cores, memory, GPUs -- with a time limit within
+  `guest_max_days` (no limit stored: how long it ran, once it ended; still
+  running or never ran: left out) are placed, the longest-waiting first. The cores placed are the idle
+  core-hours a waiting job could have used. It is the opportunity at each
+  moment, not a simulation: a job placed at one reading is placed again at the
+  next if it was in fact still waiting. For a job sacct hasn't reported (never
+  started, or not yet) nomad has only what squeue showed: its memory is read
+  per core (the larger reading), and GPUs asked for with `--gpus` aren't seen.
+- **Jobs that could have started earlier,** by at least 10 minutes, and by how
+  much (the median, and the job-hours in all, which is at most: two such jobs
+  may have wanted the same cores later). A job given up while it waited counts
+  until it was given up.
+- **Left out:** jobs asking for several nodes, longer than `guest_max_days`,
+  with no time limit and no finished run, too big for any of the condo's
+  nodes, or held by their own limits.
+- **Idle stretches:** the share of wholly idle, open node-hours in stretches of
+  at least 2, 6, 12 and 24 hours, and the length half of them reached: long
+  stretches are where guest jobs would rarely be pushed off.
+
+Each condo is measured on its own: one waiting job may count at several, so
+the condos' figures don't add up; the cluster's line counts each job once. No
+job or person is named; condos go by their names in report.toml (`--mask` for
+stand-ins).
+
 ## Finding the condos
 
 Nothing new runs at the sites: each node reading carries the node's

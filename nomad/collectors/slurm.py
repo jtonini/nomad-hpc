@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from nomad.db.jobkeys import (ACTIVE_STATES, ensure_job_columns, mem_per_node_mb, place, same_job,
-                              stored_job)
+                              stored_job, waiting_for_cluster)
 
 from .base import BaseCollector, CollectionError, registry
 
@@ -84,8 +84,9 @@ _JOB_UPSERT = f"""
      exit_signal, failure_reason,
      req_cpus, req_mem_mb, req_gpus, req_time_seconds,
      runtime_seconds, wait_time_seconds,
-     account, alloc_tres, alloc_gpus, work_root, work_tail, eligible_time)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     account, alloc_tres, alloc_gpus, work_root, work_tail, eligible_time,
+     pending_reason, req_nodes, ready_since)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(job_id) DO UPDATE SET
         submit_time = COALESCE(excluded.submit_time, jobs.submit_time),
         partition = CASE
@@ -124,14 +125,27 @@ _JOB_UPSERT = f"""
                         ELSE COALESCE(jobs.req_gpus, excluded.req_gpus) END,
         work_root = COALESCE(excluded.work_root, jobs.work_root),
         work_tail = COALESCE(excluded.work_tail, jobs.work_tail),
-        eligible_time = COALESCE(excluded.eligible_time, jobs.eligible_time)
+        eligible_time = COALESCE(excluded.eligible_time, jobs.eligible_time),
+        pending_reason = COALESCE(excluded.pending_reason, jobs.pending_reason),
+        -- The first count seen: while it waits, the nodes it asked for.
+        req_nodes = COALESCE(jobs.req_nodes, excluded.req_nodes),
+        -- Since when it has waited for the cluster without a break: set by the
+        -- first such reading, cleared by a reading that shows it held by its own
+        -- limits or settings, and by a requeue (a submit time after it).
+        ready_since = CASE
+            WHEN excluded.pending_reason IS NOT NULL AND excluded.ready_since IS NULL THEN NULL
+            WHEN excluded.ready_since IS NOT NULL
+                 AND (jobs.ready_since IS NULL OR jobs.ready_since < COALESCE(excluded.submit_time, ''))
+                THEN excluded.ready_since
+            WHEN jobs.ready_since < COALESCE(excluded.submit_time, '') THEN NULL
+            ELSE jobs.ready_since END
 """
 _JOB_FIELDS = ('job_id', 'user_name', 'group_name', 'partition', 'job_name', 'state',
                'node_list', 'submit_time', 'start_time', 'end_time', 'exit_code',
                'exit_signal', 'failure_reason', 'req_cpus', 'req_mem_mb', 'req_gpus',
                'req_time_seconds', 'runtime_seconds', 'wait_time_seconds',
                'account', 'alloc_tres', 'alloc_gpus', 'work_root', 'work_tail',
-               'eligible_time')
+               'eligible_time', 'pending_reason', 'req_nodes', 'ready_since')
 
 
 def gpu_count(tres) -> int:
@@ -216,6 +230,10 @@ class JobInfo:
     work_root: str | None = None
     work_tail: str | None = None
     eligible_time: datetime | None = None
+    # From squeue only (None: what is stored stays).
+    pending_reason: str | None = None
+    req_nodes: int | None = None
+    ready_since: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -244,6 +262,9 @@ class JobInfo:
             'work_root': self.work_root,
             'work_tail': self.work_tail,
             'eligible_time': self.eligible_time.isoformat() if self.eligible_time else None,
+            'pending_reason': self.pending_reason,
+            'req_nodes': self.req_nodes,
+            'ready_since': self.ready_since.isoformat() if self.ready_since else None,
         }
 
 
@@ -710,8 +731,8 @@ class SlurmCollector(BaseCollector):
     def _collect_jobs(self) -> list[JobInfo]:
         """Collect job information from squeue."""
         try:
-            # Format: JobID|User|Group|Partition|Name|State|NodeList|NumCPUs|MinMemory|Gres|TimeLimit|RunTime|SubmitTime|StartTime
-            format_str = "%i|%u|%g|%P|%j|%T|%N|%C|%m|%b|%l|%M|%V|%S"
+            # Format: JobID|User|Group|Partition|Name|State|NodeList|NumCPUs|MinMemory|Gres|TimeLimit|RunTime|SubmitTime|StartTime|Reason|NumNodes
+            format_str = "%i|%u|%g|%P|%j|%T|%N|%C|%m|%b|%l|%M|%V|%S|%r|%D"
 
             result = subprocess.run(
                 ['squeue', '-a', '-h', '-o', format_str],
@@ -748,6 +769,10 @@ class SlurmCollector(BaseCollector):
             parts = line.split('|')
             if len(parts) < 14:
                 return None
+            if len(parts) > 16:
+                # A '|' in the job name (%j, the fifth field): put it back together.
+                extra = len(parts) - 16
+                parts = parts[:4] + ['|'.join(parts[4:5 + extra])] + parts[5 + extra:]
 
             job_id = parts[0].strip()
             user_name = parts[1].strip()
@@ -768,6 +793,20 @@ class SlurmCollector(BaseCollector):
             # estimate: past or future, it is not a start.
             if _state_word(state) in NOT_STARTED:
                 start_time = None
+            # Why it waits, while it waits (a running job's is "None").
+            reason = parts[14].strip() if len(parts) > 14 else ''
+            pending_reason = (reason[:120] if _state_word(state) in NOT_STARTED
+                              and reason not in ('', 'None', '(null)') else None)
+            req_nodes = None
+            if len(parts) > 15 and parts[15].strip().isdigit() and int(parts[15].strip()) > 0:
+                req_nodes = int(parts[15].strip())
+            ready_since = None
+            if waiting_for_cluster(pending_reason):
+                # Never before its submission (this host's clock may be behind
+                # the controller's, and a later submit time means a requeue).
+                ready_since = datetime.now().replace(microsecond=0)
+                if submit_time is not None and submit_time > ready_since:
+                    ready_since = submit_time
 
             # Compute wait time for running jobs
             start_time = self._sane_start(start_time, submit_time)
@@ -799,6 +838,9 @@ class SlurmCollector(BaseCollector):
                 req_time_seconds=time_limit,
                 runtime_seconds=runtime,
                 wait_time_seconds=wait_time,
+                pending_reason=pending_reason,
+                req_nodes=req_nodes,
+                ready_since=ready_since,
             )
 
         except Exception as e:

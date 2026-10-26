@@ -118,6 +118,10 @@ class Job:
     runtime_s: float
     avg_cpu: float | None = None
     peak_gb: float | None = None
+    req_time_s: float | None = None       # the time limit asked for (None: none stored)
+    pending_reason: str | None = None     # the last reason Slurm gave while it waited (1.18)
+    req_nodes: int | None = None
+    ready_since: datetime | None = None   # first seen waiting for the cluster (1.18)
 
     def hours_in(self, t0: datetime, t1: datetime) -> float:
         return _overlap(self.start, self.end, t0, t1)
@@ -131,7 +135,8 @@ class Job:
 
 _COLS = ("job_id", "user_name", "partition", "node_list", "state", "submit_time", "eligible_time",
          "start_time", "end_time", "req_cpus", "req_mem_mb", "req_gpus", "alloc_tres", "alloc_gpus",
-         "runtime_seconds", "account", "source_site")
+         "runtime_seconds", "account", "source_site", "req_time_seconds", "pending_reason", "req_nodes",
+         "ready_since")
 
 
 def state_word(text) -> str:
@@ -207,7 +212,9 @@ def make_job(r: dict, lo: datetime, now: datetime) -> Job | None:
         state=state, submit=submit, ref=ref, start=start, end=end, ended=ended,
         cpus=cpus, gpus=int(gpus or 0), req_mem_mb=_num(r.get("req_mem_mb")),
         account=(str(r.get("account")).strip() or None) if r.get("account") else None,
-        alloc_tres=alloc, runtime_s=runtime)
+        alloc_tres=alloc, runtime_s=runtime, req_time_s=_num(r.get("req_time_seconds")),
+        pending_reason=(str(r.get("pending_reason")).strip() or None) if r.get("pending_reason") else None,
+        req_nodes=_int(r.get("req_nodes")) or None, ready_since=parse_time(r.get("ready_since")))
 
 
 def load_jobs(conn, site: str | None, lo: datetime, hi: datetime, now: datetime, *,

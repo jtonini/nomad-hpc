@@ -56,7 +56,29 @@ JOB_COLUMNS = (
     # met, its --begin time reached. A job held by those waited, but not for
     # the queue.
     ("eligible_time", "DATETIME"),
+    # 1.18, from squeue: the last reason Slurm gave while the job waited
+    # (Resources, Priority, QOSMaxJobsPerUserLimit, Dependency...) -- whether
+    # it waited for the cluster or for its own limits -- and the nodes it
+    # asked for.
+    ("pending_reason", "TEXT"),
+    ("req_nodes", "INTEGER"),
+    # ... and since when it has waited for the cluster without a break
+    # (Resources, Priority): a job held by its own limits waited for those.
+    ("ready_since", "DATETIME"),
 )
+
+# Waiting reasons that mean a job waited for the cluster -- free nodes, its
+# turn -- not for its own limits or settings (QOS*, Assoc*, Dependency,
+# BeginTime, JobHeld*, ReqNodeNotAvail when it named its nodes, ...).
+_FOR_CLUSTER = ("Resources", "Priority", "Nodes required for job are DOWN", "PartitionDown")
+
+
+def waiting_for_cluster(reason) -> bool | None:
+    """True/False from Slurm's waiting reason; None when there is none."""
+    r = str(reason or "").strip()
+    if not r or r in ("None", "(null)"):
+        return None
+    return r.startswith(_FOR_CLUSTER)
 
 
 _MEM_UNIT = {'K': 1 / 1024, 'M': 1, 'G': 1024, 'T': 1024 ** 2, 'P': 1024 ** 3}

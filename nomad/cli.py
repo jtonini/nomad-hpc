@@ -412,6 +412,105 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
             click.echo(f"  - {item}")
 
 
+@cli.command('partitions')
+@click.option('--site', help='Only this site (on a hub).')
+@click.option('--changes', 'show_changes', is_flag=True, help='When partitions appeared, changed or went.')
+@click.option('--days', default=90, show_default=True, help='With --changes: how far back.')
+@click.option('--db', type=click.Path(dir_okay=False),
+              help="Database (default: the hub's combined.db if there is one, else this host's).")
+@click.option('--json', 'as_json', is_flag=True, help='As JSON.')
+@click.pass_context
+def partitions_cmd(ctx, site, show_changes, days, db, as_json):
+    """Each Slurm partition's limits, who may use it, and its preemption.
+
+    \b
+    nomad partitions                  as the node_state collector last read them
+    nomad partitions --site c1
+    nomad partitions --changes        what changed in the last 90 days
+
+    Read from `scontrol show partition` at each node_state collection, and
+    stored when something changes.
+    """
+    import json as _json
+    from nomad import partitions as parts
+    db_path = _usage_db(ctx, db)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        have = parts._has(conn, parts.SETTINGS)
+        if site and have and "source_site" not in have:
+            raise click.ClickException("--site is for a hub's combined database (this one is one site's)")
+        rows = parts.current(conn, site)
+        hist = parts.changes(conn, site, datetime.now() - timedelta(days=days)) if show_changes else []
+        everywhere = parts.current(conn, None, gone=True) if site and not rows else rows
+    finally:
+        conn.close()
+    if site and not rows and not hist:
+        sites = sorted({r["site"] for r in everywhere if r["site"]})
+        raise click.ClickException(
+            f"no partitions for site {site}" + (f" (sites: {', '.join(sites)})" if sites else
+                                                " (--site is for a hub's combined database)"))
+    if as_json:
+        click.echo(_json.dumps({"partitions": rows, "changes": hist} if show_changes else rows,
+                               indent=2, default=str))
+        return
+    if not rows and not hist:
+        click.echo("No partition settings stored yet: the node_state collector reads them "
+                   "(nomad 1.18 or later, at a Slurm site).")
+        return
+    if show_changes:
+        if not hist:
+            click.echo(f"No changes in the last {days} days.")
+        for c in hist:
+            where = f"{c['site']}: " if c["site"] else ""
+            if c["kind"] == "changed" and c["changes"]:
+                what = "; ".join(f"{k} {a} -> {b}" for k, (a, b) in c["changes"].items())
+            else:
+                what = {"new": "first seen", "gone": "no longer listed",
+                        "back": "listed again"}.get(c["kind"], c["kind"])
+            click.echo(f"{c['at'][:16]}  {where}{c['partition']}: {what}")
+        return
+    from nomad.hostlist import expand_hostlist
+    by_site: dict = {}
+    for r in rows:
+        by_site.setdefault(r["site"] or r["cluster"], []).append(r)
+    for name, ps in by_site.items():
+        click.echo(f"{name} ({len(ps)} partitions)")
+        for p in ps:
+            n = len(expand_hostlist(p.get("nodes"))) or p.get("total_nodes") or 0
+            limit = parts.time_text(p.get("max_time_min"), p.get("max_time_unlimited"))
+            default = parts.time_text(p.get("default_time_min"), False)
+            mem = (f"{parts.mem_text(p['def_mem_per_cpu_mb'])}/core" if p.get("def_mem_per_cpu_mb")
+                   else f"{parts.mem_text(p['def_mem_per_node_mb'])}/node" if p.get("def_mem_per_node_mb")
+                   else "not set")
+            who = []
+            for key, word in (("allow_accounts", "accounts"), ("allow_groups", "groups"),
+                              ("allow_qos", "QOS")):
+                v = p.get(key)
+                if v and v.upper() != "ALL":
+                    who.append(f"{word} {v}")
+            for key, word in (("deny_accounts", "not accounts"), ("deny_qos", "not QOS")):
+                if p.get(key):
+                    who.append(f"{word} {p[key]}")
+            flags = []
+            if p.get("is_default"):
+                flags.append("default")
+            if p.get("hidden"):
+                flags.append("hidden")
+            if p.get("root_only"):
+                flags.append("root only")
+            if (p.get("state") or "UP").upper() != "UP":
+                flags.append(p["state"])
+            if parts.is_guest(p, ps):
+                flags.append("guest (preemptible)")
+            pre = p.get("preempt_mode")
+            pre = "" if not pre or pre.upper() == "OFF" else f", preempt {pre}" + (
+                f" after {p['grace_time_s']} s" if p.get("grace_time_s") else "")
+            click.echo(f"  {p['partition']}{' [' + ', '.join(flags) + ']' if flags else ''}: "
+                       f"{n} node{'' if n == 1 else 's'}, time limit {limit} (default {default}), "
+                       f"memory default {mem}, tier {p.get('priority_tier') or 0}{pre}; "
+                       f"{'; '.join(who) if who else 'anyone'}")
+
+
 @cli.command('per-user')
 @click.option('--db', type=click.Path(), help='Database to read (default: this host\'s; '
               'a hub\'s combined.db shows every site)')
@@ -7084,6 +7183,91 @@ def _condo_status(ctx, db=None, report_config=None):
         if conn is not None:
             conn.close()
     return items, settings, db_path
+
+
+@usage_report_condos.command('idle')
+@click.option('--month', metavar='YYYY-MM', help='The month (default: last month).')
+@click.option('--cluster', 'clusters', multiple=True, help='Only this cluster (repeat for several).')
+@click.option('--condo', 'only', multiple=True, help='Only this condo (repeat for several).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the reports).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml (default: as for the reports).')
+@click.option('--json', 'as_json', is_flag=True, help='As JSON.')
+@click.option('--mask', is_flag=True, help='Stand-ins for condo names (for sharing the output).')
+@click.pass_context
+def usage_report_condos_idle(ctx, month, clusters, only, db, report_config, as_json, mask):
+    """Idle condo capacity while jobs that would have fit waited elsewhere.
+
+    \b
+    nomad usage-report condos idle                    last month
+    nomad usage-report condos idle --month 2026-09 --json
+
+    Elsewhere: in partitions that don't reach the condo's nodes. Would have
+    fit: one node's cores, memory and GPUs free at that moment, within
+    guest_max_days. Counts and hours only. The figures are the opportunity
+    at each moment, not a simulation of what would have happened.
+    """
+    import json as _json
+    from nomad.condo import idle as cidle
+    from nomad.usage import sources
+    month = _condo_month(month)
+    settings = _condo_settings(report_config, ctx.obj.get('config_target'), mask)
+    conn = sources.open_db(_usage_db(ctx, db))
+    try:
+        data = cidle.build(conn, settings, month, nomad_config=ctx.obj.get('config') or {},
+                           clusters=list(clusters) or None, only=list(only) or None)
+    except (sqlite3.DatabaseError, ValueError) as e:
+        raise click.ClickException(str(e))
+    finally:
+        conn.close()
+    stand_in: dict = {}
+
+    def shown(name):
+        return stand_in.setdefault(name, f"condo {len(stand_in) + 1}") if mask else name
+    if as_json:
+        if mask:
+            for cl in data["clusters"]:
+                for r in cl["condos"]:
+                    r["condo"] = r["label"] = shown(r["condo"])
+        click.echo(_json.dumps(data, indent=2))
+        return
+
+    def h(x):
+        return "-" if x is None else f"{x:,.0f}"
+    click.echo(f"{data['month_name']}: idle condo capacity while jobs waited elsewhere "
+               f"(guest jobs up to {data['guest_max_days']:g} days)")
+    for cl in data["clusters"]:
+        if not cl["condos"]:
+            click.echo(f"{cl['label']}: no condos")
+            continue
+        click.echo(f"{cl['label']}: {cl['earlier_jobs_any']} job"
+                   f"{'' if cl['earlier_jobs_any'] == 1 else 's'} waiting elsewhere could have started "
+                   "earlier on a condo")
+        for r in cl["condos"]:
+            pct = r["usable_pct_of_open"]
+            share = r["stretch_share_pct"]
+            shut = r["idle_core_hours"] - r["open_core_hours"]
+            click.echo(f"  {shown(r['label'])}: {r['nodes']} nodes, idle {h(r['idle_core_hours'])} core-hours"
+                       + (f" ({r['idle_pct']:.0f}%)" if r["idle_pct"] is not None else "")
+                       + (f", {h(shut)} of them on nodes taking no jobs (draining, reserved)" if shut >= 1 else "")
+                       + f"; {h(r['usable_core_hours'])} wanted by a waiting job"
+                       + (f" ({pct:.0f}% of the open ones)" if pct is not None else "")
+                       + f", over {h(r['hours_with_taker'])} hours")
+            if r["earlier_jobs"]:
+                click.echo(f"    {r['earlier_jobs']} job{'' if r['earlier_jobs'] == 1 else 's'} could have "
+                           f"started earlier, by a median {r['earlier_hours_median']:g} h (at most "
+                           f"{h(r['earlier_hours_total'])} job-hours in all)"
+                           + (f"; {r['reason_unknown']} without a recorded waiting reason"
+                              if r["reason_unknown"] else ""))
+            lo = r["left_out"]
+            out = [f"{v} {k.replace('_', ' ')}" for k, v in lo.items() if v]
+            if out:
+                click.echo(f"    left out: {', '.join(out)}")
+            if r["idle_node_hours"]:
+                click.echo(f"    wholly idle and open {h(r['idle_node_hours'])} node-hours; in stretches of "
+                           + ", ".join(f">= {k} h: {v:.0f}%" for k, v in share.items() if v is not None)
+                           + (f"; half in stretches of {r['stretch_median_hours']:g} h or more"
+                              if r["stretch_median_hours"] is not None else ""))
 
 
 @usage_report_condos.command('status')

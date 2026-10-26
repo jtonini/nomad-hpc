@@ -20,7 +20,7 @@ enabled = false
 | `iostat` | on | every host | `iostat` (sysstat) | `iostat_device`, `iostat_cpu` |
 | `mpstat` | on | every host | `mpstat` (sysstat) | `mpstat_summary`, `mpstat_core` |
 | `vmstat` | on | every host | `vmstat` | `vmstat` |
-| `node_state` | on | Slurm head node | `scontrol` | `node_state` |
+| `node_state` | on | Slurm head node | `scontrol` | `node_state`, `partition_settings`, `partition_changes` |
 | `gpu` | on | hosts with NVIDIA GPUs, or a head node reaching GPU nodes over SSH | `nvidia-smi` (DCGM if present) | `gpu_stats`, `gpu_health` |
 | `nfs` | on | hosts that mount NFS (client side) | `nfsiostat` (nfs-utils, in `/usr/sbin`) | `nfs_stats` |
 | `groups` | on | every site | `getent`; `sacct` for job accounting | `group_membership`, `job_accounting` |
@@ -36,6 +36,10 @@ enabled = false
 An `enabled = [...]` list under `[collectors]`, which older example configs carried, is not read.
 
 `groups` reads membership with `getent group`: on the head node of each `[clusters]` entry (over SSH when it has a `host`), on the first reachable workstation of a `type = "workstations"` cluster with an `ssh_user`, and on this host otherwise. Job accounting needs `sacct` and is skipped without it. On the same host it looks up each member with `getent passwd` and records whether they still have an account (`has_account`): a hand-kept `/etc/group` goes on listing people whose accounts were deleted long ago. "No account" needs every run for two days to find none (getent says the same for an unreachable directory), and a run where the lookup fails keeps the last known answer. Every run stamps what it saw with one time (`collected_at`), so a membership no longer listed stops being stamped. `first_seen` says when a membership was first seen (since 1.11; earlier ones are empty, not known): a course's students this term can be told from earlier terms' in a group nobody prunes. A membership missing from the runs for a week and listed again starts over (a student back for another course); one the collector simply did not run for keeps its date. A lab's members are the people listed in their cluster's latest run (give or take two days, for a failed run; a cluster not collected for 30 days while its site goes on is retired) who have an account; `nomad console roles NETID` says how many are not counted, and why.
+
+`node_state` also reads each partition's settings (`scontrol --all --oneliner show partition`, hidden partitions and ones this account may not use included: limits, default and maximum time, default memory, who may use it, priority tier, preemption) and stores them only when something changes: `partition_settings` holds each partition as it is now, `partition_changes` when one appeared, changed (old and new values) or went. `nomad partitions` shows them; `nomad partitions --changes`, what changed. A cluster whose `scontrol` won't show partitions still has its nodes stored.
+
+`slurm` records, from `squeue`, the last reason Slurm gave while a job waited (`pending_reason`: Resources, Priority, QOSMaxJobsPerUserLimit, Dependency...), since when it has waited for the cluster without a break (`ready_since`: Resources or Priority; cleared by a reading that shows it held by its own limits, and by a requeue) and how many nodes it asked for (`req_nodes`), from 1.18 on: whether, and from when, a job waited for the cluster rather than for its own limits. The first sync after upgrading sends each site's jobs table whole once (it gained columns).
 
 `nomad collect -C disk,nfs` (or `-C disk -C nfs`) runs only those, if enabled. An unknown name is warned about and skipped; if no name is known, nothing runs and the command says so.
 

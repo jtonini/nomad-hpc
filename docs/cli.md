@@ -71,6 +71,9 @@ nomad collectors
 # On the hub: how every site's collectors ran in the last 7 days
 nomad collectors --db ~/.local/share/nomad/combined.db
 
+# Each Slurm partition's limits, who may use it, and its preemption; what changed
+nomad partitions [--site S] [--changes] [--json]
+
 # Jobs from before nomad (or not collected): an sacct export, or sacct itself
 nomad import sacct EXPORT [--apply]
 nomad import sacct --from 2025-10-01 [--to 2026-10-01] [--apply]
@@ -92,6 +95,9 @@ nomad usage-report init --cluster c1
 
 # The period's usernames, for a department/school map (--user-map)
 nomad usage-report people --cluster c1 --out users.csv
+
+# Idle condo capacity while jobs that would have fit waited elsewhere
+nomad usage-report condos idle [--month 2026-09] [--json] [--mask]
 ```
 
 Options: `--config` (report.toml), `--db`, `--user-map`, `--exclude-users`,

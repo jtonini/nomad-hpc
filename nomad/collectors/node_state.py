@@ -149,11 +149,35 @@ class NodeStateCollector(BaseCollector):
             records = self._parse_scontrol_output(result.stdout)
             if self._alert_config.get('enabled', True):
                 self._dispatch_state_alerts(records)
+            parts = self._collect_partitions()
+            if parts is not None:
+                records.append(parts)
             return records
         except FileNotFoundError:
             raise MissingToolError("scontrol not found - SLURM not installed?")
         except subprocess.TimeoutExpired:
             raise CollectionError("scontrol timed out")
+
+    def _collect_partitions(self) -> dict[str, Any] | None:
+        """Each partition's settings (nomad.partitions), as one record; None
+        when scontrol won't say (the nodes are still stored)."""
+        from nomad import partitions
+        try:
+            # --all: also hidden partitions and those this account isn't
+            # allowed in (a condo's), which scontrol leaves out otherwise.
+            result = subprocess.run(['scontrol', '--all', '--oneliner', 'show', 'partition'],
+                                    capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.warning(f"node_state: scontrol show partition: {e}")
+            return None
+        if result.returncode != 0:
+            logger.warning(f"node_state: scontrol show partition failed: {result.stderr.strip()[:200]}")
+            return None
+        rows = partitions.parse(result.stdout)
+        if not rows:
+            return None
+        return {'type': 'partition_settings', 'cluster': self.cluster_name,
+                'timestamp': datetime.now().isoformat(), 'rows': rows}
 
     def _classify_state(self, state: str) -> str | None:
         """
@@ -396,6 +420,18 @@ class NodeStateCollector(BaseCollector):
                             1 if record['is_healthy'] else 0,
                         )
                     )
+                elif record.get('type') == 'partition_settings':
+                    # Its own savepoint: a failure here leaves the node rows stored.
+                    from nomad import partitions
+                    conn.execute("SAVEPOINT partitions")
+                    try:
+                        partitions.store(conn, record.get('cluster') or 'default', record['rows'],
+                                         datetime.fromisoformat(record['timestamp']))
+                        conn.execute("RELEASE SAVEPOINT partitions")
+                    except Exception as e:      # whatever it is, the nodes stay stored
+                        conn.execute("ROLLBACK TO SAVEPOINT partitions")
+                        conn.execute("RELEASE SAVEPOINT partitions")
+                        logger.warning(f"node_state: partition settings not stored: {e}")
 
             conn.commit()
             logger.debug(f"Stored {len(data)} node state records")
