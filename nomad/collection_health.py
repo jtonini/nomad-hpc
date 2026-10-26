@@ -18,7 +18,11 @@ These checks read the merged database and say so:
   report (all of them quiet: one alert for the site);
 - **dcgm** -- a GPU node whose DCGM samples stopped ``gpu_fallback_hours``
   (24) ago while nvidia-smi still answers: GPU utilization in scores comes
-  only from DCGM.
+  only from DCGM;
+- **runaway jobs** (1.17.3) -- jobs Slurm's controller no longer lists but
+  its accounting still has running or waiting, for over RUNAWAY_HOURS: they
+  count as running or waiting wherever sacct is read, and only an admin
+  can clear them (``sacctmgr show runawayjobs``).
 
 Each site is judged as of the hub's last live pull from it
 (``sync_sites.last_success``), not the clock: a site whose pull failed, or a
@@ -44,6 +48,7 @@ MIN_SPAN_HOURS = 24     # nor runs that all fall within a day (tries by hand)
 RECENT_GAPS = 20        # the usual interval: from this many latest gaps...
 INTERVALS = 3           # ...missed this many times over: stopped
 SAME_RUN_SECONDS = 60   # runs this close together count as one
+RUNAWAY_HOURS = 24      # a job gone from the queue but active in sacct this long is a runaway
 
 
 @dataclass
@@ -183,7 +188,40 @@ def collection_problems(conn: sqlite3.Connection, now: datetime | None = None,
     if "gpu_stats" in tables:
         flagged = {p.site for p in problems if p.details.get("collector") == "gpu"}
         problems += _gpus(conn, now, s, pulls, stopped, flagged, gpu_limit)
+    if "runaway_jobs" in tables:
+        problems += _runaways(conn, now, pulls)
     return problems
+
+
+def _runaways(conn, now, pulls) -> list[Problem]:
+    """Each site's runaway jobs: seen so (nomad.collectors.slurm
+    record_runaways) for over RUNAWAY_HOURS. Counts and dates only."""
+    cols = _columns(conn, "runaway_jobs")
+    if not {"job_id", "first_seen"} <= cols:
+        return []
+    has_site = "source_site" in cols
+    out = []
+    for site in _site_list(conn, "runaway_jobs", cols, pulls):
+        label = site if has_site else "this host"
+        label = label if label is not None else "(no site)"
+        as_of = _as_of(site, now, pulls)
+        where, args = ("source_site IS ?", [site]) if has_site else ("1", [])
+        before = (as_of - timedelta(hours=RUNAWAY_HOURS)).isoformat()
+        n, oldest = conn.execute(
+            f"SELECT COUNT(*), MIN(submit_time) FROM runaway_jobs WHERE {where} AND first_seen <= ?",
+            args + [before]).fetchone()
+        if not n:
+            continue
+        when = _time(oldest)
+        out.append(Problem(
+            f"runaway:{site}", site, label, "runaway jobs", "warning",
+            f"Site {label}: Slurm's accounting still lists {n} job{'' if n == 1 else 's'} as running or "
+            f"waiting that Slurm no longer runs" + (f" (the oldest submitted {_shown(when)})" if when else "")
+            + ". They count as running or waiting wherever sacct is read; as Slurm's admin, "
+            "`sacctmgr show runawayjobs` lists them and offers to fix them.",
+            {"metric": "runaway_jobs", "site": site, "count": n,
+             "oldest_submit": when.isoformat() if when else None}))
+    return out
 
 
 def _site_list(conn, table, cols, pulls) -> list:

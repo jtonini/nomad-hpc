@@ -101,6 +101,47 @@ class NodeState:
         return node_is_available(self.state)
 
 
+# Default state policies. Used when [alerts.node_state] is absent from
+# nomad.toml. Substring match (case-insensitive) covers Slurm composite
+# states like "DOWN+NOT_RESPONDING" and "MIXED+DRAIN", plus common
+# vocabulary from PBS ("down", "offline") and LSF ("unavail", "unreach").
+DEFAULT_CRITICAL_STATES = ('DOWN', 'NOT_RESPONDING', 'FAIL', 'OFFLINE', 'UNREACH')
+DEFAULT_WARNING_STATES = ('DRAIN', 'DRNG', 'DRAINING', 'CLOSED', 'UNAVAIL')
+
+
+def classify_state(state: str, cfg: dict | None = None) -> str | None:
+    """
+    Return 'critical' | 'warning' | None for an unhealthy node's state.
+
+    None means the state is explicitly ignored (e.g. POWERED_DOWN at
+    sites that consider it operational, not an incident). The node_state
+    collector and the hub's node alerts for its sites (nomad.alerts.hub_nodes)
+    both decide by it.
+
+    Configuration:
+        [alerts.node_state]
+        critical_states = ["DOWN", "NOT_RESPONDING", ...]
+        warning_states  = ["DRAIN", "DRNG", ...]
+        ignore_states   = ["POWERED_DOWN", ...]
+    """
+    s = (state or '').upper()
+    if '*' in s and 'NOT_RESPONDING' not in s:
+        s += '+NOT_RESPONDING'          # "IDLE*" is Slurm's not-responding mark
+    cfg = cfg if isinstance(cfg, dict) else {}
+
+    ignore = [x.upper() for x in cfg.get('ignore_states', [])]
+    critical = [x.upper() for x in cfg.get('critical_states', DEFAULT_CRITICAL_STATES)]
+    warning = [x.upper() for x in cfg.get('warning_states', DEFAULT_WARNING_STATES)]
+
+    if any(tok in s for tok in ignore):
+        return None
+    if any(tok in s for tok in critical):
+        return 'critical'
+    if any(tok in s for tok in warning):
+        return 'warning'
+    return 'warning'  # is_healthy=0 but state unrecognized -> warn conservatively
+
+
 @registry.register
 class NodeStateCollector(BaseCollector):
     """
@@ -125,12 +166,9 @@ class NodeStateCollector(BaseCollector):
         self._alert_config = config.get('alerts', {}).get('node_state', {})
         logger.info(f"NodeStateCollector: nodes={self.nodes or 'all'}")
 
-    # Default state policies. Used when [alerts.node_state] is absent from
-    # nomad.toml. Substring match (case-insensitive) covers Slurm composite
-    # states like "DOWN+NOT_RESPONDING" and "MIXED+DRAIN", plus common
-    # vocabulary from PBS ("down", "offline") and LSF ("unavail", "unreach").
-    DEFAULT_CRITICAL_STATES = ('DOWN', 'NOT_RESPONDING', 'FAIL', 'OFFLINE', 'UNREACH')
-    DEFAULT_WARNING_STATES = ('DRAIN', 'DRNG', 'DRAINING', 'CLOSED', 'UNAVAIL')
+    # The default state policies (module level since 1.17.3, kept here too).
+    DEFAULT_CRITICAL_STATES = DEFAULT_CRITICAL_STATES
+    DEFAULT_WARNING_STATES = DEFAULT_WARNING_STATES
 
     def collect(self) -> list[dict[str, Any]]:
         """Collect node state from scontrol."""
@@ -180,34 +218,8 @@ class NodeStateCollector(BaseCollector):
                 'timestamp': datetime.now().isoformat(), 'rows': rows}
 
     def _classify_state(self, state: str) -> str | None:
-        """
-        Return 'critical' | 'warning' | None for a state string.
-
-        None means the state is explicitly ignored (e.g. POWERED_DOWN at
-        sites that consider it operational, not an incident).
-
-        Configuration:
-            [alerts.node_state]
-            critical_states = ["DOWN", "NOT_RESPONDING", ...]
-            warning_states  = ["DRAIN", "DRNG", ...]
-            ignore_states   = ["POWERED_DOWN", ...]
-        """
-        s = (state or '').upper()
-        if '*' in s and 'NOT_RESPONDING' not in s:
-            s += '+NOT_RESPONDING'          # "IDLE*" is Slurm's not-responding mark
-        cfg = self._alert_config
-
-        ignore = [x.upper() for x in cfg.get('ignore_states', [])]
-        critical = [x.upper() for x in cfg.get('critical_states', self.DEFAULT_CRITICAL_STATES)]
-        warning = [x.upper() for x in cfg.get('warning_states', self.DEFAULT_WARNING_STATES)]
-
-        if any(tok in s for tok in ignore):
-            return None
-        if any(tok in s for tok in critical):
-            return 'critical'
-        if any(tok in s for tok in warning):
-            return 'warning'
-        return 'warning'  # is_healthy=0 but state unrecognized -> warn conservatively
+        """'critical' | 'warning' | None for a state string (classify_state)."""
+        return classify_state(state, self._alert_config)
 
     def _dispatch_state_alerts(self, records: list[dict[str, Any]]) -> None:
         """

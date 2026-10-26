@@ -367,6 +367,128 @@ class QueueState:
         }
 
 
+# Jobs Slurm's controller no longer lists but its accounting still has
+# running or waiting (1.17.3): a job that only just ended, until sacct
+# catches up, or a runaway record (`sacctmgr show runawayjobs`). Each is
+# kept with when it was first and last seen so; one that sacct settles, or
+# that the queue lists again, is removed. Read on the hub by collection
+# health (a runaway is one seen so for over a day) and left out of the
+# condo reports' waiting jobs.
+RUNAWAY = 'runaway_jobs'
+
+
+def ensure_runaway_table(conn) -> None:
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {RUNAWAY} (job_id TEXT NOT NULL, state TEXT, "
+                 "submit_time TEXT, first_seen TEXT, last_seen TEXT, PRIMARY KEY (job_id))")
+
+
+_RAN = ('RUNNING', 'SUSPENDED', 'COMPLETING', 'STAGE_OUT', 'STOPPED', 'RESIZING', 'SIGNALING')
+_PRIVATE_KEY = 'slurm.private_jobs'      # in config: "yes|no <when read>"
+
+
+def _running_account() -> str | None:
+    """The account this runs as (its uid, not $USER)."""
+    try:
+        import os
+        import pwd
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except Exception:
+        return None
+
+
+def _private_jobs(conn, me) -> bool | None:
+    """Whether Slurm hides other people's jobs from this account
+    (PrivateData includes jobs, and it is neither root nor SlurmUser); None
+    when scontrol can't say. Kept in config for a day."""
+    now = datetime.now()
+    try:
+        row = conn.execute("SELECT value FROM config WHERE key = ?", (_PRIVATE_KEY,)).fetchone()
+        if row and row[0]:
+            word, _, when = str(row[0]).partition(' ')
+            if now - datetime.fromisoformat(when) < timedelta(days=1):
+                return word == 'yes'
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(['scontrol', 'show', 'config'], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0:
+        return None
+    private = slurm_user = None
+    for line in out.stdout.splitlines():
+        key, _, value = line.partition('=')
+        key, value = key.strip(), value.strip()
+        if key == 'PrivateData':
+            private = {v.strip().lower() for v in value.split(',')}
+        elif key == 'SlurmUser':
+            slurm_user = value.split('(')[0].strip()
+    if private is None:
+        return None
+    hidden = 'jobs' in private and me not in ('root', slurm_user)
+    try:
+        conn.execute("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)",
+                     (_PRIVATE_KEY, f"{'yes' if hidden else 'no'} {now.isoformat(timespec='seconds')}"))
+        # At once: the lookups in sacct that follow mustn't hold the
+        # database locked (store() commits before them for the same reason).
+        conn.commit()
+    except Exception:
+        pass
+    return hidden
+
+
+def _past_its_time(job: dict, now: datetime) -> bool:
+    """A job sacct has running that can't still be: a day past its start and
+    time limit, or started over 60 days ago with no limit. (A waiting job can
+    wait for as long as it likes: never by this.)"""
+    try:
+        started = datetime.fromisoformat(str(job.get('start_time'))) if job.get('start_time') else None
+    except ValueError:
+        started = None
+    if started is None:
+        return False
+    if started.tzinfo is not None:
+        started = started.astimezone().replace(tzinfo=None)
+    limit = job.get('req_time_seconds')
+    try:
+        limit = int(limit) if limit else None
+    except (TypeError, ValueError):
+        limit = None
+    if limit:
+        return now - started > timedelta(seconds=limit, days=1)
+    return now - started > timedelta(days=60)
+
+
+def record_runaways(conn, seen, checked, listed, now: str) -> None:
+    """seen: (job_id, state, submit_time) active in sacct this run and not in
+    the queue; checked: the jobs sacct answered for this run (its pull, and
+    the ones looked up); listed: the jobs squeue listed. A job checked and not
+    seen so, listed again, or no longer stored as active goes. Run whenever
+    squeue answered, so a runaway an admin fixed is cleared."""
+    ensure_runaway_table(conn)
+    keep = {j for j, _, _ in seen}
+    for job_id, state, submit in seen:
+        conn.execute(f"INSERT INTO {RUNAWAY} (job_id, state, submit_time, first_seen, last_seen) "
+                     "VALUES (?, ?, ?, ?, ?) ON CONFLICT(job_id) DO UPDATE SET state = excluded.state, "
+                     "submit_time = excluded.submit_time, last_seen = excluded.last_seen",
+                     (job_id, state, submit, now, now))
+    have = {r[0] for r in conn.execute(f"SELECT job_id FROM {RUNAWAY}")}
+    if not have:
+        return
+    gone = (have & (set(checked) - keep)) | (have & set(listed or ()))
+    marks = ','.join('?' * len(ACTIVE_STATES))
+    active = set()
+    ids = sorted(have)
+    for i in range(0, len(ids), 500):           # the few recorded, by number
+        part = ids[i:i + 500]
+        active |= {r[0] for r in conn.execute(
+            f"SELECT job_id FROM jobs WHERE job_id IN ({','.join('?' * len(part))}) "
+            f"AND state IN ({marks})", (*part, *ACTIVE_STATES))}
+    gone |= have - active
+    for job_id in gone:
+        conn.execute(f"DELETE FROM {RUNAWAY} WHERE job_id = ?", (job_id,))
+
+
 @registry.register
 class SlurmCollector(BaseCollector):
     """
@@ -409,6 +531,7 @@ class SlurmCollector(BaseCollector):
         # about jobs that seem gone.
         self._squeue_ids: set[str] | None = None
         self._listed: set[str] = set()
+        self._listed_users: set[str] = set()
 
         logger.info(f"SlurmCollector: jobs from every partition; queue snapshot of "
                     f"{', '.join(map(str, self.partitions)) if self.partitions else 'all partitions'}")
@@ -746,18 +869,23 @@ class SlurmCollector(BaseCollector):
 
             jobs = []
             listed = set()
+            users = set()
             for line in result.stdout.strip().split('\n'):
                 if not line.strip():
                     continue
                 # Every listed job counts as still there, whether or not its
                 # line parses.
-                listed.add(line.split('|', 1)[0].strip())
+                parts = line.split('|', 2)
+                listed.add(parts[0].strip())
+                if len(parts) > 1 and parts[1].strip():
+                    users.add(parts[1].strip())
 
                 job = self._parse_job_line(line)
                 if job:
                     jobs.append(job)
 
             self._listed = listed
+            self._listed_users = users
             return jobs
 
         except subprocess.TimeoutExpired:
@@ -1050,6 +1178,19 @@ class SlurmCollector(BaseCollector):
             conn.commit()
             logger.debug(f"Stored {len(data)} SLURM records")
 
+    def _queue_shows_everyone(self, conn) -> bool:
+        """Whether squeue shows this account every job, so that a job it
+        doesn't list isn't in the queue. Slurm's PrivateData=jobs hides other
+        people's jobs from an account that isn't root or SlurmUser (or an
+        operator, coordinator...: not told apart here, so taken as hidden).
+        From `scontrol show config`, read once a day; if that can't be read,
+        whether squeue listed another account's job this run."""
+        me = _running_account()
+        hidden = _private_jobs(conn, me)
+        if hidden is not None:
+            return not hidden
+        return bool(set(self._listed_users or ()) - {me})
+
     def _settle_ended_jobs(self, conn, data: list[dict[str, Any]]) -> None:
         """Give jobs that left the queue their real outcome, never an assumed one.
 
@@ -1070,9 +1211,33 @@ class SlurmCollector(BaseCollector):
         listed = self._squeue_ids
         if listed is None:
             return      # squeue did not answer this run: no job can be called ended
+        pulled = {str(r['job_id']): r for r in data if r.get('type') == 'job' and r.get('job_id')}
         still = set(listed) | {
-            str(r['job_id']) for r in data
-            if r.get('type') == 'job' and _state_word(r.get('state')) in ACTIVE_STATES}
+            j for j, r in pulled.items() if _state_word(r.get('state')) in ACTIVE_STATES}
+        # Runaway records (1.17.3): active in this run's sacct pull but not in
+        # the queue. Slurm's accounting returns a job it never closed (no end
+        # time) in every pull, so these are found here, not by a lookup.
+        listed_set = set(listed)
+        now_dt = datetime.now()
+        now = now_dt.isoformat(timespec='seconds')
+        everyone = self._queue_shows_everyone(conn)
+        runaway, checked = [], set(pulled)
+        for j, r in pulled.items():
+            st = _state_word(r.get('state'))
+            if j in listed_set or st not in ACTIVE_STATES:
+                continue
+            if '[' in j:
+                # A pending array range: squeue cuts long ones short (%i is
+                # 32 characters), so its id needn't match sacct's.
+                checked.discard(j)
+                continue
+            if everyone or (st in _RAN and _past_its_time(r, now_dt)):
+                runaway.append((j, st, r.get('submit_time')))
+            else:
+                # squeue may show this account only its own jobs (PrivateData
+                # in slurm.conf, not in slurmdbd.conf): not a runaway because
+                # squeue doesn't show it; left as it was.
+                checked.discard(j)
         marks = ','.join('?' * len(ACTIVE_STATES))
         ended = [str(r[0]) for r in conn.execute(
             f"SELECT job_id FROM jobs WHERE state IN ({marks})", ACTIVE_STATES)
@@ -1089,10 +1254,12 @@ class SlurmCollector(BaseCollector):
             if str(r[0]) not in ended_set]
         todo = ended + repair
         if not todo:
+            record_runaways(conn, runaway, checked, listed_set, now)
             return
 
         found = self._lookup_jobs([j for j in todo if _LOOKUP_ID.match(j)])
-        now = datetime.now().isoformat(timespec='seconds')
+        if found is not None:
+            checked |= set(todo)
         settled = unknown = dropped = 0
         for job_id in todo:
             row = conn.execute("SELECT state, submit_time, end_time FROM jobs WHERE job_id = ?",
@@ -1110,7 +1277,14 @@ class SlurmCollector(BaseCollector):
                 job = None      # sacct's job of that number is another, later one
             if job is not None:
                 if fresh and _state_word(job.state) in ACTIVE_STATES:
-                    continue    # sacct still has it running: leave it as it is
+                    # sacct still has it active: leave it as it is. Slurm's
+                    # controller no longer lists it, though: a job that has
+                    # only just ended, or a runaway record in its accounting
+                    # (record_runaways says which).
+                    st = _state_word(job.state)
+                    if everyone or (st in _RAN and _past_its_time(job.to_dict(), now_dt)):
+                        runaway.append((job_id, st, row['submit_time']))
+                    continue
                 # Its outcome; or, for a row marked UNKNOWN or assumed, sacct
                 # saying it is still active, which puts it back as it is.
                 record = job.to_dict()
@@ -1136,6 +1310,7 @@ class SlurmCollector(BaseCollector):
             logger.info(f"Jobs that left the queue or had an assumed outcome: "
                         f"{settled} settled from sacct, {unknown} marked {UNKNOWN}, "
                         f"{dropped} pending array ranges dropped")
+        record_runaways(conn, runaway, checked, listed_set, now)
 
     def _repair_start_times(self, conn) -> None:
         """Once per database: correct start times that can't be real.

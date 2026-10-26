@@ -299,6 +299,55 @@ def changes(conn: sqlite3.Connection, site: str | None = None, since: datetime |
     return out
 
 
+_NAMED = ("allow_accounts", "deny_accounts", "allow_groups", "allow_qos", "deny_qos", "qos")
+_NAMED_KEYS = {"AllowAccounts", "DenyAccounts", "AllowGroups", "AllowQos", "DenyQos", "QoS",
+               "PartitionName", "Alternate"}
+
+
+def masked(rows: list[dict], hist: list[dict] | None = None) -> tuple[list[dict], list[dict]]:
+    """``nomad partitions --mask`` (1.17.3): partitions as "partition N" (by
+    site, in name order), and who may use them as how many are listed --
+    partition names often name a PI, and accounts and groups name people.
+    Limits, tiers, preemption and nodes stay."""
+    names: dict = {}
+    for r in sorted(rows or [], key=lambda r: (str(r.get("site")), str(r.get("partition")))):
+        site = r.get("site") or r.get("cluster")
+        n = sum(1 for k in names if k[0] == site) + 1
+        names.setdefault((site, r.get("partition")), f"partition {n}")
+
+    def name_of(r):
+        site = r.get("site") or r.get("cluster")
+        key = (site, r.get("partition"))
+        if key not in names:
+            names[key] = f"partition {sum(1 for k in names if k[0] == site) + 1}"
+        return names[key]
+
+    def count(v):
+        v = str(v or "")
+        if not v or v.upper() == "ALL":
+            return v or None
+        return f"{len([x for x in v.split(',') if x])} listed"
+
+    out = []
+    for r in rows or []:
+        m = dict(r)
+        m["partition"] = name_of(r)
+        for k in _NAMED:
+            if k in m:
+                m[k] = count(m[k])
+        m.pop("settings", None)
+        out.append(m)
+    changed = []
+    for c in hist or []:
+        m = dict(c)
+        m["partition"] = name_of(c)
+        if isinstance(m.get("changes"), dict):
+            m["changes"] = {k: (["(listed)", "(listed)"] if k in _NAMED_KEYS else v)
+                            for k, v in m["changes"].items()}
+        changed.append(m)
+    return out, changed
+
+
 def is_guest(p: dict, partitions: list[dict]) -> bool:
     """A partition whose jobs can be pushed off by another partition's: its
     PreemptMode isn't OFF, and some other partition sharing a node with it
@@ -333,6 +382,10 @@ def time_text(minutes, unlimited) -> str:
 
 
 def mem_text(mb) -> str:
-    """4096 -> '4 GB', 2000 -> '2000 MB'."""
+    """In one unit (1.17.3): 4096 -> '4 GB', 7350 -> '7.2 GB', 29500 ->
+    '28.8 GB'; under 1 GB in MB (512 -> '512 MB')."""
     mb = int(mb)
-    return f"{mb // 1024} GB" if mb % 1024 == 0 else f"{mb} MB"
+    if mb < 1024:
+        return f"{mb} MB"
+    gb = mb / 1024
+    return f"{gb:.0f} GB" if abs(gb - round(gb)) < 0.005 else f"{gb:.1f} GB"

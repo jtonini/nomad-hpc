@@ -122,12 +122,21 @@ def test_partitions_command(tmp_path):
     c.close()
     r = CliRunner().invoke(cli, ["partitions", "--db", str(db)])
     assert r.exit_code == 0, r.output
-    assert "basic [default]: 2 nodes, time limit none (default not set), memory default 4 GB/core" in r.output
-    assert "2000 MB/core" in r.output
+    assert "basic [default]: 2 nodes, no time limit, memory default 4 GB/core" in r.output
+    assert "2.0 GB/core" in r.output
     assert "condos [guest (preemptible)]" in r.output and "preempt REQUEUE after 300 s" in r.output
-    assert "smith: 2 nodes, time limit 14 d (default 1 h)" in r.output and "accounts smithlab" in r.output
+    assert "smith: 2 nodes, time limit 14 d, default 1 h" in r.output and "accounts smithlab" in r.output
+    assert "hpc1 (3 partitions)" in r.output
     r = CliRunner().invoke(cli, ["partitions", "--db", str(db), "--changes"])
     assert r.exit_code == 0 and "first seen" in r.output
+    # --mask (1.17.3): no partition, account or group names, for sharing.
+    for args in (["partitions", "--db", str(db), "--mask"], ["partitions", "--db", str(db), "--mask", "--json"],
+                 ["partitions", "--db", str(db), "--mask", "--changes"]):
+        r = CliRunner().invoke(cli, args)
+        assert r.exit_code == 0, r.output
+        assert "smith" not in r.output and "condos" not in r.output and "basic" not in r.output, r.output
+    r = CliRunner().invoke(cli, ["partitions", "--db", str(db), "--mask"])
+    assert "partition 1" in r.output and "accounts 1 listed" in r.output and "preempt REQUEUE" in r.output
 
 
 # --- squeue: why a job waits, and for how many nodes ----------------------------------
@@ -414,7 +423,7 @@ def test_partitions_command_history_and_unknown_site(tmp_path):
     r = CliRunner().invoke(cli, ["partitions", "--db", str(hub), "--site", "elsewhere"])
     assert r.exit_code != 0 and "no partitions for site elsewhere (sites: hpc1)" in r.output
     r = CliRunner().invoke(cli, ["partitions", "--db", str(hub), "--site", "hpc1"])
-    assert r.exit_code == 0 and "condos [guest (preemptible)]" in r.output and "2000 MB/core" in r.output
+    assert r.exit_code == 0 and "condos [guest (preemptible)]" in r.output and "2.0 GB/core" in r.output
 
 
 def test_requested_nodes_stay_as_asked(tmp_path):

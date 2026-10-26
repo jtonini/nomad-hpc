@@ -142,6 +142,13 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # A service account's $SHELL is often /sbin/nologin, through which ssh
+    # can't run a ProxyJump: /bin/sh for this run's ssh and scp (1.17.3).
+    from nomad.shell_env import fix_shell
+    replaced = fix_shell()
+    if replaced is not None:
+        logging.getLogger(__name__).debug("SHELL=%r can't run ssh's ProxyJump; using /bin/sh", replaced)
+
     # Try to load config, but don't fail if not found
     if config_path is None:
         config_path = resolve_config_path()
@@ -419,8 +426,11 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
 @click.option('--db', type=click.Path(dir_okay=False),
               help="Database (default: the hub's combined.db if there is one, else this host's).")
 @click.option('--json', 'as_json', is_flag=True, help='As JSON.')
+@click.option('--mask', is_flag=True,
+              help="Partitions, accounts and groups as stand-ins (partition names often name a PI), "
+                   "for sharing the output.")
 @click.pass_context
-def partitions_cmd(ctx, site, show_changes, days, db, as_json):
+def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask):
     """Each Slurm partition's limits, who may use it, and its preemption.
 
     \b
@@ -449,6 +459,8 @@ def partitions_cmd(ctx, site, show_changes, days, db, as_json):
         raise click.ClickException(
             f"no partitions for site {site}" + (f" (sites: {', '.join(sites)})" if sites else
                                                 " (--site is for a hub's combined database)"))
+    if mask:
+        rows, hist = parts.masked(rows, hist)
     if as_json:
         click.echo(_json.dumps({"partitions": rows, "changes": hist} if show_changes else rows,
                                indent=2, default=str))
@@ -474,11 +486,13 @@ def partitions_cmd(ctx, site, show_changes, days, db, as_json):
     for r in rows:
         by_site.setdefault(r["site"] or r["cluster"], []).append(r)
     for name, ps in by_site.items():
-        click.echo(f"{name} ({len(ps)} partitions)")
+        click.echo(f"{name} ({len(ps)} partition{'' if len(ps) == 1 else 's'})")
         for p in ps:
-            n = len(expand_hostlist(p.get("nodes"))) or p.get("total_nodes") or 0
+            n = (len(expand_hostlist(p.get("nodes"))) if p.get("nodes") else 0) or p.get("total_nodes") or 0
             limit = parts.time_text(p.get("max_time_min"), p.get("max_time_unlimited"))
             default = parts.time_text(p.get("default_time_min"), False)
+            times = ("no time limit" if limit == "none" else f"time limit {limit}") + (
+                "" if default == "not set" else f", default {default}")
             mem = (f"{parts.mem_text(p['def_mem_per_cpu_mb'])}/core" if p.get("def_mem_per_cpu_mb")
                    else f"{parts.mem_text(p['def_mem_per_node_mb'])}/node" if p.get("def_mem_per_node_mb")
                    else "not set")
@@ -506,7 +520,7 @@ def partitions_cmd(ctx, site, show_changes, days, db, as_json):
             pre = "" if not pre or pre.upper() == "OFF" else f", preempt {pre}" + (
                 f" after {p['grace_time_s']} s" if p.get("grace_time_s") else "")
             click.echo(f"  {p['partition']}{' [' + ', '.join(flags) + ']' if flags else ''}: "
-                       f"{n} node{'' if n == 1 else 's'}, time limit {limit} (default {default}), "
+                       f"{n} node{'' if n == 1 else 's'}, {times}, "
                        f"memory default {mem}, tier {p.get('priority_tier') or 0}{pre}; "
                        f"{'; '.join(who) if who else 'anyone'}")
 
@@ -4784,6 +4798,9 @@ SYNC_INDEXES = [
         ("alerts", "source_site, timestamp"),
         ("jobs", "source_site, end_time"),
         ("jobs", "source_site, submit_time"),
+        # One job by its number (1.17.3): the Console's job details, search
+        # by job number and Explain read the whole table without it.
+        ("jobs", "job_id"),
         # A lab's machines and storage (nomad console roles, the PI
         # view): each machine's and each export's latest record.
         ("workstation_state", "hostname, timestamp"),
@@ -5564,6 +5581,13 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
             collection_alerts(combined_path, cache_dir, failing=_failing, config=_cfg or None)
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"collection alert not sent: {_alert_err}")
+        # Node alerts for the sites that leave them to the hub (1.17.3).
+        try:
+            from nomad.alerts.hub_nodes import hub_node_alerts
+            hub_node_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                            failing=_failing, hub_sites=hub_cfg.get('sites'))
+        except Exception as _alert_err:      # never let an alert stop a sync
+            logging.getLogger("nomad.sync").warning(f"node alert not sent: {_alert_err}")
 
 
 # Asking a site for its changes failing this many times in a row: it is copied
@@ -5930,6 +5954,13 @@ def _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=Fa
             collection_alerts(combined_path, cache_dir, failing=dict(pull_errors), config=cfg or None)
         except Exception as e:               # never let an alert stop a sync
             log.warning(f"collection alert not sent: {e}")
+        # Node alerts for the sites that leave them to the hub (1.17.3).
+        try:
+            from nomad.alerts.hub_nodes import hub_node_alerts
+            hub_node_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                            failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
+        except Exception as e:               # never let an alert stop a sync
+            log.warning(f"node alert not sent: {e}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,
@@ -7247,7 +7278,7 @@ def usage_report_condos_idle(ctx, month, clusters, only, db, report_config, as_j
             pct = r["usable_pct_of_open"]
             share = r["stretch_share_pct"]
             shut = r["idle_core_hours"] - r["open_core_hours"]
-            click.echo(f"  {shown(r['label'])}: {r['nodes']} nodes, idle {h(r['idle_core_hours'])} core-hours"
+            click.echo(f"  {shown(r['label'])}: {r['nodes']} node{'' if r['nodes'] == 1 else 's'}, idle {h(r['idle_core_hours'])} core-hours"
                        + (f" ({r['idle_pct']:.0f}%)" if r["idle_pct"] is not None else "")
                        + (f", {h(shut)} of them on nodes taking no jobs (draining, reserved)" if shut >= 1 else "")
                        + f"; {h(r['usable_core_hours'])} wanted by a waiting job"

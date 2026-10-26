@@ -353,6 +353,18 @@ db_path = "/var/lib/nomad/nomad.db"
    runs on the hub itself, without the agent key. `~/.config/nomad/sync.toml` with top-level
    `[[sites]]` still works, with a warning.
 
+   A site reached through a jump host (`ProxyJump` in the hub account's
+   `~/.ssh/config`) works from a service account too: ssh runs a jump
+   through `$SHELL`, which for an account with no login shell is
+   `/sbin/nologin`, so since 1.17.3 nomad sets `SHELL=/bin/sh` for itself
+   and its ssh and scp when `$SHELL` is missing or can't run one. A shell
+   that works is left as it is.
+
+   A site that can't send its own alerts (no way to the mail server, or set
+   up with `nomad init --quick`, which writes no `[alerts]`) can have the hub
+   send its node alerts: `alerts = "hub"` in its `[[hub.sites]]` entry
+   ([alerts](alerts.md)).
+
 3. Run sync and launch the combined dashboard:
 
 ```bash

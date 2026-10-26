@@ -160,10 +160,10 @@ class AlertDispatcher:
                 decision = RAISE if self._fallback_raise(key, alert) else None
             if not decision:
                 logger.debug(f"Alert already raised: {key}")
-                return {}
+                return Held()
         elif not self._outside_cooldown(key):
             logger.debug(f"Alert in cooldown: {key}")
-            return {}
+            return Held()
 
         # Store in database -- once: a retry after a failed send is the
         # same alert, sent again.
@@ -430,6 +430,13 @@ def _own_gap(alert: dict) -> float:
     return float(g) if isinstance(g, (int, float)) and not isinstance(g, bool) and g > 0 else 0.0
 
 
+class Held(dict):
+    """What dispatch returns when it sent nothing because it holds the
+    alert back itself: already raised and no reminder due, a retry after a
+    failed send not due yet, or a cooldown. Empty, so it reads as {} -- but
+    not "sent": nomad.alerts.once asks again next run (1.17.3)."""
+
+
 def alert_key(alert: dict) -> str:
     """The condition an alert is about: source|host|subject, and the metric
     when the alert has one (an NFS mount's latency and its retransmissions
@@ -462,6 +469,7 @@ def send_alert(
     details: dict = None,
     config: dict = None,
     subject: str = None,
+    site: str = None,
 ) -> dict[str, bool]:
     """
     Convenience function to send an alert.
@@ -475,6 +483,9 @@ def send_alert(
         config: Config dict (uses global dispatcher if not provided)
         subject: What on the host it is about -- a path, a mount, a GPU
             (optional); with source and host it identifies the condition
+        site: The cluster it is about, when not this one (the hub sending a
+            site's node alerts, 1.17.3): its name in the subject and the
+            record, instead of this host's
     
     Returns:
         Dict mapping backend name to success status
@@ -507,5 +518,7 @@ def send_alert(
     }
     if subject:
         alert['subject'] = str(subject)
+    if site:
+        alert['site'] = str(site)
 
     return dispatcher.dispatch(alert)

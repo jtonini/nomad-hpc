@@ -116,6 +116,28 @@ What is not raised:
 - A GPU node is watched once it has sent samples over more than a day.
   Collectors and nodes silent for more than 30 days are taken as retired.
 
+Also (1.17.3):
+
+- **runaway jobs**: jobs Slurm's controller no longer lists (`squeue -a`)
+  but its accounting still has running or waiting, for over a day. They
+  count as running or waiting wherever sacct is read, nomad's pages included,
+  and only Slurm's admin can clear them: `sacctmgr show runawayjobs` lists
+  them and offers to fix them. The site's Slurm collector keeps them in
+  `runaway_jobs`: each job its sacct pull or a lookup has active that squeue
+  doesn't list, with when it was first and last seen so. When squeue may hide
+  other people's jobs from the collecting account (`PrivateData` in
+  `scontrol show config` includes `jobs`, read once a day, and the account
+  is neither root nor SlurmUser; if that can't be read, when squeue listed no
+  other account's job), a running job squeue doesn't list counts only
+  once it is a day past its start and time limit (60 days with no limit), and
+  a waiting one doesn't; a pending array range, whose id squeue cuts short,
+  never does (a job only just
+  ended is there until sacct catches up). One squeue lists again, that sacct
+  has ended, or that is no longer stored as active goes, at the next run.
+  The idle-condo report leaves the ones that never started out of the jobs
+  that waited. A warning, with the count and the oldest one's submit date,
+  no names.
+
 To leave some out (`name` or `site:name`, shell wildcards allowed):
 
 ```toml
@@ -129,6 +151,43 @@ collection_alerts = true
 
 `nomad collection-check` lists the same, read-only (`--send` raises them; run
 it as the account that runs the sync).
+
+### Node alerts sent by the hub (1.17.3)
+
+A site's node alerts (a node down, not responding or draining) are raised by
+that site's own nomad, through the email, Slack or webhook in its nomad.toml.
+A site that can't send any -- a head node with no way to the mail server, or
+one set up with `nomad init --quick`, which writes nothing in `[alerts]` --
+can leave them to the hub:
+
+```toml
+[[hub.sites]]
+name = "cluster-b"
+host = "headnode-b"
+ssh_user = "monitor"
+db_path = "~/.local/share/nomad/cluster-b.db"
+alerts = "hub"                 # the hub sends this site's node alerts
+```
+
+After each sync the hub reads that site's latest node reading and raises
+each unhealthy node as the site's own collector would (critical for DOWN,
+NOT_RESPONDING, FAIL...; warning for DRAIN...; the hub's own
+`[alerts.node_state]` states apply), through the hub's `[alerts]` backends,
+with source `node_state` and the node as host. Sent once, again when worse,
+then every `reminder_hours`; a node healthy again is forgotten, so its return
+is news (kept in `node_alerts.json` beside the hub's cached copies). Each
+alert names the site, not the hub, in its subject and in the hub's alert
+records; two sites' nodes of the same name are separate alerts. A node's
+reason is sent without the name of whoever set it (Slurm's
+`[user@time]`) and with what could name a person masked. `[hub]
+quiet_node_alerts` (`name`, `site:name`, `site:*`, shell wildcards) leaves
+nodes out, a node kept down on purpose say; `quiet_nodes` is for the
+collection checks only (a GPU node without DCGM) and doesn't silence a node
+going down. A site not read for two hours is skipped: the
+sync and collection alerts say so. A send that failed is tried again when
+the hub's alert database says its retry is due (after 15 minutes, then
+longer), not a day later. Leave the site's own `[alerts]` without backends,
+or it sends them too.
 
 ## Backends
 

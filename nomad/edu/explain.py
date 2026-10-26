@@ -78,30 +78,58 @@ def _site_column(conn: sqlite3.Connection, table: str) -> str | None:
     return "source_site" if "source_site" in cols else None
 
 
-def load_job(db_path: str, job_id: str, cluster: str = None) -> dict | None:
+def load_job(db_path: str, job_id: str, cluster: str = None, submit_time: str | None = None) -> dict | None:
     """Load a job from the database.
-    
+
     Args:
         db_path: Path to database
-        job_id: SLURM job ID
+        job_id: SLURM job ID (or the id nomad keeps an older job of a reused
+            number under, ``NUMBER@SUBMIT-TIME``)
         cluster: Cluster name (optional, required if job_id exists in multiple clusters)
+        submit_time: when it was submitted (1.17.3): with the cluster, names
+            the one job at once, through the hub's (source_site,
+            submit_time) index. A time that no longer matches (a requeue
+            gives a job a new one) falls back to the id.
     """
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         site_col = _site_column(conn, "jobs")
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+        newest = " ORDER BY +submit_time DESC" if "submit_time" in cols else ""
         if cluster and site_col:
-            row = conn.execute(
-                f"SELECT * FROM jobs WHERE job_id = ? AND {site_col} = ?", (job_id, cluster)
-            ).fetchone()
+            row = None
+            if submit_time and "submit_time" in cols:
+                # The job itself; or, moved aside since the link was made (its
+                # number given out again), under NUMBER@SUBMIT-TIME.
+                from nomad.db.jobkeys import aside_id
+                for jid in dict.fromkeys((job_id, aside_id(job_id, submit_time))):
+                    row = conn.execute(
+                        f"SELECT * FROM jobs WHERE {site_col} = ? AND submit_time = ? AND job_id = ? LIMIT 1",
+                        (cluster, submit_time, jid)).fetchone()
+                    if row is not None:
+                        break
+            if row is None:
+                # "+": not every row of the site through its index for the one
+                # with this id; through the job_id index the hub has since
+                # 1.17.3, or a plain read before.
+                row = conn.execute(
+                    f"SELECT * FROM jobs WHERE job_id = ? AND +{site_col} = ?{newest} LIMIT 1",
+                    (job_id, cluster)).fetchone()
         else:
             # A single site's database has one job per ID; a combined one may
             # hold the same ID from several sites.
-            rows = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchall()
-            if len(rows) > 1:
-                sites = [str(r[site_col]) if site_col else "?" for r in rows]
+            rows = conn.execute(f"SELECT * FROM jobs WHERE job_id = ?{newest}", (job_id,)).fetchall()
+            if submit_time and "submit_time" in cols:
+                same = [r for r in rows if r["submit_time"] == submit_time]
+                if not same:
+                    # Moved aside since the link was made (see above).
+                    from nomad.db.jobkeys import aside_id
+                    same = conn.execute("SELECT * FROM jobs WHERE job_id = ? AND submit_time = ?",
+                                        (aside_id(job_id, submit_time), submit_time)).fetchall()
+                rows = same or rows
+            sites = sorted({str(r[site_col]) for r in rows}) if site_col else []
+            if len(sites) > 1:
                 conn.close()
                 raise ValueError(f"Job {job_id} exists in multiple clusters: {', '.join(sites)}. Use --cluster to specify.")
             row = rows[0] if rows else None
@@ -126,8 +154,9 @@ def load_summary(db_path: str, job_id: str, cluster: str = None) -> dict | None:
         conn.row_factory = sqlite3.Row
         site_col = _site_column(conn, "job_summary")
         if cluster and site_col:
+            # "+": through the job_id index, not every row of the site.
             row = conn.execute(
-                f"SELECT * FROM job_summary WHERE job_id = ? AND {site_col} = ?", (job_id, cluster)
+                f"SELECT * FROM job_summary WHERE job_id = ? AND +{site_col} = ?", (job_id, cluster)
             ).fetchone()
         else:
             row = conn.execute(
@@ -402,6 +431,9 @@ def format_json(
         "user": fingerprint.user,
         "state": job.get("state"),
         "partition": job.get("partition"),
+        # Which job this is (1.17.3): a number can have been given out again.
+        "site": job.get("source_site") or job.get("cluster"),
+        "submit_time": job.get("submit_time"),
         "overall_score": round(fingerprint.overall, 1),
         "overall_level": fingerprint.overall_level,
         "dimensions": {},
@@ -439,6 +471,7 @@ def explain_job(
     show_progress: bool = True,
     output_format: str = "terminal",
     record: bool = True,
+    submit_time: str | None = None,
 ) -> str | None:
     """
     Generate a plain-language explanation of a job.
@@ -452,12 +485,14 @@ def explain_job(
         record:         Save the job's scores in proficiency_scores. Readers of
                         a database they don't own (the Console reading the
                         hub's combined.db) pass False.
+        submit_time:    When it was submitted (1.17.3): with the cluster, which
+                        of the jobs that had this number (see load_job).
 
     Returns:
         Formatted string, or None if job not found.
     """
     try:
-        job = load_job(db_path, job_id, cluster)
+        job = load_job(db_path, job_id, cluster, submit_time)
     except ValueError as e:
         return str(e)
     if not job:

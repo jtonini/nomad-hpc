@@ -30,11 +30,14 @@ def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
     """Send what is due and not yet sent (or worse, or due a reminder).
 
     due: dicts with key (the condition), host, subject, severity, message,
-    details, and optionally site. Returns the ones sent. An alert every
-    backend failed to send is tried again at the next run. What was sent
+    details, and optionally site (for hold_sites) and cluster (the cluster
+    the alert is about, when not the hub). Returns the ones sent. An alert
+    every backend failed to send is tried again at the next run, or when the
+    dispatcher's own retry is due (it holds the alert back until then:
+    dispatcher.Held, not noted as sent). What was sent
     about a site in hold_sites (one not read this time) is kept as it is
     rather than forgotten, so it isn't sent again as news when it is read."""
-    from nomad.alerts.dispatcher import send_alert
+    from nomad.alerts.dispatcher import Held, send_alert
     stamp = Path(stamp)
     try:
         sent = json.loads(stamp.read_text())
@@ -53,9 +56,17 @@ def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
             when = None
         if (prev is None or ORDER.get(severity, 0) > ORDER.get(prev.get("severity"), 0)
                 or when is None or (now - when).total_seconds() >= every):
+            extra = {"site": item["cluster"]} if item.get("cluster") else {}
             result = send_alert(severity, source, item["message"], host=item.get("host"),
                                 subject=item.get("subject"), details=item.get("details"),
-                                config=config)
+                                config=config, **extra)
+            if isinstance(result, Held):
+                # The dispatcher holds it back (a retry after a failed send
+                # not due yet, say): nothing went out, so it isn't noted as
+                # sent; asked again next run.
+                if prev is not None:
+                    keep[key] = prev
+                continue
             raised.append(item)
             if not result or any(result.values()):
                 keep[key] = {"severity": severity, "sent": now.isoformat()}

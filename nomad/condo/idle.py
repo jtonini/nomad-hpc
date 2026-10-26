@@ -56,6 +56,7 @@ No job or person is named; condos are named as report.toml names them
 from __future__ import annotations
 
 import heapq
+import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -400,6 +401,22 @@ def _next_live(live, i, t):
     return None
 
 
+def runaway_ids(conn, site) -> set:
+    """The site's jobs Slurm no longer runs but its accounting lists as
+    running or waiting (nomad.collectors.slurm record_runaways), by number."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(runaway_jobs)")}
+        if "job_id" not in cols:
+            return set()
+        if "source_site" in cols:
+            rows = conn.execute("SELECT job_id FROM runaway_jobs WHERE source_site IS ?", (site,))
+        else:
+            rows = conn.execute("SELECT job_id FROM runaway_jobs")
+        return {str(r[0]) for r in rows}
+    except sqlite3.Error:
+        return set()
+
+
 def build(conn, settings: Settings, month: str, *, nomad_config: dict | None = None,
           clusters: list[str] | None = None, only: list[str] | None = None,
           now: datetime | None = None) -> dict:
@@ -443,6 +460,14 @@ def build(conn, settings: Settings, month: str, *, nomad_config: dict | None = N
         # The month's jobs, and those that waited in it and started after it.
         jobs = load_jobs(conn, site, t0, min(now, t1 + WAITING_AT_MOST), now,
                          keep=lambda r, before=t1.isoformat(): str(r.get("submit_time") or "") < before)
+        # Not jobs waiting: records Slurm no longer runs that never started
+        # (1.17.3). One that started waited for real before it did.
+        gone = runaway_ids(conn, site)
+        if gone:
+            out_ = [j for j in jobs if j.job_id in gone and j.start is None]
+            if out_:
+                entry["runaway_left_out"] = len(out_)
+                jobs = [j for j in jobs if not (j.job_id in gone and j.start is None)]
         any_earlier = set()
         for c in condos:
             nodes = set(c.nodes) if c.nodes else set(found.condos.get(c.part, ()))
