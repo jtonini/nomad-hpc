@@ -16,6 +16,9 @@
     workstations = ["adam", "eve"] # the lab's own machines
     storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 
+    [console.labs.assistants]
+    "group$" = ["eve"]             # research assistants: see the lab as its PI does
+
     [console.storage."10.0.0.28"]   # a storage server, as the mounts name it
     name = "sarahvaughan"
     note = "community $HOME, all users"
@@ -35,6 +38,22 @@ here. Nothing is guessed from names. ``[console.storage]`` gives a storage
 server a name and a note, shown wherever its exports are (``servers``): a
 server shared by everyone should say so, or its use reads as the lab's.
 
+A research assistant (``assistants``) sees a lab as its PI does -- its
+members one by one (but for whoever leads it: the PI's own work stays
+theirs), its machines and storage -- while they are one of its members: someone who leaves the group stops being its assistant with no
+edit (the entry stays, and ``nomad console roles`` says it no longer
+applies). Only the PI, someone who leads the lab, or an administrator
+makes someone an assistant.
+
+A group that is a course this term ([console.courses]: listed, as `nomad
+course add` does, or named like a course) is a class, not a lab
+(``lab_now``): the group ``group_pattern`` names for its instructor is not
+their lab that term, and its research assistants see nothing of it --
+unless machines or storage are listed for it under [console.labs.resources]
+or ``leads`` names it. On a teaching server an instructor's own group often
+holds their class. (The condo reports' members are the owner's group either
+way.)
+
 The file names people. The Console's users.json keeps only what is private or
 automatic: the break-glass password, and the record made at someone's first
 login. For anyone named here, the file wins: ``viewer`` names someone who is
@@ -44,6 +63,7 @@ older role in the Console's own records).
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -52,9 +72,12 @@ logger = logging.getLogger(__name__)
 
 ROLES = ("admin", "operator")       # what the file can grant; anyone else is a viewer
 FILE_ROLES = ROLES + ("viewer",)    # the lists [console.roles] may have
-_LABS_KEYS = ("group_pattern", "leads", "resources")
+_LABS_KEYS = ("group_pattern", "leads", "resources", "assistants")
 RESOURCE_KINDS = ("workstations", "storage")
 OTHER_USER = "another user"
+
+
+_NETID = re.compile(r"[a-z0-9_][a-z0-9._-]*")     # as nomad.config.labs takes them
 
 
 def _netid(value) -> str | None:
@@ -92,6 +115,9 @@ class Access:
     resources: dict = field(default_factory=dict)   # group -> {kind: tuple of names}
     servers: dict = field(default_factory=dict)     # storage server -> (name, note)
     lab_names: dict = field(default_factory=dict)   # group -> how the lab is shown
+    assistants: dict = field(default_factory=dict)  # group -> tuple of NetIDs (research assistants)
+    course_groups: frozenset = frozenset()          # groups nomad.toml lists as courses this term
+    courses: object = field(default=None, compare=False)   # [console.courses] (is_course), or None
     problems: tuple = ()                            # what in the file was ignored, and why
 
     def role(self, netid) -> str | None:
@@ -119,6 +145,27 @@ class Access:
         name = self.lab_names.get(group)
         return f"{name} ({group})" if name else group
 
+    def is_class(self, group) -> bool:
+        """Whether [console.courses] makes ``group`` a course this term:
+        listed, or named like one (its ``pattern``, when its sources say
+        groups so named are courses)."""
+        if group in self.course_groups:
+            return True
+        try:
+            return self.courses is not None and bool(self.courses.is_course(group))
+        except Exception as exc:         # unreadable courses: as nomad course says
+            logger.warning("can't tell whether %s is a course (%s): taken as a lab", group, exc)
+            return False
+
+    def lab_now(self, group) -> bool:
+        """Whether ``group`` can be a lab this term: not a course this term
+        (a class: ``is_class``), unless machines or storage are listed for
+        it under [console.labs.resources] or ``leads`` names it. (A
+        workstation only tagged with the group doesn't count: the tag is
+        the collector's, the course nomad.toml's.)"""
+        return (not self.is_class(group) or group in self.resources
+                or any(group in gs for gs in self.leads.values()))
+
     def lab_groups(self, netid, group_exists: Callable[[str], bool] | None = None,
                    tagged: Callable[[str], set] | None = None) -> list:
         """The groups this person leads: their ``leads`` entry, then the group
@@ -131,21 +178,82 @@ class Access:
         if self.group_pattern:
             g = self.group_pattern.replace("{netid}", n)
             # A group the file lists resources for is one the site says exists.
-            if (group_exists is None or group_exists(g) or g in self.resources
-                    or (tagged is not None and tagged(g))):
+            # A group that is a course this term is a class, not a lab
+            # (lab_now; the person's own leads above still count).
+            if self.lab_now(g) and (group_exists is None or group_exists(g) or g in self.resources
+                                    or (tagged is not None and tagged(g))):
                 groups.append(g)
         seen = set()
         return [g for g in groups if not (g in seen or seen.add(g))]
 
-    def lab_resources(self, netid, group_exists: Callable[[str], bool] | None = None,
-                      tagged: Callable[[str], set] | None = None) -> dict:
-        """The workstations and storage of the labs this person leads:
-        {"workstations": set, "storage": set}, from what is listed here and the
-        workstations tagged with each lab (``tagged``: group -> hostnames).
-        Admins and operators see every machine anyway; this is what a PI's
-        view adds."""
+    def assisted_groups(self, netid, members_of: Callable[[str], Iterable[str]] | None) -> list:
+        """The labs this person is a research assistant of now: listed in
+        ``assistants``, one of the group's members (``members_of``; None, no
+        groups data: none, since it can't be told), and the group a lab
+        (``is_lab``: not any group with members) this term (``lab_now``: not
+        a class)."""
+        n = _netid(netid)
+        if not n or members_of is None:
+            return []
+        out = []
+        for g, people in sorted(self.assistants.items()):
+            if (n in people and self.lab_now(g) and self.is_lab(g, members_of)
+                    and n in {_netid(u) for u in members_of(g)}):
+                out.append(g)
+        return out
+
+    def is_lab(self, group, members_of: Callable[[str], Iterable[str]] | None = None) -> bool:
+        """Whether ``group`` is a lab by nomad's rules (whether or not a
+        class this term: ``lab_now``): named in [console.labs] (machines,
+        storage, a name, a lead), or the group ``group_pattern`` names for
+        one of its own members (``members_of``; None: only the former). Not
+        any group with members ("faculty")."""
+        if (group in self.resources or group in self.lab_names
+                or any(group in gs for gs in self.leads.values())):
+            return True
+        p = self.group_pattern
+        if not p or "{netid}" not in p or members_of is None or not isinstance(group, str):
+            return False
+        pre, post = p.split("{netid}", 1)
+        if not (group.startswith(pre) and group.endswith(post) and len(group) > len(pre) + len(post)):
+            return False
+        n = group[len(pre):len(group) - len(post)].lower()
+        return n in {_netid(u) for u in members_of(group)}
+
+    def leaders(self, group) -> set:
+        """Who leads ``group``: the NetID ``group_pattern`` names it for, and
+        anyone whose ``leads`` entry lists it."""
+        out = {n for n, gs in self.leads.items() if group in gs}
+        p = self.group_pattern
+        if p and "{netid}" in p and isinstance(group, str):
+            pre, post = p.split("{netid}", 1)
+            if group.startswith(pre) and group.endswith(post) and len(group) > len(pre) + len(post):
+                out.add(group[len(pre):len(group) - len(post)].lower())
+        return out
+
+    def assisted_people(self, netid, members_of: Callable[[str], Iterable[str]] | None) -> set:
+        """Whom a research assistant sees through the labs they assist: each
+        lab's members, less those who lead it (a PI's own work stays theirs)."""
+        out: set = set()
+        for g in self.assisted_groups(netid, members_of):
+            out |= {_netid(u) for u in members_of(g) if _netid(u)} - self.leaders(g)
+        return out
+
+    def lapsed_assistants(self, members_of: Callable[[str], Iterable[str]]) -> list:
+        """(group, netid) for each assistant listed who is no longer one of
+        the group's members: the role doesn't apply; the entry can go."""
+        out = []
+        for g, people in sorted(self.assistants.items()):
+            members = {_netid(u) for u in members_of(g)}
+            out.extend((g, n) for n in people if n not in members)
+        return out
+
+    def group_resources(self, groups: Iterable[str],
+                        tagged: Callable[[str], set] | None = None) -> dict:
+        """The workstations and storage of these labs: {"workstations": set,
+        "storage": set} (see lab_resources)."""
         out = {k: set() for k in RESOURCE_KINDS}
-        for g in self.lab_groups(netid, group_exists, tagged):
+        for g in groups:
             for kind, names in self.resources.get(g, {}).items():
                 out[kind].update(names)
             if tagged is not None:
@@ -154,6 +262,15 @@ class Access:
         # collected as a workstation keeps old records with the lab's tag.
         out["workstations"] -= {s.partition(":")[0] for s in out["storage"]}
         return out
+
+    def lab_resources(self, netid, group_exists: Callable[[str], bool] | None = None,
+                      tagged: Callable[[str], set] | None = None) -> dict:
+        """The workstations and storage of the labs this person leads:
+        {"workstations": set, "storage": set}, from what is listed here and the
+        workstations tagged with each lab (``tagged``: group -> hostnames).
+        Admins and operators see every machine anyway; this is what a PI's
+        view adds."""
+        return self.group_resources(self.lab_groups(netid, group_exists, tagged), tagged)
 
 
 def access_from(config: dict | None, log: bool = True) -> Access:
@@ -244,6 +361,36 @@ def access_from(config: dict | None, log: bool = True) -> Access:
         if any(kinds.values()):
             resources[group.strip()] = kinds
 
+    assistants: dict[str, tuple] = {}
+    raw = labs.get("assistants")
+    if raw is not None and not isinstance(raw, dict):
+        problems.append('[console.labs.assistants] should be a table ("group$" = [NetIDs]); ignored')
+        raw = {}
+    for group, people in (raw or {}).items():
+        where = f'[console.labs.assistants] "{group}"'
+        names = []
+        for x in _names(people, where, problems):
+            n = _netid(x)
+            if n and _NETID.fullmatch(n):
+                names.append(n)
+            else:
+                problems.append(f"{where}: {x!r} is not a NetID; ignored")
+        if isinstance(group, str) and group.strip() and names:
+            g = group.strip()
+            assistants[g] = tuple(dict.fromkeys(assistants.get(g, ()) + tuple(names)))
+
+    # Courses this term are classes, not labs (Access.lab_now).
+    course_groups: frozenset = frozenset()
+    courses = None
+    try:
+        from nomad.config.courses import courses_from
+        courses = courses_from(config)
+        course_groups = frozenset(g for g in courses.listed if courses.is_course(g))
+    except Exception as exc:
+        courses = None
+        problems.append(f"[console.courses] couldn't be read to tell classes from labs ({exc}); "
+                        "every group is taken as a lab")
+
     servers = _servers(console.get("storage"), problems)
 
     for p in problems if log else ():
@@ -251,7 +398,8 @@ def access_from(config: dict | None, log: bool = True) -> Access:
     return Access(admins=frozenset(found["admin"]), operators=frozenset(found["operator"]),
                   viewers=frozenset(found["viewer"]),
                   group_pattern=pattern, leads=leads, resources=resources,
-                  servers=servers, lab_names=lab_names, problems=tuple(problems))
+                  servers=servers, lab_names=lab_names, assistants=assistants,
+                  course_groups=course_groups, courses=courses, problems=tuple(problems))
 
 
 _SERVER_KEYS = ("name", "note")
@@ -629,14 +777,16 @@ def shared_free(conn, sizes: dict[str, ExportSize]) -> list[SharedFree]:
 def visible_people(access: Access, netid, members_of: Callable[[str], Iterable[str]],
                    group_exists: Callable[[str], bool] | None = None) -> set | None:
     """Whom this person may see individually: None means everyone (admin,
-    operator); otherwise themselves and the members of the labs they lead."""
+    operator); otherwise themselves, the members of the labs they lead, and
+    the members of the labs they are a research assistant of but for those
+    labs' PIs (Access.assisted_people)."""
     if access.role(netid) in ROLES:
         return None
     n = _netid(netid)
     people = {n} if n else set()
     for g in access.lab_groups(n, group_exists):
         people |= {_netid(u) for u in members_of(g) if _netid(u)}
-    return people
+    return people | access.assisted_people(n, members_of)
 
 
 def shown_name(username, visible: set | None) -> str:

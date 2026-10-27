@@ -452,10 +452,12 @@ def test_what_the_site_says_wins_over_the_guess():
     # Staff in the faculty group teach nothing, active or not: one faculty member left.
     t = C.teaching(c, "demo505", m, _active("staff1"))
     assert t["instructors"] == {"prof1"} and t["why"]["prof1"] == C.ONLY
-    # ...unless added to a course by name.
+    # ...unless added to a course by name -- and then they alone (1.17.5: a
+    # name in nomad.toml is the whole answer; prof2, its one faculty member,
+    # would be listed too if they teach it).
     t = C.teaching(c, "demo606", m, _active())
-    assert t["instructors"] == {"staff1", "prof2"}
-    assert t["why"] == {"staff1": C.ADDED, "prof2": C.ONLY}
+    assert t["instructors"] == {"staff1"}
+    assert t["why"] == {"staff1": C.ADDED} and t["left_out"] == {"prof2"}
     # Staff outside the faculty group are not students either.
     r = C.roster(c, "demo505", m, lambda users: set(users), {}, datetime(2026, 8, 24),
                  _active("staff1"))
@@ -636,7 +638,7 @@ def test_decisions_hold_for_their_term(tmp_path):
     assert c.decisions("demo202", SPRING) == (set(), set())          # a new term: nothing holds
     groups = {"faculty": {"prof1", "prof2"}, "demo202": {"prof1", "prof2", "s1"}}
     t = C.teaching(c, "demo202", _members(groups), _active("prof2"), term=FALL)
-    assert t["instructors"] == {"prof9", "prof1"}                   # prof1: the one left
+    assert t["instructors"] == {"prof9"}                            # named: prof9 alone (1.17.5)
     t = C.teaching(c, "demo202", _members(groups), _active("prof2"), term=SPRING)
     assert t["instructors"] == {"prof2"}                            # the guess again
     # The same decision for every term is one more; remove takes both.
@@ -759,11 +761,13 @@ def test_faculty_are_asked_about_their_course_groups_and_their_answers_count(tmp
     conn = _hub(tmp_path)
     cfg = {"console": {"courses": {"term_start": FALL, "not_teaching": ["prof7"],
                                    "groups": {"demo707": {"instructors": ["prof4"]}}}}}
-    # prof2: in demo202 (students this term) and demo707 (students on hpc1).
+    # prof2: in demo202 (students this term) and demo707 (students on hpc1),
+    # but nomad.toml names demo707's instructor: decided, not asked (1.17.5).
     asked = {q["group"]: q for q in questions(conn, cfg, "prof2", now=NOW)}
-    assert set(asked) == {"demo202", "demo707"}
+    assert set(asked) == {"demo202"}
     assert asked["demo202"]["answer"] is None and not asked["demo202"]["teaches"]
-    assert asked["demo707"]["teaches"] and asked["demo707"]["why"] == C.ACTIVE
+    assert may_answer(conn, cfg, "prof2", "demo707", NOW) == (
+        False, "nomad.toml names who teaches it this term")
     # prof4 is added to demo707 by name: not asked there.
     assert {q["group"] for q in questions(conn, cfg, "prof4", now=NOW)} == {"demo202"}
     assert may_answer(conn, cfg, "prof2", "demo202", NOW) == (True, "")
@@ -778,7 +782,7 @@ def test_faculty_are_asked_about_their_course_groups_and_their_answers_count(tmp
     c, = [x for x in courses(conn, cfg, now=NOW, answers=said)["courses"] if x["group"] == "demo202"]
     assert c["instructors"] == ["prof2"] and c["instructors_why"] == {"prof2": "confirmed"}
     assert [x["group"] for x in courses(conn, cfg, netid="prof2", now=NOW, answers=said)["courses"]] \
-        == ["demo202", "demo707"]
+        == ["demo202"]                                     # demo707: prof4's alone
     assert courses(conn, cfg, netid="prof3", now=NOW, answers=said)["courses"] == []
     asked = {q["group"]: q for q in questions(conn, cfg, "prof2", said, now=NOW)}
     assert asked["demo202"]["answer"] is True and asked["demo202"]["why"] == C.CONFIRMED
@@ -838,3 +842,38 @@ def test_an_unreadable_answers_file_is_said_and_masked(tmp_path):
         assert str(tmp_path) not in r.output
     r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "answers", "--db", db])
     assert r.exit_code != 0 and "can't read it" in r.output
+
+
+def test_course_add_says_who_wont_see_it_any_more(tmp_path, monkeypatch):
+    """1.17.5: named instructors teach a course alone, so adding one says
+    whom nomad took as teaching it until then."""
+    import shutil
+
+    from click.testing import CliRunner
+
+    import nomad.actions.remote as remote
+    from nomad.cli import cli
+
+    def no_hub(*a, **k):
+        raise RuntimeError("not a hub")
+    monkeypatch.setattr(remote, "hub_settings", no_hub)       # this host's database only
+    _hub(tmp_path).close()
+    data = tmp_path / "data"
+    data.mkdir()
+    shutil.copy(tmp_path / "hub.db", data / "nomad.db")
+    cfg = _toml(tmp_path, f'[general]\ndata_dir = "{data}"\n\n[console.courses]\n'
+                          f'term_start = "{FALL}"\n')
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "add", "demo505", "prof9"])
+    assert r.exit_code == 0, r.output
+    assert "Teaching demo505 this term: prof1 now; prof9 after this." in r.output
+    assert "prof1 won't see it any more: add them too if they teach it." in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "add", "demo505", "prof9", "--apply"])
+    assert r.exit_code == 0, r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "list", "--db", str(data / "nomad.db")])
+    line = next(x for x in r.output.splitlines() if x.startswith("  demo505:"))
+    assert line.startswith("  demo505: prof9 (") and "teach it alone" in line, line
+    # an exclude or a remove says who goes, without telling you to add them back
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "exclude", "demo505", "prof1"])
+    assert "add them too" not in r.output
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "course", "remove", "demo505", "prof9"])
+    assert "prof9" in r.output and "add them too" not in r.output, r.output

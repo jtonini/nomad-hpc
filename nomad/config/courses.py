@@ -55,7 +55,10 @@ it chooses its instructors among: two courses may share one).
 
 Its instructors this term (``teaching``):
 
-* anyone listed as one (``nomad course add``), for this term or every term;
+* anyone listed as one (``nomad course add``), for this term or every term:
+  when anyone is, they alone teach it that term (a group reused from an
+  earlier term keeps its earlier instructor among its members; a TA or a
+  co-instructor is listed too). Otherwise:
 * of its people in ``faculty_group`` (its group's members, and whoever used
   its environments this term): those who said they teach it this term (in
   the Console; ``course_answers``); when none has, its only one;
@@ -429,6 +432,9 @@ def teaching(c: Courses, group: str, members_of: Callable[[str], set],
     CourseIndex.members``). ``answers``: {netid: True/False}, what the group's
     faculty members said about teaching it this term (``course_answers``).
 
+    Anyone listed for the term (or every term) is an instructor, and when
+    anyone is, nobody else is: decisions in nomad.toml are the whole answer.
+
     Returns ``instructors``; ``why`` {netid: ADDED, CONFIRMED, ONLY, JOINED,
     ENVIRONMENT or ACTIVE}; ``faculty``, the group's faculty members nomad chose among
     (less those excluded, those not teaching and those who said no);
@@ -444,6 +450,12 @@ def teaching(c: Courses, group: str, members_of: Callable[[str], set],
     said_no = {n for n in everyone if said.get(n) is False} - added
     faculty = everyone - said_no
     why = dict.fromkeys(added, ADDED)
+    if added:
+        # Named in nomad.toml: they alone teach it this term. Neither nomad's
+        # guess nor an answer adds anyone (a reused group's earlier
+        # instructor is still among its members).
+        return {"instructors": set(why), "why": why, "faculty": faculty, "said_no": said_no,
+                "left_out": faculty - added, "undecided": False}
     found: dict = {}
     confirmed = {n for n in faculty if said.get(n) is True}
     if confirmed:

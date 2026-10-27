@@ -116,6 +116,9 @@ name = "Smith Lab"             # how the lab is shown (else its group)
 workstations = ["adam", "eve"] # the lab's own machines
 storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 
+[console.labs.assistants]
+"NETID$" = ["eve"]             # research assistants: see the lab as its PI does
+
 [console.storage."10.0.0.28"]  # a storage server, as the mounts name it
 name = "sarahvaughan"
 note = "community $HOME, all users"
@@ -148,6 +151,30 @@ else `sudo nomad -c ...`).
   one (see the groups collector).
   `group_pattern` is empty by default: a site that has not said how its groups
   work gets no lab view rather than a wrong one.
+  A group that is a course this term (`[console.courses]`: listed, as
+  `nomad course add` on an instructor's own group does, or named like a
+  course) is a class, not a lab: that term it is not the instructor's lab,
+  unless storage or machines are listed for it under
+  `[console.labs.resources]` or a `leads` entry names it (`nomad lab lead
+  LAB NETID` writes one, for the instructor too: its PI and research
+  assistants then see its members, the class's students, one by one); a
+  workstation only tagged with the group doesn't count. `nomad console roles
+  NETID` and `nomad facts lab NETID` say when someone's own group is a class
+  this term. `nomad course add` says so when it makes a
+  lab a class. It is a lab again the term it isn't a course. The condo
+  reports' members are the owner's group either way.
+- **Research assistant:** a viewer listed for a lab under
+  `[console.labs.assistants]` (`nomad lab assistant LAB NETID`, below, or the
+  PI from the lab's Members page in the Console) sees it as its PI does: its
+  members one by one, its machines and storage -- but for whoever leads it:
+  the PI's own work stays theirs. Only while they are one of
+  the lab's members: someone who leaves the group stops being its assistant
+  with nothing to edit, and `nomad console roles` lists the entries that no
+  longer apply. Only a lab has them: a group named in `[console.labs]`
+  (machines, storage, a name, a lead) or the one `group_pattern` names for
+  one of its own members, not any group with members; a lab that is a
+  class this term (above) has none that term. Names that aren't NetIDs are
+  reported and left out.
 - **A lab's machines:** a PI also sees their labs' workstations and storage.
   On those machines, people outside the lab appear as "another user".
   A workstation belongs to a lab when the collector that monitors it tags it
@@ -190,6 +217,8 @@ nomad lab add-storage LAB SERVER[:/export] [--name NAME] [--note "..."]
                                         storage the lab's machines mount, listed as the lab's
 nomad lab name LAB "NAME"               how the lab is shown, e.g. "Smith Lab"
 nomad lab lead LAB NETID [--remove]     NETID leads LAB too (or no longer)
+nomad lab assistant LAB NETID [--remove]
+                                        NETID is a research assistant of LAB (or no longer)
 nomad lab remove LAB HOST
 ```
 
@@ -220,6 +249,14 @@ with `"{netid}$"`), or the lab's group itself.
   `nomad.toml.example`, becomes that table. Editing `leads` by hand risks
   setting it twice, which makes the whole file unreadable. The PI
   `group_pattern` names needs no entry.
+- **assistant** goes on the Console's machine: a research assistant sees
+  the lab as its PI does while one of its members (above). LAB as for
+  `lead`, and a lab by nomad's rules (above), not just any group with
+  members; taking a name off works for any. It says how many members the lab has, and when NETID isn't one of
+  them in the groups data now (the entry applies once they are), and writes
+  `[console.labs.assistants]`, which goes when its last name does. Like
+  `leads`, the table is written whole: comments inside it aren't kept, and
+  an entry nomad can't read is left for a person to fix first.
 - **remove** takes a host out of a lab: no longer collected here, no longer
   listed.
 
@@ -295,7 +332,8 @@ course = false                           # named like a course, but isn't one
     group_pattern`) holds their class. Such a group is often their lab too,
     so none becomes a course by itself: `nomad course discover` proposes the
     ones with people active this term, and one becomes a course when someone
-    is added to it.
+    is added to it. A course this term, it is not their lab that term (see
+    the PI under Console access): add one that mostly holds a class.
 
   Whatever the sources, a group listed under `groups` is a course (unless
   `course = false`), and a course's `environments` add whoever used them this
@@ -308,8 +346,12 @@ course = false                           # named like a course, but isn't one
   decisions (someone added to an instructor's own group for a term) is a
   course that term only.
 - A course's **instructors this term**, in this order:
-  1. anyone listed (`nomad course add`), this term or every term;
-  2. of its members in `faculty_group` (its group's, and whoever used the
+  1. anyone listed (`nomad course add`), this term or every term. When
+     anyone is, they alone teach it that term: nothing below adds anyone,
+     and nobody is asked about it in the Console. A group reused from an
+     earlier term keeps that term's instructor among its members, so adding
+     this term's takes the earlier one out; list a co-instructor or a TA too;
+  2. otherwise, of its members in `faculty_group` (its group's, and whoever used the
      environment named for it), those who said in the Console that they
      teach it this term (`nomad course answers`);
   3. when none has, its one faculty member, when it has one;

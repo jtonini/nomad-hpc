@@ -357,6 +357,12 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # workstations = ["adam", "eve"]
 # storage = ["sarahvaughan"]           # a server, or "server:/export"
 
+# A lab's research assistants see it as its PI does, while they are one of
+# its members (`nomad lab assistant LAB NETID` writes this). A group made a
+# course this term ([console.courses]) is a class, not a lab, that term.
+# [console.labs.assistants]
+# "NETID$" = ["eve"]
+
 # A storage server's name and a note, shown wherever its exports are. The
 # server as the mounts name it (often an address). Say when everyone shares
 # it, or its use reads as the lab's own.

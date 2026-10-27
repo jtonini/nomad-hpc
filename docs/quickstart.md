@@ -21,7 +21,7 @@ makes each what they are (`.config/nomad/nomad.toml`):
 | Who | Is | Sees |
 |---|---|---|
 | bob | a student in CS 101 | his own jobs, some running now |
-| eve | a research assistant in the Grace Lab | her own work, as a lab member does |
+| eve | the Grace Lab's research assistant | its members one by one, as its PI does, but not Grace's own work |
 | grace | the PI of the Grace Lab (`grace$`) | her lab's members one by one, and their work |
 | henry | the instructor of CS 101 | his class |
 | olive | an operator | everything; changes no settings |

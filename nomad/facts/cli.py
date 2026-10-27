@@ -251,6 +251,19 @@ def me_cmd(ctx, netid, days, db, as_json, mask):
         click.echo(f"  advice ({a['severity']}, {a['dimension']}): {a['advice']}")
 
 
+def _why_no_lab(config: dict, netid: str) -> str:
+    """Why the group named for NETID is no lab this term, when that is why."""
+    from nomad.config.access import access_from
+    acc = access_from(config, log=False)
+    if not acc.group_pattern:
+        return ""
+    g = acc.group_pattern.replace("{netid}", netid.strip().lower())
+    if acc.lab_now(g):
+        return ""
+    return (f": {g} is a course this term, a class rather than a lab (a lead entry or storage "
+            "listed for it keeps it a lab as well)")
+
+
 @facts_group.command("lab")
 @click.argument("netid")
 @click.option("--days", default=30, show_default=True, type=click.IntRange(1, 365))
@@ -262,8 +275,9 @@ def me_cmd(ctx, netid, days, db, as_json, mask):
 @click.option("--each", is_flag=True, help="Each member too, by NetID (not with --mask).")
 @click.pass_context
 def lab_cmd(ctx, netid, days, db, as_json, mask, each):
-    """The labs NETID leads, by nomad.toml's rules: members, their jobs
-    taken together, workstations and storage; --each, each member too."""
+    """The labs NETID leads, or is a research assistant of, by nomad.toml's
+    rules: members, their jobs taken together, workstations and storage;
+    --each, each member too."""
     from nomad.facts import labs
     path, conn = _open(ctx, db)
     try:
@@ -278,10 +292,12 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
         return
     who = "this person" if mask else netid
     if not data["labs"]:
-        click.echo(f"{who} leads no lab by nomad.toml's rules")
+        click.echo(f"{who} leads no lab by nomad.toml's rules"
+                   + ("" if mask else _why_no_lab(ctx.obj.get("config", {}) or {}, netid)))
         return
     for lab in data["labs"]:
-        click.echo(f"{lab['name']}, last {data['window']['days']} days{_where(path, mask)}")
+        helper = " (as its research assistant)" if lab.get("as") == "assistant" else ""
+        click.echo(f"{lab['name']}{helper}, last {data['window']['days']} days{_where(path, mask)}")
         m = lab.get("members")
         if m:
             click.echo(f"  members: {m['current']}" + ("" if m["ran_jobs"] is None

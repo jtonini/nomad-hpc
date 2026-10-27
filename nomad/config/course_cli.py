@@ -511,9 +511,105 @@ def _course_change(ctx, group, apply, new_group=False, **kw):
             return c is None or kw["env_remove"].strip() not in c.environments
         return True
     notes = ["The Console reads nomad.toml on every request: no restart."] if changes else []
+    if changes:
+        notes = _lab_notes(_original(edit), edit.data, g) + notes
+        if kw.get("name") is None:          # a name can't change who teaches it
+            notes = _teaching_notes(ctx, _original(edit), edit.data, g,
+                                    hint=bool(kw.get("add"))) + notes
     if changes and kw.get("env_add"):
         notes = _env_notes(ctx, before, g, kw["env_add"].strip()) + notes
     _finish(edit, changes, apply, check, notes)
+
+
+def _teaching_notes(ctx, before: dict, after: dict, group: str, hint: bool = True) -> list:
+    """Who teaches GROUP this term before and after the change, when that
+    changes: someone nomad took as teaching it who won't, once someone is
+    named (they alone teach it), is the one to check (``hint``: say to add
+    them, after an add; an exclude or a remove means it). The groups data the Console
+    reads (the hub's combined database, else this host's); nothing when it
+    can't be read."""
+    import sqlite3
+    import urllib.parse
+    from datetime import datetime
+    from pathlib import Path
+    try:
+        from nomad.config import course_answers
+        from nomad.facts.courses import CourseIndex
+    except ImportError:
+        return []
+    paths = []
+    try:
+        from nomad.actions.remote import hub_settings
+        paths.append(hub_settings((ctx.obj or {}).get("config_target"))["combined_db"])
+    except Exception:
+        pass
+    try:
+        from nomad.cli import get_db_path
+        paths.append(get_db_path(ctx.obj.get("config", {}) or {}))
+    except Exception:
+        pass
+    now = datetime.now()
+    for path in paths:
+        path = Path(path).expanduser()
+        if not path.exists():
+            continue
+        try:
+            conn = sqlite3.connect("file:" + urllib.parse.quote(str(path)) + "?mode=ro", uri=True)
+            try:
+                def who(cfg):
+                    from nomad.config.courses import courses_from
+                    start = courses_from(cfg).start(now.date()).isoformat()
+                    try:
+                        said = course_answers.load(course_answers.path_beside(path), start)
+                    except Exception:
+                        said = {}
+                    idx = CourseIndex(conn, cfg, now, said)
+                    return set(idx.roster(group)["instructors"]) if group in idx.keys else set()
+                was, now_ = who(before), who(after)
+            finally:
+                conn.close()
+        except Exception:
+            return []                       # the first database there is: no other's guess
+        if was == now_:
+            return []
+        out = [f"Teaching {group} this term: " + (", ".join(sorted(was)) or "nobody")
+               + " now; " + (", ".join(sorted(now_)) or "nobody") + " after this."]
+        gone = sorted(was - now_)
+        if gone and hint:
+            out.append(f"{', '.join(gone)} won't see it any more: add "
+                       f"{'them' if len(gone) > 1 else 'them too'} if they teach it.")
+        return out
+    return []
+
+
+def _lab_notes(before: dict, after: dict, group: str) -> list:
+    """A group that becomes a course this term stops being a lab this term
+    (nomad.config.access, lab_now): say so when it was one."""
+    from nomad.config.access import access_from
+    try:
+        was, now = access_from(before, log=False), access_from(after, log=False)
+    except Exception:
+        return []
+    if not was.lab_now(group) or now.lab_now(group):
+        return []
+    parts = []
+    pattern = was.group_pattern
+    if pattern and "{netid}" in pattern:
+        pre, post = pattern.split("{netid}", 1)
+        core = group[len(pre):len(group) - len(post)] if post else group[len(pre):]
+        if core and group == pre + core + post:
+            parts.append(f"it is not {core}'s lab this term (no My lab for it)")
+    n = len(was.assistants.get(group, ()))
+    if n:
+        parts.append(f"its research assistant{'' if n == 1 else 's'} ({n}) "
+                     f"{'sees' if n == 1 else 'see'} nothing of it this term")
+    if not parts:
+        return []
+    return [f"As a course this term, {group} is a class rather than a lab: " + "; ".join(parts)
+            + ". A lead entry (`nomad lab lead LAB NETID`) or storage listed for it (`nomad lab "
+              "add-storage`) keeps it a lab as well -- its PI and research assistants then see its "
+              "members, the class's students, one by one; a workstation only tagged with it "
+              "doesn't."]
 
 
 def _env_notes(ctx, before, group: str, env: str) -> list:
@@ -574,9 +670,11 @@ def env_cmd(ctx, group, environment, remove, new_group, apply):
 @click.pass_context
 def add_cmd(ctx, group, netid, every_term, apply, new_group):
     """NETID teaches GROUP this term: when no faculty member is in the group,
-    when several are and nomad can't tell which teaches it, or for a
-    co-instructor or a TA. Decisions for a term stop applying when the term
-    moves on (--every-term: they don't)."""
+    when several are and nomad can't tell which teaches it, or when a group
+    is reused from an earlier term. Whoever is added teaches it alone that
+    term (nobody else is guessed or asked), so add each co-instructor and TA
+    too. Decisions for a term stop applying when the term moves on
+    (--every-term: they don't)."""
     _course_change(ctx, group, apply, new_group, add=netid, every_term=every_term)
 
 
@@ -791,7 +889,8 @@ def list_cmd(ctx, db, mask):
                    f"{'nomad.toml' if c.term_start else 'by the calendar'}); "
                    f"from {', '.join(c.sources) or 'listed courses only'}")
         fg = "the faculty group" if mask else repr(c.faculty_group)
-        click.echo(f"Instructors: those added by name; of its members in {fg}, "
+        click.echo(f"Instructors: those added by name, alone when there are any; else of its "
+                   f"members in {fg}, "
                    "those who said they teach it this term, else its only one, else those who "
                    "joined its group this term, else those who used its environment this term, "
                    "else those active this term where its students work; less those excluded "
@@ -836,8 +935,10 @@ def list_cmd(ctx, db, mask):
                 who = ", ".join(f"{n} ({_short(t['why'][n], sites, n in always)})"
                                 for n in sorted(r["instructors"]))
             if t["left_out"]:
+                named = all(w == "added" for w in t["why"].values())
                 who += (f"; {len(t['left_out'])} other faculty member(s) left out this term"
-                        + ("" if mask else f" ({', '.join(sorted(t['left_out']))})"))
+                        + ("" if mask else f" ({', '.join(sorted(t['left_out']))})")
+                        + (": instructors named in nomad.toml teach it alone" if named else ""))
             if t["said_no"]:
                 who += (f"; {len(t['said_no'])} said they don't teach it"
                         + ("" if mask else f" ({', '.join(sorted(t['said_no']))})"))

@@ -12,6 +12,9 @@
                            storage the lab's machines mount, listed as the lab's
     lead LAB NETID         NETID leads LAB too (a co-PI, a lab manager); with
                            remove=True, no longer
+    assistant LAB NETID    NETID is a research assistant of LAB: sees it as
+                           its PI does while one of its members; with
+                           remove=True, no longer
     remove LAB HOST        out of all of these for that lab
 
 A workstation's lab travels with its data (the tag), so add-machine is done
@@ -35,6 +38,7 @@ RESOURCES = ("console", "labs", "resources")
 NAMES = ("console", "storage")
 LABS = ("console", "labs")
 LEADS = LABS + ("leads",)
+ASSISTANTS = LABS + ("assistants",)
 
 
 class LabError(Exception):
@@ -332,7 +336,9 @@ def _write_leads(edit: TomlEdit, new: dict) -> None:
 def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> list:
     """NETID leads GROUP too (or, remove=True, no longer) through
     [console.labs] leads. Whom group_pattern already makes the PI is not
-    listed again."""
+    listed again -- unless GROUP is a course this term, a class rather than
+    a lab (nomad.config.access, lab_now): then the entry keeps it their lab
+    as well."""
     if group == SHARED:
         raise LabError('"shared" is not a lab; give the PI\'s NetID or the lab\'s group')
     n = netid.strip().lower()
@@ -347,7 +353,7 @@ def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> li
     else:
         from nomad.config.access import access_from
         acc = access_from(edit.data, log=False)
-        if group in groups or (acc.group_pattern
+        if group in groups or (acc.group_pattern and acc.lab_now(group)
                                and acc.group_pattern.replace("{netid}", n) == group):
             return []
         groups.append(group)
@@ -363,6 +369,110 @@ def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> li
     return [f"{n} no longer leads {group}" if remove else f"{n} leads {group}"]
 
 
+def assistants_of(data: dict) -> dict:
+    """{group: [netids]} from [console.labs.assistants], as access_from()
+    reads it (NetIDs lower-cased, a single string taken as a list of one)."""
+    raw = _get(data, ASSISTANTS)
+    out: dict = {}
+    if not isinstance(raw, dict):
+        return out
+    for group, people in raw.items():
+        if isinstance(people, str):
+            people = [people]
+        if not isinstance(group, str) or not isinstance(people, list):
+            continue
+        g = group.strip()
+        for who in people:
+            n = who.strip().lower() if isinstance(who, str) else ""
+            if n and n not in out.setdefault(g, []):
+                out[g].append(n)
+    return {g: v for g, v in out.items() if v}
+
+
+def set_assistant(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> list:
+    """NETID is a research assistant of GROUP (or, remove=True, no longer):
+    [console.labs.assistants], a table of its own right after
+    [console.labs] (gone when empty). Other ways of writing it are left for
+    a person."""
+    if group == SHARED:
+        raise LabError('"shared" is not a lab; give the PI\'s NetID or the lab\'s group')
+    n = netid.strip().lower()
+    if not _NETID.match(n):
+        raise LabError(f"{netid}: not a NetID (no domain, no @)")
+    raw = _get(edit.data, ASSISTANTS)
+    if raw is not None and not isinstance(raw, dict):
+        raise LabError("assistants is not a table of labs: change it by hand")
+    for key, people in (raw or {}).items():
+        if not (isinstance(people, str) or (isinstance(people, list)
+                                            and all(isinstance(x, str) for x in people))):
+            # Rewriting the table would lose it: left for a person.
+            raise LabError(f"assistants has an entry nomad can't read ({key!r} = {people!r}): "
+                           "fix it by hand first")
+    current = assistants_of(edit.data)
+    people = list(current.get(group, []))
+    if remove:
+        if n not in people:
+            return []
+        people.remove(n)
+    else:
+        if n in people:
+            return []
+        people.append(n)
+    new = {g: v for g, v in current.items() if g != group}
+    if people:
+        new[group] = people
+    for i, table, k in reversed(edit.key_lines()):
+        if table == LABS and k == ("assistants",):
+            try:
+                edit.remove_line(i)
+            except ValueError as e:
+                raise LabError(f"{e}; change assistants by hand") from e
+    clash = edit.assigned(ASSISTANTS)
+    if clash or edit.defined_inline(ASSISTANTS):
+        raise LabError(f"assistants is written as values in {edit.path.name}"
+                       + (f" (line {clash[0] + 1})" if clash else "")
+                       + ": write it as [console.labs.assistants] or change it by hand")
+    edit.set_table(ASSISTANTS, dict(sorted(new.items())), after=LEADS if _get(edit.data, LEADS) else LABS)
+    return [f"{n} is no longer a research assistant of {group}" if remove
+            else f"{n} is a research assistant of {group}"]
+
+
+def check_assistant(before: dict, group: str, netid: str, remove: bool = False):
+    """A check for TomlEdit.save after set_assistant: the file as it would be
+    has NETID among GROUP's research assistants (``remove``: not), GROUP's
+    others and every other lab's as they were, and the rest of the file
+    reading as it did (``before``: the file's data when it was read). For
+    `nomad lab assistant` and the Console."""
+    import copy
+    n = netid.strip().lower()
+
+    def without(d):
+        d = copy.deepcopy(d)
+        console = d.get("console")
+        labs_t = console.get("labs") if isinstance(console, dict) else None
+        if isinstance(labs_t, dict):
+            labs_t.pop("assistants", None)
+            if not labs_t:
+                console.pop("labs")
+        if isinstance(console, dict) and not console:
+            d.pop("console")
+        return d
+    rest = without(before)
+    was = assistants_of(before)
+
+    def check(d):
+        now = assistants_of(d)
+        got = now.get(group, [])
+        if (n in got) == remove:
+            return False
+        if [x for x in got if x != n] != [x for x in was.get(group, []) if x != n]:
+            return False
+        if {g: v for g, v in now.items() if g != group} != {g: v for g, v in was.items() if g != group}:
+            return False
+        return without(d) == rest
+    return check
+
+
 def summary(config: dict, group: str | None = None) -> list:
     """What nomad.toml here says about labs, as lines."""
     ws = _entries(config, _list_path(config, WS_SECTION, "workstations"))
@@ -370,8 +480,9 @@ def summary(config: dict, group: str | None = None) -> list:
     res = _get(config, RESOURCES) or {}
     names = _get(config, NAMES) or {}
     led = leads_of(config)
+    helpers = assistants_of(config)
     groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res)
-                    | {g for gs in led.values() for g in gs})
+                    | {g for gs in led.values() for g in gs} | set(helpers))
     if group == SHARED:
         groups = []
     elif group:
@@ -397,6 +508,8 @@ def summary(config: dict, group: str | None = None) -> list:
         also = sorted(who for who, gs in led.items() if g in gs)
         if also:
             lines.append(f"  also led by: {', '.join(also)}")
+        if helpers.get(g):
+            lines.append(f"  research assistants: {', '.join(helpers[g])}")
         if lines[-1] in (f"{g}:", f"{shown} ({g}):"):
             lines.append("  nothing here")
     untagged = sorted(e.get("hostname") for e in ws if not e.get("department"))

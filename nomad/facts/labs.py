@@ -127,7 +127,8 @@ def _each_member(conn, people: set, rows: list | None, ceilings: dict, stale: se
 def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None = None,
          days: int = 30, now: datetime | None = None, groups: list | None = None,
          min_others: int = 0, names: bool = False) -> dict:
-    """The labs ``netid`` leads (or, for staff, the ``groups`` named), each
+    """The labs ``netid`` leads or is a research assistant of (or, for staff,
+    the ``groups`` named), each
     with its members, their jobs over ``days`` taken together, its
     workstations and its storage. ``min_others``: leave out a total resting
     on fewer members than this besides ``netid`` (see the top of the file).
@@ -151,12 +152,24 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         tagged = workstation_tags(conn, now)
     led = list(groups) if groups is not None else (
         acc.lab_groups(netid, exists, tagged) if netid else [])
+    # And those ``netid`` is a research assistant of now: seen as their PI
+    # sees them (each says which: "as").
+    assisted = [g for g in acc.assisted_groups(netid, members_of) if g not in led] \
+        if groups is None and netid else []
     ceilings = memory_ceilings(conn) if conn is not None else {}
     out = envelope("lab", now, win)
     out["labs"] = []
-    for g in led:
+    for g in led + assisted:
         lab = {"group": g, "name": acc.lab_names.get(g) or g}
+        if groups is None:
+            lab["as"] = "assistant" if g in assisted else "pi"
         people = set(members_of(g)) if members_of is not None else set()
+        if g in assisted:
+            # A research assistant: the lab's members, less whoever leads it
+            # (NetIDs compared in lower case: the groups data keeps the
+            # directory's spelling).
+            leaders = acc.leaders(g)
+            people = {u for u in people if (u or "").strip().lower() not in leaders}
         if conn is not None:
             counts = membership_counts(conn, g)
             rows = jobfacts.finished_rows(conn, since, until, users=sorted(people))
@@ -164,7 +177,7 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
             ran = {r.get("user_name") for r in rows or () if r.get("user_name")}
             me = {(netid or "").strip().lower()}
             few = 0 < len(ran - me) < min_others
-            lab["members"] = {"current": counts["members"],
+            lab["members"] = {"current": len(people) if g in assisted else counts["members"],
                               # how many ran jobs is itself one member's news in a small lab
                               "ran_jobs": None if few else len(ran),
                               "no_longer_listed": counts["former"],

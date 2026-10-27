@@ -11,8 +11,8 @@ them from its sign-in page, with no password: for trying it, tutorials and
 screenshots. Nothing here is a real person.
 
     student             bob     takes CS 101; his own jobs, some running now
-    research assistant  eve     works in Grace's lab (what a lab member sees;
-                                a lab viewer once lab roles come)
+    research assistant  eve     Grace's lab's research assistant: sees it as
+                                its PI does, but for Grace's own work
     PI                  grace   leads the Grace Lab (group grace$): alice,
                                 charlie and eve
     instructor          henry   teaches CS 101 this term
@@ -56,7 +56,8 @@ class Person:
 CAST = (
     Person("bob", "Student", "Takes CS 101. Sees his own jobs, some running now.", "viewer"),
     Person("eve", "Research assistant",
-           "Works in the Grace Lab. Sees her own work, as a lab member does.", "viewer"),
+           "The Grace Lab's research assistant: sees its members, one by one, but not Grace's own work.",
+           "viewer"),
     Person("grace", "PI", "Leads the Grace Lab: sees its members, one by one, and its work.", "viewer"),
     Person("henry", "Instructor", "Teaches CS 101 this term: sees his class.", "viewer"),
     Person("olive", "Operator", "Runs the systems: sees everything, changes no settings.", "operator"),
@@ -96,6 +97,9 @@ group_pattern = "{{netid}}$"           # grace leads grace$
 
 [console.labs.resources."{LAB_GROUP}"]
 name = "{LAB_NAME}"
+
+[console.labs.assistants]
+"{LAB_GROUP}" = ["eve"]                # sees the lab as its PI does (nomad 1.17.5)
 
 [console.courses]
 sources = ["groups"]

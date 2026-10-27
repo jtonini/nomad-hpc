@@ -6437,7 +6437,8 @@ def console_role(ctx, netid, role, apply):
 
 @console.command('roles')
 @click.argument('netid', required=False)
-@click.option('--db', type=click.Path(), help='Database with group membership (default: this host\'s)')
+@click.option('--db', type=click.Path(),
+              help="Database with group membership (default: the hub's combined one, else this host's)")
 @click.option('--mask', is_flag=True, help='Counts only: no NetIDs or group names.')
 @click.pass_context
 def console_roles(ctx, netid, db, mask):
@@ -6475,6 +6476,13 @@ def console_roles(ctx, netid, db, mask):
         "no group_pattern (labs only from leads)"
     click.echo(f"  labs:      {rule}; leads listed for {len(acc.leads)} "
                f"{'person' if len(acc.leads) == 1 else 'people'}")
+    if acc.assistants:
+        na = sum(len(v) for v in acc.assistants.values())
+        click.echo(f"  assistants: {na} research assistant{'' if na == 1 else 's'} listed for "
+                   f"{len(acc.assistants)} lab{'' if len(acc.assistants) == 1 else 's'}")
+    if acc.course_groups:
+        click.echo(f"  courses:   {len(acc.course_groups)} group{'' if len(acc.course_groups) == 1 else 's'} "
+                   "listed as courses this term (and any named like one): classes, not labs")
     if acc.resources:
         nw = sum(len(r.get('workstations', ())) for r in acc.resources.values())
         ns = sum(len(r.get('storage', ())) for r in acc.resources.values())
@@ -6489,16 +6497,57 @@ def console_roles(ctx, netid, db, mask):
                "work, unless given a role there)")
     for p in acc.problems:
         click.echo(click.style(f"  ! {p}", fg='yellow'))
+    db_path = Path(db).expanduser() if db else _groups_db(config, ctx.obj.get('config_path'))
     if not netid:
+        if acc.assistants and db_path.exists():
+            try:
+                conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+                try:
+                    exists, members_of = members_lookup(conn)
+                    lapsed = acc.lapsed_assistants(members_of)
+                finally:
+                    conn.close()
+            except sqlite3.Error as e:
+                click.echo(click.style(f"  ! {db_path} can't be read ({e}): research assistants "
+                                       "not checked against the groups", fg='yellow'))
+                return
+            not_labs = sorted(g for g in acc.assistants if exists(g) and not acc.is_lab(g, members_of))
+            lapsed = [(g, n) for g, n in lapsed if g not in not_labs]
+            gone = [(g, n) for g, n in lapsed if exists(g)]
+            unknown = sorted({g for g, _ in lapsed if not exists(g)})
+            if not_labs:
+                click.echo(click.style(
+                    f"  ! {len(not_labs)} group{'' if len(not_labs) == 1 else 's'} with research "
+                    f"assistants listed {'is' if len(not_labs) == 1 else 'are'} not a lab by nomad's "
+                    "rules" + ("" if mask else f" ({', '.join(not_labs)})")
+                    + ": their assistants apply to no one", fg='yellow'))
+            if gone:
+                click.echo(click.style(
+                    f"  ! {len(gone)} research assistant entr{'y' if len(gone) == 1 else 'ies'} "
+                    "for someone no longer in the lab's group: they no longer apply"
+                    + ("" if mask else " (" + ", ".join(f"{n} in {g}" for g, n in gone) + ")")
+                    + "; `nomad lab assistant LAB NETID --remove` tidies each", fg='yellow'))
+            if unknown:
+                click.echo(click.style(
+                    f"  ! {len(unknown)} lab{'' if len(unknown) == 1 else 's'} with research assistants "
+                    f"listed {'has' if len(unknown) == 1 else 'have'} no members in the groups data at "
+                    f"{db_path}" + ("" if mask else f" ({', '.join(unknown)})")
+                    + ": their assistants apply to no one until it does", fg='yellow'))
         return
 
-    db_path = Path(db).expanduser() if db else get_db_path(config)
     exists = members = tagged = None
     conn = None
     if db_path.exists():
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        exists, members = members_lookup(conn)
-        tagged = workstation_tags(conn, now=_now())
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            exists, members = members_lookup(conn)
+            tagged = workstation_tags(conn, now=_now())
+        except sqlite3.Error as e:
+            click.echo(click.style(f"  ! {db_path} can't be read ({e}): as with no database",
+                                   fg='yellow'))
+            if conn is not None:
+                conn.close()
+            exists = members = tagged = conn = None
     who = "this person" if mask else netid
     click.echo(f"\n{who}:")
     role = acc.role(netid)
@@ -6511,6 +6560,11 @@ def console_roles(ctx, netid, db, mask):
     else:
         line = "as the Console's own record says (a viewer unless given a role there)" + pi
     click.echo(f"  role: {line}")
+    if acc.group_pattern:
+        own = acc.group_pattern.replace("{netid}", netid.strip().lower())
+        if not acc.lab_now(own) and (exists is None or exists(own)):
+            click.echo(f"    {'their own group' if mask else own}: a course this term, a class rather "
+                       "than a lab (a lead entry or storage listed for it keeps it a lab as well)")
     # Every group listed for them; the one their name gives only if it exists.
     listed = list(acc.leads.get(netid.strip().lower(), ()))
     listed += [g for g in labs if g not in listed]
@@ -6528,8 +6582,17 @@ def console_roles(ctx, netid, db, mask):
                            + (f" ({', '.join(left)}: not counted)" if left else ""))
             else:
                 click.echo(f"    {name}: not in the groups data")
+    led_count = len(listed)
+    me = netid.strip().lower()
+    helping = sorted(g for g, people in acc.assistants.items() if me in people)
+    assisted = [g for g in acc.assisted_groups(me, members) if g not in labs] if members else []
     res = acc.lab_resources(netid, exists, tagged)
     listed = acc.lab_resources(netid, exists)
+    # A research assistant sees the lab's machines as its PI does.
+    for kind, names in acc.group_resources(assisted, tagged).items():
+        res[kind] |= names
+    for kind, names in acc.group_resources(assisted).items():
+        listed[kind] |= names
     for i, name in enumerate(sorted(res['workstations']), 1):
         label = f"workstation #{i}" if mask else name
         how = "" if name in listed['workstations'] else " [tagged]"
@@ -6538,6 +6601,24 @@ def console_roles(ctx, netid, db, mask):
                    ("not in the data" if conn is not None else "(no database)")))
     for line in _storage_lines(conn, acc, res['storage'], mask):
         click.echo(line)
+    # Research assistant of: while a member of the group.
+    for i, g in enumerate(helping, 1):
+        name = f"lab #{led_count + i}" if mask else acc.lab_label(g)
+        if members is None:
+            click.echo(f"  research assistant of {name}: (no database at {db_path}: can't tell "
+                       "whether they are a member, so it doesn't apply here)")
+        elif g in assisted or g in acc.assisted_groups(me, members):
+            click.echo(f"  research assistant of {name}: sees it as its PI does, but for the "
+                       "PI's own work" + (" (and leads it)" if g in labs else ""))
+        elif not acc.lab_now(g):
+            click.echo(f"  research assistant of {name}: a course this term, a class rather than "
+                       "a lab, so it doesn't apply this term")
+        elif not exists(g):
+            click.echo(f"  research assistant of {name}: the groups data has no members for it, "
+                       "so it applies to no one until it does")
+        else:
+            click.echo(f"  research assistant of {name}: not one of its members now, so it "
+                       "doesn't apply (`nomad lab assistant LAB NETID --remove` tidies it)")
     if role:
         click.echo("  sees individually: everyone")
     elif members is not None:
@@ -8025,6 +8106,8 @@ def lab():
                                        storage the lab's machines mount, listed as the lab's
     nomad lab name LAB "NAME"          how the lab is shown, e.g. "Smith Lab"
     nomad lab lead LAB NETID           NETID leads LAB too (--remove: no longer)
+    nomad lab assistant LAB NETID      NETID sees LAB as its PI does while one of its
+                                       members: a research assistant (--remove: no longer)
     nomad lab remove LAB HOST
 
     For storage that is everyone's, LAB is "shared": add-nas shared HOST.
@@ -8291,35 +8374,12 @@ def lab_name_cmd(ctx, lab_name, shown, apply):
     _lab_run(ctx, lab_name, lambda e, g: set_name(e, g, shown), check, apply)
 
 
-@lab.command('lead')
-@click.argument('lab_name', metavar='LAB')
-@click.argument('netid')
-@click.option('--remove', is_flag=True, help='NETID no longer leads LAB.')
-@click.option('--new-group', is_flag=True,
-              help="LAB is a group nomad doesn't know yet (no machines, storage or members).")
-@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
-@click.pass_context
-def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
-    """NETID leads LAB too (a co-PI, a lab manager, a test account): in the
-    Console they see LAB's machines and, one by one, its members. The PI
-    group_pattern names needs no entry. --remove: no longer.
-
-    LAB is the PI's NetID (with group_pattern), the lab's group, or its name
-    as `nomad lab show` prints it ("Smith Lab"); it must be a lab nomad knows
-    here -- listed machines or storage, tagged workstations, or members in
-    the groups data -- unless --new-group says otherwise: a mistyped NetID
-    could otherwise be another PI's lab.
-
-    Written as [console.labs.leads] (a `leads = {...}` line in
-    [console.labs] becomes that table), so nobody edits it by hand.
-    """
-    import copy
+def _lab_target(edit, before, acc, lab_name, remove, new_group):
+    """The lab's group for `nomad lab lead` and `nomad lab assistant`: LAB as
+    the PI's NetID (with group_pattern), the lab's group, or its name as
+    `nomad lab show` prints it; one nomad knows here unless --new-group."""
     import re as _re
-    from nomad.config.access import access_from
-    from nomad.config.labs import SHARED, LabError, lab_group, leads_of, set_lead
-    edit = _lab_edit(ctx)
-    before = edit.data
-    acc = access_from(before, log=False)
+    from nomad.config.labs import SHARED, lab_group
     direct = lab_group(before, lab_name)
     group = direct
     if "$" not in lab_name:
@@ -8348,8 +8408,42 @@ def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
             f"{group} is not a lab nomad knows here: no machines or storage are listed for "
             "it, no workstation is tagged with it, and the groups data has no members for "
             "it. Check the spelling (nomad lab show), or give --new-group to add it anyway.")
+    return group
+
+
+@lab.command('lead')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('netid')
+@click.option('--remove', is_flag=True, help='NETID no longer leads LAB.')
+@click.option('--new-group', is_flag=True,
+              help="LAB is a group nomad doesn't know yet (no machines, storage or members).")
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
+    """NETID leads LAB too (a co-PI, a lab manager, a test account): in the
+    Console they see LAB's machines and, one by one, its members. The PI
+    group_pattern names needs no entry. --remove: no longer.
+
+    LAB is the PI's NetID (with group_pattern), the lab's group, or its name
+    as `nomad lab show` prints it ("Smith Lab"); it must be a lab nomad knows
+    here -- listed machines or storage, tagged workstations, or members in
+    the groups data -- unless --new-group says otherwise: a mistyped NetID
+    could otherwise be another PI's lab.
+
+    Written as [console.labs.leads] (a `leads = {...}` line in
+    [console.labs] becomes that table), so nobody edits it by hand.
+    """
+    import copy
+    from nomad.config.access import access_from
+    from nomad.config.labs import LabError, leads_of, set_lead
+    edit = _lab_edit(ctx)
+    before = edit.data
+    acc = access_from(before, log=False)
+    group = _lab_target(edit, before, acc, lab_name, remove, new_group)
     n = netid.strip().lower()
-    by_pattern = bool(acc.group_pattern) and acc.group_pattern.replace("{netid}", n) == group
+    pattern_pi = bool(acc.group_pattern) and acc.group_pattern.replace("{netid}", n) == group
+    # Through group_pattern only while the group is a lab this term (not a class).
+    by_pattern = pattern_pi and acc.lab_now(group)
 
     def without_leads(d):
         d = copy.deepcopy(d)
@@ -8379,8 +8473,20 @@ def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
         if acc.role(n):
             notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} "
                          f"{acc.role(n)} here: they see everything anyway.")
-    if changes and remove and by_pattern:
+    after = access_from(edit.data, log=False)
+    if changes and remove and pattern_pi and after.lab_now(group):
         notes.append(f"{n} still leads {group} through group_pattern.")
+    if changes and acc.lab_now(group) != after.lab_now(group):
+        n_ra = len(acc.assistants.get(group, ()))
+        if after.lab_now(group):
+            notes.append(f"{group} is a course this term: with this entry it is a lab as well, so "
+                         "whoever leads it" + (f" and its {n_ra} research assistant"
+                                               f"{'' if n_ra == 1 else 's'}" if n_ra else "")
+                         + " will see its members -- the class's students -- one by one.")
+        else:
+            notes.append(f"{group} is a course this term: with no lead entry left it is a class "
+                         "rather than a lab, so neither its PI nor any research assistant sees it "
+                         "as one this term.")
     if changes and remove and acc.role(n):
         notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} {acc.role(n)} "
                      "here: they still see everything.")
@@ -8393,6 +8499,136 @@ def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
         return (((group not in got) if remove else (group in got))
                 and without_leads(d) == without_leads(before))
     _lab_finish(edit, changes, apply, check, notes)
+
+
+@lab.command('assistant')
+@click.argument('lab_name', metavar='LAB')
+@click.argument('netid')
+@click.option('--remove', is_flag=True, help='NETID is no longer a research assistant of LAB.')
+@click.option('--new-group', is_flag=True,
+              help="LAB is a group nomad doesn't know yet (no machines, storage or members).")
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_assistant(ctx, lab_name, netid, remove, new_group, apply):
+    """NETID is a research assistant of LAB: in the Console they see LAB as
+    its PI does -- its members one by one (not the PI's own work), their
+    jobs, the lab's machines and storage -- while they are one of its
+    members. LAB must be a lab by nomad's rules, not any group. Someone who leaves the group stops
+    being its assistant with no edit; `nomad console roles` lists entries
+    that no longer apply. --remove: no longer. The PI can do the same from
+    the lab's Members page in the Console.
+
+    LAB as for `nomad lab lead`. Written as [console.labs.assistants].
+    """
+    from nomad.config.access import access_from
+    from nomad.config.labs import LabError, check_assistant, set_assistant
+    edit = _lab_edit(ctx)
+    before = edit.data
+    acc = access_from(before, log=False)
+    group = _lab_target(edit, before, acc, lab_name, remove, new_group)
+    n = netid.strip().lower()
+    if not remove:
+        # A lab by nomad's rules, not any group with members ("faculty").
+        listed = (group in acc.resources or group in acc.lab_names
+                  or any(group in gs for gs in acc.leads.values()))
+        pattern = acc.group_pattern or ""
+        named = False
+        if "{netid}" in pattern and not listed:
+            # The group named for someone who is one of its members (as
+            # Access.is_lab): a pattern with no suffix names every group.
+            pi = [x for x in acc.leaders(group) if pattern.replace("{netid}", x) == group]
+            member = _lab_member(before, group, pi[0], edit.path) if pi else False
+            named = member is True or (member is None and new_group)
+        if not (listed or named):
+            raise click.ClickException(
+                f"{group} is not a lab by nomad's rules: group_pattern names it for none of its "
+                "members, and no machines, storage, name or lead entry is listed for it. A "
+                "research assistant is for a lab; if it is one, name it first (nomad lab name) "
+                "or give it a lead (nomad lab lead).")
+    try:
+        changes = set_assistant(edit, group, netid, remove)
+    except LabError as e:
+        raise click.ClickException(str(e))
+    notes = []
+    if changes and not remove:
+        size = _lab_size(before, group, edit.path)
+        notes.append(f"In the Console {n} will see {acc.lab_label(group)}'s members one by one, "
+                     "as its PI does but for the PI's own work"
+                     + (f" ({size} members in the groups data)" if size else "")
+                     + ", while they are one of them.")
+        member = _lab_member(before, group, n, edit.path)
+        if member is False:
+            notes.append(f"{n} isn't one of {group}'s members in the groups data now: the role "
+                         "applies once they are.")
+        elif member is None:
+            notes.append(f"The groups data here has no members for {group}: the role applies "
+                         f"once it shows {n} in it.")
+        if not acc.lab_now(group):
+            notes.append(f"{group} is a course this term: a class rather than a lab, so this "
+                         "applies from a term it isn't one (or once a lead entry or storage listed "
+                         "for it keeps it a lab as well).")
+        if acc.role(n):
+            notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} {acc.role(n)} "
+                         "here: they see everything anyway.")
+    if changes:
+        notes.append("The Console reads nomad.toml on every request: no restart.")
+
+    _lab_finish(edit, changes, apply, check_assistant(before, group, n, remove), notes)
+
+
+def _lab_size(config, group, config_path):
+    """How many members GROUP has in the groups data the Console reads, or
+    None when that can't be told."""
+    import sqlite3
+    import urllib.parse
+    from nomad.config.access import members_lookup
+    try:
+        db = _groups_db(config, config_path)
+        if not db.exists():
+            return None
+        conn = sqlite3.connect("file:" + urllib.parse.quote(str(db)) + "?mode=ro", uri=True)
+        try:
+            return len(members_lookup(conn)[1](group)) or None
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def _groups_db(config, config_path) -> Path:
+    """The database with the groups data the Console reads: a hub's combined
+    one when this is a hub and it exists, else this host's."""
+    try:
+        from nomad.actions.remote import hub_settings
+        combined = Path(hub_settings(config_path)["combined_db"])
+        if combined.exists():
+            return combined
+    except Exception:
+        pass
+    return Path(get_db_path(config))
+
+
+def _lab_member(config, group, netid, config_path):
+    """Whether NETID is one of GROUP's members in the groups data the Console
+    reads (_groups_db); None when that can't be told: no database, or no
+    members of GROUP in it."""
+    import sqlite3
+    import urllib.parse
+    from nomad.config.access import members_lookup
+    try:
+        db = _groups_db(config, config_path)
+        if not db.exists():
+            return None
+        conn = sqlite3.connect("file:" + urllib.parse.quote(str(db)) + "?mode=ro", uri=True)
+        try:
+            exists, members_of = members_lookup(conn)
+            if not exists(group):
+                return None
+            return netid in {str(u).lower() for u in members_of(group)}
+        finally:
+            conn.close()
+    except Exception:
+        return None
 
 
 @lab.command('remove')

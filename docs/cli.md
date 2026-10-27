@@ -11,6 +11,8 @@
 | `nomad console launch` | Open the Console in your browser through an SSH tunnel ([Console access](console.md)) |
 | `nomad console roles [NETID]` | Who may see what in the Console, as nomad.toml says; with NETID, what that person sees |
 | `nomad console role NETID ROLE` | Make one person admin, operator or viewer in nomad.toml's `[console.roles]`, or `none` (`--apply` writes it) ([Configuration](config.md)) |
+| `nomad lab lead LAB NETID` | NETID leads LAB too: a co-PI, a lab manager (`--remove`: no longer; `--apply` writes it) ([Configuration](config.md)) |
+| `nomad lab assistant LAB NETID` | NETID is a research assistant of LAB: sees it as its PI does while one of its members (`--remove`: no longer; `--apply` writes it) |
 | `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as (quickstart.md) |
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |

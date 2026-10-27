@@ -704,7 +704,8 @@ def questions(conn: sqlite3.Connection, config: dict | None, netid: str,
               answers: dict | None = None, now: datetime | None = None) -> list[dict]:
     """What to ask ``netid`` this term: the courses they are a faculty
     member of -- in its group, or a user of its environment -- (not
-    excluded, not staff, not added by name: those are decided) that have
+    excluded, not staff, and none with instructors named in nomad.toml
+    this term: those are decided) that have
     students this term or that they already answered for. Each: group (the
     course), name, students this term, their ``answer`` (True/False/None),
     and whether nomad takes them as teaching it now (``teaches``, ``why``)."""
@@ -717,8 +718,10 @@ def questions(conn: sqlite3.Connection, config: dict | None, netid: str,
         return []
     out = []
     for k in idx.keys:
+        # Not asked about a course nomad.toml names instructors for this
+        # term: that is decided (they alone teach it).
         if n not in candidates(idx.c, k, idx.members, idx.term) or \
-                n in idx.c.decisions(k, idx.term)[0]:
+                idx.c.decisions(k, idx.term)[0] - idx.c.decisions(k, idx.term)[1]:
             continue
         said = idx.answers.get(k, {})
         people = idx.roster(k)
@@ -768,6 +771,8 @@ def may_answer(conn: sqlite3.Connection, config: dict | None, netid: str, group:
         return False, "not a course"
     if n in idx.c.decisions(group, idx.term)[0]:
         return False, "already listed as teaching it"
+    if idx.c.decisions(group, idx.term)[0] - idx.c.decisions(group, idx.term)[1]:
+        return False, "nomad.toml names who teaches it this term"
     if n not in candidates(idx.c, group, idx.members, idx.term):
         return False, "not one of the course's faculty members"
     return True, ""
