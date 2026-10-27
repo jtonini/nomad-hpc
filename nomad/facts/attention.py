@@ -437,15 +437,47 @@ def _data(conn, lab: dict, people: set, cfg: dict, shared: dict, places: dict, g
         t = parse_time(r.get("read_at"))
         return None if t is None or now - t <= fresh else str(r["read_at"])[:10]
 
+    def owned(server: str, path: str | None) -> bool:
+        """The lab's own: the whole server (path None: listed whole), or one
+        of its exports holding the path."""
+        return any(n == server.lower() and (e is None if path is None else
+                                            (e is None or path == e or path.startswith(e.rstrip("/") + "/")))
+                   for n, e in own)
+
+    def server_label(server: str) -> str:
+        """The server once, with what it is: "store1 (the cluster's storage)"."""
+        name, note = places.get(server.lower(), (server, ""))
+        extra = "; ".join(x for x in (note, "the lab's" if owned(server, None) else "") if x)
+        return f"{name or server}" + (f" ({extra})" if extra else "")
+
     def where(r) -> str:
+        """One place: server:path, what the server is, the lab's, the reading's date if old."""
         server, path = r["server"], r["path"]
         name, note = places.get(server.lower(), (server, ""))
-        lab_own = any(n == server.lower() and (e is None or path == e or path.startswith(e.rstrip("/") + "/"))
-                      for n, e in own)
-        extra = "; ".join(x for x in (note, "the lab's" if lab_own else "") if x)
+        extra = "; ".join(x for x in (note, "the lab's" if owned(server, path) else "") if x)
         when = old_reading(r)
         return (f"{name or server}:{path}" + (f" ({extra})" if extra else "")
                 + (f", as of {when}" if when else ""))
+
+    def path_here(r, size) -> str:
+        """A path under its server: "/scratch 11.4 TB" (and the lab's, an old reading's date)."""
+        own_path = owned(r["server"], r["path"]) and not owned(r["server"], None)
+        when = old_reading(r)
+        return (f"{r['path']} {size}" + (" (the lab's)" if own_path else "")
+                + (f" as of {when}" if when else ""))
+
+    def places_said(parts: list) -> str:
+        """Each server once, its paths under it, largest first; the rest summed."""
+        top, rest = parts[:MAX_PLACES], parts[MAX_PLACES:]
+        by_server: dict = {}
+        for p in top:
+            by_server.setdefault(p["row"]["server"], []).append(p)
+        groups_ = sorted(by_server.items(), key=lambda kv: -sum(p["bytes"] for p in kv[1]))
+        out = [f"on {server_label(server)} " + ", ".join(path_here(p["row"], _size(p["bytes"])) for p in ps)
+               for server, ps in groups_]
+        if rest:
+            out.append(f"{_size(sum(p['bytes'] for p in rest))} on {len(rest)} other place{_s(len(rest))}")
+        return out
 
     def change_of(r):
         """The change over ``days``, when it is between a fresh reading and
@@ -505,13 +537,16 @@ def _data(conn, lab: dict, people: set, cfg: dict, shared: dict, places: dict, g
     for rank, x in enumerate(ranked):
         if x not in named:
             continue
-        parts = sorted((p for p in x["parts"] if p["bytes"]), key=lambda p: -p["bytes"])
-        shown = [f"{_size(p['bytes'])} on {where(p['row'])}" for p in parts[:MAX_PLACES]]
-        rest = parts[MAX_PLACES:]
-        if rest:
-            shown.append(f"{_size(sum(p['bytes'] for p in rest))} on {len(rest)} other place{_s(len(rest))}")
-        says = (f"{x['user']} holds {_size(x['total'])} on {where(parts[0]['row'])}" if len(parts) == 1 else
-                f"{x['user']} holds {_size(x['total'])}: " + ", ".join(shown))
+        parts = sorted((p for p in x["parts"] if p["bytes"]),
+                       key=lambda p: (-p["bytes"], p["row"]["server"], p["row"]["path"]))
+        shown = places_said(parts)
+        if len(parts) == 1:
+            says = f"{x['user']} holds {_size(x['total'])} on {where(parts[0]['row'])}"
+        elif len(shown) == 1:                 # one server: its paths after it
+            says = (f"{x['user']} holds {_size(x['total'])} on {server_label(parts[0]['row']['server'])}: "
+                    + ", ".join(path_here(p["row"], _size(p["bytes"])) for p in parts))
+        else:
+            says = f"{x['user']} holds {_size(x['total'])}: " + "; ".join(shown)
         if x["change"] is not None and growth and abs(x["change"]) >= growth:
             says += f"; {'up' if x['change'] > 0 else 'down'} {_size(abs(x['change']))} {week}"
         if x["old"] and x["old"] >= OLD_SHARE * x["total"]:

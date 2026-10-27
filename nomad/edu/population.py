@@ -306,7 +306,7 @@ def _window_index(end_time: str, start: datetime, window_size: int) -> int | Non
 
 _CACHE: dict[tuple, Population] = {}
 _CACHE_LOCK = threading.Lock()
-_CACHE_SIZE = 4
+_CACHE_SIZE = 8           # windows in use at once: 7, 30, 90 and a page's own, per database (1.17.8)
 
 
 def population(db_path: str, days: int = 90, window_size: int = 7) -> Population:
@@ -345,14 +345,22 @@ def research_group(name: str, pattern: str | None = None, exclude=()) -> bool:
 
 
 def group_members(db_path: str) -> dict[str, set[str]]:
-    """group name -> usernames, across every site in the database."""
+    """group name -> its members now, every site together: as nomad's labs
+    count them (nomad.config.access.members_lookup), listed in the groups
+    collector's latest run, with an account. 1.17.8: someone the group
+    stopped listing, or lists without an account, is no longer a member
+    here, so a group's report and its Labs and Groups figures agree."""
+    from nomad.config.access import members_lookup
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        out: dict[str, set[str]] = defaultdict(set)
-        for group, user in conn.execute(
-                "SELECT DISTINCT group_name, username FROM group_membership"):
-            if group and user:
-                out[group].add(user)
+        names = [g for (g,) in conn.execute(
+            "SELECT DISTINCT group_name FROM group_membership WHERE group_name IS NOT NULL")]
+        _, members_of = members_lookup(conn)
+        out: dict[str, set[str]] = {}
+        for group in names:
+            members = {u for u in members_of(group) if u}
+            if members:
+                out[group] = members
         return out
     except sqlite3.OperationalError:
         return {}
@@ -373,17 +381,34 @@ def _spread(values: list[float]) -> Spread | None:
                   p25=round(p25, 1), p75=round(p75, 1), n=len(values))
 
 
+def group_known(db_path: str, group_name: str) -> bool:
+    """Whether the groups collector has ever listed this group (it may have
+    no members now)."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return conn.execute("SELECT 1 FROM group_membership WHERE group_name = ? LIMIT 1",
+                            (group_name,)).fetchone() is not None
+    except sqlite3.OperationalError:
+        return False
+    finally:
+        conn.close()
+
+
 def group_report(db_path: str, group_name: str, days: int = 90,
-                 members: set[str] | None = None) -> GroupReport | None:
+                 members: set[str] | None = None,
+                 pop: Population | None = None) -> GroupReport | None:
     """A group's members: who ran jobs, how they score, what most need.
 
-    None when the group has no members in the database.
+    None when the group has no members now. ``pop``: everyone scored over
+    the same days, when the caller already has it (1.17.8), so the report
+    never scores everyone again.
     """
     if members is None:
         members = group_members(db_path).get(group_name, set())
     if not members:
         return None
-    pop = population(db_path, days)
+    if pop is None or pop.days != days:
+        pop = population(db_path, days)
     people = [pop.people[u] for u in members if u in pop.people]
     without = sorted(u for u in members if u not in pop.people)
     scored = [p for p in people if p.overall is not None]

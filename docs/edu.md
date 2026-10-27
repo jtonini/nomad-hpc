@@ -156,11 +156,16 @@ nomad edu report <group_name> [options]
 ```
 
 Every figure says how many people and jobs it rests on. A job counts when it
-finished in the period and is scored only when NØMAÐ measured it; members with
-no jobs are listed apart, never averaged in as zero. Figures over people are
-medians. "Change" compares a member's first and last week with measured jobs,
-and needs two such weeks. The Console's Group Reports page shows the same
-numbers.
+finished in the period (completed, failed, timed out or ran out of memory) and
+is scored only when NØMAÐ measured it; members with no jobs are listed apart,
+never averaged in as zero. Figures over people are medians. "Change" compares a
+member's first and last week with measured jobs, and needs two such weeks.
+
+The members are the group's members now, as `nomad facts lab` counts them:
+listed in the groups collector's latest run, with an account (1.17.8; before,
+anyone the group had ever listed); for a group with no one in it now the
+command says so. The Console shows the same report under the group's row on
+Groups.
 
 ### `nomad edu me`
 

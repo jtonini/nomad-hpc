@@ -230,8 +230,8 @@ else `sudo nomad -c ...`).
   compared without case; at most 200 characters. A storage server's
   `[console.storage]` note is used when it has none here.
   `nomad machine note NAME "..."` shows the change and `--apply` writes it
-  (with a backup; only the note line changes, the table's other keys and
-  comments stay); `--remove` takes it away; `nomad machine list` lists them.
+  (with a backup, `nomad.toml.bak-machine-*`, the newest 20 kept; only the
+  note line changes, the table's other keys and comments stay); `--remove` takes it away; `nomad machine list` lists them.
   A storage server has one description under its address and its name.
   A note is seen by whoever sees the machine named: a site, a storage
   server or a cluster's node is everyone's (a site that is also a lab's

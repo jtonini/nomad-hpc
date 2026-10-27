@@ -8223,7 +8223,7 @@ def _lab_reach(host, nas=False):
                                    ("; no zpool answered (not ZFS?)" if nas else ""))
 
 
-def _lab_finish(edit, changes, apply, check, notes=()):
+def _lab_finish(edit, changes, apply, check, notes=(), tag="lab", keep=None):
     from nomad.config.labs import LabError  # noqa: F401
     if not changes:
         click.echo("Nothing to change: nomad.toml already says so.")
@@ -8237,7 +8237,7 @@ def _lab_finish(edit, changes, apply, check, notes=()):
         click.echo("\nNothing changed. Run again with --apply to write it.")
         return
     try:
-        backup = edit.save(check)
+        backup = edit.save(check, tag=tag, keep=keep)
     except ValueError as e:
         raise click.ClickException(f"{e}; nothing changed")
     except OSError as e:
@@ -8323,7 +8323,8 @@ def machine_note(ctx, name, note, remove, apply):
     if not changes and remove and after:
         click.echo(f"{name}: no [console.machines] note to take away; " + notes[0])
         return
-    _lab_finish(edit, changes, apply, check_machine_note(name, text), notes)
+    # Backups as nomad.toml.bak-machine-*, the newest 20 kept (a note is a small change, often made).
+    _lab_finish(edit, changes, apply, check_machine_note(name, text), notes, tag="machine", keep=20)
 
 
 @machine.command('list')
@@ -8921,7 +8922,7 @@ def edu_report(ctx, group_name, db_path, days, output_json):
         nomad edu report bio301 --days 120
         nomad edu report physics-lab --json
     """
-    from nomad.edu.population import format_group_report, group_report
+    from nomad.edu.population import format_group_report, group_known, group_report
 
     if not db_path:
         config = ctx.obj.get('config', {}) if ctx.obj else {}
@@ -8929,6 +8930,10 @@ def edu_report(ctx, group_name, db_path, days, output_json):
 
     gr = group_report(str(db_path), group_name, days)
 
+    if gr is None and group_known(str(db_path), group_name):
+        click.echo(f"{group_name} has no members now: no one it lists in the groups collector's "
+                   "latest run has an account here (its former members aren't counted).", err=True)
+        raise SystemExit(1)
     if gr is None:
         click.echo(f"No data found for group '{group_name}'.", err=True)
         click.echo("Ensure group membership data has been collected:")

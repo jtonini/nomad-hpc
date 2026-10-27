@@ -173,8 +173,8 @@ def test_the_pi_is_told_whom_to_help_most_pressing_first(hub):
     assert says[("failing", "a3")] == "a3: 4 of the 5 jobs that ran to an end failed in the last 7 days (1 completed)."
     assert says[("quota", "a2")] == "a2 is at 95% of a soft quota on nas1:/data (the lab's): 400.0 GB of 420.0 GB."
     assert says[("storage", None)] == "nas1 is 95% full."
-    assert says[("data", "a1")] == ("a1 holds 4.0 TB: 3.0 TB on bigstore:/home (community $HOME), 1.0 TB on "
-                                    "nas1:/data (the lab's); up 500.0 GB in the last 7 days; 2.0 TB of it "
+    assert says[("data", "a1")] == ("a1 holds 4.0 TB: on bigstore (community $HOME) /home 3.0 TB; on nas1 "
+                                    "(the lab's) /data 1.0 TB; up 500.0 GB in the last 7 days; 2.0 TB of it "
                                     "unchanged for a year.")
     assert says[("data", "a2")] == "a2 holds 400.0 GB on nas1:/data (the lab's); up 200.0 GB in the last 7 days."
     assert says[("data", "a4")] == "a4 holds 200.0 GB on bigstore:/home (community $HOME)."
@@ -345,7 +345,7 @@ def test_an_old_reading_is_said_with_its_date_and_no_change(hub_path):
            t(days=28), t(days=8))
     says = {(i["kind"], i["user"]): i["says"] for i in _fresh(hub_path)["attention"]}
     a1 = says[("data", "a1")]
-    assert f"3.0 TB on bigstore:/home (community $HOME), as of {t(days=20)[:10]}" in a1
+    assert f"on bigstore (community $HOME) /home 3.0 TB as of {t(days=20)[:10]}" in a1
     assert "up" not in a1                               # its change was weeks ago
 
 
@@ -392,7 +392,7 @@ def test_nested_zfs_paths_count_once_and_keep_the_growth(tmp_path):
         conn.close()
     says = [i["says"] for i in items]
     assert says == ["nia is at 96% of a soft quota on zfs1:/tank/a (dataset tank/a): 500.0 GB of 520.0 GB.",
-                    "nia holds 550.0 GB: 500.0 GB on zfs1:/tank/a, 50.0 GB on zfs1:/tank; up 300.0 GB in the "
+                    "nia holds 550.0 GB on zfs1: /tank/a 500.0 GB, /tank 50.0 GB; up 300.0 GB in the "
                     "last 7 days."]
     assert holdings is not None
 
@@ -424,3 +424,31 @@ def test_a_member_whose_every_job_failed(hub_path):
     _write(hub_path, "DELETE FROM jobs WHERE job_id = '305'")
     says = {(i["kind"], i["user"]): i["says"] for i in _fresh(hub_path)["attention"]}
     assert says[("failing", "a3")] == "a3: all 4 jobs that ran to an end in the last 7 days failed."
+
+
+def test_each_server_is_named_once_with_its_paths(tmp_path):
+    from nomad.collectors import storage_use as su
+    from nomad.facts.attention import _HOLDINGS, lab_attention
+    from nomad import facts
+    path = tmp_path / "s.db"
+    c = sqlite3.connect(path)
+    c.executescript(su.SCHEMA)
+    rows = [("store1", "/scratch", 11400), ("store1", "/home", 27.6), ("gpu", "/home", 2800),
+            ("gpu", "/scratch", 2800), ("store1", "/scratch2", 327.3), ("other", "/x", 6)]
+    for server, p_, gb in rows:
+        c.execute("INSERT INTO storage_paths (timestamp, server, path, fs, total_bytes, used_bytes, available_bytes, "
+                  "accounting) VALUES (?, ?, ?, 'xfs', ?, 0, 0, 1)", (t(minutes=5), server, p_, 10**15))
+        c.execute("INSERT INTO storage_owners (timestamp, server, path, kind, name, used_bytes) "
+                  "VALUES (?, ?, ?, 'user', 'u1', ?)", (t(minutes=5), server, p_, int(gb * 10**9)))
+    c.commit()
+    c.close()
+    _HOLDINGS.clear()
+    conn = facts.open_readonly(path)
+    try:
+        places = {"store1": ("store1", "spydur's storage"), "gpu": ("gpu", "the GPU cluster")}
+        items = lab_attention(conn, {"storage": []}, {"u1"}, {}, NOW, places=places)
+    finally:
+        conn.close()
+    says, = [i["says"] for i in items if i["kind"] == "data"]
+    assert says == ("u1 holds 17.4 TB: on store1 (spydur's storage) /scratch 11.4 TB; on gpu (the GPU cluster) "
+                    "/home 2.8 TB, /scratch 2.8 TB; 360.9 GB on 3 other places.")

@@ -343,3 +343,14 @@ def test_an_unreadable_table_is_never_taken_as_nobodys(hub, monkeypatch):
         assert M.kinds(conn, acc)["bobpc"] == "workstation"       # nothing was kept
     finally:
         conn.close()
+
+
+def test_machine_notes_keep_their_newest_backups(tmp_path):
+    from nomad.cli import cli
+    p = tmp_path / "nomad.toml"
+    p.write_text('[console.machines."a"]\nnote = "0"\n')
+    for i in range(1, 24):
+        r = CliRunner().invoke(cli, ["-c", str(p), "machine", "note", "a", f"note {i}", "--apply"])
+        assert r.exit_code == 0, r.output
+    backups = sorted(tmp_path.glob("nomad.toml.bak-machine-*"))
+    assert len(backups) == 20 and not list(tmp_path.glob("nomad.toml.bak-lab-*"))
