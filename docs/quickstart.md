@@ -22,7 +22,7 @@ makes each what they are (`.config/nomad/nomad.toml`):
 |---|---|---|
 | bob | a student in CS 101 | his own jobs, some running now |
 | eve | the Grace Lab's research assistant | its members one by one, as its PI does, but not Grace's own work |
-| grace | the PI of the Grace Lab (`grace$`) | her lab's members one by one, and their work |
+| grace | the PI of the Grace Lab (`grace$`) | her lab's members one by one, their work, and what needs her attention: a job of charlie's that will never start, jobs out of memory, who holds the lab's data and where (nas-01, everyone's $HOME; nas-02, the lab's own) |
 | henry | the instructor of CS 101 | his class |
 | olive | an operator | everything; changes no settings |
 | adam | an admin | everything, settings included |

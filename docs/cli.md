@@ -152,6 +152,7 @@ What the Console's `/api/v1` answers, on the command line ([details](facts.md)).
 nomad facts sites                 # every site now, and its jobs (last 30 days)
 nomad facts me NETID              # one person's work
 nomad facts lab NETID             # the labs NETID leads, taken together
+nomad facts lab NETID --each      # each member too, and what needs attention
 nomad facts sites --json          # the data itself
 nomad facts me NETID --mask       # without the NetID, for sharing
 ```

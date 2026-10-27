@@ -19,7 +19,7 @@ On the command line:
 nomad facts sites                 # every site, jobs over the last 30 days
 nomad facts me NETID --days 90    # one person
 nomad facts lab NETID             # the labs NETID leads
-nomad facts lab NETID --each      # each member too, by NetID
+nomad facts lab NETID --each      # each member too, by NetID, and what needs attention
 nomad facts sites --json          # the data itself
 nomad facts lab NETID --mask      # no NetID, lab, machine or storage names, for sharing
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
@@ -135,6 +135,35 @@ Console's My Lab):
   member by NetID: jobs finished in the window, core-hours held and the
   share used, memory used of what was asked, GPU-hours, the median wait,
   and jobs running and waiting now. Most core-hours first.
+* `attention` (with names too, 1.17.6): what needs the PI's attention now,
+  most pressing first, each item with who (`user`, or none for a machine),
+  how many, up to three of the jobs it is about (`job_id`, `site`,
+  `submit_time`), and a sentence saying it (`says`); `attention_days` is the
+  window it looks at. From the last 7 days, what is waiting now, and the
+  latest storage readings:
+
+  | `kind` | When |
+  |---|---|
+  | `waiting` | a member's jobs waiting more than 24 hours (and under 60 days) for something that won't change by itself: a job it depends on that can never run, a hold (also `REQUEUE_HOLD` and the like), a request beyond a partition's or a per-job limit, an account or QOS that won't take it. Not limits that lift as jobs end (per user or per group), nor the cluster's own reasons (its turn, free nodes, nodes down, drained or reserved, a partition down), nor at a site that stopped reporting. One item a member, the longest wait first |
+  | `out_of_memory` | a member's jobs that ran out of memory |
+  | `timeout` | a member's jobs that hit their time limit or their `--deadline` |
+  | `failing` | 3 or more failed jobs, at least half of a member's jobs that ran to an end (node failures aside) |
+  | `quota` | a member at 90% or more of a quota, where there are quotas |
+  | `storage` | a lab storage server or export 90% full or more (a current reading) |
+  | `data` | the lab's 3 biggest holders of data (100 GB or more each), and anyone whose data grew by 100 GB or more in the last 7 days: how much, where (server and path, with the note `[console.storage]` gives the server, and "the lab's" on its own storage), how much it changed, and how much the latest scans (of the last 8 days) found unchanged for a year (modified, not read). From the servers the `storage_use` collector reads; copies (backups, replicas) and owners the server can only number are left out. A reading more than 2 days old is said with its date, and no change is said from it, nor from readings much further apart than the window |
+  | `over_cpu` | a member whose measured jobs held 100 core-hours or more and used under 25% of them |
+  | `over_memory` | a member whose jobs used under 20% of the memory they asked for, over 3 measured jobs or more, where Slurm holds the memory a job asks for |
+  | `workstation` | a lab workstation that hasn't answered for 2 hours |
+
+  Every limit is nomad.toml's to change, `[console.labs.attention]` (see
+  [configuration](config.md)). Nothing else is listed, and nothing says
+  "all fine": an empty list is a lab where none of these checks found
+  anything, which may be because nothing was measured; `attention_unchecked`
+  names a check that couldn't be made (`storage`: the readings couldn't be
+  read just then). The one asking is
+  left out (their own jobs and data are on their Home and in
+  `nomad facts me`), and a research assistant isn't told about the lab's
+  leaders, as in `each`; staff, naming the lab, see every member.
 
 Lab-wide figures unless names are asked for. How much a PI sees of each
 student is the institution's decision: the Console gives each member's row

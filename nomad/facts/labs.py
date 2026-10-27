@@ -46,7 +46,15 @@ def _workstation(conn, host: str, now: datetime) -> dict:
     age = age_minutes(when, now)
     online = (age is not None and age <= MACHINE_STALE_MINUTES
               and (state is None or state in ("online", "degraded")))
-    return {"name": host, "online": online, "status": state, "last_seen": str(when)}
+    # When it last answered: the collector stores a record when it doesn't
+    # too ("offline"), so the latest record isn't that (1.17.6).
+    last_online = str(when) if state is None else None
+    if state is not None:
+        r = fetch(conn, "SELECT MAX(timestamp) AS t FROM workstation_state WHERE hostname = ? "
+                        "AND status IN ('online', 'degraded')", [host])
+        last_online = str(r[0]["t"]) if r and r[0]["t"] else None
+    return {"name": host, "online": online, "status": state, "last_seen": str(when),
+            "last_online": last_online}
 
 
 def _storage(conn, acc, entry: str, now: datetime, sizes: dict) -> dict:
@@ -132,8 +140,9 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
     with its members, their jobs over ``days`` taken together, its
     workstations and its storage. ``min_others``: leave out a total resting
     on fewer members than this besides ``netid`` (see the top of the file).
-    ``names``: each member's own row too (``each``); then no total is left
-    out, since the rows show each member anyway."""
+    ``names``: each member's own row too (``each``), and what needs the
+    PI's attention now (``attention``, nomad.facts.attention); then no total
+    is left out, since the rows show each member anyway."""
     if names:
         min_others = 0
     from nomad.config.access import (access_from, export_sizes, members_lookup, membership_counts,
@@ -157,6 +166,16 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
     assisted = [g for g in acc.assisted_groups(netid, members_of) if g not in led] \
         if groups is None and netid else []
     ceilings = memory_ceilings(conn) if conn is not None else {}
+    if names and conn is not None:
+        from nomad.config.attention import from_config
+        from nomad.facts.attention import lab_attention
+        attention = from_config(config)
+        shared: dict = {}                       # what is waiting, who holds what: read once
+        places = {}                             # storage servers as [console.storage] names them
+        for server, (name, note) in acc.servers.items():
+            places[str(server).lower()] = (name or server, note or "")
+            if name:
+                places[str(name).lower()] = (name, note or "")
     out = envelope("lab", now, win)
     out["labs"] = []
     for g in led + assisted:
@@ -208,6 +227,19 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         else:
             lab["workstations"] = [{"name": h, "online": None, "last_seen": None} for h in sorted(hosts)]
             lab["storage"] = [{"entry": s, "measured": False} for s in storage]
+        if names and conn is not None:
+            # What needs the PI's attention now (nomad.facts.attention): with
+            # each member by name only. Whom to help: not the one asking
+            # (their own jobs and data are on their Home and My storage).
+            others = {u for u in people if (u or "").strip().lower() != (netid or "").strip().lower()}
+            lab["attention"] = lab_attention(
+                conn, lab, others, ceilings, now, set((lab.get("now") or {}).get("stale_sites") or ()),
+                settings=attention, rows=rows if days >= attention["days"] else None,
+                shared=shared, places=places)
+            lab["attention_days"] = attention["days"]
+            if shared.get("unchecked"):
+                # a check that couldn't be made (the storage readings, a busy database)
+                lab["attention_unchecked"] = sorted(shared["unchecked"])
         out["labs"].append(lab)
     out["notes"] = [
         ("Each member by NetID (each), as well as the lab's totals." if names else

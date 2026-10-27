@@ -119,6 +119,22 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 [console.labs.assistants]
 "NETID$" = ["eve"]             # research assistants: see the lab as its PI does
 
+[console.labs.attention]       # what My lab's Needs attention lists (1.17.6); the defaults:
+# days = 7                     # the jobs, and the growth of data, looked at
+# waiting_hours = 24           # a job waiting longer for something that won't change by itself,
+# waiting_max_days = 60        # and no longer (an old record, not a job)
+# failing_jobs = 3             # failed jobs, at least half of a member's that ran to an end
+# storage_pct = 90             # a lab storage server this full
+# holders = 3                  # the lab's biggest holders of data named (0: none),
+# holder_gb = 100              # each holding this much or more,
+# growth_gb = 100              # and anyone whose data grew this much in `days` (0: none)
+# quota_pct = 90               # a member this close to a quota
+# over_cpu_hours = 100         # core-hours held by measured jobs,
+# over_cpu_pct = 25            # used under this share of them
+# over_memory_pct = 20         # memory used under this share of what jobs asked for,
+# over_memory_jobs = 3         # over this many measured jobs
+# workstation_hours = 2        # a lab workstation silent this long
+
 [console.storage."10.0.0.28"]  # a storage server, as the mounts name it
 name = "sarahvaughan"
 note = "community $HOME, all users"
@@ -186,8 +202,18 @@ else `sudo nomad -c ...`).
   `[console.labs.resources."group"]` (one not collected, say), and storage is
   listed there: a storage server's name, or one export (`server:/export`) as
   the workstations mount it. Nothing is guessed from names.
+- **Needs attention:** the lab's PI (and its research assistants, and
+  staff) see at the top of each lab what needs them: members' jobs stuck
+  waiting, out of memory, out of time or mostly failing, the lab's storage
+  filling, who holds the most data and where, someone near a quota, jobs
+  holding far more than they use, a workstation gone quiet
+  ([details](facts.md#lab)). `[console.labs.attention]` sets each limit;
+  `nomad config check` reports a value it can't use (its default applies).
+  `nomad facts lab NETID --each` prints the same list.
 - **Storage servers:** `[console.storage."SERVER"]` gives a server a `name`
-  and a `note`, shown wherever its exports are. When the storage collector
+  and a `note`, shown wherever its exports are (and beside a member's data in
+  Needs attention: a note saying what it is, "spydur's /home and /scratch",
+  tells a PI where that is). When the storage collector
   reads that server (under its address, or under that name, as an ssh
   alias), its state, space and pools' health go on the server's line. SERVER is the server as the
   mounts name it, the part before the colon in `server:/export` (often an

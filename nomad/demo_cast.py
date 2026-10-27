@@ -97,6 +97,10 @@ group_pattern = "{{netid}}$"           # grace leads grace$
 
 [console.labs.resources."{LAB_GROUP}"]
 name = "{LAB_NAME}"
+storage = ["{STORAGE_LAB[0]}"]                # the lab's own storage server
+
+[console.storage."{STORAGE_HOME[0]}"]
+note = "everyone's $HOME"
 
 [console.labs.assistants]
 "{LAB_GROUP}" = ["eve"]                # sees the lab as its PI does (nomad 1.17.5)
@@ -219,6 +223,10 @@ def add_cast(db_path, now: datetime | None = None, seed: int | None = None, days
              at(hours=19), None),
             ("frank", "highmem", "node08", "RUNNING", "md_sim", 40, 380, 0, 48, at(hours=9), at(hours=8), None),
             ("charlie", "compute", "node04", "RUNNING", "dft_calc", 24, 96, 0, 24, at(hours=4), at(hours=4), None),
+            # One that will never start: the job it waits for failed (My
+            # lab's Needs attention, 1.17.6).
+            ("charlie", "compute", None, "PENDING", "post_process", 4, 16, 0, 4, at(days=2, hours=3), None,
+             "DependencyNeverSatisfied"),
             ("frank", "gpu", "gpu01", "RUNNING", "inference", 8, 48, 1, 8, at(hours=1, minutes=30),
              at(hours=1, minutes=20), None),
         ]
@@ -279,6 +287,8 @@ def add_cast(db_path, now: datetime | None = None, seed: int | None = None, days
                              "total_jobs) VALUES (?, ?, ?, ?, ?)",
                              (now.isoformat(), part, c["PENDING"], c["RUNNING"], c["PENDING"] + c["RUNNING"]))
 
+        owners = _storage_use(conn, now)
+
         conn.execute(f"CREATE TABLE IF NOT EXISTS {DEMO_INFO} (key TEXT PRIMARY KEY, value TEXT)")
         for key, value in (("made_by", "nomad demo --console"), ("made_at", now.isoformat()),
                            ("cast", json.dumps(cast_dicts()))):
@@ -286,7 +296,58 @@ def add_cast(db_path, now: datetime | None = None, seed: int | None = None, days
         conn.commit()
     finally:
         conn.close()
-    return {"groups": len(groups), "jobs_now": len(now_jobs), "node_readings": nodes, "moved_back": shifted}
+    return {"groups": len(groups), "jobs_now": len(now_jobs), "node_readings": nodes, "moved_back": shifted,
+            "storage_owners": owners}
+
+
+# Who holds what on the demo's storage servers (1.17.6), as the storage_use
+# collector would have stored it: everyone's $HOME on nas-01, the Grace Lab's
+# own data on nas-02. (user, nas-01 /home GB now, a week ago, unchanged for a
+# year; nas-02 /data GB now, a week ago)
+STORAGE_HOME = ("nas-01", "/home")
+STORAGE_LAB = ("nas-02", "/data")
+_HELD = (("alice", 1800, 1350, 1100, 900, 880), ("charlie", 420, 410, 40, 250, 240),
+         ("eve", 160, 150, 5, 60, 20), ("grace", 2600, 2590, 2000, 300, 300),
+         ("bob", 12, 9, 0, 0, 0), ("henry", 35, 35, 20, 0, 0), ("diana", 950, 940, 300, 0, 0),
+         ("frank", 610, 400, 100, 0, 0))
+
+
+def _storage_use(conn, now: datetime) -> int:
+    from nomad.collectors.storage_use import SCHEMA
+    conn.executescript(SCHEMA)
+    gb = 10 ** 9
+    stamp, before = now.isoformat(), (now - timedelta(days=8)).isoformat()
+    for (server, path), total in ((STORAGE_HOME, 40_000), (STORAGE_LAB, 4_000)):
+        i = 1 if path == "/home" else 4
+        used = sum(h[i] for h in _HELD)
+        # As big as the storage collector says the server is, when it does.
+        try:
+            row = conn.execute("SELECT total_bytes FROM storage_state WHERE hostname = ? "
+                               "ORDER BY timestamp DESC LIMIT 1", (server,)).fetchone()
+        except sqlite3.Error:
+            row = None
+        if row and row[0] and row[0] // gb > used:
+            total = row[0] // gb
+        conn.execute("INSERT INTO storage_paths (timestamp, server, path, fs, total_bytes, used_bytes, "
+                     "available_bytes, accounting) VALUES (?, ?, ?, 'zfs', ?, ?, ?, 1)",
+                     (stamp, server, path, total * gb, used * gb, (total - used) * gb))
+        conn.execute("INSERT INTO storage_reports (server, mode, started, finished, host, read_at, paths, owners) "
+                     "VALUES (?, 'usage', ?, ?, ?, ?, 1, ?)", (server, stamp, stamp, server, stamp, len(_HELD)))
+    n = 0
+    for user, home, home_was, old, lab, lab_was in _HELD:
+        for (server, path), now_gb, was_gb in ((STORAGE_HOME, home, home_was), (STORAGE_LAB, lab, lab_was)):
+            if not now_gb:
+                continue
+            for when, size in ((stamp, now_gb), (before, was_gb)):
+                conn.execute("INSERT INTO storage_owners (timestamp, server, path, kind, name, used_bytes) "
+                             "VALUES (?, ?, ?, 'user', ?, ?)", (when, server, path, user, size * gb))
+            n += 1
+        conn.execute("INSERT INTO storage_tops (scanned_at, server, path, top, top_owner, bytes, files, "
+                     "older1_bytes, older2_bytes, age1_days, age2_days, complete) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 180, 365, 1)",
+                     ((now - timedelta(hours=7)).isoformat(), *STORAGE_HOME, user, user, home * gb,
+                      home * 900, min(home, old * 1.2) * gb, old * gb))
+    return n
 
 
 def is_demo_db(db_path) -> bool:

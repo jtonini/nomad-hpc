@@ -105,6 +105,8 @@ def _mask_labs(data: dict) -> None:
     for i, lab in enumerate(data["labs"], 1):
         lab["group"] = lab["name"] = f"lab #{i}"
         lab.pop("each", None)                     # each member by NetID
+        lab.pop("attention", None)                # who, which job, which machine (never built
+                                                  # masked: --mask asks for no names)
         for j, w in enumerate(lab.get("workstations", ()), 1):
             w["name"] = f"workstation #{j}"
         for j, st in enumerate(lab.get("storage", ()), 1):
@@ -298,6 +300,15 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
     for lab in data["labs"]:
         helper = " (as its research assistant)" if lab.get("as") == "assistant" else ""
         click.echo(f"{lab['name']}{helper}, last {data['window']['days']} days{_where(path, mask)}")
+        att = lab.get("attention")
+        if att:
+            click.echo("  Needs attention:")
+            for item in att:
+                click.echo(f"    {item['says']}")
+        elif att is not None:
+            click.echo("  Needs attention: none of its checks found anything")
+        if "storage" in (lab.get("attention_unchecked") or ()):
+            click.echo("    (who holds the lab's data couldn't be read just now)")
         m = lab.get("members")
         if m:
             click.echo(f"  members: {m['current']}" + ("" if m["ran_jobs"] is None

@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 ROLES = ("admin", "operator")       # what the file can grant; anyone else is a viewer
 FILE_ROLES = ROLES + ("viewer",)    # the lists [console.roles] may have
-_LABS_KEYS = ("group_pattern", "leads", "resources", "assistants")
+_LABS_KEYS = ("group_pattern", "leads", "resources", "assistants", "attention")
 RESOURCE_KINDS = ("workstations", "storage")
 OTHER_USER = "another user"
 
@@ -312,6 +312,9 @@ def access_from(config: dict | None, log: bool = True) -> Access:
     for key in labs:
         if key not in _LABS_KEYS:
             problems.append(f"[console.labs] {key}: unknown setting; ignored")
+    if "attention" in labs:
+        from nomad.config.attention import settings as attention_settings
+        problems += attention_settings(labs.get("attention"))[1]
     pattern = labs.get("group_pattern", "")
     if not isinstance(pattern, str):
         problems.append("[console.labs] group_pattern should be text; ignored")

@@ -363,6 +363,23 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # [console.labs.assistants]
 # "NETID$" = ["eve"]
 
+# What My lab's Needs attention lists (docs/facts.md); these are the defaults.
+# [console.labs.attention]
+# days = 7                 # the jobs, and the growth of data, looked at
+# waiting_hours = 24       # a job waiting longer for something that won't change by itself
+# waiting_max_days = 60    # ... and no longer (an old record, not a job)
+# failing_jobs = 3         # failed jobs, at least half of a member's that ran to an end
+# storage_pct = 90         # a lab storage server this full
+# holders = 3              # the lab's biggest holders of data named (0: none),
+# holder_gb = 100          # each holding this much or more (GB = 10^9 bytes),
+# growth_gb = 100          # and anyone whose data grew this much in `days` (0: none)
+# quota_pct = 90           # a member this close to a quota
+# over_cpu_hours = 100     # core-hours held by measured jobs ...
+# over_cpu_pct = 25        # ... and used under this share of them
+# over_memory_pct = 20     # memory used under this share of what jobs asked for,
+# over_memory_jobs = 3     # over this many measured jobs
+# workstation_hours = 2    # a lab workstation silent this long
+
 # A storage server's name and a note, shown wherever its exports are. The
 # server as the mounts name it (often an address). Say when everyone shares
 # it, or its use reads as the lab's own.

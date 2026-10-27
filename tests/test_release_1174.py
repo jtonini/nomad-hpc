@@ -27,6 +27,9 @@ def test_the_demo_has_its_cast_and_says_it_is_a_demo(made):
     now = c.execute("SELECT user_name, state, pending_reason FROM jobs WHERE end_time IS NULL ORDER BY job_id").fetchall()
     assert ("bob", "RUNNING", None) in now and ("bob", "PENDING", "Priority") in now
     assert c.execute("SELECT COUNT(*) FROM node_state WHERE cluster = 'demo-cluster'").fetchone()[0] > 0
+    # 1.17.6: a job that will never start, and who holds what on the storage servers
+    assert ("charlie", "PENDING", "DependencyNeverSatisfied") in now
+    assert c.execute("SELECT COUNT(DISTINCT name) FROM storage_owners").fetchone()[0] == 8
 
 
 def test_its_nomad_toml_makes_grace_a_pi_and_henry_an_instructor(made):
@@ -37,6 +40,7 @@ def test_its_nomad_toml_makes_grace_a_pi_and_henry_an_instructor(made):
     assert acc.role("adam") == "admin" and acc.role("olive") == "operator" and acc.role("bob") is None
     assert acc.group_pattern == "{netid}$"
     assert cfg["console"]["courses"]["groups"]["cs101"]["instructors"] == ["henry"]
+    assert cfg["console"]["labs"]["resources"]["grace$"]["storage"] == ["nas-02"] and not acc.problems
 
 
 def test_it_replaces_its_own_demo_but_never_another_database(tmp_path, made):

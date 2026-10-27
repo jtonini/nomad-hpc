@@ -73,7 +73,8 @@ def _select(jcols: set, scols: set) -> str:
         f"{j('runtime_seconds')} AS runtime, {j('submit_time')} AS submit_time, "
         f"{j('start_time')} AS start_time, {wait} AS wait_seconds, "
         f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb, "
-        f"{s('max_tasks')} AS max_tasks, {j('alloc_tres')} AS alloc_tres "
+        f"{s('max_tasks')} AS max_tasks, {j('alloc_tres')} AS alloc_tres, "
+        f"{j('job_id')} AS job_id, {j('end_time')} AS end_time "
     )
 
 
@@ -188,6 +189,8 @@ def summarize(rows: list[dict] | None, ceilings: dict | None = None) -> dict | N
             "requested": round(sum(r["req_cpus"] * hours(r) for r in held), 1),
             "used_pct": pct(core_used, core_held),
             "jobs_measured": len(cpu_measured),
+            # what the measured jobs held: what used_pct is a share of (1.17.6)
+            "measured_requested": round(core_held, 1),
         },
         "memory": {
             "used_pct": pct(mem_used, mem_held),
