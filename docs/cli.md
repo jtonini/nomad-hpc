@@ -144,6 +144,18 @@ nomad agent install-key 'ssh-ed25519 AAAA... nomad-actions@hub' [--from PATTERN]
 
 See [Actions](actions.md).
 
+## Machines
+
+What each machine is, shown beside its name ([details](config.md)).
+
+```bash
+nomad machine note labhead1 "the Smith lab's head node"   # shows the change
+nomad machine note labhead1 "the Smith lab's head node" --apply
+nomad machine note labhead1             # what nomad.toml says of it
+nomad machine note labhead1 --remove --apply
+nomad machine list                          # every machine described
+```
+
 ## Facts
 
 What the Console's `/api/v1` answers, on the command line ([details](facts.md)).

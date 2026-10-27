@@ -90,6 +90,7 @@ def _mask_sites(data: dict) -> None:
     """Filesystem paths can name a lab or a project (/data/smithlab): numbered."""
     names: dict = {}
     for s in data["sites"]:
+        s.pop("note", None)                      # what a machine is can name a lab
         for f in s.get("storage", ()):
             names.setdefault((s["name"], f["path"]), f"filesystem #{len(names) + 1}")
     for s in data["sites"]:
@@ -109,7 +110,9 @@ def _mask_labs(data: dict) -> None:
                                                   # masked: --mask asks for no names)
         for j, w in enumerate(lab.get("workstations", ()), 1):
             w["name"] = f"workstation #{j}"
+            w.pop("note", None)
         for j, st in enumerate(lab.get("storage", ()), 1):
+            st.pop("note", None)
             for key in ("entry", "server", "name", "export"):
                 if key in st:
                     st[key] = f"storage #{j}"
@@ -173,7 +176,8 @@ def sites_cmd(ctx, days, db, as_json, mask):
     for s in data["sites"]:
         state = {"ok": click.style("ok", fg="green"), "stale": click.style("stale", fg="yellow"),
                  "no_data": click.style("no data", fg="red")}[s["status"]]
-        line = f"\n  {s['name']}  {state}, data {_age(s['age_minutes'])}"
+        line = (f"\n  {s['name']}" + (f" ({s['note']})" if s.get("note") else "")
+                + f"  {state}, data {_age(s['age_minutes'])}")
         sync = s.get("sync")
         if sync and sync["failing"]:
             line += click.style(f"; sync failing (last success {_when(sync['last_success'])})", fg="red")
@@ -327,8 +331,13 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
         if ws:
             online = sum(1 for w in ws if w.get("online"))
             click.echo(f"  workstations: {online} of {len(ws)} online")
+            for w in ws:
+                if w.get("note"):
+                    click.echo(f"    {w['name']}: {w['note']}")
         for s in lab.get("storage", []):
             label = s["entry"] if s["entry"].startswith("storage #") else f"storage {s['entry']}"
+            if s.get("note"):
+                label += f" ({s['note']})"
             if not s.get("measured"):
                 click.echo(f"  {label}: not measured")
             else:

@@ -102,6 +102,16 @@ storage = ["{STORAGE_LAB[0]}"]                # the lab's own storage server
 [console.storage."{STORAGE_HOME[0]}"]
 note = "everyone's $HOME"
 
+# What each machine is, shown beside its name (nomad 1.17.7)
+[console.machines."{SITE}"]
+note = "the demo's cluster"
+
+[console.machines."{STORAGE_LAB[0]}"]
+note = "the Grace Lab's NAS"
+
+[console.machines."login-node-01"]
+note = "a login node: for editing and submitting jobs, not for running them"
+
 [console.labs.assistants]
 "{LAB_GROUP}" = ["eve"]                # sees the lab as its PI does (nomad 1.17.5)
 

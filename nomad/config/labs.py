@@ -39,6 +39,7 @@ NAMES = ("console", "storage")
 LABS = ("console", "labs")
 LEADS = LABS + ("leads",)
 ASSISTANTS = LABS + ("assistants",)
+MACHINES = ("console", "machines")
 
 
 class LabError(Exception):
@@ -172,6 +173,99 @@ def _set_name(edit: TomlEdit, server: str, name: str | None, note: str | None,
     if body != {k: v for k, v in old.items() if k in ("name", "note") and v}:
         edit.set_table(NAMES + (server,), body)
         changes.append(f'{server}: ' + ", ".join(f'{k} "{v}"' for k, v in body.items()))
+
+
+_NOTE_LINE = re.compile(r"""^(\s*note\s*=\s*)("(?:[^"\\]|\\.)*"|'[^']*')(\s*#.*)?\s*$""")
+
+
+def set_machine_note(edit: TomlEdit, name: str, note: str) -> list:
+    """What a machine is, in [console.machines."NAME"] (1.17.7): shown
+    beside its name wherever nomad and the Console name it. An empty note
+    takes the description away. Only the note line changes: the table's
+    other keys and comments stay. An existing table for the machine, in any
+    case, is the one changed; a new one goes after the last machine's (or
+    the storage servers')."""
+    from nomad.config.access import _MACHINE, NOTE_MAX, clean_note
+    from nomad.config.edit import lines_of, value
+    n = name.strip()
+    if not _MACHINE.match(n):
+        raise LabError(f"{name!r}: not a machine's name (letters, digits, '.', '-', '_'), "
+                       "as nomad shows it")
+    note = clean_note(note or "")
+    if len(note) > NOTE_MAX:
+        raise LabError(f"the note is {len(note)} characters; keep it to {NOTE_MAX} at most: a line "
+                       "beside a name")
+    tables = _get(edit.data, MACHINES) or {}
+    if not isinstance(tables, dict):
+        raise LabError("console.machines isn't a table here; change it by hand")
+    from nomad.config.access import access_from
+    names = access_from(edit.data, log=False).aliases(n)      # a storage server's address and name
+    same = [k for k in tables if k.lower() in names]
+    if len(same) > 1:
+        raise LabError(f"{', '.join(same)}: one machine described {len(same)} times (its names, "
+                       "compared without case); keep one by hand first")
+    key = same[0] if same else n
+    path = MACHINES + (key,)
+    if edit.assigned(path):
+        raise LabError(f"console.machines.{key} is written inline in {edit.path.name} (a value, not a "
+                       f'[console.machines."{key}"] table); change it by hand')
+    table = tables.get(key)
+    if table is not None and not isinstance(table, dict):
+        raise LabError(f"console.machines.{key} isn't a table; change it by hand")
+    old = table.get("note") if isinstance(table, dict) and isinstance(table.get("note"), str) else ""
+    if clean_note(old) == note:
+        return []
+    lines = [i for i, t, k in edit.key_lines() if t == path and k == ("note",)]
+    if lines:
+        text_lines = lines_of(edit.text)
+        m = _NOTE_LINE.match(text_lines[lines[0]].rstrip("\r\n"))
+        if not m or m.group(2).startswith(('"""', "'''")):
+            raise LabError(f'{key}\'s note isn\'t a plain note = "..." line; change it by hand')
+        if note:
+            end = "\n" if text_lines[lines[0]].endswith("\n") else ""
+            text_lines[lines[0]] = f"{m.group(1)}{value(note)}{m.group(3) or ''}{end}"
+            edit.text = "".join(text_lines)
+        elif not {k for k in table if k != "note"}:
+            # Nothing else in it: the table goes, its comments above the note with it.
+            head = next(b[0] for b in edit._blocks()[1] if b[2] == path and not b[3])
+            before = edit.text
+            edit.text = "".join(text_lines[:head] + text_lines[lines[0] + 1:]).lstrip("\n") \
+                if head == 0 else "".join(text_lines[:head]).rstrip("\n") + "\n" + (
+                    "\n" + "".join(text_lines[lines[0] + 1:]).lstrip("\n")
+                    if "".join(text_lines[lines[0] + 1:]).strip() else "")
+            try:
+                edit.data
+            except Exception:
+                edit.text = before
+                raise LabError(f"{key}'s table couldn't be taken out cleanly; change it by hand")
+        else:
+            edit.remove_line(lines[0])
+    elif note:
+        if table is not None:
+            edit.insert_key(path, "note", note)
+        else:
+            blocks = edit._blocks()[1]
+            after = next((b[2] for b in reversed(blocks) if not b[3] and b[2][:2] == MACHINES
+                          and len(b[2]) >= 3), None) or \
+                next((b[2] for b in reversed(blocks) if not b[3] and b[2][:2] == NAMES and len(b[2]) == 3), None)
+            edit.set_table(path, {"note": note}, after=after)
+    import json
+    return [f"{key}: {json.dumps(note, ensure_ascii=False)}" if note else f"{key}: no description"]
+
+
+def check_machine_note(name: str, note: str):
+    """A check for TomlEdit.save after set_machine_note."""
+    from nomad.config.access import clean_note
+    n = name.strip().lower()
+    want = clean_note(note or "")
+
+    def check(data: dict) -> bool:
+        from nomad.config.access import access_from
+        names = access_from(data, log=False).aliases(n)
+        tables = _get(data, MACHINES) or {}
+        got = [t.get("note") for k, t in tables.items() if k.lower() in names and isinstance(t, dict)]
+        return (got == [want]) if want else all(not g for g in got)
+    return check
 
 
 def add_machine(edit: TomlEdit, group: str, host: str) -> list:
@@ -481,6 +575,8 @@ def summary(config: dict, group: str | None = None) -> list:
     names = _get(config, NAMES) or {}
     led = leads_of(config)
     helpers = assistants_of(config)
+    from nomad.config.access import access_from
+    note_of = access_from(config, log=False).note_of            # what each machine is (1.17.7)
     groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res)
                     | {g for gs in led.values() for g in gs} | set(helpers))
     if group == SHARED:
@@ -497,13 +593,20 @@ def summary(config: dict, group: str | None = None) -> list:
             lines.append(f"  workstations collected here: {', '.join(machines)}")
         if listed["workstations"]:
             lines.append(f"  workstations listed for the Console: {', '.join(listed['workstations'])}")
+        shown_hosts = {}
+        for host in sorted(set(machines) | set(listed["workstations"])):
+            shown_hosts.setdefault(host.lower(), host)
+        for host in shown_hosts.values():
+            if note_of(host):
+                lines.append(f"    {host}: {note_of(host)}")
         for target in listed["storage"]:
             server = target.partition(":")[0]
             n = names.get(server) or {}
             label = (f"{n.get('name')} ({target})" if n.get("name") not in (None, "", target)
                      else target)
             here = next((e for e in nas if e.get("hostname") == server), None)
-            lines.append(f"  storage: {label}" + (f", {n['note']}" if n.get("note") else "")
+            said = note_of(server)
+            lines.append(f"  storage: {label}" + (f", {said}" if said else "")
                          + (f"; a NAS collected here ({here.get('type', 'zfs')})" if here else ""))
         also = sorted(who for who, gs in led.items() if g in gs)
         if also:

@@ -114,6 +114,7 @@ class Access:
     leads: dict = field(default_factory=dict)       # netid -> tuple of group names
     resources: dict = field(default_factory=dict)   # group -> {kind: tuple of names}
     servers: dict = field(default_factory=dict)     # storage server -> (name, note)
+    machines: dict = field(default_factory=dict)    # machine (lower case) -> what it is (1.17.7)
     lab_names: dict = field(default_factory=dict)   # group -> how the lab is shown
     assistants: dict = field(default_factory=dict)  # group -> tuple of NetIDs (research assistants)
     course_groups: frozenset = frozenset()          # groups nomad.toml lists as courses this term
@@ -139,6 +140,44 @@ class Access:
     def named(self) -> set:
         """Everyone the file names: their access is the file's, not users.json's."""
         return set(self.admins) | set(self.operators) | set(self.viewers) | set(self.leads)
+
+    def aliases(self, name) -> set:
+        """The names one machine goes by (lower case): a storage server's
+        address and the name [console.storage] gives it, or the name alone."""
+        n = str(name or "").strip().lower()
+        out = {n} if n else set()
+        for server, (shown, _note) in (self.servers or {}).items():
+            names = {server.lower(), (shown or "").lower()} - {""}
+            if n in names:
+                out |= names
+        return out
+
+    def note_of(self, name) -> str:
+        """What a machine is, as nomad.toml says ([console.machines] under any
+        name it goes by, else a storage server's [console.storage] note); ""
+        when it says nothing. Names compared without case."""
+        names = self.aliases(name)
+        # A storage server under two of its names: the name [console.storage]
+        # gives it first, then its address (access_from reports the two).
+        shown = {(s or "").lower() for _a, (s, _n) in (self.servers or {}).items()} - {""}
+        for n in sorted(names, key=lambda x: (x not in shown, x)):
+            if self.machines.get(n):
+                return self.machines[n]
+        for server, (shown, note) in (self.servers or {}).items():
+            if note and names & {server.lower(), (shown or "").lower()}:
+                return note
+        return ""
+
+    def notes(self) -> dict:
+        """Every machine nomad.toml describes: {name: what it is}, a storage
+        server under its address and its name, with one description."""
+        out = dict(self.machines)
+        for server, (shown, _note) in (self.servers or {}).items():
+            note = self.note_of(server)
+            if note:
+                for n in self.aliases(server):
+                    out[n] = note
+        return out
 
     def lab_label(self, group: str) -> str:
         """"Smith Lab (jsmith$)" when the lab has a name, else the group."""
@@ -395,17 +434,76 @@ def access_from(config: dict | None, log: bool = True) -> Access:
                         "every group is taken as a lab")
 
     servers = _servers(console.get("storage"), problems)
+    machines = _machines(console.get("machines"), problems)
+    for server, (shown, _note) in servers.items():
+        twice = sorted({server.lower(), (shown or "").lower()} - {""} & set(machines))
+        if len(twice) > 1:
+            problems.append(f"[console.machines] describes the storage server {server} under "
+                            f"{' and '.join(twice)}: {shown or twice[0]}'s note is shown; keep one")
 
     for p in problems if log else ():
         logger.warning("nomad.toml: %s", p)
     return Access(admins=frozenset(found["admin"]), operators=frozenset(found["operator"]),
                   viewers=frozenset(found["viewer"]),
                   group_pattern=pattern, leads=leads, resources=resources,
-                  servers=servers, lab_names=lab_names, assistants=assistants,
+                  servers=servers, machines=machines, lab_names=lab_names, assistants=assistants,
                   course_groups=course_groups, courses=courses, problems=tuple(problems))
 
 
 _SERVER_KEYS = ("name", "note")
+_MACHINE_KEYS = ("note",)
+NOTE_MAX = 200              # a note is a line beside a name, not a page
+_MACHINE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")
+
+
+def _machines(raw, problems: list) -> dict:
+    """[console.machines."NAME"] note = "...": what each machine is (a head
+    node, the hub, a NAS, a cluster, a workstation), shown beside its name.
+    NAME as nomad shows the machine; compared without case."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        problems.append('[console.machines] should hold one table per machine, as '
+                        '[console.machines."NAME"] note = "..."; ignored')
+        return {}
+    out: dict = {}
+    seen: set = set()
+    for name, table in raw.items():
+        where = f'[console.machines."{name}"]'
+        n = str(name).strip()
+        if not _MACHINE.match(n):
+            problems.append(f"{where}: not a machine's name (letters, digits, '.', '-', '_'); ignored")
+            continue
+        if not isinstance(table, dict):
+            problems.append(f'{where} should be a table (note = "..."); ignored')
+            continue
+        for key in table:
+            if key not in _MACHINE_KEYS:
+                problems.append(f"{where} {key}: unknown; the setting is note")
+        note = table.get("note")
+        if note is None:
+            continue
+        if not isinstance(note, str):
+            problems.append(f"{where} note should be text; ignored")
+            continue
+        note = clean_note(note)
+        if len(note) > NOTE_MAX:
+            problems.append(f"{where} note is {len(note)} characters; the first {NOTE_MAX} are shown")
+            note = note[:NOTE_MAX].rstrip()
+        if n.lower() in seen:
+            problems.append(f"{where}: {n} is described twice (names are compared without case); "
+                            "the last one is used")
+        seen.add(n.lower())
+        if note:
+            out[n.lower()] = note
+        else:
+            out.pop(n.lower(), None)
+    return out
+
+
+def clean_note(text) -> str:
+    """A note as one line: whitespace runs as one space, no control characters."""
+    return " ".join("".join(ch if ch.isprintable() or ch.isspace() else " " for ch in str(text)).split())
 
 
 def _servers(raw, problems: list) -> dict:

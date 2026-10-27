@@ -92,6 +92,7 @@ ended in the window:
 For each site (the hub's `sync_sites`, so a site whose sync fails is still
 listed):
 
+* `note`: what the site is, when `[console.machines]` says (1.17.7).
 * `status`: `ok`, `stale` or `no_data`; `last_data` and `age_minutes`, from
   its newest reading in any table; `sync.failing` and `sync.last_success`
   on a hub (the reason stays in the hub's sync log).
@@ -127,8 +128,11 @@ Console's My Lab):
   with an account), how many ran jobs in the window, how many the group
   lists without an account or no longer lists.
 * `jobs` and `now`: the members' jobs taken together.
-* `workstations`: the lab's machines, online or not, last seen.
-* `storage`: each server or export the lab has, with its size and use;
+* `workstations`: the lab's machines, online or not, last seen, when they
+  last answered (`last_online`), and what each is (`note`, from
+  `[console.machines]`, 1.17.7).
+* `storage`: each server or export the lab has, with its size and use, and
+  what it is (`note`);
   `shares_free_with` for exports of one pool (their free space is one).
 
 * `each` (with `names=True`, `--each` on the command line): a row per

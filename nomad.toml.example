@@ -387,6 +387,11 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # name = "sarahvaughan"
 # note = "community $HOME, all users"
 
+# What each machine is (a head node, the hub, a NAS, a cluster), shown beside
+# its name in the Console and nomad facts; `nomad machine note NAME "..."`.
+# [console.machines."labhead1"]
+# note = "the Smith lab's head node: collects its workstations"
+
 # ─── Support ─────────────────────────────────────────────────────
 # Where people's questions go, e.g. the Console's "Contact support".
 [support]

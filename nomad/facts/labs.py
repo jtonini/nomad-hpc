@@ -171,11 +171,24 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         from nomad.facts.attention import lab_attention
         attention = from_config(config)
         shared: dict = {}                       # what is waiting, who holds what: read once
-        places = {}                             # storage servers as [console.storage] names them
-        for server, (name, note) in acc.servers.items():
-            places[str(server).lower()] = (name or server, note or "")
+        # Where data is: storage servers as [console.storage] names them, and
+        # what each is -- of the machines the caller sees named (staff: all;
+        # anyone else: sites, storage servers, nodes, and their labs' own).
+        from nomad.facts.machines import visible
+        mine = None
+        if groups is None:
+            mine = set()
+            for g in led + assisted:
+                listed = acc.resources.get(g, {})
+                mine |= {str(x).partition(":")[0] for x in listed.get("storage", ())}
+                mine |= set(listed.get("workstations", ())) | (tagged(g) if tagged else set())
+        places = {}
+        for server, (name, _note) in acc.servers.items():
+            places[str(server).lower()] = (name or server, "")
             if name:
-                places[str(name).lower()] = (name, note or "")
+                places[str(name).lower()] = (name, "")
+        for key, note in visible(conn, acc, mine, config).items():
+            places[key] = (places.get(key, (None, ""))[0], note)
     out = envelope("lab", now, win)
     out["labs"] = []
     for g in led + assisted:
@@ -227,6 +240,14 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         else:
             lab["workstations"] = [{"name": h, "online": None, "last_seen": None} for h in sorted(hosts)]
             lab["storage"] = [{"entry": s, "measured": False} for s in storage]
+        # What each machine is, as nomad.toml says (1.17.7).
+        for w in lab["workstations"]:
+            if acc.note_of(w["name"]):
+                w["note"] = acc.note_of(w["name"])
+        for st in lab["storage"]:
+            note = acc.note_of(st.get("server") or st["entry"].partition(":")[0]) or acc.note_of(st.get("name"))
+            if note:
+                st["note"] = note
         if names and conn is not None:
             # What needs the PI's attention now (nomad.facts.attention): with
             # each member by name only. Whom to help: not the one asking

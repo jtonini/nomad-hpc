@@ -138,6 +138,9 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 [console.storage."10.0.0.28"]  # a storage server, as the mounts name it
 name = "sarahvaughan"
 note = "community $HOME, all users"
+
+[console.machines."labhead1"]   # what a machine is, beside its name (1.17.7)
+note = "the Smith lab's head node: collects its workstations"
 ```
 
 `nomad console role NETID admin|operator|viewer|none` changes one person's
@@ -219,6 +222,22 @@ else `sudo nomad -c ...`).
   mounts name it, the part before the colon in `server:/export` (often an
   address). A server that everyone shares should say so in its note: its
   used space is everyone's, and would otherwise read as the lab's own.
+- **What each machine is:** `[console.machines."NAME"]` gives any machine
+  (a head node, the hub, a NAS, a cluster, a workstation) a `note`, a short
+  line saying what it is: the Console shows it when the pointer is over the
+  machine's name (and under the name on a lab's Workstations), and
+  `nomad facts`, `nomad lab show` print it. NAME as nomad shows the machine,
+  compared without case; at most 200 characters. A storage server's
+  `[console.storage]` note is used when it has none here.
+  `nomad machine note NAME "..."` shows the change and `--apply` writes it
+  (with a backup; only the note line changes, the table's other keys and
+  comments stay); `--remove` takes it away; `nomad machine list` lists them.
+  A storage server has one description under its address and its name.
+  A note is seen by whoever sees the machine named: a site, a storage
+  server or a cluster's node is everyone's (a site that is also a lab's
+  head node is a site; a machine listed or collected as storage is
+  storage); a workstation is its lab's PI's, research assistants' and
+  staff's; a name nomad can't place, staff's.
 - **Operator:** sees everything, changes no settings.
 - **Admin:** everything, settings included.
 

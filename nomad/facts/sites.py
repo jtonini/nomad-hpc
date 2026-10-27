@@ -351,6 +351,8 @@ def sites(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
     sync = _sync(conn)
     active = jobfacts.active(conn)
     ceilings = memory_ceilings(conn, now)
+    from nomad.config.access import access_from
+    note_of = access_from(config or {}, log=False).note_of        # what each machine is (1.17.7)
     out = []
     for name in site_names(conn):
         fresh = freshness(conn, name)
@@ -359,6 +361,8 @@ def sites(conn: sqlite3.Connection, days: int = 30, now: datetime | None = None,
         entry = {"name": name if name is not None else _local_name(config),
                  "status": "no_data" if fresh["newest"] is None else "stale" if stale else "ok",
                  "last_data": fresh["newest"], "age_minutes": age}
+        if note_of(entry["name"]):
+            entry["note"] = note_of(entry["name"])
         s = sync.get(name)
         if s is not None:
             entry["sync"] = {"last_success": s.get("last_success"),

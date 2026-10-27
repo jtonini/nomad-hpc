@@ -172,7 +172,7 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
             # Out loud, on stderr (cron mails it; $(...) doesn't capture it):
             # running on with none of the file's settings is otherwise silent.
             # These commands say so themselves, in their own terms.
-            if ctx.invoked_subcommand not in ('config', 'console', 'lab', 'syscheck'):
+            if ctx.invoked_subcommand not in ('config', 'console', 'lab', 'machine', 'syscheck'):
                 _warn_config_unreadable(ctx.obj['config_error'])
     else:
         # No user/system config: fall back to the packaged default so shipped
@@ -8260,6 +8260,90 @@ def _lab_run(ctx, lab_name, action, check, apply, notes=()):
         raise click.ClickException(str(e))
     _lab_finish(edit, changes, apply, lambda d: check(d, group), notes)
     return group
+
+
+@cli.group()
+def machine():
+    """What each machine is: a line nomad and the Console show beside its name."""
+
+
+@machine.command('note')
+@click.argument('name')
+@click.argument('note', required=False)
+@click.option('--remove', is_flag=True, help='Take the description away.')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def machine_note(ctx, name, note, remove, apply):
+    """What NAME is (a head node, the hub, a NAS), shown beside its name.
+
+    nomad machine note labhead1 "the Smith lab's head node" --apply.
+    Written to [console.machines."NAME"] in nomad.toml (on the Console's
+    machine, the hub). Without NOTE, says what nomad.toml says of NAME now."""
+    from nomad.config.access import access_from, clean_note
+    from nomad.config.labs import LabError, check_machine_note, set_machine_note
+    if ctx.obj.get('config_error') is not None:
+        raise click.ClickException(f"{ctx.obj['config_error']}; fix that first (nomad config check)")
+    target = ctx.obj.get('config_target')
+    if target and not Path(target).expanduser().exists():
+        raise click.ClickException(f"{target} doesn't exist")
+    before = access_from(ctx.obj.get('config', {}) or {}, log=False)
+    if note is None and not remove:
+        if apply:
+            raise click.ClickException("give a note to write, or --remove to take it away")
+        said = before.note_of(name)
+        click.echo(f"{name}: {said}" if said else f"{name}: nomad.toml says nothing of it "
+                   "(nomad machine note NAME \"...\" --apply)")
+        return
+    if remove and note:
+        raise click.ClickException("give a note or --remove, not both")
+    if not remove and not clean_note(note):
+        raise click.ClickException("the note is empty: give one, or --remove to take it away")
+    text = "" if remove else note
+    edit = _lab_edit(ctx)
+    try:
+        changes = set_machine_note(edit, name, text)
+    except (LabError, ValueError) as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    import json as _json
+    try:
+        after = access_from(edit.data, log=False).note_of(name)
+    except Exception:
+        after = None
+    notes = []
+    if after is not None and after != clean_note(text):
+        # Something else still describes it: a storage server's [console.storage] note.
+        notes.append(f"{name} will read: {_json.dumps(after, ensure_ascii=False)} "
+                     "(from [console.storage]; change it there)" if after else f"{name}: no description")
+    if text:
+        for server, (shown, old) in (before.servers or {}).items():
+            if old and old != clean_note(text) and before.aliases(name) & (
+                    {server.lower(), (shown or "").lower()} - {""}):
+                notes.append(f'[console.storage."{server}"]\'s note, {_json.dumps(old, ensure_ascii=False)}, '
+                             "is no longer shown")
+    if not changes and remove and after:
+        click.echo(f"{name}: no [console.machines] note to take away; " + notes[0])
+        return
+    _lab_finish(edit, changes, apply, check_machine_note(name, text), notes)
+
+
+@machine.command('list')
+@click.pass_context
+def machine_list(ctx):
+    """Every machine nomad.toml describes here."""
+    from nomad.config.access import access_from
+    if ctx.obj.get('config_error') is not None:
+        raise click.ClickException(f"{ctx.obj['config_error']}; fix that first (nomad config check)")
+    acc = access_from(ctx.obj.get('config', {}) or {}, log=False)
+    notes = acc.notes()
+    for p in acc.problems:
+        if "[console.machines" in p:
+            click.echo(f"  ! {p}")
+    if not notes:
+        click.echo("nomad.toml describes no machine here (nomad machine note NAME \"...\" --apply)")
+        return
+    width = max(len(k) for k in notes)
+    for name in sorted(notes):
+        click.echo(f"  {name:<{width}}  {notes[name]}")
 
 
 @lab.command('show')
