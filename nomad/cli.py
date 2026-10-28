@@ -10620,6 +10620,10 @@ cli.add_command(facts_group)
 from nomad.config.course_cli import course_group, interactive_group  # noqa: E402
 cli.add_command(course_group)
 cli.add_command(interactive_group)
+# What a job should ask for, before it runs (1.18).
+from nomad.submit.cli import size_cmd, submit_cmd  # noqa: E402
+cli.add_command(size_cmd)
+cli.add_command(submit_cmd)
 
 # =============================================================================
 # COMMUNITY COMMANDS

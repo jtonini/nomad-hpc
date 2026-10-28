@@ -33,6 +33,17 @@
 - `--json` — JSON output
 - `--days N` — Lookback period (trajectory/report)
 
+## Sizing and Submitting Jobs
+
+Run by users on a cluster's login node (1.18; [details](submit.md)):
+
+| Command | Description |
+|---------|-------------|
+| `nomad size job.sh` | What a script should ask for (CPUs, memory, time, GPUs, partition), each value with where it comes from and why |
+| `nomad size --job N` | The same for a job of yours that ran, to run it again |
+| `nomad submit job.sh` | Size it, show the sbatch command, ask, and submit it: nomad's values, or yours (`--mem 12G`, `--keep`) |
+| `nomad submit --again N` | A job of yours that ran, sent again with what nomad learned from how it ended |
+
 ## Analysis
 
 | Command | Description |

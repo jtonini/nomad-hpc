@@ -49,6 +49,7 @@ nav:
     - Console Access: console.md
     - GPU Monitoring: gpu.md
     - Educational Analytics: edu.md
+    - Sizing and Submitting: submit.md
     - Alerts: alerts.md
     - Interactive Sessions: interactive.md
     - Data Readiness: readiness.md
