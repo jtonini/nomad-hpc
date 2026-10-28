@@ -157,8 +157,9 @@ def commands_of(lines: list) -> list:
     """Each command of the script's lines: 'cd x && g16 < a.com' is two.
     Split on ;, && and || outside quotes; a here-document's body is skipped;
     a line continued with a backslash is joined to the next."""
+    from nomad.submit.spec import _scan, is_heredoc_end, split_commands
     out = []
-    heredoc = None
+    heredocs: list = []
     joined, buf = [], None
     for line in lines or []:                    # a line ending in a backslash goes on
         line = line.rstrip()
@@ -170,33 +171,12 @@ def commands_of(lines: list) -> list:
     if buf is not None:
         joined.append(buf)
     for line in joined:
-        if heredoc is not None:
-            if line.strip() == heredoc:
-                heredoc = None
+        if heredocs:
+            if is_heredoc_end(line, heredocs[0]) or line.strip() == heredocs[0][0]:
+                heredocs.pop(0)
             continue
-        m = re.search(r"(?<!<)<<(?!<)-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", line)
-        if m:
-            heredoc = m.group(1)
-        parts, buf, quote, i = [], "", None, 0
-        while i < len(line):
-            ch = line[i]
-            if quote:
-                buf += ch
-                if ch == quote:
-                    quote = None
-            elif ch in "'\"":
-                quote = ch
-                buf += ch
-            elif ch == ";" or line[i:i + 2] in ("&&", "||"):
-                parts.append(buf)
-                buf = ""
-                i += 1 if ch == ";" else 2
-                continue
-            else:
-                buf += ch
-            i += 1
-        parts.append(buf)
-        out += [p.strip() for p in parts if p.strip()]
+        heredocs = _scan(line)[1]                        # a body that came inside the line isn't to come
+        out += split_commands(line)
     return out
 
 
@@ -236,24 +216,56 @@ def _strip_launchers(words: list) -> tuple[list, str | None]:
     return words[i:], launcher
 
 
+# An interpreter given its code on the command line (python -c, Rscript -e)
+# reads no input file; one given a module (python -m) runs that module's own
+# arguments (a .py among them is the script).
+_INLINE = {"Python": ("-c", "-"), "R": ("-e", "--expr"), "Julia": ("-e", "-E", "--eval", "--print"),
+           "MATLAB": ("-r", "-batch")}
+_MODULE = {"Python": ("-m",)}
+_REDIRECT = re.compile(r"(?<![<0-9&])<(?![<&(])")
+
+
 def _input_of(family: str | None, words: list, line: str) -> str | None:
-    """The input file a command names: a redirect '< file' (not a
-    here-document), else the first argument with the family's usual
-    extension, else its first argument that isn't an option."""
-    m = re.search(r"(?<!<)<(?!<)\s*([^\s<>|;&]+)", line)
-    if m:
-        return m.group(1)
-    if "<<" in line:
+    """The input file a command names: what a redirect '< file' outside
+    quotes reads (not a here-document or here-string), else the first
+    argument with the family's usual extension, else its first argument
+    that isn't an option or a redirect; none for code given on an
+    interpreter's command line (python -c)."""
+    from nomad.submit.spec import _outside_quotes
+    bare = _outside_quotes(line)
+    if "<<" in bare:
         return None
+    for m in _REDIRECT.finditer(bare):
+        after = line[m.end():].lstrip()
+        try:
+            rest = shlex.split(after, comments=True)
+        except ValueError:
+            rest = after.split()
+        if rest and not rest[0].startswith((">", "|", "&", ";")):
+            w = rest[0]
+            if after[:1] not in ("'", '"'):
+                w = re.split(r"[<>|;&]", w)[0]           # w.com>w.log: the file is w.com
+            if w:
+                return w
+    module = False
+    for w in words[1:]:
+        if w in _INLINE.get(family or "", ()):
+            return None
+        if w in _MODULE.get(family or "", ()):
+            module = True
+            break
+        if not w.startswith("-"):
+            break
     exts = _INPUT_EXT.get(family or "", ())
-    args = [w for w in words[1:] if not w.startswith("-") and not w.startswith("+")
-            and w not in (">", ">>", "2>", "&>")]
+    args = [w for w in words[1:] if not w.startswith(("-", "+", "<", ">", "2>", "&>", "|"))]
     for w in words[1:]:
         if w.lower().endswith(tuple(e.lower() for e in exts)):
             return w
+    if module:
+        return None                                  # its first argument is the module's name
     if family in ("Gaussian", "ORCA", "Python", "R", "Julia") and args:
         a = args[0]
-        if not a.startswith(">") and "$" not in a:
+        if "$" not in a:
             return a
     return None
 
@@ -296,6 +308,20 @@ def program_of(lines: list) -> Program:
         if base in _SETUP or base.startswith("#") or re.match(r"[0-9]*[<>&|]", exe):
             continue                                # setting up, or only redirecting (exec > log)
         fam = _family(exe)
+        if fam is None and base in ("bash", "sh") and len(words) > 2 and words[1] == "-c":
+            inner = program_of(words[2].splitlines())      # srun bash -c '...': the program inside
+            if inner.family:
+                if inner.cd is None:
+                    where = cd                      # where the outer script went
+                elif inner.cd == "?" or inner.cd.startswith(("/", "~")) or cd is None:
+                    where = inner.cd
+                elif cd == "?":
+                    where = "?"                     # relative to a folder nomad doesn't know
+                else:
+                    where = posixpath.join(cd, inner.cd)
+                return Program(inner.family, inner.executable, inner.command, inner.input, inner.gpu_build,
+                               inner.launcher or launcher, where)
+            continue
         if fam is None and base in ("bash", "sh") and len(words) > 1:
             continue
         if fam is None:

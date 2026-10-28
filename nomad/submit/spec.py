@@ -242,39 +242,314 @@ def parse_submit_line(line: str | None) -> SubmitLine:
 MAX_SCRIPT = 256 * 1024            # a job script larger than this isn't read
 
 
+_HEREDOC_WORD = re.compile(r"""\\?(['"]?)([^\s'"<>|;&()]+)\1""")
+_SHELL = ("", "(", "`")                  # contexts where the shell reads commands
+
+
+def _command_position(line: str, i: int) -> bool:
+    """Whether a word at ``i`` is where a command starts (so case and esac
+    are keywords there, not arguments)."""
+    before = line[:i].rstrip(" \t")
+    return (not before or before[-1] in ";&|(`{"
+            or re.search(r"(^|[\s;&|(])(then|do|else|elif|if|while|until|!)$", before) is not None)
+
+
+def _arithmetic(line: str, j: int) -> bool:
+    """Whether the (( before ``j`` is arithmetic: as bash decides, when it
+    closes with )) (else it is a subshell, or $( and one)."""
+    depth = 0
+    for k in range(j, len(line)):
+        c = line[k]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            if depth == 0:
+                return line[k + 1:k + 2] == ")"
+            depth -= 1
+    return False
+
+
+def _scan_line(line: str, stack: list, cuts: list | None = None) -> list:
+    """Read one line as the shell reads it, ``stack`` holding what is open
+    (innermost last: ' and " quotes, $ for $'...', ( for $(...), ` for
+    backquotes, p for a subshell's ( inside those, c for a case in them,
+    A for $(( )) and (( ))
+    arithmetic, a for a parenthesis in it, [ for $[ ]), and changed to what
+    is open at its end. A comment ends the line
+    (in backquotes, at the closing one). Returns the here-documents begun
+    on it, in order: (the word that ends each, tabs allowed before it).
+    ``cuts`` (a list) gets where ;, && and || part commands at the top:
+    (position, length)."""
+    started = []
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        nxt = line[i + 1:i + 2]
+        top = stack[-1] if stack else ""
+        if top == "'":
+            if ch == "'":
+                stack.pop()
+        elif top == "$":                                 # $'...': backslash escapes
+            if ch == "\\":
+                i += 1
+            elif ch == "'":
+                stack.pop()
+        elif top == '"':
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                stack.pop()
+            elif ch == "$" and line[i + 1:i + 3] == "((" and _arithmetic(line, i + 3):
+                stack.append("A")
+                i += 2
+            elif ch == "$" and nxt == "(":
+                stack.append("(")
+                i += 1
+            elif ch == "$" and nxt == "[":
+                stack.append("[")
+                i += 1
+            elif ch == "`":
+                stack.append("`")
+        elif top in ("A", "a", "["):                     # arithmetic: << is a shift
+            if ch == "\\":
+                i += 1
+            elif top == "A" and line[i:i + 2] == "))":
+                stack.pop()
+                i += 1
+            elif top == "[" and ch == "]":
+                stack.pop()
+            elif ch == "(":
+                stack.append("a")
+            elif top == "a" and ch == ")":
+                stack.pop()
+            elif ch == "$" and line[i + 1:i + 3] == "((" and _arithmetic(line, i + 3):
+                stack.append("A")
+                i += 2
+            elif ch == "$" and nxt == "(":
+                stack.append("(")
+                i += 1
+            elif ch in "'\"`":
+                stack.append(ch)
+        else:                                            # unquoted, or inside $( ), ` ` or ( ) in them
+            word_start = i == 0 or line[i - 1] in " \t;&|(`"
+            if ch == "\\":
+                i += 1
+            elif cuts is not None and not stack and (ch == ";" or line[i:i + 2] in ("&&", "||")):
+                n = 1 if ch == ";" else 2
+                cuts.append((i, n))
+                i += n
+                continue
+            elif top == "c" and _command_position(line, i) and re.match(r"esac(?![\w-])", line[i:]):
+                stack.pop()
+                i += 4
+                continue
+            elif top == "c" and ch in "()":
+                pass                                     # a case pattern's: no subshell
+            elif top in ("(", "`", "p", "c") and _command_position(line, i) and re.match(r"case\s", line[i:]):
+                stack.append("c")                        # $( case ... in a) ...;; esac )
+                i += 4
+                continue
+            elif top == "p" and ch == ")":
+                stack.pop()
+            elif top == "(" and ch == ")":
+                stack.pop()
+            elif top == "`" and ch == "`":
+                stack.pop()
+            elif ch == "$" and line[i + 1:i + 3] == "((" and _arithmetic(line, i + 3):
+                stack.append("A")
+                i += 2
+            elif ch == "$" and nxt in ("'", "(", "["):
+                stack.append({"'": "$", "(": "(", "[": "["}[nxt])
+                i += 1
+            elif ch == "(" and nxt == "(" and line[i - 1:i] != "$" and _arithmetic(line, i + 2):
+                stack.append("A")                        # (( n << 2 )), after while or if too
+                i += 1
+            elif ch == "(" and top in ("(", "`", "p"):
+                stack.append("p")                        # $( (cd x; ls) | wc -l ): a subshell in it
+            elif ch in "'\"`":
+                stack.append(ch)
+            elif ch == "<" and nxt == "<":
+                if line[i + 2:i + 3] == "<":
+                    i += 3                               # <<<: a here-string
+                    continue
+                tabs = line[i + 2:i + 3] == "-"
+                i += 3 if tabs else 2
+                word = _HEREDOC_WORD.match(line[i:].lstrip(" \t"))
+                if word:
+                    started.append((word.group(2), tabs))
+                continue
+            elif ch == "#" and word_start:
+                if top == "`":                           # a comment in backquotes ends at the closing one
+                    close = line.find("`", i)
+                    if close < 0:
+                        break
+                    i = close
+                    continue
+                break                                    # a comment (inside $( ) too)
+        i += 1
+    return started
+
+
+def _open_quote(piece: str, quote: str | None) -> str | None:
+    """What is still open at the end of ``piece`` begun with ``quote`` open
+    (None: nothing), as a string of contexts innermost last (_scan_line)."""
+    stack = list(quote or "")
+    _scan_line(piece, stack)
+    return "".join(stack) or None
+
+
+def _scan(text: str, quote: str | None = None) -> tuple[str | None, list]:
+    """Read text, maybe of several lines, as the shell does: what is still
+    open at its end, and the here-documents whose bodies are still to come
+    (begun on its last line, or not ended in it). A here-document's body is
+    passed over as it is."""
+    stack = list(quote or "")
+    pending: list = []
+    held: list = []
+    for line in text.split("\n"):
+        if pending:
+            rest = _body_end(line, pending, stack)
+            if rest is None:
+                continue
+            line = rest
+        held += _scan_line(line, stack)
+        if not stack or stack[-1] not in "'\"$":
+            pending, held = held, []
+    return ("".join(stack) or None), pending + held
+
+
+def split_commands(text: str) -> list:
+    """The commands of a line (or of a command over several lines), parted
+    where ;, && and || part them: outside quotes, $( ), comments and
+    here-document bodies."""
+    stack: list = []
+    pending: list = []
+    held: list = []
+    out, start, pos = [], 0, 0
+    for line in text.split("\n"):
+        off = 0
+        if pending:
+            rest = _body_end(line, pending, stack)
+            if not rest:
+                pos += len(line) + 1
+                continue
+            off = len(line) - len(rest)
+        cuts: list = []
+        held += _scan_line(line[off:], stack, cuts)
+        if not stack or stack[-1] not in "'\"$":
+            pending, held = held, []
+        for at, n in cuts:
+            out.append(text[start:pos + off + at])
+            start = pos + off + at + n
+        pos += len(line) + 1
+    out.append(text[start:])
+    return [p.strip() for p in out if p.strip()]
+
+
+def _body_end(line: str, pending: list, stack: list) -> str | None:
+    """A line of a here-document's body: None while it goes on; else what
+    follows its end word on the line ('' when the line is only that, the
+    closing backquote and the rest for `cat <<EOF ... EOF`)."""
+    word, tabs = pending[0]
+    body = line.lstrip("\t") if tabs else line
+    if body == word:
+        pending.pop(0)
+        return None if pending else ""
+    if len(pending) == 1 and stack and stack[-1] == "`" and body.startswith(word + "`"):
+        pending.pop(0)
+        return body[len(word):]
+    return None
+
+
+def _heredoc_end(line: str) -> tuple[str, bool] | None:
+    """The word that ends a here-document the line starts (outside quotes,
+    comments and arithmetic) and whose body isn't in it, and whether tabs
+    before it are allowed (<<-). None: it starts none."""
+    pending = _scan(line)[1]
+    return pending[0] if pending else None
+
+
+def is_heredoc_end(raw: str, end: tuple[str, bool]) -> bool:
+    word, tabs = end
+    return (raw.lstrip("\t") if tabs else raw) == word         # exactly, as bash ends one
+
+
+def _outside_quotes(line: str) -> str:
+    """The line with what is inside quotes blanked out."""
+    out, quote = [], None
+    for ch in line:
+        if quote:
+            out.append(" ")
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def sbatch_lines(text: str) -> tuple[list[str], list[str]]:
     """The #SBATCH options of a job script (sbatch reads them until the
     first command, and only at the very start of a line: an indented
     #SBATCH is a comment to it), and the script's command lines (comments
-    and blank lines left out; a line ending in a backslash joined to the
-    next, as the shell does)."""
+    and blank lines left out). As the shell does, a line ending in a
+    backslash goes on to the next, and so does a quote left open
+    (python3 -c '...' over several lines is one command); a here-document's
+    lines are passed on as they are, quotes in them not followed (inside a
+    command still open, as part of it)."""
     opts, cmds = [], []
     seen_cmd = False
-    buf = None
+    buf, quote = None, None              # a command still going on, and what is open in it
+    bodies: list = []                    # here-documents being read: (the word that ends each, tabs)
+    held: list = []                      # ... begun on a line the next one continues
     for i, raw in enumerate((text or "").splitlines()):
-        line = raw.strip()
-        if buf is not None:
-            if line.endswith("\\"):
-                buf += " " + line[:-1].strip()
+        piece = None
+        if bodies:
+            stack = list(quote or "")
+            rest = _body_end(raw, bodies, stack)
+            if not rest:
+                if buf is not None:
+                    buf += raw + "\n"                   # inside a command still open: part of it
+                elif raw.strip():
+                    cmds.append(raw.strip()[:2000])
                 continue
-            cmds.append((buf + " " + line).strip()[:1000])
-            buf = None
-            continue
-        if i == 0 and line.startswith("#!"):
-            continue
-        if not line:
-            continue
-        if line.startswith("#"):
-            if not seen_cmd and re.match(r"#SBATCH\s", raw):
-                opts.append(raw[len("#SBATCH"):].strip())
-            continue
-        seen_cmd = True
-        if line.endswith("\\"):
-            buf = line[:-1].rstrip()
-            continue
-        cmds.append(line[:1000])
+            buf += raw[:len(raw) - len(rest)] + "\n"     # EOF` : the end word, then the rest of the line
+            piece = rest
+        if piece is not None:
+            pass
+        elif buf is None:
+            line = raw.strip()
+            if i == 0 and line.startswith("#!"):
+                continue
+            if not line:
+                continue
+            if line.startswith("#"):
+                if not seen_cmd and re.match(r"#SBATCH\s", raw):
+                    opts.append(raw[len("#SBATCH"):].strip())
+                continue
+            seen_cmd = True
+            piece, buf = line, ""
+        else:
+            piece = raw if quote else raw.strip()
+        stack = list(quote or "")
+        held += _scan_line(piece, stack)
+        quote = "".join(stack) or None
+        if quote:
+            buf += piece + "\n"
+            if quote[-1] not in "'\"$":
+                bodies, held = held, []                  # in $( ) or ` `: the body is next
+            continue                                     # in a string: after the line it closes on
+        if piece.endswith("\\") and not piece.endswith("\\\\"):
+            buf += piece[:-1].rstrip() + " "
+            continue                                     # cat <<EOF \ ...: its body after the line
+        command = (buf + piece).strip()
+        cmds.append(command[:2000])
+        buf = None
+        bodies, held = held, []
     if buf:
-        cmds.append(buf[:1000])
+        cmds.append(buf.strip()[:2000])
     return opts, cmds
 
 

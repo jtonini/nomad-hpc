@@ -75,4 +75,19 @@ The job is tagged, in Slurm's `--extra` field, with who chose each value:
 
 ## Installing it for users
 
-Users run one central install on each cluster, not one of their own: for example a virtual environment owned by the site's account in `/usr/local/sw/nomad` (not group-writable), with `nomad` on users' PATH. `nomad size` and `nomad submit` need no nomad.toml.
+Users run one central install on each cluster, not one of their own, and `nomad size` and `nomad submit` need no nomad.toml. `scripts/install_nomad_for_users.sh` makes it, as the account that owns the folder (`/usr/local/sw/nomad`, or `NOMAD_USERS_DIR`), on the cluster or from a nomad checkout:
+
+```
+ssh OWNER@CLUSTER 'bash -s 1.18.1' < scripts/install_nomad_for_users.sh
+ssh OWNER@CLUSTER 'NOMAD_USERS_DIR=/path bash -s 1.18.1' < scripts/install_nomad_for_users.sh
+```
+
+Running it again with another version upgrades: that is how a cluster follows nomad's releases, one step of each release beside the hub's upgrade.
+
+- **Each release whole in its own folder.** `releases/VERSION` holds its own Python 3.12, installed by uv (from uv's release on GitHub, checked against a checksum fixed in the script), and its own environment, so the system's Python doesn't matter (a `python3` of 3.6 is fine). uv's cache and downloads are in a private temporary folder, and one run goes at a time.
+- **One step to switch.** The release is built and checked first; only then is `bin/nomad` replaced, in one step, by one that runs it. Until then users go on with the one they had, and a release that fails is removed. The one before is kept (with its `bin/nomad`, as `bin/nomad.before`), and the script prints how to go back to it; older ones are removed. Two releases take about 0.9 GB. An install made by 1.18.0's script is replaced the same way, and its folders removed after the switch. A removal that fails then (a file still open on NFS, say) is reported and left for the next run.
+- **The right folder.** The script refuses a folder another account owns (run it as that account), and one that holds anything it doesn't recognise as its own or 1.18.0's script's (a wrong `NOMAD_USERS_DIR`, say): such a folder is left untouched.
+- **`bin/nomad`** starts nomad's Python isolated (`python -I`, writing no bytecode), so `PYTHONHOME` and `PYTHONPATH` a cluster sets for another Python (Anaconda's, say) don't reach it, while the jobs nomad submits get the environment as it is.
+- **Nothing writable but by the owner,** nor owned by anyone else; the script stops if it finds otherwise, and says so when a folder above the install is writable by others (who could then replace it).
+- **On users' PATH**: `bin/` holds only `nomad`, so it can't shadow anyone's Python. A link in a folder already on everyone's PATH (`ln -s /usr/local/sw/nomad/bin/nomad /usr/local/sw/bin/nomad`), or a module, or `/etc/profile.d`; last on the PATH, an account with its own nomad keeps it.
+- **`check_current.sh`**, beside it, says when nomad-hpc has a newer release than the one installed (and prints the command that upgrades) and says nothing otherwise: for the owner's crontab, weekly, with `MAILTO` set. It never upgrades anything itself.
