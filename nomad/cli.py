@@ -6562,12 +6562,21 @@ def console_roles(ctx, netid, db, mask):
     click.echo(f"  role: {line}")
     if acc.group_pattern:
         own = acc.group_pattern.replace("{netid}", netid.strip().lower())
-        if not acc.lab_now(own) and (exists is None or exists(own)):
+        if own in acc.not_labs:
+            click.echo(f"    {'their own group' if mask else own}: listed in [console.labs] "
+                       "not_labs, so not a lab (nomad lab hide LAB --remove makes it one again)")
+        elif not acc.lab_now(own) and (exists is None or exists(own)):
             click.echo(f"    {'their own group' if mask else own}: a course this term, a class rather "
                        "than a lab (a lead entry or storage listed for it keeps it a lab as well)")
     # Every group listed for them; the one their name gives only if it exists.
+    # One nomad.toml says is never a lab (not_labs) is said, not counted.
     listed = list(acc.leads.get(netid.strip().lower(), ()))
+    hidden_leads = [g for g in listed if g in acc.not_labs]
+    listed = [g for g in listed if g not in acc.not_labs]
     listed += [g for g in labs if g not in listed]
+    for g in hidden_leads:
+        click.echo(f"    {'a group listed for them' if mask else g}: listed in [console.labs] "
+                   "not_labs, so not a lab (their leads entry doesn't apply)")
     for i, g in enumerate(listed, 1):
         name = f"lab #{i}" if mask else acc.lab_label(g)
         if members is None:
@@ -6610,6 +6619,9 @@ def console_roles(ctx, netid, db, mask):
         elif g in assisted or g in acc.assisted_groups(me, members):
             click.echo(f"  research assistant of {name}: sees it as its PI does, but for the "
                        "PI's own work" + (" (and leads it)" if g in labs else ""))
+        elif g in acc.not_labs:
+            click.echo(f"  research assistant of {name}: listed in [console.labs] not_labs, not a "
+                       "lab, so it doesn't apply")
         elif not acc.lab_now(g):
             click.echo(f"  research assistant of {name}: a course this term, a class rather than "
                        "a lab, so it doesn't apply this term")
@@ -8144,7 +8156,7 @@ def _lab_edit(ctx):
     return edit
 
 
-def _lab_known(config, group, config_path=None) -> bool:
+def _lab_known(config, group, config_path=None, db=None) -> bool:
     """Is GROUP a lab nomad knows here: listed machines or storage, a
     workstation tagged with it, a lead already, or members in the groups
     data -- this host's database, or the hub's combined.db (in this
@@ -8169,7 +8181,7 @@ def _lab_known(config, group, config_path=None) -> bool:
             homes.append(Path(pwd.getpwuid(Path(config_path).stat().st_uid).pw_dir))
     except (ImportError, KeyError, OSError):
         pass
-    candidates = []
+    candidates = [Path(db).expanduser()] if db else []
     try:
         candidates.append(get_db_path(config))
     except Exception:
@@ -8459,6 +8471,70 @@ def lab_name_cmd(ctx, lab_name, shown, apply):
     _lab_run(ctx, lab_name, lambda e, g: set_name(e, g, shown), check, apply)
 
 
+@lab.command('hide')
+@click.argument('lab_name', metavar='LAB')
+@click.option('--remove', is_flag=True, help="Off the list: a lab again by nomad's rules.")
+@click.option('--db', type=click.Path(), help="The groups data to look LAB up in (default: this "
+              "host's database, else the hub's).")
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def lab_hide(ctx, lab_name, remove, db, apply):
+    """LAB is not a lab, whatever nomad's rules say (1.17.10): a service
+    account's group, a mistyped one, someone's who left. The Console doesn't
+    show it (Labs, search, Groups), nobody leads it or assists it; nothing on
+    the clusters changes, and its data stays. --remove: a lab again.
+
+    LAB is the lab's group, the PI's NetID with group_pattern set
+    (svc is svc$ with "{netid}$"; a group nomad knows by that
+    very name, as a workstation tag, is taken as it is), or the lab's name
+    as `nomad lab show` prints it. Written to [console.labs] not_labs on the
+    Console's machine. The condo reports count its members as before.
+    """
+    from nomad.config.access import access_from
+    from nomad.config.labs import LabError, check_not_lab, lab_group, not_labs_of, set_not_lab
+    if db and not Path(db).expanduser().exists():
+        raise click.ClickException(f"no database at {db}")
+    edit = _lab_edit(ctx)
+    before = edit.data
+    acc = access_from(before, log=False)
+    exact = lab_name.strip()
+    group = lab_group(before, lab_name)
+    listed = not_labs_of(before)
+    named = sorted(g for g, shown in acc.lab_names.items()
+                   if " ".join(shown.split()).lower() == " ".join(exact.split()).lower())
+    if remove and exact in listed:
+        group = exact                       # off the list as written
+    elif "$" not in exact and len(named) == 1 and not _lab_known(before, group, edit.path, db):
+        group = named[0]                    # the lab's name, as `nomad lab show` prints it
+    elif "$" not in exact and len(named) > 1:
+        raise click.ClickException(f"several labs are named {exact!r} ({', '.join(named)}): "
+                                   "give the group")
+    elif not remove and group != exact and _lab_known(before, exact, edit.path, db) \
+            and not _lab_known(before, group, edit.path, db):
+        # A group not named like a lab ("research", a workstation tag "Physics"):
+        # the one nomad knows, not the pattern's "research$".
+        group = exact
+    try:
+        changes = set_not_lab(edit, group, remove=remove)
+    except LabError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    notes = []
+    if changes and not remove:
+        said = [what for what, hit in (
+            ("a name", group in acc.lab_names), ("machines or storage", group in acc.resources),
+            ("a lead", any(group in gs for gs in acc.leads.values())),
+            ("research assistants", group in acc.assistants)) if hit]
+        if said:
+            notes.append(f"nomad.toml also gives {group} {' and '.join(said)}: kept, but not shown "
+                         "while it is no lab")
+        if not _lab_known(before, group, edit.path, db):
+            notes.append(f"nomad knows no {group} here (no members in the groups data, no machines): "
+                         "check the name")
+    if changes:
+        notes.append("The Console reads nomad.toml on every request: no restart.")
+    _lab_finish(edit, changes, apply, check_not_lab(before, group, remove), notes)
+
+
 def _lab_target(edit, before, acc, lab_name, remove, new_group):
     """The lab's group for `nomad lab lead` and `nomad lab assistant`: LAB as
     the PI's NetID (with group_pattern), the lab's group, or its name as
@@ -8523,8 +8599,13 @@ def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
     from nomad.config.labs import LabError, leads_of, set_lead
     edit = _lab_edit(ctx)
     before = edit.data
+    import dataclasses
     acc = access_from(before, log=False)
     group = _lab_target(edit, before, acc, lab_name, remove, new_group)
+    hidden = group in acc.not_labs
+    # Lab or class by the rules, whether or not not_labs hides it (1.17.10):
+    # a lead entry stays right when the group is shown again.
+    acc = dataclasses.replace(acc, not_labs=frozenset())
     n = netid.strip().lower()
     pattern_pi = bool(acc.group_pattern) and acc.group_pattern.replace("{netid}", n) == group
     # Through group_pattern only while the group is a lab this term (not a class).
@@ -8551,14 +8632,17 @@ def lab_lead(ctx, lab_name, netid, remove, new_group, apply):
                       if remove else "."))
         return
     notes = []
-    if changes and not remove:
+    if changes and not remove and hidden:
+        notes.append(f"[console.labs] not_labs lists {group}: while it does, it is no lab and "
+                     f"{n} sees nothing of it in the Console (nomad lab hide {group} --remove).")
+    elif changes and not remove:
         notes.append(f"In the Console {n} will see {acc.lab_label(group)}: its workstations "
                      "and storage (My Lab), and each of its members on Trajectory, "
                      "Recommendations and the job pages.")
         if acc.role(n):
             notes.append(f"{n} is {'an' if acc.role(n)[0] in 'aeiou' else 'a'} "
                          f"{acc.role(n)} here: they see everything anyway.")
-    after = access_from(edit.data, log=False)
+    after = dataclasses.replace(access_from(edit.data, log=False), not_labs=frozenset())
     if changes and remove and pattern_pi and after.lab_now(group):
         notes.append(f"{n} still leads {group} through group_pattern.")
     if changes and acc.lab_now(group) != after.lab_now(group):
@@ -8637,10 +8721,11 @@ def lab_assistant(ctx, lab_name, netid, remove, new_group, apply):
     notes = []
     if changes and not remove:
         size = _lab_size(before, group, edit.path)
-        notes.append(f"In the Console {n} will see {acc.lab_label(group)}'s members one by one, "
-                     "as its PI does but for the PI's own work"
-                     + (f" ({size} members in the groups data)" if size else "")
-                     + ", while they are one of them.")
+        if group not in acc.not_labs:
+            notes.append(f"In the Console {n} will see {acc.lab_label(group)}'s members one by one, "
+                         "as its PI does but for the PI's own work"
+                         + (f" ({size} members in the groups data)" if size else "")
+                         + ", while they are one of them.")
         member = _lab_member(before, group, n, edit.path)
         if member is False:
             notes.append(f"{n} isn't one of {group}'s members in the groups data now: the role "
@@ -8648,7 +8733,10 @@ def lab_assistant(ctx, lab_name, netid, remove, new_group, apply):
         elif member is None:
             notes.append(f"The groups data here has no members for {group}: the role applies "
                          f"once it shows {n} in it.")
-        if not acc.lab_now(group):
+        if group in acc.not_labs:
+            notes.append(f"[console.labs] not_labs lists {group}: while it does, it is no lab, so "
+                         f"this applies once it is shown again (nomad lab hide {group} --remove).")
+        elif not acc.lab_now(group):
             notes.append(f"{group} is a course this term: a class rather than a lab, so this "
                          "applies from a term it isn't one (or once a lead entry or storage listed "
                          "for it keeps it a lab as well).")

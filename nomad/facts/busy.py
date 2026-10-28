@@ -525,9 +525,11 @@ def _labs(conn: sqlite3.Connection, config: dict | None, now: datetime) -> tuple
     acc = access_from(config, log=False)
     labs: dict = {}
     storage: set = set()
+    hidden = getattr(acc, "not_labs", frozenset())      # never labs (1.17.10)
     for group, kinds in acc.resources.items():
         for host in kinds.get("workstations", ()):
-            labs.setdefault(host, set()).add(group)
+            if group not in hidden:
+                labs.setdefault(host, set()).add(group)
         storage |= {_machine_key(entry.partition(":")[0]) for entry in kinds.get("storage", ())}
     for server, (name, _note) in acc.servers.items():
         storage |= {_machine_key(server)} | ({_machine_key(name)} if name else set())
@@ -544,7 +546,7 @@ def _labs(conn: sqlite3.Connection, config: dict | None, now: datetime) -> tuple
             if host not in latest or str(when) > latest[host][0]:
                 latest[host] = (str(when), dept)
         for host, (_, dept) in latest.items():
-            if isinstance(dept, str) and dept.strip():
+            if isinstance(dept, str) and dept.strip() and dept.strip() not in hidden:
                 labs.setdefault(host, set()).add(dept.strip())
     return labs, storage, dict(acc.lab_names)
 

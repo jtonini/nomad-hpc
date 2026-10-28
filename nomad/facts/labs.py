@@ -163,6 +163,8 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         tagged = workstation_tags(conn, now)
     led = list(groups) if groups is not None else (
         acc.lab_groups(netid, exists, tagged) if netid else [])
+    # [console.labs] not_labs (1.17.10): never a lab, whoever asks.
+    led = [g for g in led if g not in acc.not_labs]
     # And those ``netid`` is a research assistant of now: seen as their PI
     # sees them (each says which: "as").
     assisted = [g for g in acc.assisted_groups(netid, members_of) if g not in led] \
@@ -253,10 +255,14 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
                 st["note"] = note
         if condos is not None and conn is not None:
             # The lab's own condo nodes, as report.toml names them (1.17.9).
+            import dataclasses
             from nomad.facts.condos import lab_condos
+            # Whose a condo is counts every lab its owner leads, hidden ones
+            # too (not_labs): hiding one never moves the condo onto another.
+            every = dataclasses.replace(acc, not_labs=frozenset())
             lab["condos"] = lab_condos(conn, g, acc.leaders(g), condos, now, found=found_nodes,
                                        pattern=acc.group_pattern,
-                                       labs_of=lambda n: acc.lab_groups(n, exists, tagged))
+                                       labs_of=lambda n: every.lab_groups(n, exists, tagged))
         if names and conn is not None:
             # What needs the PI's attention now (nomad.facts.attention): with
             # each member by name only. Whom to help: not the one asking

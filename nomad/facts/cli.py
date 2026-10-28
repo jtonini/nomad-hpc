@@ -270,6 +270,8 @@ def _why_no_lab(config: dict, netid: str) -> str:
     if not acc.group_pattern:
         return ""
     g = acc.group_pattern.replace("{netid}", netid.strip().lower())
+    if g in acc.not_labs:
+        return f": [console.labs] not_labs lists {g}: it is not a lab"
     if acc.lab_now(g):
         return ""
     return (f": {g} is a course this term, a class rather than a lab (a lead entry or storage "

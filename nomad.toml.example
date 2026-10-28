@@ -350,6 +350,8 @@ viewer = []                  # named: their own work, whatever else says
 group_pattern = ""           # e.g. "{netid}$" where a faculty member's group
                              # is their NetID followed by $
 leads = {}                   # e.g. { NETID = ["chemlab$"] }
+# not_labs = []              # groups never a lab, whatever else says: a service
+                             # account's, a mistyped one (`nomad lab hide LAB`)
 
 # A lab's own workstations and storage, which its PI also sees (people
 # outside the lab show as "another user" there). One table per lab group:

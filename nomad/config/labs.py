@@ -15,6 +15,9 @@
     assistant LAB NETID    NETID is a research assistant of LAB: sees it as
                            its PI does while one of its members; with
                            remove=True, no longer
+    hide LAB               LAB is never a lab ([console.labs] not_labs): a
+                           service account's group, a mistyped one; with
+                           remove=True, a lab again by nomad's rules (1.17.10)
     remove LAB HOST        out of all of these for that lab
 
 A workstation's lab travels with its data (the tag), so add-machine is done
@@ -445,8 +448,11 @@ def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> li
             return []
         groups.remove(group)
     else:
+        import dataclasses
         from nomad.config.access import access_from
-        acc = access_from(edit.data, log=False)
+        # A lab or a class by the rules, whether or not not_labs hides it:
+        # the entry must still be right when it is shown again.
+        acc = dataclasses.replace(access_from(edit.data, log=False), not_labs=frozenset())
         if group in groups or (acc.group_pattern and acc.lab_now(group)
                                and acc.group_pattern.replace("{netid}", n) == group):
             return []
@@ -461,6 +467,115 @@ def set_lead(edit: TomlEdit, group: str, netid: str, remove: bool = False) -> li
         new[n] = groups
     _write_leads(edit, new)
     return [f"{n} no longer leads {group}" if remove else f"{n} leads {group}"]
+
+
+NOT_LABS = "not_labs"
+
+
+def not_labs_of(data: dict) -> list:
+    """[console.labs] not_labs as access_from() reads it (a single string
+    taken as a list of one), in the file's order."""
+    raw = (_get(data, LABS) or {}).get(NOT_LABS) if isinstance(_get(data, LABS), dict) else None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    return list(dict.fromkeys(g.strip() for g in raw if isinstance(g, str) and g.strip()))
+
+
+_NOT_LABS_LINE = re.compile(r"""^(\s*not_labs\s*=\s*)(\[[^\]\n]*\])(\s*#.*)?\s*$""")
+
+
+def set_not_lab(edit: TomlEdit, group: str, remove: bool = False) -> list:
+    """GROUP is never a lab (1.17.10), whatever nomad's rules say: not on
+    the Console's Labs page or in its search, led by nobody, assisted by
+    nobody. remove=True: off the list, a lab again by the rules. Only the
+    ``not_labs = [...]`` line of [console.labs] changes, where it is, its
+    comment kept (a new one goes first in the table); a list spread over
+    several lines, entries that aren't group names, or [console.labs]
+    written inline are left for a person."""
+    from nomad.config.edit import lines_of, loads, value
+    g = group.strip()
+    if g.lower() == SHARED:
+        raise LabError('"shared" is not a lab; give the lab\'s group or the PI\'s NetID')
+    if not g:
+        raise LabError("give the group")
+    if any(c.isspace() for c in g):
+        raise LabError(f"{g!r}: a group's name has no spaces (give the group, or the lab's name "
+                       "as `nomad lab show` prints it)")
+    labs = _get(edit.data, LABS)
+    raw = labs.get(NOT_LABS) if isinstance(labs, dict) else None
+    if raw is not None and not (isinstance(raw, str) or (
+            isinstance(raw, list) and all(isinstance(x, str) and x.strip() for x in raw))):
+        raise LabError(f"[console.labs] {NOT_LABS} in {edit.path.name} isn't a list of group names: "
+                       "fix it by hand first")
+    current = not_labs_of(edit.data)
+    if remove:
+        if g not in current:
+            return []
+        new = [x for x in current if x != g]
+    else:
+        if g in current:
+            return []
+        new = current + [g]
+    own = [i for i, table, k in edit.key_lines() if table == LABS and k == (NOT_LABS,)]
+    clash = [i for i in edit.assigned(LABS + (NOT_LABS,)) if i not in own]
+    if clash or len(own) > 1:
+        raise LabError(f"{NOT_LABS} is written another way in {edit.path.name} "
+                       f"(line {(clash or own)[0] + 1}): change it by hand")
+    if own:
+        lines = lines_of(edit.text)
+        i = own[0]
+        m = _NOT_LABS_LINE.match(lines[i].rstrip("\n"))
+        try:
+            same = m is not None and loads(f"x = {m.group(2)}")["x"] == (
+                [raw] if isinstance(raw, str) else raw)
+        except Exception:
+            same = False
+        if isinstance(raw, str) and m is None:
+            m2 = re.match(r"""^(\s*not_labs\s*=\s*)("[^"\n]*"|'[^'\n]*')(\s*#.*)?\s*$""",
+                          lines[i].rstrip("\n"))
+            same, m = m2 is not None, m2
+        if not same:
+            raise LabError(f"the {NOT_LABS} line of {edit.path.name} (line {i + 1}) goes on over "
+                           "several lines or isn't plain: change it by hand")
+        head, comment = m.group(1), m.group(3) or ""
+        if new or comment:
+            lines[i] = f"{head}{value(new)}{comment}\n"
+        else:
+            del lines[i]
+        edit.text = "".join(lines)
+    elif new:
+        edit.insert_key(LABS, NOT_LABS, new)
+    return [f"{g}: a lab again by nomad's rules" if remove
+            else f"{g}: not a lab (not shown in the Console; nobody leads it)"]
+
+
+def check_not_lab(before: dict, group: str, remove: bool = False):
+    """For TomlEdit.save: the file reads back with GROUP listed (or not),
+    the list otherwise as it was, and nothing else changed."""
+    import copy
+    g = group.strip()
+    current = not_labs_of(before)
+    want = [x for x in current if x != g] if remove else current + ([g] if g not in current else [])
+
+    def rest(d):
+        d = copy.deepcopy(d)
+        console = d.get("console")
+        labs_t = console.get("labs") if isinstance(console, dict) else None
+        if isinstance(labs_t, dict):
+            labs_t.pop(NOT_LABS, None)
+            if not labs_t:
+                console.pop("labs")
+        if isinstance(console, dict) and not console:
+            d.pop("console")
+        return d
+
+    def check(data: dict) -> bool:
+        from nomad.config.access import access_from
+        return (rest(data) == rest(before) and not_labs_of(data) == want
+                and (g in access_from(data, log=False).not_labs) != remove)
+    return check
 
 
 def assistants_of(data: dict) -> dict:
@@ -577,6 +692,7 @@ def summary(config: dict, group: str | None = None) -> list:
     helpers = assistants_of(config)
     from nomad.config.access import access_from
     note_of = access_from(config, log=False).note_of            # what each machine is (1.17.7)
+    hidden = not_labs_of(config)
     groups = sorted({e.get("department") for e in ws if e.get("department")} | set(res)
                     | {g for gs in led.values() for g in gs} | set(helpers))
     if group == SHARED:
@@ -613,8 +729,12 @@ def summary(config: dict, group: str | None = None) -> list:
             lines.append(f"  also led by: {', '.join(also)}")
         if helpers.get(g):
             lines.append(f"  research assistants: {', '.join(helpers[g])}")
+        if g in hidden:
+            lines.append("  not a lab ([console.labs] not_labs): the Console doesn't show it")
         if lines[-1] in (f"{g}:", f"{shown} ({g}):"):
             lines.append("  nothing here")
+    if hidden and not group:
+        lines.append(f"not labs ([console.labs] not_labs, not shown): {', '.join(hidden)}")
     untagged = sorted(e.get("hostname") for e in ws if not e.get("department"))
     if untagged and not group:
         lines.append(f"workstations collected here with no lab: {', '.join(untagged)}")

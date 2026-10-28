@@ -110,6 +110,7 @@ viewer = []                    # named: their own work, whatever else says
 [console.labs]
 group_pattern = "{netid}$"     # the group a faculty member leads, by its name
 leads = { NETID = ["chemlab$"] }   # exceptions and extra groups
+not_labs = ["svc$"]            # never a lab, whatever else says (1.17.10)
 
 [console.labs.resources."NETID$"]
 name = "Smith Lab"             # how the lab is shown (else its group)
@@ -194,6 +195,16 @@ else `sudo nomad -c ...`).
   one of its own members, not any group with members; a lab that is a
   class this term (above) has none that term. Names that aren't NetIDs are
   reported and left out.
+- **Not a lab:** `not_labs` lists groups that are never labs, whatever the
+  rules above say (1.17.10): a service account's group, a mistyped one, the
+  group of someone who left. The Console leaves them out (Labs, search,
+  Groups, My lab), nobody leads them or is their research assistant, and
+  `nomad facts lab` and `nomad console roles` say why. Nothing on the
+  clusters changes and their data stays: the condo reports count a hidden
+  group's members as before, and hiding one of an owner's labs moves no
+  condo onto another. Taking a group off the list makes it a lab again. `nomad lab hide LAB` writes it (below). A name, machines
+  or a lead nomad.toml gives a group it lists are kept but don't apply, and
+  `nomad config check` says so.
 - **A lab's machines:** a PI also sees their labs' workstations and storage.
   On those machines, people outside the lab appear as "another user".
   A workstation belongs to a lab when the collector that monitors it tags it
@@ -264,6 +275,7 @@ nomad lab name LAB "NAME"               how the lab is shown, e.g. "Smith Lab"
 nomad lab lead LAB NETID [--remove]     NETID leads LAB too (or no longer)
 nomad lab assistant LAB NETID [--remove]
                                         NETID is a research assistant of LAB (or no longer)
+nomad lab hide LAB [--remove]           LAB is never a lab, not shown (or a lab again)
 nomad lab remove LAB HOST
 ```
 
@@ -302,6 +314,15 @@ with `"{netid}$"`), or the lab's group itself.
   `[console.labs.assistants]`, which goes when its last name does. Like
   `leads`, the table is written whole: comments inside it aren't kept, and
   an entry nomad can't read is left for a person to fix first.
+- **hide** goes on the Console's machine: LAB is not a lab (above), so the
+  Console doesn't show it; nothing on the clusters changes. It writes the
+  `not_labs = [...]` line of `[console.labs]` on one line (a list spread over
+  several lines is left to change by hand), says when nomad knows no such
+  group here (a mistyped name hides nothing; `--db` gives the groups data
+  when nomad can't find it), and `--remove` makes it a lab again. A group
+  nomad knows by that very name (`research`, a workstation tag) is taken as
+  it is, not as a PI's NetID; LAB may also be the lab's name as `nomad lab
+  show` prints it ("Smith Lab"). `nomad lab show` lists them.
 - **remove** takes a host out of a lab: no longer collected here, no longer
   listed.
 

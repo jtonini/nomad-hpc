@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 ROLES = ("admin", "operator")       # what the file can grant; anyone else is a viewer
 FILE_ROLES = ROLES + ("viewer",)    # the lists [console.roles] may have
-_LABS_KEYS = ("group_pattern", "leads", "resources", "assistants", "attention")
+_LABS_KEYS = ("group_pattern", "leads", "resources", "assistants", "attention", "not_labs")
 RESOURCE_KINDS = ("workstations", "storage")
 OTHER_USER = "another user"
 
@@ -118,6 +118,7 @@ class Access:
     lab_names: dict = field(default_factory=dict)   # group -> how the lab is shown
     assistants: dict = field(default_factory=dict)  # group -> tuple of NetIDs (research assistants)
     course_groups: frozenset = frozenset()          # groups nomad.toml lists as courses this term
+    not_labs: frozenset = frozenset()               # groups never a lab, whatever else says (1.17.10)
     courses: object = field(default=None, compare=False)   # [console.courses] (is_course), or None
     problems: tuple = ()                            # what in the file was ignored, and why
 
@@ -202,6 +203,8 @@ class Access:
         it under [console.labs.resources] or ``leads`` names it. (A
         workstation only tagged with the group doesn't count: the tag is
         the collector's, the course nomad.toml's.)"""
+        if group in self.not_labs:
+            return False
         return (not self.is_class(group) or group in self.resources
                 or any(group in gs for gs in self.leads.values()))
 
@@ -223,7 +226,7 @@ class Access:
                                     or (tagged is not None and tagged(g))):
                 groups.append(g)
         seen = set()
-        return [g for g in groups if not (g in seen or seen.add(g))]
+        return [g for g in groups if g not in self.not_labs and not (g in seen or seen.add(g))]
 
     def assisted_groups(self, netid, members_of: Callable[[str], Iterable[str]] | None) -> list:
         """The labs this person is a research assistant of now: listed in
@@ -246,7 +249,10 @@ class Access:
         class this term: ``lab_now``): named in [console.labs] (machines,
         storage, a name, a lead), or the group ``group_pattern`` names for
         one of its own members (``members_of``; None: only the former). Not
-        any group with members ("faculty")."""
+        any group with members ("faculty"), and never one [console.labs]
+        not_labs lists."""
+        if group in self.not_labs:
+            return False
         if (group in self.resources or group in self.lab_names
                 or any(group in gs for gs in self.leads.values())):
             return True
@@ -421,6 +427,18 @@ def access_from(config: dict | None, log: bool = True) -> Access:
             g = group.strip()
             assistants[g] = tuple(dict.fromkeys(assistants.get(g, ()) + tuple(names)))
 
+    # Groups that are never labs (1.17.10): a service account's, a mistyped
+    # one, someone's who left. Not shown, not led, nobody's assistants.
+    not_labs = frozenset(_names(labs.get("not_labs"), "[console.labs] not_labs", problems))
+    for g in sorted(not_labs):
+        said = [what for what, hit in (
+            ("a name or machines", g in lab_names or g in resources),
+            ("a lead", any(g in gs for gs in leads.values())),
+            ("research assistants", g in assistants)) if hit]
+        if said:
+            problems.append(f"[console.labs] not_labs lists {g}, which [console.labs] also gives "
+                            f"{' and '.join(said)}: it is not a lab, so they don't apply")
+
     # Courses this term are classes, not labs (Access.lab_now).
     course_groups: frozenset = frozenset()
     courses = None
@@ -447,7 +465,8 @@ def access_from(config: dict | None, log: bool = True) -> Access:
                   viewers=frozenset(found["viewer"]),
                   group_pattern=pattern, leads=leads, resources=resources,
                   servers=servers, machines=machines, lab_names=lab_names, assistants=assistants,
-                  course_groups=course_groups, courses=courses, problems=tuple(problems))
+                  course_groups=course_groups, courses=courses, not_labs=not_labs,
+                  problems=tuple(problems))
 
 
 _SERVER_KEYS = ("name", "note")

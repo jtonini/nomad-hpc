@@ -598,11 +598,14 @@ def resolve_members(conn, condo: Condo, acc, members_of, exists, site: str | Non
                 [since] + ([site] if where else []) + [a]) if u}
         how = f"Slurm account {a}, who used it this past year"
     elif condo.owners and acc is not None:
-        # The owner's group whether or not it is a class this term: who may
+        # The owner's group whether or not it is a class this term, and
+        # whether or not nomad.toml hides it (not_labs, 1.17.10): who may
         # use the condo is not who the Console shows as a lab.
         import dataclasses
         if hasattr(acc, "courses"):
             acc = dataclasses.replace(acc, course_groups=frozenset(), courses=None)
+        if hasattr(acc, "not_labs"):
+            acc = dataclasses.replace(acc, not_labs=frozenset())
         groups = []
         for o in condo.owners:
             for g in (acc.lab_groups(o, exists) if members_of else []):
