@@ -134,7 +134,7 @@ def _each_member(conn, people: set, rows: list | None, ceilings: dict, stale: se
 
 def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None = None,
          days: int = 30, now: datetime | None = None, groups: list | None = None,
-         min_others: int = 0, names: bool = False) -> dict:
+         min_others: int = 0, names: bool = False, condos=None) -> dict:
     """The labs ``netid`` leads or is a research assistant of (or, for staff,
     the ``groups`` named), each
     with its members, their jobs over ``days`` taken together, its
@@ -142,7 +142,9 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
     on fewer members than this besides ``netid`` (see the top of the file).
     ``names``: each member's own row too (``each``), and what needs the
     PI's attention now (``attention``, nomad.facts.attention); then no total
-    is left out, since the rows show each member anyway."""
+    is left out, since the rows show each member anyway. ``condos``:
+    report.toml's condo settings (nomad.condo.config.load); each lab's own
+    condos and their nodes now too (``condos``, nomad.facts.condos, 1.17.9)."""
     if names:
         min_others = 0
     from nomad.config.access import (access_from, export_sizes, members_lookup, membership_counts,
@@ -191,6 +193,7 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
             places[key] = (places.get(key, (None, ""))[0], note)
     out = envelope("lab", now, win)
     out["labs"] = []
+    found_nodes: dict = {}                      # each cluster's nodes, read once for every lab
     for g in led + assisted:
         lab = {"group": g, "name": acc.lab_names.get(g) or g}
         if groups is None:
@@ -248,6 +251,12 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
             note = acc.note_of(st.get("server") or st["entry"].partition(":")[0]) or acc.note_of(st.get("name"))
             if note:
                 st["note"] = note
+        if condos is not None and conn is not None:
+            # The lab's own condo nodes, as report.toml names them (1.17.9).
+            from nomad.facts.condos import lab_condos
+            lab["condos"] = lab_condos(conn, g, acc.leaders(g), condos, now, found=found_nodes,
+                                       pattern=acc.group_pattern,
+                                       labs_of=lambda n: acc.lab_groups(n, exists, tagged))
         if names and conn is not None:
             # What needs the PI's attention now (nomad.facts.attention): with
             # each member by name only. Whom to help: not the one asking

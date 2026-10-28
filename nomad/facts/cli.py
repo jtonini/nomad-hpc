@@ -118,6 +118,12 @@ def _mask_labs(data: dict) -> None:
                     st[key] = f"storage #{j}"
             if st.get("shares_free_with"):
                 st["shares_free_with"] = [f"storage ({len(st['shares_free_with'])} more)"]
+        # A condo is named for its owner, and so are its partition and often its nodes.
+        for j, c in enumerate(lab.get("condos", ()), 1):
+            c["condo"] = c["label"] = c["partition"] = f"condo #{j}"
+            c["owners"] = []
+            for k, n in enumerate(c.get("nodes", ()), 1):
+                n["node"] = f"node #{k}"
 
 
 def _when(t) -> str:
@@ -285,12 +291,22 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
     rules: members, their jobs taken together, workstations and storage;
     --each, each member too."""
     from nomad.facts import labs
+    from nomad.condo import config as ccfg
+    # The labs' condo nodes (1.17.9): as report.toml's condo reports name them.
+    condo_problem = None
+    try:
+        condos = ccfg.load(None, (ctx.obj or {}).get("config_target"))
+    except ccfg.CondoConfigError as e:
+        condos, condo_problem = None, str(e)
     path, conn = _open(ctx, db)
     try:
         data = labs(conn, ctx.obj.get("config", {}) or {}, netid.strip().lower(), days=days,
-                    names=each and not mask)
+                    names=each and not mask, condos=condos)
     finally:
         conn.close()
+    if condo_problem:
+        # Its text can name a condo, and so its owner: --mask says only that.
+        data["condos_problem"] = "report.toml doesn't read" if mask else condo_problem
     if mask:
         _mask_labs(data)
     if as_json:
@@ -343,6 +359,24 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
             else:
                 click.echo(f"  {label}: {_p(s['used_pct'])} used, "
                            f"{_size(s['free_bytes'])} free" + (" [stale]" if s["stale"] else ""))
+        for c in lab.get("condos", []):
+            t = c["total"]
+            where = f"condo {c['label']} on {c['cluster_label']} ({c['partition']})"
+            if not t["nodes"]:
+                click.echo(f"  {where}: no node of it in the cluster's latest reading")
+                continue
+            state = f"{t['up']} up" + (f", {t['drained']} drained" if t["drained"] else "") + \
+                (f", {t['down']} down" if t["down"] else "") + \
+                (f", {t['gone']} no longer listed by Slurm" if t["gone"] else "") + \
+                (f", {t['not_read']} not read" if t["not_read"] else "")
+            gpus = f", {t['gpus']} GPUs" if t["gpus"] else ""
+            busy = ("" if t["cores_allocated_pct"] is None else
+                    f"; {t['cores_allocated']} of the {t['cores_up']} cores on nodes up allocated to jobs "
+                    "now (guests' included)")
+            click.echo(f"  {where}: {t['nodes']} nodes, {t['cores']} cores{gpus}; {state}{busy}"
+                       + (f" [as of {_when(c['as_of'])}: not reporting]" if c["stale"] else ""))
+    if data.get("condos_problem") and not mask:
+        click.echo(f"(the labs' condos aren't shown: {data['condos_problem']})")
 
 
 _BARS = " ▁▂▃▄▅▆▇█"

@@ -6,7 +6,7 @@ Three questions every front to nomad asks, answered once, as data:
 |---|---|---|
 | **sites** | every site now (freshness, nodes, CPU, memory and GPUs in use, jobs running and waiting, storage, alerts, workstations) and its jobs over a window | anyone signed in: aggregates only |
 | **me** | one person's work: their jobs over a window, running and waiting now, score and advice | that person |
-| **lab** | the labs a person leads: members, their jobs taken together, the lab's workstations and storage | the lab's PI; staff for any lab |
+| **lab** | the labs a person leads: members, their jobs taken together, the lab's workstations, storage and condo nodes | the lab's PI; staff for any lab |
 | **course** | the courses a person teaches, this term: the class together, each student as a row, when the class works | the course's instructors; staff for any course |
 | **busy** | when each cluster, interactive server and group of workstations is busiest: the most in use at once and when, a typical week, the busiest and quietest hours (1.14.7) | anyone signed in; each workstation by name for staff only |
 
@@ -134,6 +134,20 @@ Console's My Lab):
 * `storage`: each server or export the lab has, with its size and use, and
   what it is (`note`);
   `shares_free_with` for exports of one pool (their free space is one).
+* `condos` (when report.toml's condo settings are given, as `nomad facts lab`
+  and the Console do, 1.17.9): the lab's own condos. Only confirmed ones;
+  when a condo's `members` name groups (`"group:NAME"`), it is those labs'
+  only; otherwise its owner's: the lab `group_pattern` names for the owner,
+  or the one lab they lead (an owner leading several, none named for them,
+  needs `members` to say which). Each has the cluster, the partition, its
+  nodes (report.toml's, else the partition's) as the cluster's latest
+  reading has them (up, drained or down; `gone` when that reading no longer
+  lists the node; cores, cores allocated, memory, GPUs), the totals, and of
+  the cores on nodes that are up (`cores_up`) how many are allocated to jobs
+  now (`cores_allocated`, guests' jobs included) and that share. `stale`
+  when the cluster's latest reading is over 2 hours old: then the nodes are
+  as it last reported them, and no share is given. On a hub, report.toml's
+  clusters are its sites.
 
 * `each` (with `names=True`, `--each` on the command line): a row per
   member by NetID: jobs finished in the window, core-hours held and the
