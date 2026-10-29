@@ -28,15 +28,38 @@ Only accounts from --min-uid up (1000) count: system services aren't
 people; --ignore-users and --ignore-programs (a site's own services) are
 left out before anything is counted. Nothing of a command line is kept but
 what names the finding: a program's name (a short word: letters, digits,
-. _ + -), a forwarded or listening port, and whether an ssh forward's
-destination is one of --inside's names (the cluster's own, given by the
-collector) or a private address, with no proxy of its own -- a hint, not
-proof: a user's own ssh config can map any name anywhere. Never a host, an
+. _ + -), a forwarded or listening port, and an ssh forward's shape (what
+its far end listens on, whether it leads to this host). Never a host, an
 address or an argument.
 
-    /usr/bin/python3 -I -S - [--min-uid N] [--inside a,b] [--ignore-users a,b]
+An ssh forward's account is checked against what the kernel shows, not
+what anyone wrote (1.19.1): where every socket of that account on this host
+goes -- this host, this cluster's own networks (private ones reached
+directly, not through the default route), a server the collector lists
+(--trusted: addresses it resolved, with a port, or 0 for ports below 1024,
+which only root can open), campus (private addresses beyond the cluster,
+and --campus), or outside -- and whether any ssh of that account has a
+child process (ProxyCommand and ProxyJump start one) or relays (-W, -J, a
+proxy, a local forward from a socket). A reverse forward is verified when
+it opens one port leading to this host, asks for loopback on the far end,
+has no proxy of its own, and its account has nothing else: every connection
+goes to a listed server (on its port), into the cluster below port 1024,
+or to a service of a system account on this host, at least one to a server
+or into the cluster; no ssh of it has a child or relays; no UDP socket open
+beyond loopback, no raw socket.
+
+Each forward's processes are named by a key (a hash of the boot, their
+pids and start times), when each is ssh by its kernel name (as root: its
+program file is the system's ssh): an ssh keeps the connection it made for
+as long as it runs, so the collector keeps a forward verified while its key
+holds (within limits: policy_watch.keep).
+
+    /usr/bin/python3 -I -S - [--min-uid N] [--trusted NET@PORT,...]
+        [--campus NET,...] [--cluster NET,...] [--ignore-users a,b]
         [--ignore-programs a,b] [--proc DIR] < watch_probe.py
 """
+import hashlib
+import ipaddress
 import json
 import os
 import pwd
@@ -64,14 +87,33 @@ STRATUM = re.compile(r"stratum(\+tcp|\+ssl|\+tls|2)?://", re.I)
 LISTENS = re.compile(r"(?i)(^-[lL]$|listen|^--?(server|bind|socks|to)\b|(socks5?h?|https?|tcp|udp|relay|ws|wss)://"
                      r"|^:\d{2,5}$)")
 ARG = 1024                       # of each argument, what signatures look at
-NAME_OK = re.compile(r"^[A-Za-z0-9._+-]{1,32}$")
+NAME_OK = re.compile(r"^[A-Za-z0-9._+-]{1,32}\Z")
 MAX_ARGV = 64 * 1024
 MAX_PER = 5                      # programs kept per account and kind (the rest: "+N more")
+SYSTEM_SSH = ("/usr/bin/ssh", "/bin/ssh")    # as root, a forward's key only for these
+PRIVATE = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
+LINK_LOCAL = tuple(ipaddress.ip_network(n) for n in ("169.254.0.0/16", "fe80::/10"))
+
+
+def _nets(text, ports=False):
+    """NET[@PORT],... as given by the collector: (network, port) each, or
+    None where one doesn't read (the indexes are the collector's)."""
+    out = []
+    for item in (text or "").split(","):
+        port = 0
+        if ports and "@" in item:
+            item, _, p = item.rpartition("@")
+            port = int(p) if p.isdigit() and int(p) < 65536 else -1
+        try:
+            out.append((ipaddress.ip_network(item.strip(), strict=False), port) if port >= 0 else None)
+        except ValueError:
+            out.append(None)
+    return out
 
 
 def _args():
-    out = {"min_uid": 1000, "proc": "/proc", "inside": (), "ignore_users": frozenset(),
-           "ignore_programs": frozenset()}
+    out = {"min_uid": 1000, "proc": "/proc", "trusted": [], "campus": [], "cluster": [],
+           "ignore_users": frozenset(), "ignore_programs": frozenset()}
     a = sys.argv[1:]
     i = 0
     while i < len(a):
@@ -81,8 +123,11 @@ def _args():
         elif a[i] == "--proc" and i + 1 < len(a):
             out["proc"] = a[i + 1]
             i += 2
-        elif a[i] == "--inside" and i + 1 < len(a):
-            out["inside"] = tuple(x.lower() for x in a[i + 1].split(",") if x)
+        elif a[i] == "--trusted" and i + 1 < len(a):
+            out["trusted"] = _nets(a[i + 1], ports=True)
+            i += 2
+        elif a[i] in ("--campus", "--cluster") and i + 1 < len(a):
+            out[a[i][2:]] = [n for n, _p in (x for x in _nets(a[i + 1]) if x)]
             i += 2
         elif a[i] in ("--ignore-users", "--ignore-programs") and i + 1 < len(a):
             out[a[i][2:].replace("-", "_")] = frozenset(x for x in a[i + 1].split(",") if x)
@@ -125,36 +170,107 @@ def _is(name, names, script=False):
     return None
 
 
-_PRIVATE4 = re.compile(r"^(10|127)\.\d+\.\d+\.\d+$|^192\.168\.\d+\.\d+$|^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$")
+# -- ssh's own command line ---------------------------------------------------------
+
+SSH_VALUE = "bcBDeEFIiJlLmOopPQRSwW"           # ssh's options that take a value (its getopt string)
+FAR = ("loopback", "an address", "every address", "a socket", "unknown")    # worst last
+TO = ("this host", "another host", "a socket", "socks", "unknown")
+_LOOPBACK_NAME = re.compile(r"^(localhost|::1|127\.\d{1,3}\.\d{1,3}\.\d{1,3})$", re.I)
 
 
-def _private(ip):
-    """A private, loopback or link-local address, written as an address
-    (not a name)."""
-    ip = ip.lower().strip("[]")
-    if _PRIVATE4.match(ip) or re.match(r"^169\.254\.\d+\.\d+$", ip):
-        return True
-    if not re.match(r"^[0-9a-f:]+$", ip) or ":" not in ip:
-        return False
-    if re.match(r"^(0+:){7}0*1$", ip) or ip == "::1":
-        return True
-    return bool(re.match(r"^(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):", ip))
+def _fields(spec):
+    """A forward's fields as ssh splits them (readconf.c, parse_fwd_field):
+    at colons; a field in [brackets] whole; a backslash makes the next
+    character plain. (text, is a path: has a / not escaped) each; None
+    where ssh refuses it."""
+    out, i, n = [], 0, len(spec)
+    while i < n and spec[i] in " \t\r\n\f\v":
+        i += 1
+    while i < n:
+        if len(out) == 4:
+            return None                                  # trailing garbage
+        if spec[i] == "[":
+            j = spec.find("]", i + 1)
+            if j < 0 or (j + 1 < n and spec[j + 1] != ":"):
+                return None
+            field = spec[i + 1:j]
+            out.append((field, "/" in field))
+            i = j + 2
+            continue
+        buf, path = [], False
+        while i < n:
+            c = spec[i]
+            if c == "\\":
+                if i + 1 >= n:
+                    return None
+                buf.append(spec[i + 1])
+                i += 2
+                continue
+            i += 1
+            if c == ":":
+                break
+            path = path or c == "/"
+            buf.append(c)
+        out.append(("".join(buf), path))
+    return out
 
 
-SSH_VALUE = "bcDeEFIiJlLmOopPQRSwW"            # ssh's options that take a value
+def _shape(kind, spec, dynamic=False):
+    """A forward's shape, as ssh reads it (readconf.c, parse_forward):
+    port (the one it listens on), far (what it listens on: for -R the far
+    end, as asked; its sshd may still narrow or widen it), to (where a
+    connection to it leads; socks: anywhere) for -R; for -D, far is here.
+    ``dynamic``: RemoteForward with one word, a SOCKS proxy or nothing."""
+    f = _fields(spec) if "${" not in spec else None
+    out = {"port": "", "far": "unknown", "to": "unknown"}
+    if not f or (dynamic and len(f) > 2):
+        return out
+    n, bind, listen_path, host, to_path = len(f), None, False, None, False
+    if kind == "D":
+        if n == 1:
+            listen_path, port = f[0][1], f[0][0]
+        elif n == 2:
+            bind, port = f[0][0], f[1][0]
+        else:
+            return out
+        out["to"] = "socks"
+    else:
+        if n == 1:
+            listen_path, port = f[0][1], f[0][0]
+        elif n == 2 and f[1][1]:
+            listen_path, port, to_path = f[0][1], f[0][0], True
+        elif n == 2:
+            bind, port = f[0][0], f[1][0]
+        elif n == 3 and f[0][1]:
+            listen_path, port, host = True, f[0][0], f[1][0]
+        elif n == 3 and f[2][1]:
+            bind, port, to_path = f[0][0], f[1][0], True
+        elif n == 3:
+            port, host = f[0][0], f[1][0]
+        else:
+            bind, port, host = f[0][0], f[1][0], f[2][0]
+        out["to"] = "a socket" if to_path else "socks" if host is None else \
+            "this host" if _LOOPBACK_NAME.match(host) else "another host"
+    if listen_path:
+        out["far"], out["port"] = "a socket", "socket"
+        return out
+    # as ssh's a2port reads a number (022, +22); a service's name isn't one here
+    out["port"] = str(int(port)) if re.match(r"^\+?\d{1,5}$", port) and int(port) < 65536 else ""
+    out["far"] = "loopback" if bind is None or _LOOPBACK_NAME.match(bind) else \
+        "every address" if bind in ("", "*", "0.0.0.0", "::") else "an address"
+    return out
 
 
-def _forwards(argv, domains=()):
-    """An ssh client's remote (-R) and dynamic (-D) forwards and tunnel
-    devices (-w): (kind, port, inside) each, the port as given (no host);
-    -o RemoteForward/DynamicForward too. As ssh reads them: options before
-    and after the destination, up to its command. ``domains``: the names
-    that are the cluster's own (from the collector): inside is one of them
-    or a private address, with no -J, -W, -F or -o HostName/ProxyJump/
-    ProxyCommand (a hint for the reader: it lowers nothing by itself)."""
-    out = []
+def _ssh(argv):
+    """An ssh client's command line as ssh reads it, options before and after
+    the destination up to its command: (forwards, flags). Forwards: -R, -D
+    and -w (tunnel devices), -o RemoteForward/DynamicForward too, each a
+    dict (kind, port, far, to, proxied). Flags: 'proxied' (-J, -W, -F,
+    -o HostName/ProxyJump/ProxyCommand/ProxyUseFdpass, ssh://: it may not go
+    where it says) and 'relay' (-W, -J, a proxy, a local forward from a
+    socket: it may carry another ssh elsewhere)."""
+    out, flags = [], set()
     dest = None
-    proxied = False
     i, n = 1, len(argv)
     while i < n:
         a = argv[i]
@@ -172,17 +288,33 @@ def _forwards(argv, domains=()):
                         val = argv[i + 1] if i + 1 < n else ""
                         i += 1
                     val = " ".join(val.split())[:ARG]          # as ssh splits it; padding can't hide one
-                    if c in "RDw":
-                        out.append((c, _port(val, first=(c != "D"))))
-                    elif c in "JWF":
-                        proxied = True
+                    if c in "RD":
+                        out.append(dict(_shape(c, val), kind=c))
+                    elif c == "w":
+                        out.append({"kind": "w", "port": "".join(x for x in val.split(":")[0] if x.isdigit()),
+                                    "far": "", "to": ""})
+                    elif c in "JW":
+                        flags.update(("proxied", "relay"))
+                    elif c == "F":
+                        flags.add("proxied")
+                    elif c == "L":
+                        g = _fields(val)
+                        if g is None or (g and g[0][1]):
+                            flags.add("relay")
                     elif c == "o":
-                        m = re.match(r"(?i)(RemoteForward|DynamicForward)(?: ?= ?| )(\S+)", val)
-                        if m:
+                        m = re.match(r"(?i)(RemoteForward|DynamicForward|LocalForward)(?: ?= ?| )(\S*) ?(\S*)", val)
+                        if m and m.group(1).lower() == "localforward":
+                            g = _fields(m.group(2))
+                            if g is None or (g and g[0][1]):
+                                flags.add("relay")
+                        elif m:
                             k = "R" if m.group(1).lower().startswith("remote") else "D"
-                            out.append((k, _port(m.group(2), first=True)))
-                        elif re.match(r"(?i)(HostName|ProxyJump|ProxyCommand)\b", val):
-                            proxied = True
+                            spec = m.group(2) + (":" + m.group(3) if k == "R" and m.group(3) else "")
+                            out.append(dict(_shape(k, spec, dynamic=not m.group(3)), kind=k))
+                        elif re.match(r"(?i)(ProxyJump|ProxyCommand|ProxyUseFdpass)\b", val):
+                            flags.update(("proxied", "relay"))
+                        elif re.match(r"(?i)HostName\b", val):
+                            flags.add("proxied")
                     break
                 j += 1
             i += 1
@@ -192,23 +324,16 @@ def _forwards(argv, domains=()):
             i += 1
             continue
         break                                         # its command: ssh's options end
-    host = (dest or "").split("@")[-1].lower()
-    if host.startswith("ssh://"):
-        host, proxied = host[6:], True
-    # inside: only a name the collector gave as the cluster's own, or a private
-    # address written as one, and only with no proxy or host name of its own
-    where = (not proxied) and bool(host) and (host in domains or _private(host))
-    return [(k, p, where) for k, p in out]
+    if (dest or "").lower().startswith("ssh://"):
+        flags.add("proxied")
+    for f in out:
+        f["proxied"] = "proxied" in flags
+    return out, flags
 
 
-def _port(spec, first=True):
-    """The port of a forward spec ([bind:]port[:host:hostport], or a socket
-    path): the listening one, without any host."""
-    parts = [p for p in re.split(r"[: ]", spec.strip("[]")) if p]
-    nums = [p for p in parts if p.isdigit()]
-    if not nums:
-        return "socket" if "/" in spec else ""
-    return nums[0] if first else nums[-1]
+def _forwards(argv):
+    """An ssh client's -R, -D and -w forwards (see _ssh)."""
+    return _ssh(argv)[0]
 
 
 def _candidates(argv, comm):
@@ -234,10 +359,10 @@ def _candidates(argv, comm):
     return [(n, sc) for n, sc in names if n]
 
 
-def _classify(argv, comm, domains):
-    """(kind, program, detail, inside, aka) for each thing a process is;
-    aka: every name it goes by (an ignore list leaves it out only if it
-    names them all)."""
+def _classify(argv, comm):
+    """(kind, program, detail, shape, aka) for each thing a process is;
+    shape: an ssh forward's (see _ssh), else None; aka: every name it goes
+    by (an ignore list leaves it out only if it names them all)."""
     names = _candidates(argv, comm)
     progs = {n for n, sc in names if not sc}                # argv[0] and comm
     args = [x[:ARG] for x in argv[1:]]
@@ -255,13 +380,13 @@ def _classify(argv, comm, domains):
             break
     ssh = next((p for p in ("ssh", "autossh") if p in progs), None)
     if ssh:
-        for kind, port, inside in _forwards([argv[0]] + args, domains):
-            if kind == "R":
-                out.append(("ssh_reverse", ssh, port, inside))
-            elif kind == "D":
-                out.append(("ssh_socks", ssh, port, inside))
+        for f in _forwards([argv[0]] + args):
+            if f["kind"] == "R":
+                out.append(("ssh_reverse", ssh, f["port"], f))
+            elif f["kind"] == "D":
+                out.append(("ssh_socks", ssh, f["port"], f))
             else:
-                out.append(("tunnel", ssh + " -w", "", inside))
+                out.append(("tunnel", ssh + " -w", "", None))
     code = next((p for p in progs if re.match(r"^code(-insiders)?(-tunnel)?$", p)), None)
     if code and (code.endswith("-tunnel") or "tunnel" in args):
         out.append(("code_tunnel", code, "", None))
@@ -276,7 +401,7 @@ def _classify(argv, comm, domains):
         out.append(("relay", r, "", None))
     elif "socat" in progs and any(re.search(r"(?i)-listen|^listen", x) for x in args):
         out.append(("relay", "socat", "", None))
-    return [(k, p, d, i, aka) for k, p, d, i in out]
+    return [(k, p, d, s, aka) for k, p, d, s in out]
 
 
 def _read(path, limit=MAX_ARGV):
@@ -284,11 +409,22 @@ def _read(path, limit=MAX_ARGV):
         return f.read(limit)
 
 
-def processes(proc, min_uid, domains=(), ignore_users=frozenset(), ignore_programs=frozenset()):
-    """(findings, visible, of others, of others with a command line to read)."""
+def _merge(a, b):
+    """Two forwards under one finding: the worse of each."""
+    if not a or not b:
+        return a or b
+    return {"far": max(a["far"], b["far"], key=FAR.index), "to": max(a["to"], b["to"], key=TO.index),
+            "proxied": bool(a["proxied"] or b["proxied"])}
+
+
+def processes(proc, min_uid, ignore_users=frozenset(), ignore_programs=frozenset(), ssh=None):
+    """(findings, visible, of others, of others with a command line to read).
+    ``ssh``, a dict, gets each account's ssh clients: {uid: {"pids": [...],
+    "child": an ssh of it has a child process, "relay": one relays}}."""
     found = {}
     seen = others = others_cmd = 0
     me = os.getuid()
+    parents = {}                                    # pid -> its children's names
     try:
         names = os.listdir(proc)
     except OSError:
@@ -302,6 +438,14 @@ def processes(proc, min_uid, domains=(), ignore_users=frozenset(), ignore_progra
         except OSError:
             continue
         seen += 1
+        start = ""
+        try:
+            stat = _read(os.path.join(path, "stat"), 4096).decode("utf-8", "replace")
+            after = stat.rsplit(")", 1)[1].split()
+            parents.setdefault(after[1], []).append(safe(stat[stat.find("(") + 1:stat.rfind(")")]))
+            start = after[19] if len(after) > 19 else ""
+        except (OSError, IndexError, ValueError):
+            pass
         try:
             argv = [x.decode("utf-8", "replace") for x in _read(os.path.join(path, "cmdline")).split(b"\0") if x]
         except OSError:
@@ -318,29 +462,60 @@ def processes(proc, min_uid, domains=(), ignore_users=frozenset(), ignore_progra
             comm = ""
         if ignore_users and _name(uid) in ignore_users:
             continue
-        for kind, program, detail, inside, aka in _classify(argv, comm, domains):
+        if ssh is not None and "ssh" in (os.path.basename(argv[0]).lower(), comm.lower()):
+            acc = ssh.setdefault(uid, {"pids": [], "child": False, "relay": False})
+            acc["pids"].append(d)
+            acc["relay"] = acc["relay"] or "relay" in _ssh([argv[0]] + [x[:ARG] for x in argv[1:]])[1]
+        real = None
+        for kind, program, detail, shape, aka in _classify(argv, comm):
             if ignore_programs and aka and set(aka) <= ignore_programs:
                 continue
-            key = (uid, kind, safe(program), str(detail), inside)
-            n, names = found.get(key, (0, set()))
-            found[key] = (n + 1, names | set(aka))
-    rows, per, dropped_out = [], {}, {}
-    # within an account and kind: what isn't known to be inside first
-    for k, (n, aka) in sorted(found.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][4] is True, str(kv[0]))):
+            if shape and real is None:
+                # ssh by its kernel name (a user can set that too); as root, by the program file itself
+                real = comm == "ssh"
+                if real and me == 0:
+                    try:
+                        real = os.readlink(os.path.join(path, "exe")) in SYSTEM_SSH
+                    except OSError:
+                        real = False
+            key = (uid, kind, safe(program), str(detail))
+            n, names_, sh, ids = found.get(key, (0, set(), None, []))
+            found[key] = (n + 1, names_ | set(aka), _merge(sh, shape), ids + [(d + ":" + start, bool(real))])
+    if ssh is not None:
+        for acc in ssh.values():
+            kids = sorted({c for p in acc["pids"] for c in parents.get(p, [])})
+            acc["child"] = bool(kids)
+            acc["children"] = kids[:3]
+    boot = _boot_id(proc)
+    rows, per = [], {}
+    for k, (n, aka, sh, ids) in sorted(found.items(), key=lambda kv: str(kv[0])):
         group = (k[0], k[1])
         per[group] = per.get(group, 0) + 1
         if per[group] > MAX_PER:
-            if k[4] is not True:
-                dropped_out[group] = True
             continue
-        rows.append({"uid": k[0], "user": _name(k[0]), "kind": k[1], "program": k[2], "detail": k[3],
-                     "inside": k[4], "aka": sorted(aka), "processes": n})
+        row = {"uid": k[0], "user": _name(k[0]), "kind": k[1], "program": k[2], "detail": k[3],
+               "aka": sorted(aka), "processes": n}
+        if sh:
+            row.update(far=sh["far"], to=sh["to"], proxied=sh["proxied"])
+            # which processes these are (the same ones, while they live: an ssh keeps its connection),
+            # only when each is ssh (exec -a changes argv[0] alone)
+            if all(ok for _i, ok in ids):
+                row["procs"] = hashlib.sha1((boot + "|" + ",".join(sorted(i for i, _c in ids))).encode()
+                                            ).hexdigest()[:16]
+        rows.append(row)
     for (uid, kind), total in per.items():
         if total > MAX_PER:
             rows.append({"uid": uid, "user": _name(uid), "kind": kind, "program": f"+{total - MAX_PER} more",
-                         "detail": "", "inside": None if dropped_out.get((uid, kind)) else True, "aka": [],
-                         "processes": 0})
+                         "detail": "", "aka": [], "processes": 0})
     return rows, seen, others, others_cmd
+
+
+def _boot_id(proc):
+    try:
+        with open(os.path.join(proc, "sys", "kernel", "random", "boot_id")) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def _loopback(hexaddr):
@@ -441,23 +616,118 @@ def listeners(proc, min_uid, ignore_users=frozenset()):
     return rows
 
 
-def _ip(hexaddr):
-    """An address as the kernel writes it in /proc/net/tcp(6), as text."""
+# -- where an account's sockets go ------------------------------------------------------
+
+def _addr(hexaddr):
+    """An address as the kernel writes it in /proc/net (host byte order per
+    32-bit word); an IPv4-mapped IPv6 one as IPv4."""
     h = hexaddr.upper()
     if len(h) == 8:
-        return ".".join(str(int(h[i:i + 2], 16)) for i in (6, 4, 2, 0))
-    words = [h[i:i + 8] for i in range(0, 32, 8)]
-    b = "".join(w[6:8] + w[4:6] + w[2:4] + w[0:2] for w in words)
-    if b.startswith("00000000000000000000FFFF"):
-        v4 = b[24:]
-        return ".".join(str(int(v4[i:i + 2], 16)) for i in (0, 2, 4, 6))
-    return ":".join(b[i:i + 4].lstrip("0") or "0" for i in range(0, 32, 4))
+        return ipaddress.IPv4Address(bytes.fromhex(h)[::-1])
+    a = ipaddress.IPv6Address(b"".join(bytes.fromhex(h[i:i + 8])[::-1] for i in range(0, 32, 8)))
+    return a.ipv4_mapped or a
 
 
-def public_peers(proc, min_uid):
-    """The accounts with an established TCP connection to a public address."""
-    out = set()
-    for name in ("tcp", "tcp6"):
+def _ip(hexaddr):
+    """An address as the kernel writes it in /proc/net/tcp(6), as text."""
+    return str(_addr(hexaddr))
+
+
+def _in(a, nets):
+    return any(a.version == n.version and a in n for n in nets)
+
+
+def _within(net, nets):
+    return any(net.version == n.version and n.network_address <= net.network_address
+               and net.broadcast_address <= n.broadcast_address for n in nets)
+
+
+def own_addresses(proc):
+    """This host's own addresses (/proc/net/fib_trie, /proc/net/if_inet6)."""
+    out, last = set(), None
+    try:
+        with open(os.path.join(proc, "net", "fib_trie")) as f:
+            for line in f:
+                s = line.strip()
+                if s.startswith("|--"):
+                    last = s[3:].strip()
+                elif last and s.startswith("/32 host LOCAL"):
+                    try:
+                        out.add(ipaddress.IPv4Address(last))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    try:
+        with open(os.path.join(proc, "net", "if_inet6")) as f:
+            for line in f:
+                try:
+                    out.add(ipaddress.IPv6Address(bytes.fromhex(line.split()[0])))
+                except (ValueError, IndexError):
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def cluster_networks(proc, extra=()):
+    """The cluster's own networks as this host sees them: private ones it
+    reaches directly (no gateway), on an interface with no default route
+    (that one is a way out, shared with whatever else is there); and
+    ``extra``, the site's own (cluster_networks: where a node's way out is
+    the cluster network, or a spare default route is on it)."""
+    direct, default = [], set()
+    try:
+        with open(os.path.join(proc, "net", "route")) as f:
+            for line in f.read().splitlines()[1:]:
+                p = line.split()
+                if len(p) < 8:
+                    continue
+                try:
+                    flags = int(p[3], 16)
+                    dest = int.from_bytes(bytes.fromhex(p[1])[::-1], "big")
+                    mask = bin(int.from_bytes(bytes.fromhex(p[7])[::-1], "big")).count("1")
+                except ValueError:
+                    continue
+                if mask == 0:
+                    default.add((4, p[0]))
+                elif p[2] == "00000000" and flags & 1 and not flags & 2:
+                    direct.append((p[0], ipaddress.ip_network((dest, mask), strict=False)))
+    except OSError:
+        pass
+    try:
+        with open(os.path.join(proc, "net", "ipv6_route")) as f:
+            for line in f:
+                p = line.split()
+                if len(p) < 10:
+                    continue
+                try:
+                    plen, flags = int(p[1], 16), int(p[8], 16)
+                    net = ipaddress.IPv6Network((int(p[0], 16), plen), strict=False)
+                except ValueError:
+                    continue
+                if plen == 0 and p[9] != "lo" and not flags & 0x200:       # not a reject route
+                    default.add((6, p[9]))
+                elif p[4] == "0" * 32 and flags & 1 and not flags & 0x80000002 and p[9] != "lo":   # nor local
+                    direct.append((p[9], net))
+    except OSError:
+        pass
+    out = []
+    for iface, n in direct:
+        if (n.version, iface) in default or not _within(n, PRIVATE) or n in out:
+            continue
+        out.append(n)
+    return out + [n for n in extra if n not in out]
+
+
+SOCKET_FILES = (("tcp", "tcp"), ("tcp6", "tcp"), ("udp", "udp"), ("udp6", "udp"), ("raw", "raw"),
+                ("raw6", "raw"), ("icmp", "raw"), ("icmp6", "raw"))
+
+
+def sockets(proc):
+    """Every socket /proc/net shows: (proto, uid, state, local address,
+    local port, remote address, remote port)."""
+    for name, proto in SOCKET_FILES:
         try:
             with open(os.path.join(proc, "net", name)) as f:
                 rows = f.read().splitlines()[1:]
@@ -465,15 +735,88 @@ def public_peers(proc, min_uid):
             continue
         for row in rows:
             p = row.split()
-            if len(p) < 8 or p[3] != "01":
+            if len(p) < 8:
                 continue
             try:
-                uid = int(p[7])
-                ip = _ip(p[2].split(":")[0])
+                la, lp = p[1].split(":")
+                ra, rp = p[2].split(":")
+                yield proto, int(p[7]), p[3], _addr(la), int(lp, 16), _addr(ra), int(rp, 16)
             except ValueError:
                 continue
-            if uid >= min_uid and not _private(ip):
-                out.add(uid)
+
+
+def reach(proc, uids, trusted=(), campus=(), system=lambda uid: False, extra=()):
+    """Where each of ``uids``' sockets on this host go: {uid: {"reach":
+    inside (this host, the cluster, a listed server), campus or outside;
+    "why": what keeps a forward of it from being verified, by kind (counts);
+    "servers": the listed servers (indexes) it reaches}}. ``trusted``:
+    (network, port) or None each (port 0: below 1024); ``system``: an
+    account whose services anyone may use (not a person's); ``extra``: the
+    site's own cluster networks, besides those found (cluster_networks)."""
+    rows = list(sockets(proc))
+    own, cluster = own_addresses(proc), cluster_networks(proc, extra)
+    bound = {}
+    for proto, uid, st, la, lp, ra, rp in rows:
+        if (proto == "tcp" and st == "0A") or (proto == "udp" and rp == 0 and ra.is_unspecified):
+            bound.setdefault((proto, lp), []).append((la, uid))
+
+    def owners(proto, a, port):
+        return [u for la, u in bound.get((proto, port), []) if la == a or la.is_unspecified]
+
+    def where(a):
+        if a.is_loopback or a in own:
+            return "host", []
+        hit = [i for i, t in enumerate(trusted) if t and a.version == t[0].version and a in t[0]]
+        if hit:
+            return "server", hit
+        if _in(a, cluster):
+            return "cluster", []
+        if _in(a, PRIVATE) or _in(a, LINK_LOCAL) or _in(a, campus):
+            return "campus", []
+        return "outside", []
+
+    rank = ("", "inside", "campus", "outside")
+    out = {u: {"reach": "", "why": {}, "servers": set(), "carriers": 0} for u in uids}
+    for proto, uid, st, la, lp, ra, rp in rows:
+        acc = out.get(uid)
+        if acc is None:
+            continue
+        why = acc["why"]
+        if proto == "raw":
+            why["raw"] = why.get("raw", 0) + 1
+            continue
+        if proto == "tcp" and st == "0A":
+            continue
+        if ra.is_unspecified:
+            if proto == "udp" and not la.is_loopback:
+                why["udp"] = why.get("udp", 0) + 1     # bound, not connected: it may send anywhere
+            continue
+        w, idx = where(ra)
+        label = "inside" if w in ("host", "server", "cluster") else w
+        acc["reach"] = max(acc["reach"], label, key=rank.index)
+        acc["servers"].update(idx)
+        inbound = proto == "tcp" and uid in owners("tcp", la, lp)
+        bad = None
+        if w in ("campus", "outside"):
+            bad = w
+        elif inbound:
+            pass                                       # a connection to its own port, from inside
+        elif w == "host":
+            o = owners(proto, ra, rp)
+            if not o or not all(system(u) for u in o):
+                bad = "host_port"                      # a person's port here: maybe a relay
+        elif w == "server":
+            if not any(trusted[i][1] == rp or (trusted[i][1] == 0 and rp < 1024) for i in idx):
+                bad = "server_port"
+        elif rp >= 1024:
+            bad = "cluster_port"                       # a person's port on a node: maybe a relay
+        if bad:
+            why[bad] = why.get(bad, 0) + 1
+        elif proto == "tcp" and st == "01" and not inbound and w in ("server", "cluster"):
+            acc["carriers"] += 1
+    for acc in out.values():
+        if not acc["carriers"]:
+            acc["why"]["none"] = 1                      # nothing a forward could be going through
     return out
 
 
@@ -489,15 +832,56 @@ def hidepid(proc):
     return False
 
 
+FORWARDS = ("ssh_reverse", "ssh_socks")
+
+
+def check(found, accounts, ssh):
+    """Each ssh forward's reach and why it isn't verified (nothing: it is):
+    its account's (``accounts``, from reach(); ``ssh``, from processes()),
+    and, for -R, its own shape."""
+    for f in found:
+        if f["kind"] not in FORWARDS:
+            continue
+        acc = accounts.get(f["uid"]) or {"reach": "", "why": {"none": 1}, "servers": set(), "carriers": 0}
+        s = ssh.get(f["uid"]) or {}
+        why = dict(acc["why"])
+        if 0 < acc.get("carriers", 0) < len(s.get("pids") or []):
+            why["carrier"] = 1          # an ssh with no connection of its own: between attempts, or a mux client
+        for k in ("child", "relay"):
+            if s.get(k):
+                why[k] = 1
+        if s.get("children"):
+            f["children"] = s["children"]
+        if f["kind"] == "ssh_reverse":
+            if not f["detail"].isdigit() or "far" not in f:
+                why["unchecked"] = 1
+            else:
+                if f["far"] != "loopback":
+                    why["far"] = 1
+                if f["to"] != "this host":
+                    why["to"] = 1
+                if f["proxied"]:
+                    why["proxied"] = 1
+        else:
+            why["unchecked"] = 1                        # a SOCKS proxy: never
+        f["reach"] = acc["reach"]
+        f["why"] = why
+        f["servers"] = sorted(acc["servers"])
+        f["verified"] = not why
+
+
 def main():
     a = _args()
-    found, seen, others, others_cmd = processes(a["proc"], a["min_uid"], a["inside"], a["ignore_users"],
-                                                a["ignore_programs"])
-    # an ssh forward is inside only if its account reaches nothing public from here
-    out_there = public_peers(a["proc"], a["min_uid"])
-    for f in found:
-        if f.get("inside") and f.get("uid") in out_there:
-            f["inside"] = False
+    ssh = {}
+    found, seen, others, others_cmd = processes(a["proc"], a["min_uid"], a["ignore_users"], a["ignore_programs"],
+                                                ssh=ssh)
+    uids = {f["uid"] for f in found if f["kind"] in FORWARDS}
+
+    def system(uid):
+        return uid < a["min_uid"] or _name(uid) in a["ignore_users"]
+
+    accounts = reach(a["proc"], uids, a["trusted"], a["campus"], system, a["cluster"]) if uids else {}
+    check(found, accounts, ssh)
     out = {
         "host": socket.gethostname().split(".")[0],
         "uid": os.getuid(),
@@ -506,6 +890,8 @@ def main():
         "others": others,
         "others_readable": others_cmd,
         "programs_of_listeners": os.getuid() == 0,
+        "addresses": sorted(str(x) for x in own_addresses(a["proc"]) if not (x.is_loopback or x.is_link_local)),
+        "cluster": sorted(str(n) for n in cluster_networks(a["proc"], a["cluster"])),
         "findings": found,
         "listeners": listeners(a["proc"], a["min_uid"], a["ignore_users"]),
     }

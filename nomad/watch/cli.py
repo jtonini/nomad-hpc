@@ -57,6 +57,37 @@ def _short(ts) -> str:
     return str(ts or "?").replace("T", " ")[5:16]
 
 
+def _masked_note(m, note) -> str:
+    """A finding's note as printed; with --mask, the listed servers it names
+    (the only names a note has) as stand-ins."""
+    if not note:
+        return ""
+    head, sep, rest = str(note).partition("verified: to ")
+    if m.on and sep:
+        names, semi, tail = rest.partition(";")
+        if names != "the cluster":
+            rest = ", ".join(m("host", n.strip()) for n in names.split(",")) + semi + tail
+    return _c(head + sep + rest)
+
+
+def _extra(f) -> str:
+    """What follows a finding's kind: its program, port, and where it goes."""
+    extra = f" {f['program']}" if f.get("program") else ""
+    if f.get("detail"):
+        extra += f" port {f['detail']}" if str(f["detail"]).isdigit() else f" {f['detail']}"
+    if f.get("verified"):
+        extra += ", verified"
+    elif f.get("reach") == "outside":
+        extra += ", connects outside"
+    elif f.get("reach") == "campus":
+        extra += ", on campus"
+    elif f.get("reach") == "inside":
+        extra += ", stays inside"
+    elif f.get("reach") == "ephemeral":
+        extra += " (an ephemeral port)"
+    return _c(extra)
+
+
 @click.group("watch")
 def watch_group():
     """What the policy watch found: tunnels, miners, relays, exposed services.
@@ -75,27 +106,29 @@ def watch_group():
 @click.option("--days", default=7, show_default=True, type=click.IntRange(1, 3650),
               help="Findings seen in the last DAYS days.")
 @click.option("--all", "everything", is_flag=True, help="Also what is only listed (info): listeners on "
-              "ephemeral ports on compute nodes.")
+              "ephemeral ports on compute nodes. Verified forwards are always shown.")
 @click.option("--mask", is_flag=True, help="Stand-ins for people and hosts (for sharing outside ARC).")
 @click.option("--json", "as_json", is_flag=True, help="Print JSON.")
 @click.option("--db", type=click.Path(exists=True, dir_okay=False), help="Database (default: the site's).")
 @click.pass_context
 def list_cmd(ctx, days, everything, mask, as_json, db):
-    """Findings, the most serious and the latest first."""
+    """Findings, the most serious and the latest first; a verified ssh
+    forward (to a listed server) is shown too, as info."""
     from nomad.collectors.policy_watch import LABELS
     conn = _connect(_db(ctx, db))
     cols = {r[1] for r in conn.execute("PRAGMA table_info(policy_findings)")}
     site = "source_site" if "source_site" in cols else "_sync_site" if "_sync_site" in cols else None
     since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    later = ", ".join(c if c in cols else "NULL" for c in ("verified", "note"))
     rows = conn.execute(
         "SELECT host, role, username, uid, kind, program, detail, reach, first_seen, last_seen, sweeps, severity, "
-        + (site or "NULL") + " FROM policy_findings WHERE last_seen >= ?", (since,)).fetchall()
+        + (site or "NULL") + ", " + later + " FROM policy_findings WHERE last_seen >= ?", (since,)).fetchall()
     # seen in its site's last sweep: within a minute of the latest it has (info included)
     latest: dict = {}
     for r in rows:
         latest[r[12]] = max(latest.get(r[12], ""), str(r[9]))
     if not everything:
-        rows = [r for r in rows if r[11] != "info"]
+        rows = [r for r in rows if r[11] != "info" or r[13] == 1]
     rows.sort(key=lambda r: (ORDER.get(r[11], 3), -(datetime.fromisoformat(str(r[9])[:19]).timestamp())))
     m = _Masker(mask)
     out = []
@@ -108,7 +141,8 @@ def list_cmd(ctx, days, everything, mask, as_json, db):
         out.append({"site": m("site", r[12]) if site else None, "host": m("host", r[0]), "role": r[1],
                     "user": m("user", r[2] or f"uid {r[3]}"), "kind": r[4], "what": LABELS.get(r[4], r[4]),
                     "program": _c(r[5]), "detail": _c(r[6]), "reach": r[7] or "", "first_seen": r[8],
-                    "last_seen": r[9], "sweeps": r[10], "severity": r[11], "now": now})
+                    "last_seen": r[9], "sweeps": r[10], "severity": r[11], "now": now,
+                    "verified": None if r[13] is None else bool(r[13]), "note": _masked_note(m, r[14])})
     if as_json:
         click.echo(json.dumps(out, indent=2))
         return
@@ -118,20 +152,13 @@ def list_cmd(ctx, days, everything, mask, as_json, db):
         return
     click.echo(f"{len(out)} findings in the last {days} days (* seen in the last sweep):\n")
     for f in out:
-        extra = f" {f['program']}" if f["program"] else ""
-        if f["detail"]:
-            extra += f" port {f['detail']}" if f["detail"].isdigit() else f" {f['detail']}"
-        if f["reach"] == "outside":
-            extra += ", to a host outside"
-        elif f["reach"] in ("cluster name", "inside"):
-            extra += ", to one of the cluster's names (not verified)"
-        elif f["reach"] == "ephemeral":
-            extra += " (an ephemeral port)"
         where = (f["site"] + ":" if f["site"] else "") + f["host"]
         click.echo(f"{'*' if f['now'] else ' '} {f['severity']:<8} {where:<16} {f['user']:<12} "
-                   f"{f['what']}{extra}")
+                   f"{f['what']}{_extra(f)}")
         click.echo(f"{'':<11}first {_short(f['first_seen'])}, last {_short(f['last_seen'])}, "
                    f"in {f['sweeps']} sweep{'s' if f['sweeps'] != 1 else ''} ({f['role']})")
+        if f["note"]:
+            click.echo(f"{'':<11}{f['note']}")
 
 
 @watch_group.command("status")
@@ -180,14 +207,21 @@ def status_cmd(ctx, mask, db):
 @click.pass_context
 def probe_cmd(ctx, host, mask, as_json):
     """Look now, here or on HOST (over ssh, as the collector does). Stores nothing."""
+    import logging
     from nomad.collectors.base import find_tool
     from nomad.collectors.policy_watch import LABELS, PolicyWatchCollector, findings_of
     from nomad.collectors.node_disks import HOST_RE
     conf = ((ctx.obj or {}).get("config", {}) or {}).get("collectors", {}).get("policy_watch", {}) \
         if ctx and ctx.obj else {}
-    c = PolicyWatchCollector(dict(conf or {}), ":memory:")
+    base = logging.getLogger("nomad.collectors.base")
+    was = base.level
+    base.setLevel(logging.WARNING)                     # not "Initialized policy_watch collector"
+    try:
+        c = PolicyWatchCollector(dict(conf or {}), ":memory:")
+    finally:
+        base.setLevel(was)
     if host:
-        if not HOST_RE.match(host):
+        if not HOST_RE.fullmatch(host):
             raise click.BadParameter("not a host name", param_hint="HOST")
         ssh = find_tool("ssh")
         if not ssh:
@@ -205,26 +239,32 @@ def probe_cmd(ctx, host, mask, as_json):
             for f in (d.get("findings") or []) + (d.get("listeners") or []):
                 f["user"], f["uid"] = m("user", f.get("user") or f.get("uid")), None
             d["host"] = m("host", d.get("host"))
+            d["addresses"], d["cluster"] = [], []
         click.echo(json.dumps(d, indent=2))
         return
     found = findings_of(d, d.get("host") or host or "here", role, listeners_on_nodes=True,
                         ignore_users=c.ignore_users, ignore_programs=c.ignore_programs,
-                        ignore_ports=c.ignore_ports)
+                        ignore_ports=c.ignore_ports, servers=c.servers())
     m = _Masker(mask)
-    click.echo(f"{_c(d.get('host'))}: {d.get('processes')} processes"
+    click.echo(f"{m('host', d.get('host'))}: {d.get('processes')} processes"
                + (" (other accounts' hidden: hidepid)" if d.get("hidepid") else "") + ".")
+    from nomad.collectors.policy_watch import describe_trusted
+    trusted = describe_trusted(c.trusted())
+    if mask and trusted:
+        click.echo(f"  trusted: {len(trusted)} hosts or networks (nomad config check names them)")
+    for line in [] if mask else trusted:
+        click.echo(f"  trusted: {_c(line)}")
+    if mask and c.trust_notes:
+        click.echo(f"  {len(c.trust_notes)} notes on the settings (nomad config check says them)")
+    for n in [] if mask else c.trust_notes:
+        click.echo(f"  note: {_c(n)}")
     if not found:
         click.echo("Nothing found.")
     for f in found:
-        extra = f" {f['program']}" if f["program"] else ""
-        if f["detail"]:
-            extra += f" port {f['detail']}" if f["detail"].isdigit() else f" {f['detail']}"
-        if f.get("reach") == "outside":
-            extra += ", to a host outside"
-        elif f.get("reach") == "cluster name":
-            extra += ", to one of the cluster's names (not verified)"
         who = m("user", f["username"] or "uid " + str(f["uid"]))
-        click.echo(f"  {f['severity']:<8} {who:<12} {LABELS.get(f['kind'], f['kind'])}{_c(extra)}")
+        click.echo(f"  {f['severity']:<8} {who:<12} {LABELS.get(f['kind'], f['kind'])}{_extra(f)}")
+        if f.get("note"):
+            click.echo(f"  {'':<8} {'':<12} {_masked_note(m, f['note'])}")
     loop = [s for s in d.get("listeners") or [] if s.get("scope") == "loopback"]
     if loop:
         click.echo(f"  ({len(loop)} listening on loopback only: not counted)")

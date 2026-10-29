@@ -133,6 +133,20 @@ check_services = ["slurmd", "munge"]
 # nodes = "slurm"
 # ignore_programs = []
 # owners_in_alerts = false
+# An ssh -R to a server listed here (1.19.1) is verified -- listed, not
+# alerted -- when what the kernel shows agrees: its account's connections
+# go only there (ports below 1024, or the one given), into the cluster
+# below port 1024, or to a system service on that host; no proxy or jump;
+# loopback on the far end. It stays so while the same ssh runs. Names are
+# resolved by the collector, not by anyone's ssh config.
+# trusted_hosts = ["vadur"]               # or "vadur:2222", "172.28.122.224", "10.9.0.0/24"
+# Public ranges that are campus: only a label ("on campus" or "connects
+# outside"); private addresses beyond the cluster are campus already.
+# campus_networks = ["141.166.0.0/16", "192.67.49.0/24"]
+# The cluster's own networks are found on each host (private, reached
+# directly, on an interface with no default route); list one a node
+# routes out through, or with a spare default route on it:
+# cluster_networks = ["10.1.1.0/24"]
 
 # Compute nodes' local disks (1.14): on the head node, df of each path on
 # every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the

@@ -49,7 +49,7 @@ Read by admins (1.19; [details](policy_watch.md)):
 
 | Command | What |
 |---|---|
-| `nomad watch list` | What the policy watch found on login and compute nodes (tunnels, miners, relays, exposed services), the most serious first; `--mask` for sharing |
+| `nomad watch list` | What the policy watch found on login and compute nodes (tunnels, miners, relays, exposed services), the most serious first, and ssh forwards verified to a server in `trusted_hosts`; `--mask` for sharing |
 | `nomad watch status` | The last sweep: each host, whether it answered, what it could see |
 | `nomad watch probe [HOST]` | Look now, here or on a node |
 

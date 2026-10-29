@@ -95,36 +95,37 @@ def test_hidepid_is_told(proc):
     assert probe.hidepid(str(proc))
 
 
-INSIDE = ("login01", "spydur")             # the cluster's own names, as the collector passes them
+def _fw(port, far="loopback", to="this host", kind="R", proxied=False):
+    return {"kind": kind, "port": port, "far": far, "to": to, "proxied": proxied}
 
 
 @pytest.mark.parametrize("argv, want", [
-    (["ssh", "-R", "0:localhost:22", "me@out.example.org"], [("R", "0", False)]),
-    (["ssh", "-R8022:localhost:22", "login01"], [("R", "8022", True)]),          # a cluster name (a hint)
-    (["ssh", "-p", "2200", "-R", "[::]:9000:localhost:22", "10.1.2.3"], [("R", "9000", True)]),
-    (["ssh", "-D", "127.0.0.1:1080", "10.0.0.5"], [("D", "1080", True)]),
-    (["ssh", "me@out.example.org", "-R", "2222:localhost:22"], [("R", "2222", False)]),   # after the host
+    (["ssh", "-R", "0:localhost:22", "me@out.example.org"], [_fw("0")]),
+    (["ssh", "-R8022:localhost:22", "login01"], [_fw("8022")]),
+    (["ssh", "-p", "2200", "-R", "[::]:9000:localhost:22", "10.1.2.3"], [_fw("9000", "every address")]),
+    (["ssh", "-D", "127.0.0.1:1080", "10.0.0.5"], [_fw("1080", kind="D", to="socks")]),
+    (["ssh", "me@out.example.org", "-R", "2222:localhost:22"], [_fw("2222")]),     # after the host
     (["ssh", "h", "uptime", "-R", "9"], []),                                    # the command's, not ssh's
-    (["ssh", "-NoRemoteForward=2222:localhost:22", "h"], [("R", "2222", False)]),
-    (["ssh", "-No", "RemoteForward 2222 localhost:22", "h"], [("R", "2222", False)]),
-    (["ssh", "-fNo", "DynamicForward=1080", "h"], [("D", "1080", False)]),
-    (["ssh", "-o", "RemoteForward\t2223 localhost:22", "h"], [("R", "2223", False)]),
-    (["ssh", "-w", "0:0", "h"], [("w", "0", False)]),
-    (["ssh", "-R", "/tmp/sock:/run/x.sock", "h"], [("R", "socket", False)]),
+    (["ssh", "-NoRemoteForward=2222:localhost:22", "h"], [_fw("", "unknown", "unknown")]),   # ssh refuses it
+    (["ssh", "-No", "RemoteForward 2222 localhost:22", "h"], [_fw("2222")]),
+    (["ssh", "-fNo", "DynamicForward=1080", "h"], [_fw("1080", kind="D", to="socks")]),
+    (["ssh", "-o", "RemoteForward\t2223 localhost:22", "h"], [_fw("2223")]),
+    (["ssh", "-w", "0:0", "h"], [{"kind": "w", "port": "0", "far": "", "to": "", "proxied": False}]),
+    (["ssh", "-R", "/tmp/sock:/run/x.sock", "h"], [_fw("socket", "a socket", "a socket")]),
     (["ssh", "--", "h", "-R", "9"], []),
-    # what a user controls never makes a forward inside
-    (["ssh", "-o", "HostName=evil.example.com", "-R", "9:l:22", "login01"], [("R", "9", False)]),
-    (["ssh", "-J", "me@evil.example.com", "-R", "9:l:22", "login01"], [("R", "9", False)]),
-    (["ssh", "-o", "ProxyCommand=nc evil 22", "-R", "9:l:22", "login01"], [("R", "9", False)]),
-    (["ssh", "-R", "9:l:22", "myvps"], [("R", "9", False)]),                     # an alias of one's own
-    (["ssh", "-R", "9:l:22", "fcc.gov"], [("R", "9", False)]),
-    (["ssh", "-R", "9:l:22", "10.evil.example.com"], [("R", "9", False)]),
-    (["ssh", "-R", "9:l:22", "2606:4700:4700::1111"], [("R", "9", False)]),
-    (["ssh", "-R", "9:l:22", "134744072"], [("R", "9", False)]),
-    (["ssh", "-R", "9:l:22", "ssh://login01"], [("R", "9", False)]),
+    (["ssh", "-R", "2222", "h"], [_fw("2222", to="socks")]),                     # a SOCKS proxy on the far end
+    (["ssh", "-R", "*:2222:localhost:22", "h"], [_fw("2222", "every address")]),
+    (["ssh", "-R", "10.0.0.9:2222:localhost:22", "h"], [_fw("2222", "an address")]),
+    (["ssh", "-R", "2222:node05:22", "h"], [_fw("2222", to="another host")]),
+    # what a user controls: a proxy or a jump, a host name of its own
+    (["ssh", "-o", "HostName=evil.example.com", "-R", "9:localhost:22", "login01"], [_fw("9", proxied=True)]),
+    (["ssh", "-J", "me@evil.example.com", "-R", "9:localhost:22", "login01"], [_fw("9", proxied=True)]),
+    (["ssh", "-o", "ProxyCommand=nc evil 22", "-R", "9:localhost:22", "login01"], [_fw("9", proxied=True)]),
+    (["ssh", "-o", "ProxyUseFdpass=yes", "-R", "9:localhost:22", "login01"], [_fw("9", proxied=True)]),
+    (["ssh", "-R", "9:localhost:22", "ssh://login01"], [_fw("9", proxied=True)]),
 ])
 def test_ssh_forwards(argv, want):
-    assert probe._forwards(argv, INSIDE) == want
+    assert probe._forwards(argv) == want
 
 
 def test_ssh_forwards_as_ssh_itself_reads_them():
@@ -160,7 +161,8 @@ def test_ssh_forwards_as_ssh_itself_reads_them():
         want = ssh_says(args)
         if want is None:
             continue
-        assert sorted((k, p) for k, p, _i in probe._forwards(["ssh", *args]) if k in "RD") == want, args[:4]
+        assert sorted((f["kind"], f["port"]) for f in probe._forwards(["ssh", *args]) if f["kind"] in "RD") == want, \
+            args[:4]
         checked += 1
     assert checked > 20
 
@@ -169,15 +171,14 @@ def test_a_long_option_takes_no_time():
     import time
     t = time.time()
     for n in (16000, 65000, 200000):
-        probe._classify(["ssh", "-o", "RemoteForward" + " " * n, "h"], "ssh", ())
+        probe._classify(["ssh", "-o", "RemoteForward" + " " * n, "h"], "ssh")
     assert time.time() - t < 0.5
 
 
-def test_accounts_reaching_outside_are_never_inside(proc):
-    # 0A00000B -> 11.0.0.10 is public; the account's -R to login01 isn't inside then
-    assert probe.public_peers(str(proc), 1000) == {1500}
+def test_addresses_as_the_kernel_writes_them():
     assert probe._ip("0100007F") == "127.0.0.1" and probe._ip("0A00000B") == "11.0.0.10"
-    assert probe._private("10.2.3.4") and probe._private("fd00:1::5") and not probe._private("fdx.example.com")
+    assert probe._ip("0000000000000000FFFF00000B00000A") == "10.0.0.11"          # IPv4-mapped
+    assert probe._ip("00000000000000000000000001000000") == "::1"
 
 
 @pytest.mark.parametrize("argv, comm, kind, program", [
@@ -205,7 +206,7 @@ def test_accounts_reaching_outside_are_never_inside(proc):
     (["sing-box", "run"], "sing-box", "relay", "sing-box"),
 ])
 def test_names_as_a_process_goes_by_them(argv, comm, kind, program):
-    got = [(k, p) for k, p, _d, _i, _a in probe._classify(argv, comm, ())]
+    got = [(k, p) for k, p, _d, _s, _a in probe._classify(argv, comm)]
     assert got == ([] if kind is None else [(kind, program)]), got
 
 
@@ -274,18 +275,18 @@ def test_an_ignored_name_leaves_out_only_what_goes_by_it_alone():
 
 def test_what_a_user_writes_lowers_nothing():
     a = answer(extra=[{"uid": 1500, "user": "amy", "kind": "ssh_reverse", "program": "ssh", "detail": "8888",
-                       "inside": True, "processes": 1},
+                       "inside": True, "processes": 1},                          # 1.19.0's hint: no pass
                       {"uid": 1500, "user": "amy", "kind": "ssh_reverse", "program": "ssh", "detail": "2222",
-                       "inside": False, "processes": 1}])
+                       "verified": True, "why": {}, "far": "every address", "to": "this host", "proxied": False,
+                       "processes": 1}])                                          # a shape that's never verified
     a["listeners"].append({"uid": 1500, "user": "amy", "port": 45123, "scope": "network", "program": "",
                            "ephemeral": True})
     for host, role in (("spdr12", "node"), ("spydur", "login")):
-        sev = {(f["kind"], f["detail"], f["reach"]): f["severity"]
-               for f in pw.findings_of(a, host, role, listeners_on_nodes=True)}
-        assert sev[("ssh_reverse", "8888", "cluster name")] == "warning"          # a hint, not a pass
-        assert sev[("ssh_reverse", "2222", "outside")] == "warning"
-        assert sev[("ssh_socks", "1080", "")] == "warning"                       # traffic out through another
-        assert sev[("listening", "45123", "ephemeral")] == ("info" if role == "node" else "warning")
+        sev = {(f["kind"], f["detail"]): f["severity"] for f in pw.findings_of(a, host, role, listeners_on_nodes=True)}
+        assert sev[("ssh_reverse", "8888")] == "warning"
+        assert sev[("ssh_reverse", "2222")] == "warning"
+        assert sev[("ssh_socks", "1080")] == "warning"                           # traffic out through another
+        assert sev[("listening", "45123")] == ("info" if role == "node" else "warning")
 
 
 def test_service_accounts_and_this_one_are_left_out():
@@ -312,9 +313,12 @@ def test_listeners_are_capped_per_account(tmp_path):
     assert len(f) == probe.MAX_PER + 1 and f[-1]["program"] == "+35 more" and f[-1]["severity"] == "warning"
 
 
-def test_ipv6_loopback_and_link_local_are_private():
-    assert probe._private(probe._ip("00000000000000000000000001000000"))
-    assert probe._private("fe80::1") and probe._private("169.254.1.2") and not probe._private("2606:4700::1111")
+def test_ipv6_loopback_and_link_local_are_never_outside():
+    import ipaddress
+    assert probe._addr("00000000000000000000000001000000").is_loopback
+    assert probe._in(ipaddress.ip_address("fe80::1"), probe.LINK_LOCAL)
+    assert probe._in(ipaddress.ip_address("169.254.1.2"), probe.LINK_LOCAL)
+    assert not probe._in(ipaddress.ip_address("2606:4700::1111"), probe.PRIVATE + probe.LINK_LOCAL)
 
 
 def test_a_fixed_interpreter_without_site_packages_over_plain_ssh(monkeypatch):
@@ -351,6 +355,21 @@ def test_parse_probe_past_a_banner():
     assert pw.parse_probe("no json here") is None
 
 
+def dispatcher_like(sent):
+    """send_alert as the dispatcher answers within an episode: held back
+    (Held) once a subject has been raised."""
+    from nomad.alerts.dispatcher import Held
+    raised = set()
+
+    def send(*a, **k):
+        sent.append((a, k))
+        if k.get("subject") in raised:
+            return Held()
+        raised.add(k.get("subject"))
+        return {"slack": True}
+    return send
+
+
 @pytest.fixture
 def watch(db_path, monkeypatch):
     c = pw.PolicyWatchCollector({"enabled": True, "nodes": ["spdr12", "spdr13"]}, db_path)
@@ -361,7 +380,7 @@ def watch(db_path, monkeypatch):
     monkeypatch.setattr(pw, "find_tool", lambda name: "/usr/bin/" + name)
     sent = []
     import nomad.alerts as alerts
-    monkeypatch.setattr(alerts, "send_alert", lambda *a, **k: sent.append((a, k)))
+    monkeypatch.setattr(alerts, "send_alert", dispatcher_like(sent))
     return c, sent, db_path
 
 
@@ -502,6 +521,7 @@ def test_the_watch_is_planned_migrated_and_its_sweeps_stay_home(db_path):
     assert "policy_watch" in NAMES
     assert not next(s for s in SPECS if s.name == "policy_watch").default_on        # off by default
     assert any(v == 26 and "policy_watch" in d for v, d, _ in MIGRATIONS)
+    assert any(v == 27 and "policy_findings" in d for v, d, _ in MIGRATIONS)
     assert {"policy_watch_sweeps", "policy_watch_hosts"} <= SKIP_TABLES and "policy_findings" not in SKIP_TABLES
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM policy_findings").fetchone() == (0,)

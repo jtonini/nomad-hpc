@@ -43,6 +43,11 @@ def _policy_watch_tables(conn) -> None:
     conn.executescript(SCHEMA)
 
 
+def _policy_watch_columns(conn) -> None:
+    from nomad.collectors.policy_watch import ensure_schema
+    ensure_schema(conn)
+
+
 MIGRATIONS: list[tuple[int, str, object]] = [
     (1, "Initial schema", Path(__file__).parent.joinpath("schema.sql").read_text()),
     (2, "Add alert_history table", """
@@ -441,6 +446,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (25, "Create storage_use tables", _storage_use_tables),
     # What runs on login and compute nodes that the rules forbid (1.19).
     (26, "Create policy_watch tables", _policy_watch_tables),
+    # An ssh forward's verdict and why, as last seen (1.19.1).
+    (27, "Add policy_findings verified, note, procs and away", _policy_watch_columns),
 ]
 
 

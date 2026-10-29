@@ -21,11 +21,17 @@ accounts' processes: hidepid; then only this account's are seen, and
   chisel, Tailscale, ZeroTier, ...);
 - ssh_reverse, ssh_socks: an ssh client forwarding a port from outside to
   here (-R), or a SOCKS proxy that carries this host's traffic out through
-  another (-D). One to the cluster's own names (this host, ``login_hosts``,
-  ``inside_hosts``; or a private address), with no proxy, jump or host
-  name of its own, from an account reaching nothing public from there,
-  says so, as a hint: a user's own ssh config can map any name anywhere,
-  so it lowers nothing;
+  another (-D). Each says where its account's connections on that host go
+  (inside: this host, the cluster's own networks, listed servers; campus;
+  outside: from what the kernel shows, never from what a user wrote).
+  A reverse forward is verified -- listed, not alerted -- when it opens one
+  port leading to this host, asks for loopback on the far end, has no proxy
+  or jump, and its account's connections there go only to a listed server
+  (``trusted_hosts``, and the cluster's own login hosts) on its port, into
+  the cluster below port 1024 (where only root listens), or to a system
+  account's service on that host; with no ssh of it starting a child (a
+  proxy or jump) or relaying, and no UDP socket open beyond loopback (see
+  watch_probe.py);
 - code_tunnel: `code tunnel` (VS Code's relay through Microsoft);
 - miner: a miner by name, or with a stratum pool on its command line;
 - relay: a proxy or relay (socat listening, 3proxy, v2ray, shadowsocks, ...);
@@ -68,22 +74,30 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     # max_seconds = 180
     # ssh_user = "..."
     # python = ["/usr/bin/python3", "/usr/libexec/platform-python"]
-    # inside_hosts = []            # more of the cluster's own hosts (for ssh -R from a job)
+    # trusted_hosts = []           # e.g. ["vadur"]: servers an ssh -R may go to (ports below 1024,
+    #                              # or "vadur:2222"); names, addresses or networks
+    # campus_networks = []         # e.g. ["141.166.0.0/16"]: public ranges that are campus (a label)
+    # cluster_networks = []        # e.g. ["10.1.1.0/24"]: where a host's way out is the cluster network
     # keep_days = 365
 
 Tables: ``policy_findings`` (one row per finding: host, role, username,
-uid, kind, program, detail, reach (inside or outside, for an ssh forward),
-first_seen, last_seen, sweeps, severity: copied to the hub);
+uid, kind, program, detail, reach (an ssh forward's: inside, campus or
+outside, as last seen), verified, note (why, as last seen), procs (a key of
+the ssh processes a verified forward was verified with: a hash) and away
+(which of a kept one's last four sweeps found its account reaching elsewhere),
+first_seen, last_seen, sweeps, severity (as last seen): copied to the hub);
 ``policy_watch_hosts`` (each host at each sweep, kept 7 days: whether it
 answered, and what the probe could see there) and ``policy_watch_sweeps``
 (when each sweep started): this host's own state, not copied to the hub.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -108,6 +122,21 @@ LABELS = {"tunnel": "a tunnel program", "ssh_reverse": "an ssh reverse forward (
           "ssh_socks": "an ssh SOCKS proxy (-D)", "code_tunnel": "a VS Code tunnel",
           "miner": "a miner", "relay": "a relay or proxy",
           "listening": "a program listening on a port open to the network"}
+REACH = {"inside": "stays inside", "campus": "on campus", "outside": "connects outside"}
+# Why a forward isn't verified, as the probe says it (watch_probe.reach, check), in this order.
+WHY = {"outside": "{n} connection{s} outside", "campus": "{n} connection{s} on campus",
+       "host_port": "{n} connection{s} to a person's port on this host",
+       "cluster_port": "{n} connection{s} into the cluster above port 1023",
+       "server_port": "{n} connection{s} to a listed server on another port",
+       "udp": "an open UDP socket", "raw": "a raw or ICMP socket",
+       "none": "no connection to a listed server or into the cluster",
+       "carrier": "fewer such connections than ssh processes",
+       "child": "an ssh with a child process (a proxy or jump)", "relay": "an ssh that relays (-W, -J, a proxy)",
+       "proxied": "a proxy or jump on its command line", "far": "asks for {far} on the far end",
+       "to": "leads to {to}", "unchecked": "not checked"}
+FAR = ("loopback", "an address", "every address", "a socket", "unknown")
+TO = ("this host", "another host", "a socket", "socks", "unknown")
+ENTRY = re.compile(r"^(?:\[(?P<b>[^\]]+)\]|(?P<h>[^:\s\[\]]+))(?::(?P<port>\d{1,5}))?$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS policy_findings (
@@ -120,6 +149,10 @@ CREATE TABLE IF NOT EXISTS policy_findings (
     program TEXT,
     detail TEXT,
     reach TEXT,
+    verified INTEGER,
+    note TEXT,
+    procs TEXT,
+    away INTEGER,
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     sweeps INTEGER DEFAULT 1,
@@ -149,6 +182,190 @@ CREATE TABLE IF NOT EXISTS policy_watch_sweeps (
 """
 
 
+COLUMNS = {"policy_findings": (("reach", "TEXT"), ("verified", "INTEGER"), ("note", "TEXT"), ("procs", "TEXT"),
+                               ("away", "INTEGER")),
+           "policy_watch_hosts": (("listener_programs", "INTEGER"),)}
+
+
+def ensure_schema(conn) -> None:
+    """The tables, with the columns later releases added (1.19.1: verified, note, procs, away)."""
+    conn.executescript(SCHEMA)
+    for table, cols in COLUMNS.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, typ in cols:
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+
+
+def _resolve(name: str) -> list[str]:
+    try:
+        return sorted({ai[4][0].split("%")[0] for ai in socket.getaddrinfo(name, None, type=socket.SOCK_STREAM)})
+    except (OSError, UnicodeError):
+        return []
+
+
+def trusted_entries(entries, *, here: str = "", login_hosts=(), resolve=None) -> tuple[list, list]:
+    """(label, network, port) for each address of the cluster's own hosts
+    (this one, ``login_hosts``) and of ``trusted_hosts``, resolved here (not
+    by a user's ssh config): a name, an address or a network, with :PORT
+    (an IPv6 one in brackets), else port 0: ports below 1024, which only
+    root opens. And notes on what couldn't be used."""
+    resolve = resolve or _resolve
+    out, notes, seen, loop = [], [], set(), set()
+
+    def add(label, addrs, port):
+        """How many were usable, and how many of those were new."""
+        usable = new = 0
+        for a in addrs:
+            try:
+                net = ipaddress.ip_network(a, strict=False)
+            except ValueError:
+                continue
+            if net.network_address.is_loopback or net.prefixlen == 0:
+                loop.add(label)
+                continue
+            usable += 1
+            if (str(net), port) in seen:
+                continue
+            seen.add((str(net), port))
+            out.append((label, str(net), port))
+            new += 1
+            if net.prefixlen < (16 if net.version == 4 else 48):
+                notes.append(f"trusted host {label[:60]}: a very wide network (/{net.prefixlen})")
+        return usable, new
+
+    def said(label, got):
+        usable, new = got
+        if not usable:
+            notes.append(f"trusted host {label[:60]}: " + ("not used (loopback, or everything)" if label in loop
+                                                           else "not found"))
+        elif not new:
+            notes.append(f"trusted host {label[:60]}: already listed")
+
+    for e in [entries] if isinstance(entries, str) else entries or []:
+        e = e.strip() if isinstance(e, str) else ""
+        try:
+            net = ipaddress.ip_network(e, strict=False)
+            said(e, add(e, [str(net)], 0))
+            continue
+        except ValueError:
+            pass
+        m = ENTRY.fullmatch(e)
+        port = int(m.group("port")) if m and m.group("port") else 0
+        host = (m.group("b") or m.group("h")) if m else ""
+        if not m or (m.group("port") and not 0 < port < 65536):
+            notes.append(f"trusted host {e[:60]!r}: not a name, an address or a network")
+            continue
+        try:
+            addrs, label = [str(ipaddress.ip_network(host, strict=False))], host
+        except ValueError:
+            if not HOST_RE.fullmatch(host):
+                notes.append(f"trusted host {e[:60]!r}: not a name, an address or a network")
+                continue
+            addrs, label = resolve(host), host
+        said(label, add(label, addrs, port))
+    for h in [*login_hosts, here]:
+        if h and HOST_RE.fullmatch(h):
+            add(h, resolve(h), 0)
+    return out, notes
+
+
+def entry_labels(entries, *, here: str = "", login_hosts=()) -> set:
+    """The labels trusted_entries would give, without resolving anything:
+    what the site names now (a note naming one it no longer does is stale)."""
+    out = {h for h in [*login_hosts, here] if h}
+    for e in _list(entries):
+        e = e.strip()
+        try:
+            ipaddress.ip_network(e, strict=False)
+            out.add(e)
+            continue
+        except ValueError:
+            pass
+        m = ENTRY.fullmatch(e)
+        if m:
+            out.add(m.group("b") or m.group("h"))
+    return out
+
+
+KEYS = {"enabled", "interval", "interval_minutes", "nodes", "login_hosts", "min_uid", "listeners_on_nodes",
+        "ignore_users", "watch_self", "ignore_programs", "ignore_ports", "owners_in_alerts", "parallel", "timeout",
+        "max_seconds", "ssh_user", "python", "trusted_hosts", "campus_networks", "cluster_networks", "keep_days",
+        "alerts_enabled", "max_retries", "retry_delay"}
+
+
+def _list(v) -> list:
+    """A setting that takes a list, given one, or one string."""
+    return [v] if isinstance(v, str) else [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+
+
+def networks(values, what: str) -> tuple[list[str], list[str]]:
+    """Networks from a setting (campus_networks, cluster_networks), and notes."""
+    out, notes = [], []
+    for n in _list(values):
+        try:
+            net = ipaddress.ip_network(n.strip(), strict=False)
+        except ValueError:
+            notes.append(f"{what} {n[:60]!r}: not a network")
+            continue
+        if net.prefixlen == 0:
+            notes.append(f"{what} {n[:60]}: everything, not used")
+            continue
+        if net.prefixlen < (16 if net.version == 4 else 48):
+            notes.append(f"{what} {n[:60]}: a very wide network (/{net.prefixlen})")
+        out.append(str(net))
+    return out, notes
+
+
+def describe_trusted(entries) -> list[str]:
+    """Trusted entries as a person reads them: each label, its addresses, its ports."""
+    by: dict = {}
+    for label, net, port in entries:
+        nets, ports = by.setdefault(label, ([], []))
+        shown = net.removesuffix("/32").removesuffix("/128")
+        if shown not in nets:
+            nets.append(shown)
+        if port not in ports:
+            ports.append(port)
+    return [f"{label} = {', '.join(nets)} ("
+            + ", ".join("ports below 1024" if p == 0 else f"port {p}" for p in sorted(ports)) + ")"
+            for label, (nets, ports) in by.items()]
+
+
+def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
+    """What `nomad config check` says of [collectors.policy_watch]: what is
+    wrong (a setting it doesn't know, a list that isn't one, a trusted host
+    not found, a network that isn't one), and what trusted_hosts resolve to
+    here."""
+    problems: list[str] = []
+    if not isinstance(conf, dict):
+        return ["[collectors.policy_watch] is not a table"], []
+    for k in sorted(set(conf) - KEYS):
+        hint = " (1.19.1: trusted_hosts lists the servers an ssh -R may go to)" if k == "inside_hosts" else ""
+        problems.append(f"[collectors.policy_watch] {k}: not a setting{hint}")
+    lists = {}
+    like = {"trusted_hosts": '["vadur"]', "campus_networks": '["141.166.0.0/16"]',
+            "cluster_networks": '["10.1.1.0/24"]', "login_hosts": '["login02"]', "ignore_users": '["slurm"]',
+            "ignore_programs": '["tailscaled"]'}
+    for k, ex in like.items():
+        v = conf.get(k)
+        ok = v is None or isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))
+        if not ok:
+            problems.append(f"[collectors.policy_watch] {k}: a list of strings, like {ex}")
+        lists[k] = _list(v) if ok else []
+    entries, notes = trusted_entries(lists["trusted_hosts"], resolve=resolve)
+    problems += [f"[collectors.policy_watch] {n}" for n in notes]
+    campus, n1 = networks(lists["campus_networks"], "campus network")
+    cluster, n2 = networks(lists["cluster_networks"], "cluster network")
+    problems += [f"[collectors.policy_watch] {n}" for n in n1 + n2]
+    info = [f"trusted: {line}" for line in describe_trusted(entries)]
+    if campus:
+        info.append("campus: " + ", ".join(campus) + " (and private addresses beyond the cluster)")
+    if cluster:
+        info.append("cluster: " + ", ".join(cluster) + " (and the private networks each host reaches directly)")
+    return problems, info
+
+
 def probe_source() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "watch_probe.py"), encoding="utf-8") as f:
@@ -173,17 +390,54 @@ def parse_probe(stdout: str) -> dict | None:
 
 def _clean(v, ok=NAME_OK) -> str:
     v = "" if v is None else str(v)
-    return v if (v == "" or ok.match(v)) else "?"
+    return v if (v == "" or ok.fullmatch(v)) else "?"
+
+
+def forward_note(f: dict, servers=()) -> tuple[bool, str, str, dict]:
+    """An ssh forward's (verified, reach, note, why) from the probe's answer:
+    verified only for a -R the probe found nothing against, of a shape it
+    may be; the note in this module's own words (no command line, no
+    address: the names of listed servers are the site's)."""
+    why = f.get("why") if isinstance(f.get("why"), dict) else {"unchecked": 1}
+    why = {k: (v if isinstance(v, int) and 0 < v < 100000 else 1) for k, v in why.items() if k in WHY}
+    if set(f.get("why") or {}) - set(WHY):
+        why["unchecked"] = 1
+    far = f.get("far") if f.get("far") in FAR else "unknown"
+    to = f.get("to") if f.get("to") in TO else "unknown"
+    reach = f.get("reach") if f.get("reach") in REACH else ""
+    if f.get("kind") == "ssh_socks":
+        return False, reach, f"a SOCKS proxy here, on {far}", {"unchecked": 1}
+    ok = (f.get("kind") == "ssh_reverse" and f.get("verified") is True and not why and far == "loopback"
+          and to == "this host" and f.get("proxied") is False and str(f.get("detail", "")).isdigit())
+    names = []
+    for i in f.get("servers") or []:
+        if isinstance(i, int) and 0 <= i < len(servers) and servers[i] not in names:
+            names.append(servers[i])
+    if ok:
+        to_where = ", ".join(_clean(n, re.compile(r"[\w.:/\[\]-]{1,64}")) for n in names[:3]) or "the cluster"
+        return True, reach, f"verified: to {to_where}; far end loopback", {}
+    if not why:
+        why = {"unchecked": 1}
+    parts = [WHY[k].format(n=why[k], s="s" if why[k] != 1 else "", far=far, to=to) for k in WHY if k in why]
+    kids = [_clean(c, re.compile(r"[A-Za-z0-9._+-]{1,32}")) for c in (f.get("children") or [])[:3]
+            if isinstance(c, str)]
+    if "child" in why and kids:
+        parts[[k for k in WHY if k in why].index("child")] = \
+            f"an ssh with a child process ({', '.join(kids)}: a proxy or jump)"
+    if "far" not in why and far in ("loopback", "an address", "every address", "a socket"):
+        parts.append(f"far end {far}")
+    return False, reach, "not verified: " + "; ".join(parts), why
 
 
 def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool = False,
-                ignore_users=(), ignore_programs=(), ignore_ports=()) -> list[dict]:
+                ignore_users=(), ignore_programs=(), ignore_ports=(), servers=()) -> list[dict]:
     """The probe's answer as findings (rows for policy_findings, without
-    times). What a user controls never lowers a finding: only a listener on
+    times). What a user writes never lowers a finding: only a listener on
     an ephemeral port on a compute node (with listeners_on_nodes) is listed
-    rather than alerted. An ssh forward to one of the cluster's names says
-    so, as a hint. An ignore list leaves a finding out only if it names every
-    name its process goes by."""
+    rather than alerted, and a reverse forward the probe verified from what
+    the kernel shows (forward_note; ``servers``: the labels of the trusted
+    entries the probe was given, by index). An ignore list leaves a finding
+    out only if it names every name its process goes by."""
     out = []
     users, programs, ports = set(ignore_users), set(ignore_programs), {str(p) for p in ignore_ports}
     user_ok = re.compile(r"^[\w.$@-]{1,64}$")
@@ -198,12 +452,18 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
         if f.get("user") in users or ignored(prog, aka) or (detail and detail in ports):
             continue
         kind = f.get("kind") if f.get("kind") in SEVERITY else "other"
-        # a hint only (a user's own ssh config can map any name anywhere): it lowers nothing
-        reach = {True: "cluster name", False: "outside"}.get(f.get("inside"), "")
-        sev = SEVERITY.get(kind, "info")
+        verified, reach, note, why = False, "", None, None
+        if kind in ("ssh_reverse", "ssh_socks"):
+            verified, reach, note, why = forward_note(dict(f, kind=kind, detail=detail), servers)
+        sev = "info" if verified else SEVERITY.get(kind, "info")
+        procs = f.get("procs") if isinstance(f.get("procs"), str) and re.fullmatch(r"[0-9a-f]{16}", f["procs"]) \
+            else None
         out.append({"host": host, "role": role, "username": _clean(f.get("user"), user_ok),
                     "uid": f.get("uid") if isinstance(f.get("uid"), int) else None,
-                    "kind": kind, "program": prog, "detail": detail, "reach": reach, "severity": sev})
+                    "kind": kind, "program": prog, "detail": detail, "reach": reach,
+                    "verified": verified if kind in ("ssh_reverse", "ssh_socks") else None, "note": note,
+                    "procs": procs if kind == "ssh_reverse" and not prog.startswith("+") else None,
+                    "why": why, "severity": sev})
     if role == "login" or listeners_on_nodes:
         for s in probe.get("listeners") or []:
             prog = _clean(s.get("program"))
@@ -217,9 +477,53 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
                         "uid": s.get("uid") if isinstance(s.get("uid"), int) else None,
                         "kind": "listening", "program": prog if not str(port).startswith("+") else str(port),
                         "detail": "" if str(port).startswith("+") else _clean(port),
-                        "reach": "ephemeral" if eph else "",
+                        "reach": "ephemeral" if eph else "", "verified": None, "note": None,
                         "severity": "info" if (eph and role == "node") else SEVERITY["listening"]})
     return out
+
+
+KEPT = " (the same ssh since; now: "
+# What a forward kept verified may meet sweep after sweep: its account's other doings that carry nothing
+# elsewhere by themselves (a Jupyter through ssh -L: a person's port here; another ssh, a jump, a relay:
+# their own connections are counted). Anything else of KEPT_THROUGH at one of its last four sweeps only
+# (a git pull, a name not resolving): what its account reaches elsewhere at two of them ends it.
+FREE = {"host_port", "carrier", "child", "relay"}
+KEPT_THROUGH = FREE | {"cluster_port", "server_port", "udp", "raw", "none", "campus", "outside"}
+
+
+def keep(f: dict, old, names=None) -> None:
+    """A reverse forward verified before stays verified while the same ssh
+    processes hold it (``procs``: the probe's key of their pids and start
+    times, given only when each is ssh by its kernel name): an ssh keeps the
+    connection it made, so what its account does since (a Jupyter, a git
+    pull, a name not resolving at one sweep) doesn't move its far end. Not
+    when the site no longer names its server (``names``: entry_labels), nor
+    when its account reaches anywhere but FREE's at two of its last four
+    sweeps (``away``: those sweeps, a bit each, the latest lowest; reset when
+    it is verified afresh). The note says what is new. ``old``: (id,
+    verified, procs, note, severity, away) as stored."""
+    f["away"] = 0
+    if f.get("kind") != "ssh_reverse" or f.get("verified") or not old or old[1] != 1:
+        return
+    if not f.get("procs") or old[2] != f["procs"]:
+        return
+    was = (old[3] or "").split(KEPT)[0]
+    if not was.startswith("verified: to "):
+        return
+    servers = was[len("verified: to "):].split(";")[0]
+    if names is not None and servers != "the cluster" and \
+            not all(n.strip() in names for n in servers.split(",")):
+        return
+    why = f.get("why") or {}
+    if set(why) - KEPT_THROUGH:
+        return
+    away = (((old[5] or 0) << 1) | (1 if set(why) - FREE else 0)) & 0b1111
+    if bin(away).count("1") >= 2:
+        return
+    now = (f.get("note") or "").removeprefix("not verified: ")
+    room = 400 - len(was) - len(KEPT) - 1
+    now = now if len(now) <= room else now[:max(0, room - 3)] + "..."
+    f.update(verified=True, severity="info", note=f"{was}{KEPT}{now})", away=away)
 
 
 class PolicyWatchCollector(BaseCollector):
@@ -238,12 +542,12 @@ class PolicyWatchCollector(BaseCollector):
         self.ssh_user = c.get("ssh_user") or None
         nodes = c.get("nodes", "slurm")
         self.nodes = nodes if nodes == "slurm" else [n for n in (nodes or []) if isinstance(n, str)]
-        self.login_hosts = [h for h in (c.get("login_hosts") or []) if isinstance(h, str) and HOST_RE.match(h)]
+        self.login_hosts = [h for h in _list(c.get("login_hosts")) if HOST_RE.fullmatch(h)]
         self.min_uid = int(c.get("min_uid", 1000) or 1000)
         self.listeners_on_nodes = c.get("listeners_on_nodes", False) is True
         # Services, not people: Slurm's and munge's accounts, and this one's own
         # (the collector's account: an admin's, which may run a site's services).
-        self.ignore_users = list(c["ignore_users"]) if isinstance(c.get("ignore_users"), list) \
+        self.ignore_users = _list(c["ignore_users"]) if isinstance(c.get("ignore_users"), (list, str)) \
             else list(SERVICE_ACCOUNTS)
         if c.get("watch_self", False) is not True:
             try:
@@ -253,13 +557,19 @@ class PolicyWatchCollector(BaseCollector):
                     self.ignore_users.append(me)
             except (ImportError, KeyError):
                 pass
-        self.ignore_programs = list(c.get("ignore_programs") or [])
-        self.ignore_ports = list(c.get("ignore_ports") or [])
+        self.ignore_programs = _list(c.get("ignore_programs"))
+        ports = c.get("ignore_ports")
+        self.ignore_ports = list(ports) if isinstance(ports, list) else [ports] if ports not in (None, "") else []
         self.owners_in_alerts = c.get("owners_in_alerts", False) is True
         py = c.get("python") or list(PYTHONS)
         py = [py] if isinstance(py, str) else list(py)
         self.pythons = [p for p in py if isinstance(p, str) and PATH_OK.fullmatch(p)] or list(PYTHONS)
-        self.inside_hosts = [h for h in (c.get("inside_hosts") or []) if isinstance(h, str) and HOST_RE.match(h)]
+        self.trusted_hosts = _list(c.get("trusted_hosts"))
+        self.campus, n1 = networks(c.get("campus_networks"), "campus network")
+        self.cluster, n2 = networks(c.get("cluster_networks"), "cluster network")
+        self.trust_notes = n1 + n2
+        self.here_addresses: list[str] = []
+        self._trust: list | None = None
         self.keep_days = max(7, int(c.get("keep_days", 365) or 365))
         self.new: list[dict] = []
 
@@ -300,7 +610,7 @@ class PolicyWatchCollector(BaseCollector):
 
     def _compute_nodes(self) -> list[str]:
         if self.nodes != "slurm":
-            return [n for n in self.nodes if HOST_RE.match(n)]
+            return [n for n in self.nodes if HOST_RE.fullmatch(n)]
         sinfo = find_tool("sinfo")
         if not sinfo:
             return []
@@ -312,16 +622,43 @@ class PolicyWatchCollector(BaseCollector):
 
     # -- asking -------------------------------------------------------------------------
 
-    def _args(self) -> list[str]:
-        """The probe's arguments: min_uid, and the names that are the
-        cluster's own (this host, the login hosts, inside_hosts), for the
-        hint that an ssh forward goes back inside."""
+    def trusted(self) -> list[tuple[str, str, int]]:
+        """The trusted entries, resolved once a sweep: trusted_hosts, the
+        login hosts, this host (by name, then by the addresses its own probe
+        found, appended: an index the probe here was given stays the same)."""
+        if self._trust is None:
+            here = os.uname().nodename.split(".")[0]
+            self._trust, notes = trusted_entries(self.trusted_hosts, here=here, login_hosts=self.login_hosts)
+            self.trust_notes = [n for n in self.trust_notes if not n.startswith("trusted host")] + notes
+        have = {(net, port) for _l, net, port in self._trust}
         here = os.uname().nodename.split(".")[0]
-        names = sorted({h.lower() for h in [here, *self.login_hosts, *self.inside_hosts] if HOST_RE.match(h)})
-        args = ["--min-uid", str(self.min_uid)] + (["--inside", ",".join(names)] if names else [])
+        for a in self.here_addresses:
+            try:
+                net = str(ipaddress.ip_network(a, strict=False))
+            except ValueError:
+                continue
+            if (net, 0) not in have and not ipaddress.ip_network(net).network_address.is_loopback:
+                self._trust.append((here, net, 0))
+                have.add((net, 0))
+        return self._trust
+
+    def servers(self) -> list[str]:
+        return [label for label, _n, _p in self.trusted()]
+
+    def _args(self) -> list[str]:
+        """The probe's arguments: min_uid, the trusted entries (network@port,
+        0: below 1024), campus_networks, and who and what to leave out."""
+        args = ["--min-uid", str(self.min_uid)]
+        trusted = self.trusted()
+        if trusted:
+            args += ["--trusted", ",".join(f"{net}@{port}" for _l, net, port in trusted)]
+        if self.campus:
+            args += ["--campus", ",".join(self.campus)]
+        if self.cluster:
+            args += ["--cluster", ",".join(self.cluster)]
         safe_list = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
         for flag, vals in (("--ignore-users", self.ignore_users), ("--ignore-programs", self.ignore_programs)):
-            vals = [v for v in vals if isinstance(v, str) and safe_list.match(v)]
+            vals = [v for v in vals if isinstance(v, str) and safe_list.fullmatch(v)]
             if vals:
                 args += [flag, ",".join(vals)]
         return args
@@ -378,8 +715,13 @@ class PolicyWatchCollector(BaseCollector):
         when = datetime.now().isoformat(timespec="seconds")
         self._note_sweep(when, 1 + len(targets))
         rows: list[dict] = []
+        self._trust = None                                  # names resolved again each sweep
         d, err = self.probe_here()
         rows.append(self._host_row(when, (d or {}).get("host") or here, "login", d, err))
+        self.here_addresses = [a for a in (d or {}).get("addresses") or [] if isinstance(a, str)][:64]
+        self.trusted()                                      # appended now, before the nodes' threads read it
+        if self.trust_notes:
+            self.note = (self.note + "; " if self.note else "") + "; ".join(self.trust_notes)[:300]
         ssh = find_tool("ssh") if targets else None
         if targets and not ssh:
             self.note = "ssh not found: only this host was asked"
@@ -422,7 +764,7 @@ class PolicyWatchCollector(BaseCollector):
                        findings=findings_of(d, host, role, listeners_on_nodes=self.listeners_on_nodes,
                                             ignore_users=self.ignore_users,
                                             ignore_programs=self.ignore_programs,
-                                            ignore_ports=self.ignore_ports))
+                                            ignore_ports=self.ignore_ports, servers=self.servers()))
         return row
 
     # -- keeping it -------------------------------------------------------------------------
@@ -430,10 +772,7 @@ class PolicyWatchCollector(BaseCollector):
     def store(self, data: list[dict]) -> None:
         self.new = []
         with self.get_db_connection() as conn:
-            conn.executescript(SCHEMA)
-            for table, col in (("policy_findings", "reach"), ("policy_watch_hosts", "listener_programs")):
-                if col not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {'TEXT' if col == 'reach' else 'INTEGER'}")
+            ensure_schema(conn)
             for h in data:
                 conn.execute(
                     "INSERT INTO policy_watch_hosts (timestamp, host, role, answered, processes, others, "
@@ -441,22 +780,41 @@ class PolicyWatchCollector(BaseCollector):
                     (h["timestamp"], h["host"], h["role"], int(h["answered"]), h["processes"], h["others"],
                      h["others_readable"], None if h["hidepid"] is None else int(h["hidepid"]),
                      None if h["listener_programs"] is None else int(h["listener_programs"]), h["error"]))
-                for f in h["findings"]:
+                names = entry_labels(self.trusted_hosts, here=os.uname().nodename.split(".")[0],
+                                     login_hosts=self.login_hosts)
+                ssh_ok = {}
+                # ssh's own rows first: an autossh row is verified as its ssh is
+                for f in sorted(h["findings"], key=lambda f: f["program"] == "autossh"):
+                    # one finding whatever its reach or verdict, which are as last seen
                     old = conn.execute(
-                        "SELECT id FROM policy_findings WHERE host = ? AND uid IS ? AND kind = ? AND "
-                        "program = ? AND detail = ? AND reach = ? ORDER BY id DESC LIMIT 1",
-                        (f["host"], f["uid"], f["kind"], f["program"], f["detail"], f["reach"])).fetchone()
+                        "SELECT id, verified, procs, note, severity, away FROM policy_findings WHERE host = ? AND "
+                        "uid IS ? AND kind = ? AND program = ? AND detail = ? ORDER BY id DESC LIMIT 1",
+                        (f["host"], f["uid"], f["kind"], f["program"], f["detail"])).fetchone()
+                    f["was_info"] = bool(old) and old[4] == "info"
+                    keep(f, old, names)
+                    if f["kind"] == "ssh_reverse" and f["program"] == "ssh" and f.get("verified"):
+                        ssh_ok[(f["uid"], f["detail"])] = f["note"]
+                    elif f["kind"] == "ssh_reverse" and f["program"] == "autossh" and not f.get("verified") \
+                            and (f["uid"], f["detail"]) in ssh_ok:
+                        inner = ssh_ok[(f["uid"], f["detail"])]
+                        f.update(verified=True, severity="info",
+                                 note="as its ssh: " + (inner if len(inner) <= 388 else inner[:384] + "...)"))
+                    verified = None if f.get("verified") is None else int(bool(f["verified"]))
+                    procs = f.get("procs") if f.get("verified") else None
                     if old:
                         conn.execute("UPDATE policy_findings SET last_seen = ?, sweeps = sweeps + 1, "
-                                     "username = COALESCE(?, username) WHERE id = ?",
-                                     (h["timestamp"], f["username"], old[0]))
+                                     "username = COALESCE(?, username), reach = ?, verified = ?, note = ?, "
+                                     "procs = ?, away = ?, severity = ? WHERE id = ?",
+                                     (h["timestamp"], f["username"], f["reach"], verified, f.get("note"), procs,
+                                      f.get("away") or 0, f["severity"], old[0]))
                     else:
                         cur = conn.execute(
                             "INSERT INTO policy_findings (host, role, username, uid, kind, program, detail, "
-                            "reach, first_seen, last_seen, sweeps, severity) "
-                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                            "reach, verified, note, procs, away, first_seen, last_seen, sweeps, severity) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
                             (f["host"], f["role"], f["username"], f["uid"], f["kind"], f["program"],
-                             f["detail"], f["reach"], h["timestamp"], h["timestamp"], f["severity"]))
+                             f["detail"], f["reach"], verified, f.get("note"), procs, f.get("away") or 0,
+                             h["timestamp"], h["timestamp"], f["severity"]))
                         f["id"] = cur.lastrowid
                         self.new.append(f)
                     # the alert's key: the first finding of this account and kind, on any host
@@ -508,11 +866,13 @@ class PolicyWatchCollector(BaseCollector):
         """One alert per account and kind, on whatever hosts (renaming a
         program, or the same thing on many nodes, makes no new one),
         deduplicated by the dispatcher: raised when new, then as reminders;
-        and a new alert in the same sweep when the group gains a finding it
-        didn't have. It names no one unless owners_in_alerts; its key is the
+        and, while that alert stands (the dispatcher held this one back), a
+        new one when the group gains a finding (or one listed until now
+        becomes a warning). It names no one unless owners_in_alerts; its key is the
         finding's number here, which says nothing of the account."""
         try:
             from nomad.alerts import send_alert
+            from nomad.alerts.dispatcher import Held
         except Exception:                                    # noqa: BLE001 -- alerts are optional here
             return
         rank = {"info": 0, "warning": 1, "critical": 2}
@@ -529,6 +889,10 @@ class PolicyWatchCollector(BaseCollector):
             for f in fs:
                 p = f["program"] + (f" port {f['detail']}" if f["detail"].isdigit() else
                                     f" {f['detail']}" if f["detail"] else "")
+                if f.get("reach") in REACH:
+                    p += f", {REACH[f['reach']]}"
+                if f.get("note") and f["kind"] == "ssh_reverse":
+                    p += f" ({f['note']})"
                 if p.strip() and p.strip() not in progs:
                     progs.append(p.strip())
             return ", ".join(progs[:3]) + (f", +{len(progs) - 3} more" if len(progs) > 3 else "")
@@ -540,13 +904,14 @@ class PolicyWatchCollector(BaseCollector):
             on = hosts[0] + (f" and {more} more host{'s' if more > 1 else ''}" if more else "")
             who = f", by {fs[0]['username']}" if self.owners_in_alerts and fs[0].get("username") else ""
             label = LABELS.get(kind, kind)
-            fresh = [f for f in fs if f.get("id")]
+            # new to alerting: a new finding, or one listed (info) until this sweep
+            fresh = [f for f in fs if f.get("id") or f.get("was_info")]
             try:
                 shown = what(fs)
-                send_alert(sev, "policy_watch", f"{on}: {label}{' (' + shown + ')' if shown else ''}{who}. "
-                           "See nomad watch list.", host=hosts[0], subject=f"{kind}:f{group}",
-                           details={"kind": kind, "role": fs[0]["role"], "episode_gap_minutes": gap})
-                if fresh and group not in {f["id"] for f in fresh}:      # the group was there before
+                r = send_alert(sev, "policy_watch", f"{on}: {label}{' (' + shown + ')' if shown else ''}{who}. "
+                               "See nomad watch list.", host=hosts[0], subject=f"{kind}:f{group}",
+                               details={"kind": kind, "role": fs[0]["role"], "episode_gap_minutes": gap})
+                if fresh and isinstance(r, Held):            # the group's alert stands: say what is new
                     shown = what(fresh)
                     send_alert(sev, "policy_watch", f"{on}: new, {label}{' (' + shown + ')' if shown else ''}"
                                f"{who}. See nomad watch list.", host=hosts[0],

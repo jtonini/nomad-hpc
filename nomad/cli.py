@@ -7736,7 +7736,25 @@ def config_check(ctx):
     from nomad.impact import impact_from
     for problem in impact_from(data).problems:
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    _config_check_policy_watch(data)
     _config_check_condos(ctx)
+
+
+def _config_check_policy_watch(data):
+    """The policy watch's part of `nomad config check`: settings it doesn't
+    know, and what trusted_hosts resolve to here."""
+    conf = (data.get('collectors') or {}).get('policy_watch') if isinstance(data.get('collectors'), dict) else None
+    if conf is None:
+        return
+    try:
+        from nomad.collectors.policy_watch import config_problems
+        problems, info = config_problems(conf)
+    except Exception:              # noqa: BLE001 -- config check itself must not fail here
+        return
+    for line in info:
+        click.echo(f"  policy_watch: {line}")
+    for problem in problems:
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
 
 
 def _config_check_condos(ctx):
