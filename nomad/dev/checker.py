@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 #   pacct / cgroup_probe / mount_probe — standalone probe scripts
 #     (def probe()/main(), run directly), not BaseCollector subclasses
 NOT_REGISTRY_COLLECTORS = {
-    "slurm_legacy", "pacct", "cgroup_probe", "mount_probe",
+    "slurm_legacy", "pacct", "cgroup_probe", "mount_probe", "watch_probe",
 }
 
 

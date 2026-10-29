@@ -124,6 +124,16 @@ nfs_mount_points = ["/home", "/scratch"]
 # Services to check (via systemctl)
 check_services = ["slurmd", "munge"]
 
+# The policy watch (1.19): tunnels, ssh reverse forwards, VS Code tunnels,
+# miners, relays, and services open to the network on login nodes, from
+# /proc, here and on every node Slurm lists (over ssh), every 15 minutes.
+# Keeps no command lines. See docs/policy_watch.md; `nomad watch list`.
+# [collectors.policy_watch]
+# enabled = true
+# nodes = "slurm"
+# ignore_programs = []
+# owners_in_alerts = false
+
 # Compute nodes' local disks (1.14): on the head node, df of each path on
 # every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the
 # [alerts.thresholds.disk] percentages, one per node and path.

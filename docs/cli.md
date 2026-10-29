@@ -45,6 +45,14 @@ Run by users on a cluster's login node (1.18; [details](submit.md)):
 | `nomad submit --again N` | A job of yours that ran, sent again with what nomad learned from how it ended |
 | `nomad submit --logs here job.sh` | Its Slurm output where Slurm puts it (default: a folder of its own, `/scratch/USER/jobs/JOBID-NAME`; also `$NOMAD_LOGS`) |
 
+Read by admins (1.19; [details](policy_watch.md)):
+
+| Command | What |
+|---|---|
+| `nomad watch list` | What the policy watch found on login and compute nodes (tunnels, miners, relays, exposed services), the most serious first; `--mask` for sharing |
+| `nomad watch status` | The last sweep: each host, whether it answered, what it could see |
+| `nomad watch probe [HOST]` | Look now, here or on a node |
+
 ## Analysis
 
 | Command | Description |

@@ -38,6 +38,11 @@ def _storage_use_tables(conn) -> None:
     conn.executescript(SCHEMA)
 
 
+def _policy_watch_tables(conn) -> None:
+    from nomad.collectors.policy_watch import SCHEMA
+    conn.executescript(SCHEMA)
+
+
 MIGRATIONS: list[tuple[int, str, object]] = [
     (1, "Initial schema", Path(__file__).parent.joinpath("schema.sql").read_text()),
     (2, "Add alert_history table", """
@@ -434,6 +439,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (24, "GPU jobs whose GPUs only their request shows", _gpus_from_requests),
     # Who uses each storage server's space (1.16): the storage_use collector's tables.
     (25, "Create storage_use tables", _storage_use_tables),
+    # What runs on login and compute nodes that the rules forbid (1.19).
+    (26, "Create policy_watch tables", _policy_watch_tables),
 ]
 
 

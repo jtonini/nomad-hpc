@@ -55,6 +55,7 @@ SITE_COL, ROWID_COL = "_sync_site", "_src_rowid"
 SKIP_TABLES = frozenset({
     'schema_version', 'schema_migrations', 'sqlite_sequence', 'config',
     'per_user_state', 'interactive_state', 'oom_state', 'node_disks_sweeps', 'storage_reads',
+    'policy_watch_sweeps', 'policy_watch_hosts',
     # A demo's marker (1.17.4): a hub's database is never a demo.
     'demo_info',
 })

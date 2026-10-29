@@ -10624,6 +10624,9 @@ cli.add_command(interactive_group)
 from nomad.submit.cli import size_cmd, submit_cmd  # noqa: E402
 cli.add_command(size_cmd)
 cli.add_command(submit_cmd)
+# What the policy watch found on login and compute nodes (1.19).
+from nomad.watch.cli import watch_group  # noqa: E402
+cli.add_command(watch_group)
 
 # =============================================================================
 # COMMUNITY COMMANDS
