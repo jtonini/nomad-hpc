@@ -49,7 +49,7 @@ Memory is per node. Each value says where it comes from:
 
 A job on several nodes (`--nodes` above 1) keeps its CPUs and memory; nomad checks its time and partition. Tasks Slurm places over as many nodes as it takes (`--ntasks` without `--nodes`), or on several, with memory per CPU or per GPU have no one node's figure: their memory is weighed a CPU (or GPU) at a time, and shown so (`2G/CPU`) -- the input's memory over the CPUs the job will have, or, when the job ran out, half as much again a CPU from Slurm's record (never below what the script asks now); past runs' readings (a node at a time) aren't weighed, a change of their CPUs keeps memory per CPU, and a partition fits them when its nodes hold them all, a task (its CPUs and their memory) at a time. `--ntasks-per-node` alone (no `--ntasks`, no `--nodes`) is that many tasks on one node; with `--ntasks`, it is the most a node takes. CPUs asked per GPU (`--cpus-per-gpu`) or through `--tres-per-task=cpu=N` are kept, and so is no time limit (`--time=UNLIMITED`, `0` or `-1`; nomad says when a partition has a limit).
 
-nomad never changes how a job asks: memory asked per CPU or per GPU stays so (rounded up to 64 MB, or down to whole megabytes when it is a node's memory: sbatch takes no fractions), GPUs stay `--gpus`, `--gpus-per-node`, `--gpus-per-task`, `--tres-per-task` or `--gres`, with their type and the job's other gres. Memory is decided per node: when CPUs or GPUs change (nomad's or yours), memory asked per CPU or per GPU is written again for them, so the node gets the memory the table shows. `#SBATCH` lines are read as sbatch reads them: at the very start of a line (an indented one is a comment), before the first command.
+nomad never changes how a job asks: memory asked per CPU or per GPU stays so (rounded up to 64 MB, or down to whole megabytes when it is a node's memory: sbatch takes no fractions), GPUs stay `--gpus`, `--gpus-per-node`, `--gpus-per-task`, `--tres-per-task` or `--gres`, with their type and the job's other gres. Memory is decided per node: when CPUs or GPUs change (nomad's or yours), memory asked per CPU or per GPU is written again for them, so the node gets the memory the table shows. `#SBATCH` lines (and `#SLURM`, `#SBATCH--x`) are read as sbatch reads them: at the very start of a line (an indented one is a comment), before the first command.
 
 ## Submitting
 
@@ -64,6 +64,24 @@ The job is tagged, in Slurm's `--extra` field, with who chose each value:
 ```
 
 `s` the script's own, `u` the person on nomad's command line, `h` nomad from past runs, `i` the input file or command line, `o` how the job run again ended, `g` what the program needs, `p` a partition that fits, `d` left to Slurm's defaults; `again=N` for a job sent again. Slurm keeps it in its accounting where `AccountingStoreFlags` includes `job_extra`, so nomad can later tell the person's choices from its own. No tag where Slurm is older than 23.02 (no `--extra`; and should sbatch refuse it anyway, nomad sends the job once more untagged), where `SchedulerParameters` include `extra_constraints` (Slurm then reads `--extra` as node constraints) or nomad can't read them, or where the job sets `--extra` itself.
+
+### Where the output goes
+
+Each job's Slurm output (its `.out` file, with what it writes to stderr unless the job splits them) goes in a folder of its own, `/scratch/USER/jobs/JOBID-NAME/slurm-JOBID.out` (`slurm-JOBID_TASK.out` for each task of an array), so the folder the job runs in fills with its own results only. nomad says where, before and after submitting.
+
+Slurm never makes the folder an output file goes in (a job whose folder is missing fails with no output at all), and a job's number is known only once it is submitted. So nomad sends the job to start two minutes from now (`--begin=now+120`), reads back from Slurm where its output would go, makes its folder, and in one update (`scontrol update ... StdOut=... StartTime=now`) points its output there and lets it start at once. Should nomad be stopped in between (Ctrl-C, a dropped ssh session, a kill), or Slurm not take the folder, nothing is left waiting: the job starts on its own within the two minutes, its output where Slurm puts it. nomad never holds or releases a job, and a start time a site's `job_submit` plugin set is left as it is. What nomad then says is what Slurm holds (an update can report an error after it took effect: nomad reads the job back). The command nomad shows is the one to run by hand, without its `--begin`.
+
+The job's number and name are Slurm's own (`JobName`, after `-J`, `$SBATCH_JOB_NAME` or the script's name), kept to letters, digits and `. _ + -` in the folder's name; a folder already there (a job number Slurm used before) gets `.2`, `.3`, ... `jobs/` is made private (`0700`): change its mode to share it (folders you give with `--logs` follow your umask). Scratch may be purged after a while: so are the logs in it.
+
+Left where the job or Slurm says:
+
+- a job that sets its own output: `#SBATCH --output` or `--error` (or `--out=`: sbatch takes any prefix that is only one option's), `#PBS -o` or `-e`, its command line's (a job sent again), `$SBATCH_OUTPUT` or `$SBATCH_ERROR`; and an output a site's `job_submit` plugin set: nomad changes it only when Slurm reports its own default (`slurm-JOBID.out` in the job's folder);
+- a job that sets its own start time (`--begin`, `#PBS -a`) or a `--deadline` (a later start could miss it), one sbatch waits for (`--wait`, `$SBATCH_WAIT`), a `--test-only`, a heterogeneous job;
+- the person who has no `/scratch/USER` (nomad never makes it), or whose `/scratch/USER` isn't on a filesystem compute nodes share (NFS, Lustre, GPFS, BeeGFS, Ceph, ...; a login node that serves `/scratch` itself sees its own disk: a site where it is shared anyway sets `NOMAD_LOGS`): the output goes beside the job, and nomad says so.
+
+A job that asks to be held (`#SBATCH --hold`) gets its folder and stays held, for the person to release. A job sent again doesn't get nomad's `--begin` (or `--quiet`) from its own command line.
+
+The choice, the first one given: `nomad submit --logs`, then `$NOMAD_LOGS`, then the default. Each is `here` (Slurm's own place, beside the job), a folder (each job's own folder goes in it: `--logs ~/runs` gives `~/runs/JOBID-NAME/`; a relative one is from the folder you run nomad in), or a pattern with `{user}`, `{jobid}` and `{name}` (`{jobid}` is required: each job its own folder). A site can set `NOMAD_LOGS` for everyone (`/etc/profile.d`), and a person in their own shell setup; `--dry-run` shows where it will go (`JOBID` for the number to come).
 
 ## What it reads
 

@@ -111,6 +111,33 @@ exclusive requeue no-requeue hold wait quiet verbose parsable test-only overcomm
 spread-job oversubscribe use-min-nodes ignore-pbs get-user-env no-kill propagate reboot help usage
 version nice resv-ports
 """.split())
+# Every long option sbatch takes (Slurm 25.11's): sbatch, as getopt does,
+# takes a long option by any prefix that is only its (--out=x is --output).
+_SBATCH_LONG = frozenset("""
+account acctg-freq array autocomplete batch bb bbf begin chdir cluster cluster-constraint clusters
+comment consolidate-segments constraint container container-id context contiguous core-spec
+cores-per-socket cpu-freq cpus-per-gpu cpus-per-task deadline delay-boot dependency distribution
+error exclude exclusive export export-file external extra extra-node-info get-user-env gid gpu-bind
+gpu-freq gpus gpus-per-node gpus-per-socket gpus-per-task gres gres-flags help hint hold ignore-pbs
+input job-name kill-on-invalid-dep licenses mail-type mail-user mcs-label mem mem-bind mem-per-cpu
+mem-per-gpu mincpus network nice no-kill no-requeue nodefile nodelist nodes ntasks ntasks-per-core
+ntasks-per-gpu ntasks-per-node ntasks-per-socket ntasks-per-tres oom-kill-step open-mode output
+overcommit oversubscribe parsable partition prefer priority profile propagate qos quiet reboot
+requeue reservation resources resv-ports segment signal sockets-per-node spread-job spread-segments
+stepmgr switches tasks-per-node test-only thread-spec threads-per-core time time-min tmp tres-bind
+tres-per-task uid usage use-min-nodes verbose version wait wait-all-nodes wckey wrap
+""".split()) | _LONG_VALUE | _LONG_NONE
+
+
+def _long_name(name: str) -> str:
+    """A long option's full name: as given, or the one option it is a
+    prefix of (an ambiguous prefix sbatch refuses: left as given)."""
+    if name in _SBATCH_LONG or not name:
+        return name
+    hits = [n for n in _SBATCH_LONG if n.startswith(name)]
+    return hits[0] if len(hits) == 1 else name
+
+
 _SHORT_VALUE = frozenset("AabBcCDdeFGiJLMmNnopqStwx")
 _SHORT_NONE = frozenset("hHIkOQsvVW")
 _SHORT_LONG = {"A": "account", "a": "array", "b": "begin", "B": "extra-node-info", "c": "cpus-per-task",
@@ -170,6 +197,7 @@ def _options(words: list, out: SubmitLine) -> int:
             return i + 1
         if w.startswith("--") and len(w) > 2:
             name, eq, value = w[2:].partition("=")
+            name = _long_name(name)
             if eq:
                 out.options.append((name, value))
             elif name in _LONG_VALUE and i + 1 < len(words):
@@ -182,22 +210,28 @@ def _options(words: list, out: SubmitLine) -> int:
             i += 1
             continue
         if w.startswith("-") and len(w) > 1:
-            c = w[1]
-            if c in _SHORT_VALUE:
-                long = _SHORT_LONG.get(c, c)
-                if len(w) > 2:
-                    out.options.append((long, w[2:].lstrip("=")))
-                elif i + 1 < len(words):
-                    out.options.append((long, words[i + 1]))
-                    i += 1
+            # As getopt reads -Hb 23:00: flags, until one taking a value (the
+            # rest of the word, else the next word).
+            j = 1
+            while j < len(w):
+                c = w[j]
+                if c in _SHORT_VALUE:
+                    long = _SHORT_LONG.get(c, c)
+                    if j + 1 < len(w):
+                        out.options.append((long, w[j + 1:].lstrip("=")))
+                    elif i + 1 < len(words):
+                        out.options.append((long, words[i + 1]))
+                        i += 1
+                    else:
+                        out.unsure.append(f"-{c} without its value")
+                    break
+                if c in _SHORT_NONE:
+                    out.options.append((_SHORT_NONE_LONG.get(c, c), None))
                 else:
-                    out.unsure.append(f"-{c} without its value")
-            elif c in _SHORT_NONE:
-                for ch in w[1:]:
-                    out.options.append((_SHORT_NONE_LONG.get(ch, ch), None))
-            else:
-                out.unsure.append(f"-{c}: an option nomad doesn't know")
-                out.options.append((c, None))
+                    out.unsure.append(f"-{c}: an option nomad doesn't know")
+                    out.options.append((c, None))
+                    break
+                j += 1
             i += 1
             continue
         return i
@@ -493,7 +527,7 @@ def _outside_quotes(line: str) -> str:
 def sbatch_lines(text: str) -> tuple[list[str], list[str]]:
     """The #SBATCH options of a job script (sbatch reads them until the
     first command, and only at the very start of a line: an indented
-    #SBATCH is a comment to it), and the script's command lines (comments
+    #SBATCH is a comment to it; #SLURM lines too, and #SBATCH--x), and the script's command lines (comments
     and blank lines left out). As the shell does, a line ending in a
     backslash goes on to the next, and so does a quote left open
     (python3 -c '...' over several lines is one command); a here-document's
@@ -526,8 +560,9 @@ def sbatch_lines(text: str) -> tuple[list[str], list[str]]:
             if not line:
                 continue
             if line.startswith("#"):
-                if not seen_cmd and re.match(r"#SBATCH\s", raw):
-                    opts.append(raw[len("#SBATCH"):].strip())
+                word = next((w for w in ("#SBATCH", "#SLURM") if raw.startswith(w)), None)
+                if not seen_cmd and word and raw[len(word):].strip():
+                    opts.append(raw[len(word):].strip())         # as sbatch: #SBATCH--x, #SLURM too
                 continue
             seen_cmd = True
             piece, buf = line, ""

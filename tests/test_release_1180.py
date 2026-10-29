@@ -521,6 +521,7 @@ def cluster_here(tmp_path, monkeypatch):
         sent.append((argv, cwd))
         return subprocess.CompletedProcess(argv, 0, "4242;hpc1\n", "")
     monkeypatch.setattr(sc, "_run_sbatch", sbatch)
+    monkeypatch.setenv("NOMAD_LOGS", "here")       # never a real scratch folder or scontrol (1.18.2)
     monkeypatch.chdir(w)
     return w, sent
 

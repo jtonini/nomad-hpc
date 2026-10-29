@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import click
 
-from nomad.submit import apps, cluster, forms, history, sizing, spec
+from nomad.submit import apps, cluster, forms, history, logs as logs_, sizing, spec
 
 
 class NotYou(click.ClickException):
@@ -414,7 +414,8 @@ EXTRA_SINCE = (23, 2)          # Slurm's --extra (and AccountingStoreFlags=job_e
 # name, is kept); --wait would hold nomad; an array's other tasks aren't the
 # one run again (handled apart); --begin and --deadline were times for the
 # first run.
-NOT_AGAIN = {"chdir", "dependency", "wait", "parsable", "test-only", "wrap", "array", "begin", "deadline"}
+NOT_AGAIN = {"chdir", "dependency", "wait", "parsable", "test-only", "wrap", "array", "begin", "deadline",
+             "quiet"}
 NOMAD_CODES = set(CODES.values()) - {"d"}
 
 
@@ -513,23 +514,26 @@ def _yours(s: sizing.Sizing, cpus, mem, time_, gpus, partition, keep: bool) -> N
     s.problems = sizing.check(s)
 
 
-def command(pl: Plan, *, args: list, tagged: bool) -> dict:
+def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False) -> dict:
     """The sbatch command: {"argv", "display", "notes"}. Only what changes
     is set on the command line (sbatch reads the rest from the script); a
     job sent again gets its own command line's other options first, and its
-    folder."""
+    folder. ``delay``: sent to start in logs.DELAY s, for nomad to set
+    where its output goes first."""
     s = pl.sizing
     notes = []
-    argv = ["sbatch", "--parsable"]
+    argv = ["sbatch", "--parsable"] + ([f"--begin=now+{logs_.DELAY}"] if delay else [])
     if pl.line is not None:
         drop = s.replaces() | NOT_AGAIN
         for name, value in pl.line.options:
             if name == "dependency" and value == "singleton":
                 pass                                # on the job's name: still meant
             elif name in drop:
+                nomads = name == "begin" and value == f"now+{logs_.DELAY}" and \
+                    [n for n, _ in pl.line.options[:2]] == ["parsable", "begin"]
                 if name == "dependency":
                     notes.append("Its --dependency (on jobs long gone) isn't sent again.")
-                elif name in ("begin", "deadline"):
+                elif name in ("begin", "deadline") and not nomads:
                     notes.append(f"Its --{name} (a time for its first run) isn't sent again.")
                 continue
             if name == "extra" and str(value or "").startswith("nomad="):
@@ -550,7 +554,9 @@ def command(pl: Plan, *, args: list, tagged: bool) -> dict:
         argv.append(f"--extra={tag(s, pl.job, before=old_tag(pl.line))}")
     argv.append(pl.script)
     argv += list(args)
-    return {"argv": argv, "display": shlex.join(argv), "notes": notes}
+    # Shown without nomad's --begin: the command to run by hand.
+    shown = [a for i, a in enumerate(argv) if not (delay and i == 2)]
+    return {"argv": argv, "display": shlex.join(shown), "notes": notes}
 
 
 def extra_ok(pl: Plan) -> tuple[bool, str | None]:
@@ -572,12 +578,72 @@ def extra_ok(pl: Plan) -> tuple[bool, str | None]:
 
 
 def _run_sbatch(argv: list, cwd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=300, cwd=cwd,
-                          stdin=subprocess.DEVNULL)
+    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=300, cwd=cwd, stdin=subprocess.DEVNULL)
 
 
 _OURS = {"--again", "--cpus", "--mem", "--time", "--gpus", "--partition", "--keep", "--yes", "-y",
-         "--dry-run", "--days"}
+         "--dry-run", "--days", "--logs"}
+
+
+def logs_for(pl: Plan, flag: str | None, user: str, env=None) -> tuple:
+    """Where nomad puts the job's output (logs.Logs), and a warning when
+    $NOMAD_LOGS can't be used."""
+    env = os.environ if env is None else env
+    line = pl.line if pl.line is not None else spec.SubmitLine()
+    own = None
+    for where, sub in (("#SBATCH", pl.script_sub), ("its command line's", line)):
+        name = sub.last_of("output", "error")
+        if name:
+            own = f"{where} --{name}"
+    for var in ("SBATCH_OUTPUT", "SBATCH_ERROR"):
+        if var in env:                               # set, even empty, sbatch takes it
+            own = own or f"${var}"
+    text = (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
+    ignore_pbs = "SBATCH_IGNORE_PBS" in env or pl.script_sub.has("ignore-pbs") or line.has("ignore-pbs")
+    pbs = set() if ignore_pbs else _pbs_options(text)
+    if not own and pbs & {"o", "e"}:
+        own = "#PBS -o" if "o" in pbs else "#PBS -e"
+    cannot = None
+    if pl.script_sub.has("wait") or "SBATCH_WAIT" in env:
+        cannot = "sbatch waits for the job (--wait), so nomad can't set that before it starts"
+    elif pl.script_sub.has("test-only"):
+        cannot = "--test-only: no job is made"
+    elif pl.script_sub.has("begin") or "a" in pbs:
+        cannot = "the job sets its own start time (--begin)"
+    elif pl.script_sub.has("deadline"):
+        cannot = "the job has a --deadline, which a later start could miss"
+    elif any(o.split()[:1] in (["hetjob"], ["packjob"]) for o in spec.sbatch_lines(text)[0]):
+        cannot = "a heterogeneous job"
+    here = os.getcwd()
+    try:
+        return logs_.choose(flag=flag, env=env, user=user, here_dir=here, own_output=own,
+                            cannot=cannot), None
+    except logs_.LogsError as e:
+        if flag is not None:
+            raise click.BadParameter(str(e), param_hint="--logs")
+        warn = f"$NOMAD_LOGS can't be used ({e})."
+        return logs_.Logs(None, "env", "its output goes where Slurm puts it", kind="here"), warn
+
+
+def _pbs_options(text: str) -> set:
+    """The letters of the options a script's #PBS lines give, which sbatch
+    reads too (unless --ignore-pbs; anywhere in the script): o, e, a, h."""
+    got = set()
+    for raw in text.splitlines():
+        if raw.startswith("#PBS"):
+            for m in re.finditer(r"(?:^|\s)-([oeah])", raw[4:]):
+                got.add(m.group(1))
+    return got
+
+
+def _name_for(pl: Plan, env=None) -> str | None:
+    """The job's name as sbatch will give it (before it has one to read
+    back): its command line's -J, else $SBATCH_JOB_NAME, else the script's."""
+    env = os.environ if env is None else env
+    if pl.line is not None and pl.line.get("job-name"):
+        return pl.line.get("job-name")
+    return env.get("SBATCH_JOB_NAME") or spec.request_of(pl.sizing.sub).job_name
 
 
 @click.command("submit", context_settings={"allow_interspersed_args": False})
@@ -595,7 +661,10 @@ _OURS = {"--again", "--cpus", "--mem", "--time", "--gpus", "--partition", "--kee
 @click.option("--dry-run", is_flag=True, help="Show the sbatch command; don't run it.")
 @click.option("--days", default=180, show_default=True, type=click.IntRange(1, 730),
               help="How far back to look at your past jobs.")
-def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days):
+@click.option("--logs", metavar="here|FOLDER",
+              help="Where the job's Slurm output goes: a folder of its own in FOLDER, or `here` "
+                   "(Slurm's own place). Default: $NOMAD_LOGS, else /scratch/USER/jobs/JOBID-NAME.")
+def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs):
     """Size a job and submit it: nomad's values, or yours.
 
     \b
@@ -605,7 +674,9 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
 
     Shows what nomad suggests and why (as `nomad size`), and the sbatch
     command it will run; asks before running it. The job is tagged with
-    who chose each value (Slurm's "extra" field, Slurm 23.02 and later)."""
+    who chose each value (Slurm's "extra" field, Slurm 23.02 and later).
+    Its Slurm output goes in a folder of its own, /scratch/USER/jobs/JOBID-NAME
+    (--logs, $NOMAD_LOGS), unless the job says where."""
     if not script and not job:
         raise click.UsageError("give a job script, or --again JOB")
     if job and args:
@@ -631,9 +702,13 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         except (OSError, ValueError):
             pass
     ok, why = extra_ok(pl)
-    cmd = command(pl, args=list(args), tagged=ok)
+    user = me()
+    out, warn = logs_for(pl, logs, user)
+    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay)
     for n in cmd["notes"] + ([why] if why else []):
         click.echo(f"\n  {n}")
+    if warn:
+        click.echo(click.style(f"\n  ! {warn}", fg="yellow"))
     if stray:
         click.echo(click.style(f"\n  ! {', '.join(stray)} came after the script, so they go to the "
                                "script, not to nomad: put nomad's options before the script.", fg="yellow"))
@@ -644,6 +719,12 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         click.echo(click.style("\n  ! nomad isn't sure the script below is the one that ran: check it.",
                                fg="yellow"))
     click.echo(f"\n  sbatch command:\n    {cmd['display']}")
+    if out.pattern:
+        click.echo(f"\n  Its output: {logs_.shown(out.pattern, user=user, name=_name_for(pl))}/"
+                   f" (nomad sends it to start in {logs_.DELAY // 60} minutes, sets that, and lets it "
+                   "start at once)")
+    elif not (out.kind == "own" and out.source == "default"):
+        click.echo(f"\n  {out.why[0].upper() + out.why[1:]}.")
     if pl.sizing.problems:
         click.echo(click.style("\n  Slurm would likely refuse it as it stands (see above).", fg="yellow"))
     if dry_run:
@@ -658,25 +739,54 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         if not click.confirm("\n  Submit it?", default=True):
             click.echo("  Not submitted.")
             return
+    where = pl.submit_dir or pl.folder
+    said, failed, placed = [], None, None
     try:
-        r = _run_sbatch(cmd["argv"], pl.submit_dir or pl.folder)
+        r = _run_sbatch(cmd["argv"], where)
         if r.returncode != 0 and ok and "--extra" in (r.stderr or "") and (
                 "unrecognized" in (r.stderr or "") or "invalid" in (r.stderr or "").lower()):
             # A Slurm that has no --extra after all: once more, untagged.
-            click.echo("\n  sbatch doesn't take --extra here: sending it untagged.")
-            r = _run_sbatch([a for a in cmd["argv"] if not a.startswith("--extra=")],
-                            pl.submit_dir or pl.folder)
+            said.append("sbatch doesn't take --extra here: it was sent untagged.")
+            r = _run_sbatch([a for a in cmd["argv"] if not a.startswith("--extra=")], where)
     except subprocess.TimeoutExpired:
-        raise click.ClickException("sbatch didn't answer in 5 minutes: check squeue before sending it "
-                                   "again (it may have been submitted)")
+        r, failed = None, "sbatch didn't answer in 5 minutes"
     except OSError as e:
-        raise click.ClickException(f"sbatch could not run here: {e}")
+        r, failed = None, f"sbatch could not run here: {e}"
+    jid, on = logs_.job_number(r.stdout) if r is not None else (None, None)
+    if jid and out.pattern:
+        placed = logs_.place(out, jid, on, user=user)
+    _said_after(pl, out, r, jid, placed, failed, said)
+
+
+def _said_after(pl, out, r, jid, placed, failed, said) -> None:
+    """What `nomad submit` says once the job is sent."""
+    for n in said:
+        click.echo(f"\n  {n}")
+    if failed:
+        raise click.ClickException(failed + ("" if failed.startswith("sbatch could") else
+                                             ": check squeue before sending it again (it may have been submitted)"))
     if r.returncode != 0:
-        raise click.ClickException("sbatch refused it: " + ((r.stderr or r.stdout or "").strip()[-500:]
-                                                            or f"exit {r.returncode}"))
-    jid = (r.stdout or "").strip().split(";")[0]
+        msg = (r.stderr or r.stdout or "").strip()[-500:] or f"exit {r.returncode}"
+        if jid:
+            raise click.ClickException(f"sbatch ended with an error ({msg}), but it had submitted job {jid}: "
+                                       "check it with squeue before sending it again")
+        raise click.ClickException("sbatch refused it: " + msg)
+    if not jid:
+        click.echo("\n  Submitted (sbatch didn't print the job's number).")
+        return
     chosen = [n for n, c in pl.sizing.choices.items() if c.changed and c.source != "user"]
     mine = [n for n, c in pl.sizing.choices.items() if c.source == "user"]
     click.echo(f"\n  Submitted job {jid}."
                + (f" nomad set: {', '.join(LABELS[n] for n in chosen)}." if chosen else "")
                + (f" You set: {', '.join(LABELS[n] for n in mine)}." if mine else ""))
+    if placed is not None:
+        if placed.path:
+            click.echo(f"  Its output: {placed.path}")
+        if placed.note:
+            click.echo(f"  {placed.note}")
+        if placed.late:
+            click.echo(f"  It starts in {logs_.DELAY // 60} minutes at the latest (nomad couldn't move its "
+                       "start to now).")
+    text = (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
+    if pl.script_sub.has("hold") or (pl.line is not None and pl.line.has("hold")) or "h" in _pbs_options(text):
+        click.echo(f"  It is held, as the job asks: scontrol release {jid} when it should run.")

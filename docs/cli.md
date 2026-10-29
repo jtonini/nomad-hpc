@@ -43,6 +43,7 @@ Run by users on a cluster's login node (1.18; [details](submit.md)):
 | `nomad size --job N` | The same for a job of yours that ran, to run it again |
 | `nomad submit job.sh` | Size it, show the sbatch command, ask, and submit it: nomad's values, or yours (`--mem 12G`, `--keep`) |
 | `nomad submit --again N` | A job of yours that ran, sent again with what nomad learned from how it ended |
+| `nomad submit --logs here job.sh` | Its Slurm output where Slurm puts it (default: a folder of its own, `/scratch/USER/jobs/JOBID-NAME`; also `$NOMAD_LOGS`) |
 
 ## Analysis
 
