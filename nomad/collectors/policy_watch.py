@@ -64,6 +64,22 @@ The GPU workstations are asked as such: ``workstations`` lists hosts probed
 over ssh with the role "workstation" (login and compute nodes aside), so the
 GPU findings reach the hub and the Console the same way (1.21).
 
+Behaviour (1.22): the tells an AI agent (or a careless script) driving the
+cluster over the user's own ssh leaves -- which look like the user to the
+/proc watch, so the watch reads what was done, not who typed it.
+- heavy (``watch_heavy``, on by default): a user process using real CPU by
+  lifetime average (its whole CPU time / its age) of at least ``heavy_cpu``
+  cores, having used at least ``heavy_min_seconds`` CPU-seconds, on a **login**
+  node (a compute node is where jobs are meant to be heavy) -- a computation
+  run where it shouldn't be;
+- from this site's ``jobs`` table (``watch_jobs``, on by default; nothing where
+  there is none): job_burst (``burst_jobs`` sbatches within ``burst_minutes`` --
+  listed, not alerted, since a parameter sweep bursts too; an array counts as
+  one), fail_fast (``fail_fast_jobs`` jobs that FAILED within
+  ``fail_fast_seconds`` -- an agent resubmitting what it doesn't understand),
+  job_churn (the same job name resubmitted ``churn_repeats`` times with
+  cancellations between).
+
 A host that answered before and hasn't for 3 sweeps raises its own alert:
 a probe that can't finish there sees nothing. Findings not seen for
 ``keep_days`` (365) are removed.
@@ -107,6 +123,16 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     # watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
     # gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
     # gpu_serve_hosts = []         # e.g. ["shared-infer01"]: boxes where serving a GPU is sanctioned (listed)
+    # watch_heavy = true           # heavy use of a login node (a user process holding real CPU)
+    # heavy_cpu = 2.0              # cores (by lifetime average) at or above which it is heavy
+    # heavy_min_seconds = 600      # CPU-seconds it must have used (so a brief spike doesn't count)
+    # watch_jobs = true            # job-submission patterns from this site's jobs table
+    # job_window_hours = 24        # how far back the job patterns look
+    # burst_jobs = 60              # sbatches within burst_minutes to list a burst (an array is one)
+    # burst_minutes = 10
+    # fail_fast_jobs = 15          # jobs that FAILED within fail_fast_seconds to warn
+    # fail_fast_seconds = 60
+    # churn_repeats = 8            # resubmissions of one job (with cancellations) to warn
     # keep_days = 365
 
 Tables: ``policy_findings`` (one row per finding: host, role, username,
@@ -127,6 +153,7 @@ import logging
 import os
 import re
 import socket
+import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -148,7 +175,8 @@ SEVERITY = {"tunnel": "warning", "ssh_reverse": "warning", "ssh_socks": "warning
             "code_tunnel": "warning", "miner": "critical", "relay": "warning",
             "listening": "warning", "escalation": "critical", "agent": "info",
             "auth_failures": "warning", "setuid_new": "warning",
-            "gpu": "info", "gpu_served": "warning"}
+            "gpu": "info", "gpu_served": "warning",
+            "heavy": "warning", "job_burst": "info", "fail_fast": "warning", "job_churn": "warning"}
 LABELS = {"tunnel": "a tunnel program", "ssh_reverse": "an ssh reverse forward (-R)",
           "ssh_socks": "an ssh SOCKS proxy (-D)", "code_tunnel": "a VS Code tunnel",
           "miner": "a miner", "relay": "a relay or proxy",
@@ -156,7 +184,10 @@ LABELS = {"tunnel": "a tunnel program", "ssh_reverse": "an ssh reverse forward (
           "escalation": "a process that reached root outside the usual path",
           "agent": "an AI agent", "auth_failures": "repeated failed privilege attempts",
           "setuid_new": "a new setuid or setgid file",
-          "gpu": "a process using a GPU", "gpu_served": "a GPU served to the network"}
+          "gpu": "a process using a GPU", "gpu_served": "a GPU served to the network",
+          "heavy": "heavy use of a login node", "job_burst": "a burst of job submissions",
+          "fail_fast": "jobs failing within seconds, again and again",
+          "job_churn": "the same job cancelled and resubmitted over and over"}
 # Kinds the probe sends that are a person's finding of their own (not an ssh forward's reach).
 ESCALATION = "escalation"
 REACH = {"inside": "stays inside", "campus": "on campus", "outside": "connects outside"}
@@ -329,7 +360,16 @@ KEYS = {"enabled", "interval", "interval_minutes", "nodes", "login_hosts", "min_
         "ignore_users", "watch_self", "ignore_programs", "ignore_ports", "owners_in_alerts", "parallel", "timeout",
         "max_seconds", "ssh_user", "python", "trusted_hosts", "campus_networks", "cluster_networks", "keep_days",
         "agents", "root_report", "alerts_enabled", "max_retries", "retry_delay",
-        "workstations", "watch_gpu", "gpu_min_mem", "gpu_serve_hosts"}
+        "workstations", "watch_gpu", "gpu_min_mem", "gpu_serve_hosts",
+        "watch_heavy", "heavy_cpu", "heavy_min_seconds", "watch_jobs", "job_window_hours",
+        "burst_jobs", "burst_minutes", "fail_fast_jobs", "fail_fast_seconds", "churn_repeats"}
+
+# Job-behaviour thresholds (1.22) and their defaults; validated as whole numbers.
+JOB_DEFAULTS = {"window_hours": 24, "burst_jobs": 60, "burst_minutes": 10,
+                "fail_fast_jobs": 15, "fail_fast_seconds": 60, "churn_repeats": 8}
+_JOB_KEYS = {"job_window_hours": "window_hours", "burst_jobs": "burst_jobs", "burst_minutes": "burst_minutes",
+             "fail_fast_jobs": "fail_fast_jobs", "fail_fast_seconds": "fail_fast_seconds",
+             "churn_repeats": "churn_repeats"}
 
 
 def _list(v) -> list:
@@ -395,8 +435,19 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
     gm = conf.get("gpu_min_mem")
     if gm is not None and not (isinstance(gm, int) and not isinstance(gm, bool) and gm >= 0):
         problems.append("[collectors.policy_watch] gpu_min_mem: a whole number of MiB, like 256")
-    if conf.get("watch_gpu") is not None and not isinstance(conf.get("watch_gpu"), bool):
-        problems.append("[collectors.policy_watch] watch_gpu: true or false")
+    for b in ("watch_gpu", "watch_heavy", "watch_jobs"):
+        if conf.get(b) is not None and not isinstance(conf.get(b), bool):
+            problems.append(f"[collectors.policy_watch] {b}: true or false")
+    for k in _JOB_KEYS:
+        v = conf.get(k)
+        if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v > 0):
+            problems.append(f"[collectors.policy_watch] {k}: a whole number greater than 0, like {JOB_DEFAULTS[_JOB_KEYS[k]]}")
+    hc = conf.get("heavy_cpu")
+    if hc is not None and not (isinstance(hc, (int, float)) and not isinstance(hc, bool) and hc > 0):
+        problems.append("[collectors.policy_watch] heavy_cpu: a number of cores greater than 0, like 2")
+    hm = conf.get("heavy_min_seconds")
+    if hm is not None and not (isinstance(hm, int) and not isinstance(hm, bool) and hm >= 0):
+        problems.append("[collectors.policy_watch] heavy_min_seconds: a whole number of seconds, like 600")
     entries, notes = trusted_entries(lists["trusted_hosts"], resolve=resolve)
     problems += [f"[collectors.policy_watch] {n}" for n in notes]
     campus, n1 = networks(lists["campus_networks"], "campus network")
@@ -421,6 +472,14 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
             allow = (" (serving allowed on " + ", ".join(lists["gpu_serve_hosts"]) + ")") \
                 if lists["gpu_serve_hosts"] else ""
             info.append("GPU watch: on; a GPU reachable from the network is a warning" + allow)
+    behaviour_keys = {"watch_heavy", "heavy_cpu", "heavy_min_seconds", "watch_jobs", *_JOB_KEYS}
+    if behaviour_keys & set(conf):
+        on = []
+        if conf.get("watch_heavy") is not False:
+            on.append("heavy login-node use")
+        if conf.get("watch_jobs") is not False:
+            on.append("job bursts, fail-fast and churn")
+        info.append("behaviour: " + ("; ".join(on) if on else "off"))
     return problems, info
 
 
@@ -550,6 +609,10 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
                 # has turned node listeners on -- and even then an ephemeral port is
                 # listed. A GPU served through its account's tunnel still warns.
                 kind = "gpu"
+        if kind == "heavy":
+            if role != "login":
+                continue                                  # heavy compute is normal off a login node
+            note = heavy_note(f.get("heavy"))
         sev = "info" if verified else SEVERITY.get(kind, "info")
         procs = f.get("procs") if isinstance(f.get("procs"), str) and re.fullmatch(r"[0-9a-f]{16}", f["procs"]) \
             else None
@@ -632,6 +695,123 @@ def keep(f: dict, old, names=None) -> None:
     f.update(verified=True, severity="info", note=f"{was}{KEPT}{now})", away=away)
 
 
+def heavy_note(h: dict) -> str:
+    """A heavy-use finding's note: the CPU it holds (by lifetime average) and,
+    when large, the memory."""
+    if not isinstance(h, dict):
+        return ""
+    parts = []
+    cores = h.get("cores")
+    if isinstance(cores, (int, float)) and cores > 0:
+        parts.append(f"~{cores:g} cores, sustained")
+    rss = h.get("rss_mb")
+    if isinstance(rss, int) and rss >= 1024:
+        parts.append(f"{rss / 1024:.1f} GB")
+    return "; ".join(parts)
+
+
+# -- behaviour from the jobs table (1.22): burst, fail-fast, churn --------------------
+
+def _state_word(s) -> str:
+    """A Slurm state word: 'CANCELLED by 123' -> 'CANCELLED'."""
+    return str(s or "").strip().upper().split(" ")[0]
+
+
+def _jtime(s):
+    try:
+        return datetime.fromisoformat(str(s)[:19].replace("T", " ").replace(" ", "T"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _max_in_window(times: list, window: timedelta) -> int:
+    """The most of ``times`` (sorted) that fall within any ``window``."""
+    best = j = 0
+    for i in range(len(times)):
+        while times[i] - times[j] > window:
+            j += 1
+        best = max(best, i - j + 1)
+    return best
+
+
+def _uid_of(name: str):
+    try:
+        import pwd
+        return pwd.getpwnam(name).pw_uid
+    except (KeyError, OSError, TypeError):
+        return None
+
+
+def job_findings(conn, host: str, role: str, now: datetime, cfg: dict) -> list[dict]:
+    """Per-user job-behaviour findings from the local ``jobs`` table (1.22):
+    the patterns an AI agent (or a careless script) driving the cluster over
+    the user's own ssh leaves -- which look like the user to the /proc watch.
+    An array counts as one submission (its tasks share a submit time), so a
+    legitimate array isn't a burst. Signs for an admin to judge, not verdicts.
+
+      job_burst  (info)    at least ``burst_jobs`` sbatches within
+                           ``burst_minutes`` -- normal for a parameter sweep,
+                           so listed, not alerted;
+      fail_fast  (warning) at least ``fail_fast_jobs`` jobs that FAILED within
+                           ``fail_fast_seconds`` -- the shape of an agent
+                           resubmitting something it doesn't understand;
+      job_churn  (warning) the same job name resubmitted at least
+                           ``churn_repeats`` times with cancellations between.
+    """
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    except sqlite3.OperationalError:
+        return []
+    if not {"user_name", "submit_time", "state"} <= cols:
+        return []
+    rt = "runtime_seconds" if "runtime_seconds" in cols else "NULL"
+    jn = "job_name" if "job_name" in cols else "NULL"
+    cutoff = (now - timedelta(hours=cfg["window_hours"])).isoformat(timespec="seconds")
+    try:
+        rows = conn.execute(
+            f"SELECT user_name, submit_time, state, {rt} AS runtime, {jn} AS job_name "
+            "FROM jobs WHERE submit_time >= ? AND user_name IS NOT NULL AND user_name != ''",
+            (cutoff,)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    by_user: dict = {}
+    for r in rows:
+        by_user.setdefault(r["user_name"], []).append(r)
+    user_ok = re.compile(r"^[\w.$@-]{1,64}$")
+    out = []
+
+    def finding(user, kind, note):
+        return {"host": host, "role": role, "username": _clean(user, user_ok), "uid": _uid_of(user),
+                "kind": kind, "program": "", "detail": "", "reach": "", "verified": None,
+                "note": note, "procs": None, "why": None, "severity": SEVERITY.get(kind, "warning")}
+
+    for user, js in by_user.items():
+        subs = sorted({t for t in (_jtime(j["submit_time"]) for j in js) if t})   # distinct: an array is one
+        n_burst = _max_in_window(subs, timedelta(minutes=cfg["burst_minutes"]))
+        if n_burst >= cfg["burst_jobs"]:
+            out.append(finding(user, "job_burst", f"{n_burst} job submissions within {cfg['burst_minutes']} min"))
+        ff = {_jtime(j["submit_time"]) for j in js
+              if _state_word(j["state"]) == "FAILED" and isinstance(j["runtime"], (int, float))
+              and 0 <= j["runtime"] < cfg["fail_fast_seconds"]}
+        ff.discard(None)
+        if len(ff) >= cfg["fail_fast_jobs"]:
+            out.append(finding(user, "fail_fast",
+                               f"{len(ff)} jobs failed within {cfg['fail_fast_seconds']}s of starting"))
+        by_name: dict = {}
+        for j in js:
+            b = by_name.setdefault(j["job_name"] or "", {"subs": set(), "cancels": set()})
+            t = _jtime(j["submit_time"])
+            if t:
+                b["subs"].add(t)
+                if _state_word(j["state"]) == "CANCELLED":
+                    b["cancels"].add(t)
+        worst = max(((len(b["subs"]), len(b["cancels"])) for b in by_name.values()), default=(0, 0))
+        if worst[0] >= cfg["churn_repeats"] and worst[1] >= max(2, cfg["churn_repeats"] // 2):
+            out.append(finding(user, "job_churn",
+                               f"{worst[0]} resubmissions of one job, {worst[1]} cancelled"))
+    return out
+
+
 class PolicyWatchCollector(BaseCollector):
     name = "policy_watch"
     description = "Tunnels, miners, relays, exposed services and GPUs on login, compute and workstation hosts"
@@ -673,6 +853,20 @@ class PolicyWatchCollector(BaseCollector):
         self.gpu_min_mem = int(c["gpu_min_mem"]) if isinstance(c.get("gpu_min_mem"), int) \
             and not isinstance(c.get("gpu_min_mem"), bool) and c["gpu_min_mem"] >= 0 else 256
         self.gpu_serve_hosts = [h for h in _list(c.get("gpu_serve_hosts")) if HOST_RE.fullmatch(h)]
+        # Behaviour signals (1.22): heavy use of a login node (the probe), and
+        # job-submission patterns (the local jobs table). On by default; both
+        # no-op where there is nothing to see (no heavy process, no jobs table).
+        self.watch_heavy = c.get("watch_heavy", True) is not False
+        self.heavy_cpu = float(c["heavy_cpu"]) if isinstance(c.get("heavy_cpu"), (int, float)) \
+            and not isinstance(c.get("heavy_cpu"), bool) and c["heavy_cpu"] > 0 else 2.0
+        self.heavy_min = int(c["heavy_min_seconds"]) if isinstance(c.get("heavy_min_seconds"), int) \
+            and not isinstance(c.get("heavy_min_seconds"), bool) and c["heavy_min_seconds"] >= 0 else 600
+        self.watch_jobs = c.get("watch_jobs", True) is not False
+        self.job_cfg = dict(JOB_DEFAULTS)
+        for key, inner in _JOB_KEYS.items():
+            v = c.get(key)
+            if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+                self.job_cfg[inner] = v
         rr = c.get("root_report")
         self.root_report = rr if isinstance(rr, str) and PATH_OK.fullmatch(rr) else ""
         ports = c.get("ignore_ports")
@@ -785,6 +979,12 @@ class PolicyWatchCollector(BaseCollector):
             args += ["--gpu"]
             if self.gpu_min_mem != 256:
                 args += ["--gpu-min-mem", str(self.gpu_min_mem)]
+        if self.watch_heavy:
+            args += ["--heavy"]
+            if self.heavy_cpu != 2.0:
+                args += ["--heavy-cpu", repr(self.heavy_cpu)]
+            if self.heavy_min != 600:
+                args += ["--heavy-min", str(self.heavy_min)]
         return args
 
     def remote_command(self) -> str:
@@ -872,6 +1072,17 @@ class PolicyWatchCollector(BaseCollector):
                                                    f"no answer within the sweep's {int(self.max_seconds)} s"))
             finally:
                 pool.shutdown(wait=False, cancel_futures=True)   # late answers aren't waited for
+        # Job-behaviour findings from this site's own jobs table, attributed to
+        # the login host where the collector runs (no-op where there is no
+        # jobs table: a lab headnode without Slurm).
+        if self.watch_jobs and rows:
+            try:
+                with self.get_db_connection() as conn:
+                    conn.row_factory = sqlite3.Row
+                    jf = job_findings(conn, rows[0]["host"], "login", datetime.now(), self.job_cfg)
+                rows[0]["findings"].extend(jf)
+            except Exception as e:                           # noqa: BLE001 -- behaviour is best-effort
+                logger.warning(f"policy_watch: job behaviour not read: {e}")
         answered = sum(1 for r in rows if r["answered"])
         self._note_sweep(when, len(rows), answered)
         if answered < len(rows):

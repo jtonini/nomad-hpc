@@ -33,7 +33,11 @@ other accounts' processes: hidepid):
   network or its account also runs a tunnel/relay/forward -- a GPU reachable
   from outside, the shape of reselling or an open inference server. Graphics
   (Xorg, a browser) are not compute apps, so they don't show; a context below
-  --gpu-min-mem (256 MiB) is a probe, not a workload, and is left out.
+  --gpu-min-mem (256 MiB) is a probe, not a workload, and is left out;
+- with --heavy, user processes using real CPU by lifetime average (their whole
+  CPU time / their age) of at least --heavy-cpu cores, having used at least
+  --heavy-min CPU-seconds (heavy): the shape of a computation run where it
+  shouldn't be. The collector keeps it only for a login host.
 
 With --root-report, findings a root helper (watch_root_probe.py) left in a
 JSON file are read here too and travel the same pipeline: counts only, of
@@ -73,7 +77,8 @@ holds (within limits: policy_watch.keep).
     /usr/bin/python3 -I -S - [--min-uid N] [--trusted NET@PORT,...]
         [--campus NET,...] [--cluster NET,...] [--ignore-users a,b]
         [--ignore-programs a,b] [--agents a,b] [--root-report PATH]
-        [--gpu] [--gpu-min-mem MiB] [--proc DIR] < watch_probe.py
+        [--gpu] [--gpu-min-mem MiB] [--heavy] [--heavy-cpu CORES]
+        [--heavy-min SECONDS] [--proc DIR] < watch_probe.py
 """
 import hashlib
 import ipaddress
@@ -133,6 +138,14 @@ GPU_MIN_MEM = 256
 # such an account is served, even when its own listener can't be read (no root).
 # A verified reverse forward is the admin's own and doesn't count (see main).
 EXPOSURE_KINDS = ("tunnel", "relay", "code_tunnel", "ssh_reverse", "ssh_socks")
+# Heavy use (1.22): a user process whose lifetime-average CPU (its whole CPU
+# time / its age) is at least this many cores, having used at least this many
+# CPU-seconds -- real compute, the shape of work run where it shouldn't be (a
+# login or head node). The collector keeps it only for a login host.
+HEAVY_CORES = 2.0
+HEAVY_MIN_SECONDS = 600
+HZ = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") and "SC_CLK_TCK" in os.sysconf_names else 100
+PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") and "SC_PAGE_SIZE" in os.sysconf_names else 4096
 
 
 def _nets(text, ports=False):
@@ -154,7 +167,8 @@ def _nets(text, ports=False):
 def _args():
     out = {"min_uid": 1000, "proc": "/proc", "trusted": [], "campus": [], "cluster": [],
            "ignore_users": frozenset(), "ignore_programs": frozenset(), "agents": list(AGENTS),
-           "root_report": "", "gpu": False, "gpu_min_mem": GPU_MIN_MEM}
+           "root_report": "", "gpu": False, "gpu_min_mem": GPU_MIN_MEM,
+           "heavy": False, "heavy_cores": HEAVY_CORES, "heavy_min": HEAVY_MIN_SECONDS}
     a = sys.argv[1:]
     i = 0
     while i < len(a):
@@ -185,6 +199,21 @@ def _args():
         elif a[i] == "--gpu-min-mem" and i + 1 < len(a):
             try:
                 out["gpu_min_mem"] = max(0, int(a[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+        elif a[i] == "--heavy":
+            out["heavy"] = True
+            i += 1
+        elif a[i] == "--heavy-cpu" and i + 1 < len(a):
+            try:
+                out["heavy_cores"] = max(0.1, float(a[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+        elif a[i] == "--heavy-min" and i + 1 < len(a):
+            try:
+                out["heavy_min"] = max(0, int(a[i + 1]))
             except ValueError:
                 pass
             i += 2
@@ -1209,6 +1238,82 @@ def gpu_findings(proc, min_uid, agents=AGENTS, ignore_users=frozenset(), ignore_
     return rows
 
 
+# -- heavy use on a login node (1.22) -------------------------------------------------
+
+def _uptime(proc):
+    try:
+        with open(os.path.join(proc, "uptime")) as f:
+            return float(f.read().split()[0])
+    except (OSError, ValueError, IndexError):
+        return 0.0
+
+
+def heavy(proc, min_uid, cores=HEAVY_CORES, min_seconds=HEAVY_MIN_SECONDS,
+          ignore_users=frozenset(), ignore_programs=frozenset()):
+    """User processes using real CPU by lifetime average -- their whole CPU
+    time (utime+stime) over their age -- of at least ``cores`` cores, having
+    used at least ``min_seconds`` CPU-seconds (so a brief spike doesn't count).
+    The shape of a computation run where it shouldn't be; the collector keeps
+    it only for a login host (a compute node is where jobs are meant to be
+    heavy). Single-shot, from /proc/<pid>/stat (real uid from status, as the
+    escalation check does). At most five per account, then +N more."""
+    up = _uptime(proc)
+    if up <= 0:
+        return []
+    hz = HZ or 100
+    found = {}
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        names = []
+    for d in names:
+        if not d.isdigit():
+            continue
+        st = _status(os.path.join(proc, d))
+        if st is None:
+            continue
+        uid, _ppid, comm = st
+        if uid < min_uid or (ignore_users and _name(uid) in ignore_users):
+            continue
+        try:
+            stat = _read(os.path.join(proc, d, "stat"), 4096).decode("utf-8", "replace")
+            after = stat.rsplit(")", 1)[1].split()
+            cpu_sec = (int(after[11]) + int(after[12])) / hz        # utime + stime
+            age = up - int(after[19]) / hz                          # now - starttime
+            rss_pages = int(after[21])
+        except (OSError, IndexError, ValueError, ZeroDivisionError):
+            continue
+        if age <= 0 or cpu_sec < min_seconds:
+            continue
+        avg = cpu_sec / age
+        if avg < cores:
+            continue
+        try:
+            argv0 = _read(os.path.join(proc, d, "cmdline"), 4096).split(b"\0")[0].decode("utf-8", "replace")
+        except OSError:
+            argv0 = ""
+        aka = sorted({safe(argv0), safe(comm)} - {"?", ""})
+        if ignore_programs and aka and set(aka) <= set(ignore_programs):
+            continue
+        program = safe(argv0) if safe(argv0) != "?" else safe(comm)
+        key = (uid, program)
+        n, a2, mx_cpu, mx_rss = found.get(key, (0, set(), 0.0, 0))
+        found[key] = (n + 1, a2 | set(aka), max(mx_cpu, avg), max(mx_rss, rss_pages))
+    rows, per = [], {}
+    for (uid, program), (n, aka, avg, rss) in sorted(found.items(), key=lambda kv: str(kv[0])):
+        per[uid] = per.get(uid, 0) + 1
+        if per[uid] > MAX_PER:
+            continue
+        rows.append({"uid": uid, "user": _name(uid), "kind": "heavy", "program": program, "detail": "",
+                     "aka": sorted(aka), "processes": n,
+                     "heavy": {"cores": round(avg, 1), "rss_mb": int(rss * PAGE / (1024 * 1024))}})
+    for uid, total in per.items():
+        if total > MAX_PER:
+            rows.append({"uid": uid, "user": _name(uid), "kind": "heavy", "program": f"+{total - MAX_PER} more",
+                         "detail": "", "aka": [], "processes": 0, "heavy": {}})
+    return rows
+
+
 def main():
     a = _args()
     ssh = {}
@@ -1231,6 +1336,9 @@ def main():
                     and not (f["kind"] == "ssh_reverse" and f.get("verified"))}
         found = found + gpu_findings(a["proc"], a["min_uid"], a["agents"], a["ignore_users"],
                                      a["ignore_programs"], exposure, a["gpu_min_mem"])
+    if a["heavy"]:
+        found = found + heavy(a["proc"], a["min_uid"], a["heavy_cores"], a["heavy_min"],
+                              a["ignore_users"], a["ignore_programs"])
     out = {
         "host": socket.gethostname().split(".")[0],
         "uid": os.getuid(),

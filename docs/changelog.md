@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.22.0 (October 2026)
+
+### Features
+- The policy watch gains behaviour signals: the tells an AI agent (or a
+  careless script) driving the cluster over the user's *own* ssh leaves — which
+  look like the user typing to the /proc watch, so the watch reads what was
+  done, not who typed it. All read-only, thresholds in the TOML, info/warning
+  only.
+  - **`heavy` (warning):** a user process holding real CPU — by lifetime
+    average (its whole CPU time / its age), so a steady computation shows and a
+    brief spike doesn't — of at least `heavy_cpu` cores (default 2), on a
+    **login** node only (a compute node is where jobs are meant to be heavy).
+    The long-standing "work running on the head node" catch; no root needed.
+  - **`job_burst` (listed, not alerted):** at least `burst_jobs` sbatches by
+    one user within `burst_minutes`. An array counts as one, so a big array
+    isn't a burst; listed rather than alerted because a parameter sweep bursts
+    the same way.
+  - **`fail_fast` (warning):** at least `fail_fast_jobs` of a user's jobs that
+    FAILED within `fail_fast_seconds` — an agent resubmitting what it doesn't
+    understand (node failures don't count).
+  - **`job_churn` (warning):** the same job name resubmitted `churn_repeats`
+    times with cancellations between — a cancel/resubmit loop.
+  - Config: `watch_heavy`, `heavy_cpu`, `heavy_min_seconds`, `watch_jobs`,
+    `job_window_hours`, `burst_jobs`, `burst_minutes`, `fail_fast_jobs`,
+    `fail_fast_seconds`, `churn_repeats` in `[collectors.policy_watch]` (both
+    watches on by default; each no-ops where there's nothing to see). The job
+    signals read this site's `jobs` table; `heavy` adds `--heavy` to the probe.
+    No database change — new `kind` values in `policy_findings`, already synced.
+- Console: the Policy watch page labels the four new kinds and names them in
+  its intro (nomad_fix_73.py). No new route or scoping change.
+
 ## v1.21.0 (October 2026)
 
 ### Features

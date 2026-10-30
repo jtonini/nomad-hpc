@@ -20,6 +20,10 @@ Of accounts from `min_uid` (1000) up -- system services aren't people; nor are S
 | `auth_failures`, `setuid_new` | from the root helper only (below): repeated failed privilege attempts per account, and new setuid/setgid files in user-writable places (1.20) | warning |
 | `gpu` | a GPU compute process (nvidia-smi): **listed, not alerted** -- the note says the memory held, whether it is detached (no terminal: the shape of an unattended job), and whether it is an AI agent (1.21) | listed |
 | `gpu_served` | a GPU compute process reachable from the network: it listens on a port open to the network, or its account also runs a tunnel/relay/forward -- the shape of reselling or an open inference server (1.21) | warning |
+| `heavy` | a user process holding real CPU (by lifetime average: its whole CPU time / its age) of at least `heavy_cpu` cores on a **login** node -- a computation run where it shouldn't be (1.22) | warning |
+| `job_burst` | at least `burst_jobs` sbatches within `burst_minutes` by one user (an array counts as one) -- **listed, not alerted**, since a parameter sweep bursts too (1.22) | listed |
+| `fail_fast` | at least `fail_fast_jobs` of a user's jobs that FAILED within `fail_fast_seconds` of starting -- the shape of an agent resubmitting what it doesn't understand (1.22) | warning |
+| `job_churn` | the same job name resubmitted at least `churn_repeats` times by one user with cancellations between (1.22) | warning |
 
 A program is known by its name as it started (argv[0]), its kernel name (`comm`: what `exec -a` doesn't change), a download's suffix aside (`cloudflared-linux-amd64`, `chisel_1.10.1_linux_amd64`), and, for an interpreter (python, node, java, sh, ...), the script or module it runs, by its exact name (`python3 -m sshuttle`, `sh pagekite.py`; `rigel_fit.py` isn't the rigel miner). An `ignore_programs` entry leaves a finding out only if it names every name the process goes by.
 
@@ -89,6 +93,16 @@ enabled = true
 # watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
 # gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
 # gpu_serve_hosts = []         # boxes where serving a GPU is sanctioned (then listed): ["shared-infer01"]
+# watch_heavy = true           # heavy use of a login node (a user process holding real CPU)
+# heavy_cpu = 2.0              # cores (by lifetime average) at or above which it is heavy
+# heavy_min_seconds = 600      # CPU-seconds the process must have used (so a brief spike doesn't count)
+# watch_jobs = true            # job-submission patterns from this site's jobs table
+# job_window_hours = 24
+# burst_jobs = 60              # sbatches within burst_minutes to list a burst (an array is one)
+# burst_minutes = 10
+# fail_fast_jobs = 15          # jobs that FAILED within fail_fast_seconds to warn
+# fail_fast_seconds = 60
+# churn_repeats = 8            # resubmissions of one job (with cancellations) to warn
 # keep_days = 365              # findings not seen for this long are removed
 ```
 
@@ -145,6 +159,18 @@ GPU miners don't need a kind of their own: a miner is caught by name on any host
 **Allowing what is meant to be there.** `gpu_serve_hosts = ["shared-infer01"]` names boxes where serving a GPU is sanctioned: there a served GPU is listed, not a warning. `ignore_programs` (e.g. `["ollama"]`) and `ignore_users` apply as everywhere, so a lab's own shared server or a service account is left out.
 
 **What it can't see, honestly.** Per-process GPU attribution goes opaque under MIG, and when the compute app runs in a container or a separate PID namespace. Reading *which* port a GPU process listens on needs to read that process's sockets — the probe's own, or any as root — so where it doesn't run as root, a GPU another account serves is caught through that account's exposure (a tunnel or forward it also runs), not its listener directly. *Detached* is a heuristic: an overnight training run looks the same as a rented job, which is why it only annotates a finding and never alerts on its own. As everywhere, these are signs to judge, not verdicts, and the watch sees only what runs when it looks.
+
+## Behaviour: the agent the /proc watch can't see (1.22)
+
+An agent on a login or compute node shows up as `agent`. But an agent (or a careless script) running on someone's **laptop** and driving the cluster over the user's own ssh looks, from the cluster, exactly like the person typing — there's no agent process on the cluster to find. So the watch also reads *what was done*, not who typed it, from two things it already has: the process table, and this site's `jobs` table.
+
+- **`heavy` (warning):** a user process holding real CPU — by **lifetime average**, its whole CPU time (`utime`+`stime`) over its age, so a steady computation shows and a brief spike doesn't — of at least `heavy_cpu` cores (default 2), having used at least `heavy_min_seconds` CPU-seconds (default 600). Only on a **login** node: a compute node is where jobs are *meant* to be heavy, so `heavy` is dropped there (as a plain listener is). This is the long-standing "someone's running their work on the head node" catch, and it needs no root. `ignore_users` / `ignore_programs` leave out a sanctioned service.
+- **From the `jobs` table** (`watch_jobs`, read on the site each sweep; nothing where there's no Slurm):
+  - **`job_burst` (listed, not alerted):** at least `burst_jobs` (default 60) sbatches by one user within `burst_minutes` (default 10). An **array counts as one** (its tasks share a submit time), so a 1,000-task array isn't a burst. It's *listed* rather than alerted because a legitimate parameter sweep bursts the same way — it surfaces who is submitting heavily, for you to glance at.
+  - **`fail_fast` (warning):** at least `fail_fast_jobs` (default 15) of a user's jobs that **FAILED within `fail_fast_seconds`** (default 60) of starting. The shape of an agent resubmitting something it doesn't understand (node failures don't count — those aren't the user's doing).
+  - **`job_churn` (warning):** the same job name resubmitted at least `churn_repeats` (default 8) times by one user, with cancellations between — a cancel/resubmit loop.
+
+The job findings are attributed to the login host where the collector runs, with the user's NetID, and raise one alert per user and kind (as every finding does). Thresholds are all in the TOML; raise them, or `ignore_users` a service account, if a site's normal work trips one. As everywhere: signs to judge, not verdicts — a burst or a run of failures can be an ordinary bad day. We don't watch query rates (sacct/squeue hammering): nomad doesn't record user queries, so there's no honest signal there.
 
 ## What it is not
 

@@ -173,6 +173,22 @@ check_services = ["slurmd", "munge"]
 # watch_gpu = true
 # gpu_min_mem = 256
 # gpu_serve_hosts = ["shared-infer01"]
+# Behaviour (1.22): the tells an AI agent (or a careless script) driving the
+# cluster over the user's own ssh leaves -- which look like the user to the
+# /proc watch. heavy: a user process holding real CPU (by lifetime average) on
+# a login node. From the jobs table: job_burst (sbatches in a window; an array
+# is one; listed, a sweep bursts too), fail_fast (jobs that FAIL in seconds),
+# job_churn (the same job resubmitted and cancelled over and over).
+# watch_heavy = true
+# heavy_cpu = 2.0
+# heavy_min_seconds = 600
+# watch_jobs = true
+# job_window_hours = 24
+# burst_jobs = 60
+# burst_minutes = 10
+# fail_fast_jobs = 15
+# fail_fast_seconds = 60
+# churn_repeats = 8
 
 # Compute nodes' local disks (1.14): on the head node, df of each path on
 # every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the
