@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.21.0 (October 2026)
+
+### Features
+- The policy watch reaches GPU workstations and keys on the GPU. `workstations`
+  lists GPU boxes to probe over ssh (role "workstation"); the findings travel
+  the same pipeline to the hub and the Console. With `watch_gpu` (on by
+  default; nothing where there is no GPU), the probe reads GPU **compute**
+  processes with `nvidia-smi` — unprivileged, and never graphics (Xorg, a
+  browser), so a desktop's ordinary GPU use doesn't show:
+  - `gpu` (listed, not alerted): a GPU compute process, with the memory held,
+    whether it is detached (no terminal — the shape of an unattended job) and
+    whether it is an AI agent.
+  - `gpu_served` (warning): a GPU reachable from the network — it listens on a
+    port open to the network, or its account also runs a tunnel/relay/forward.
+    The shape of reselling or an open inference server.
+  - `gpu_min_mem` (256 MiB) drops a trivial compute context; `gpu_serve_hosts`
+    names boxes where serving a GPU is sanctioned (then listed, not alerted);
+    `ignore_programs`/`ignore_users` apply as everywhere.
+  - Under-claim by design: detached only annotates, never alerts on its own;
+    per-process GPU attribution is opaque under MIG or in containers, and a
+    GPU another account serves is caught through its account's exposure unless
+    the probe runs as root. See docs/policy_watch.md.
+- Console: the Policy watch page labels the two new kinds (`gpu`, `gpu_served`)
+  and names the workstations in its intro. No new route or scoping change.
+
 ## v1.20.1 (October 2026)
 
 ### Fixes

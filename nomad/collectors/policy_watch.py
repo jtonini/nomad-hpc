@@ -48,6 +48,21 @@ accounts' processes: hidepid; then only this account's are seen, and
   nodes too, where MPI, Dask or Ray open ports of their own; there, a port
   in the kernel's ephemeral range is listed, not alerted). Which program
   listens is known only where the account is root.
+- gpu, gpu_served: a GPU compute process (nvidia-smi, ``watch_gpu``, on by
+  default; 1.21), listed (gpu), or a warning (gpu_served) when it listens on
+  a port open to the network or its account also runs a tunnel, relay or
+  forward -- a GPU reachable from outside, the shape of reselling or an open
+  inference server. The note says the memory held, whether it is detached (no
+  terminal: the shape of an unattended job -- a heuristic, so it only annotates),
+  and whether it is an AI agent. Graphics (Xorg, a browser) are not compute
+  apps, so they don't show. ``gpu_serve_hosts`` names boxes where serving a
+  GPU is sanctioned (then listed, not alerted). Per-process GPU attribution is
+  opaque under MIG or in containers, and a GPU another account serves is
+  caught through its account's exposure unless the probe runs as root.
+
+The GPU workstations are asked as such: ``workstations`` lists hosts probed
+over ssh with the role "workstation" (login and compute nodes aside), so the
+GPU findings reach the hub and the Console the same way (1.21).
 
 A host that answered before and hasn't for 3 sweeps raises its own alert:
 a probe that can't finish there sees nothing. Findings not seen for
@@ -88,6 +103,10 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     # cluster_networks = []        # e.g. ["10.1.1.0/24"]: where a host's way out is the cluster network
     # agents = []                  # AI agent programs to add to the built-in list (listed, not alerted)
     # root_report = ""             # path a root helper writes (scripts/watch_root_probe.py); off by default
+    # workstations = []            # e.g. ["ml-ws01"]: GPU workstations to ask over ssh (role "workstation")
+    # watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
+    # gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
+    # gpu_serve_hosts = []         # e.g. ["shared-infer01"]: boxes where serving a GPU is sanctioned (listed)
     # keep_days = 365
 
 Tables: ``policy_findings`` (one row per finding: host, role, username,
@@ -128,14 +147,16 @@ NAME_OK = re.compile(r"^(\+\d+ more|[A-Za-z0-9._+ -]{1,40})$")
 SEVERITY = {"tunnel": "warning", "ssh_reverse": "warning", "ssh_socks": "warning",
             "code_tunnel": "warning", "miner": "critical", "relay": "warning",
             "listening": "warning", "escalation": "critical", "agent": "info",
-            "auth_failures": "warning", "setuid_new": "warning"}
+            "auth_failures": "warning", "setuid_new": "warning",
+            "gpu": "info", "gpu_served": "warning"}
 LABELS = {"tunnel": "a tunnel program", "ssh_reverse": "an ssh reverse forward (-R)",
           "ssh_socks": "an ssh SOCKS proxy (-D)", "code_tunnel": "a VS Code tunnel",
           "miner": "a miner", "relay": "a relay or proxy",
           "listening": "a program listening on a port open to the network",
           "escalation": "a process that reached root outside the usual path",
           "agent": "an AI agent", "auth_failures": "repeated failed privilege attempts",
-          "setuid_new": "a new setuid or setgid file"}
+          "setuid_new": "a new setuid or setgid file",
+          "gpu": "a process using a GPU", "gpu_served": "a GPU served to the network"}
 # Kinds the probe sends that are a person's finding of their own (not an ssh forward's reach).
 ESCALATION = "escalation"
 REACH = {"inside": "stays inside", "campus": "on campus", "outside": "connects outside"}
@@ -307,7 +328,8 @@ def entry_labels(entries, *, here: str = "", login_hosts=()) -> set:
 KEYS = {"enabled", "interval", "interval_minutes", "nodes", "login_hosts", "min_uid", "listeners_on_nodes",
         "ignore_users", "watch_self", "ignore_programs", "ignore_ports", "owners_in_alerts", "parallel", "timeout",
         "max_seconds", "ssh_user", "python", "trusted_hosts", "campus_networks", "cluster_networks", "keep_days",
-        "agents", "root_report", "alerts_enabled", "max_retries", "retry_delay"}
+        "agents", "root_report", "alerts_enabled", "max_retries", "retry_delay",
+        "workstations", "watch_gpu", "gpu_min_mem", "gpu_serve_hosts"}
 
 
 def _list(v) -> list:
@@ -362,13 +384,19 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
     lists = {}
     like = {"trusted_hosts": '["vadur"]', "campus_networks": '["141.166.0.0/16"]',
             "cluster_networks": '["10.1.1.0/24"]', "login_hosts": '["login02"]', "ignore_users": '["slurm"]',
-            "ignore_programs": '["tailscaled"]', "agents": '["myorg-agent"]'}
+            "ignore_programs": '["tailscaled"]', "agents": '["myorg-agent"]',
+            "workstations": '["ml-ws01"]', "gpu_serve_hosts": '["shared-infer01"]'}
     for k, ex in like.items():
         v = conf.get(k)
         ok = v is None or isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))
         if not ok:
             problems.append(f"[collectors.policy_watch] {k}: a list of strings, like {ex}")
         lists[k] = _list(v) if ok else []
+    gm = conf.get("gpu_min_mem")
+    if gm is not None and not (isinstance(gm, int) and not isinstance(gm, bool) and gm >= 0):
+        problems.append("[collectors.policy_watch] gpu_min_mem: a whole number of MiB, like 256")
+    if conf.get("watch_gpu") is not None and not isinstance(conf.get("watch_gpu"), bool):
+        problems.append("[collectors.policy_watch] watch_gpu: true or false")
     entries, notes = trusted_entries(lists["trusted_hosts"], resolve=resolve)
     problems += [f"[collectors.policy_watch] {n}" for n in notes]
     campus, n1 = networks(lists["campus_networks"], "campus network")
@@ -383,6 +411,16 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
         info.append("campus: " + ", ".join(campus) + " (and private addresses beyond the cluster)")
     if cluster:
         info.append("cluster: " + ", ".join(cluster) + " (and the private networks each host reaches directly)")
+    if lists["workstations"]:
+        info.append("workstations: " + ", ".join(lists["workstations"]) + " (asked over ssh, as a workstation)")
+    # Echo the GPU watch only when the site has set something about it, as the lines above do.
+    if "watch_gpu" in conf or lists["gpu_serve_hosts"] or lists["workstations"]:
+        if conf.get("watch_gpu") is False:
+            info.append("GPU watch: off")
+        else:
+            allow = (" (serving allowed on " + ", ".join(lists["gpu_serve_hosts"]) + ")") \
+                if lists["gpu_serve_hosts"] else ""
+            info.append("GPU watch: on; a GPU reachable from the network is a warning" + allow)
     return problems, info
 
 
@@ -449,8 +487,29 @@ def forward_note(f: dict, servers=()) -> tuple[bool, str, str, dict]:
     return False, reach, "not verified: " + "; ".join(parts), why
 
 
+def gpu_note(g: dict) -> str:
+    """A GPU finding's note from the probe's ``gpu`` facts, in this module's
+    own words: how much GPU memory, whether it is reachable from the network,
+    whether it is an AI agent, and whether it is detached (no terminal: the
+    shape of a job running unattended -- a heuristic, so it only annotates)."""
+    if not isinstance(g, dict):
+        return ""
+    parts = []
+    mem = g.get("mem_mb")
+    if isinstance(mem, int) and mem > 0:
+        parts.append(f"~{mem / 1024:.1f} GB on the GPU" if mem >= 1024 else f"~{mem} MB on the GPU")
+    if g.get("served"):
+        parts.append("reachable from the network")
+    if g.get("agent"):
+        parts.append(f"an AI agent ({_clean(str(g['agent']), re.compile(r'[A-Za-z0-9._+-]{1,32}'))})")
+    if g.get("detached"):
+        parts.append("detached, no terminal")
+    return "; ".join(parts)
+
+
 def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool = False,
-                ignore_users=(), ignore_programs=(), ignore_ports=(), servers=()) -> list[dict]:
+                ignore_users=(), ignore_programs=(), ignore_ports=(), servers=(),
+                gpu_serve_hosts=()) -> list[dict]:
     """The probe's answer as findings (rows for policy_findings, without
     times). What a user writes never lowers a finding: only a listener on
     an ephemeral port on a compute node (with listeners_on_nodes) is listed
@@ -478,6 +537,19 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
             verified, reach, note, why = forward_note(dict(f, kind=kind, detail=detail), servers)
         if kind == ESCALATION and detail:
             note = f"its parent is a {detail}"            # the program that spawned the root process
+        if kind in ("gpu", "gpu_served"):
+            g = f.get("gpu") if isinstance(f.get("gpu"), dict) else {}
+            note = gpu_note(g)
+            if kind == "gpu_served" and host in set(gpu_serve_hosts):
+                kind = "gpu"                              # serving a GPU is sanctioned on this host
+                note = (note + "; serving allowed here").strip("; ") if note else "serving allowed here"
+            elif kind == "gpu_served" and role == "node" and g.get("via") == "listen" \
+                    and (not listeners_on_nodes or g.get("ephemeral")):
+                # On a compute node a GPU job opens ports of its own (a distributed
+                # job's rendezvous): listed, as a listener there is, unless the site
+                # has turned node listeners on -- and even then an ephemeral port is
+                # listed. A GPU served through its account's tunnel still warns.
+                kind = "gpu"
         sev = "info" if verified else SEVERITY.get(kind, "info")
         procs = f.get("procs") if isinstance(f.get("procs"), str) and re.fullmatch(r"[0-9a-f]{16}", f["procs"]) \
             else None
@@ -562,7 +634,7 @@ def keep(f: dict, old, names=None) -> None:
 
 class PolicyWatchCollector(BaseCollector):
     name = "policy_watch"
-    description = "Tunnels, miners, relays and exposed services on login and compute nodes"
+    description = "Tunnels, miners, relays, exposed services and GPUs on login, compute and workstation hosts"
     default_interval = 900
 
     def __init__(self, config: dict[str, Any], db_path):
@@ -593,6 +665,14 @@ class PolicyWatchCollector(BaseCollector):
                 pass
         self.ignore_programs = _list(c.get("ignore_programs"))
         self.agents = _list(c.get("agents"))             # names to add to the probe's built-in agent list
+        # The GPU watch (1.21): workstations asked as such, and GPU compute
+        # processes placed by whether they are served to the network. On by
+        # default -- it costs a host without a GPU nothing (nvidia-smi says so).
+        self.workstations = [h for h in _list(c.get("workstations")) if HOST_RE.fullmatch(h)]
+        self.watch_gpu = c.get("watch_gpu", True) is not False
+        self.gpu_min_mem = int(c["gpu_min_mem"]) if isinstance(c.get("gpu_min_mem"), int) \
+            and not isinstance(c.get("gpu_min_mem"), bool) and c["gpu_min_mem"] >= 0 else 256
+        self.gpu_serve_hosts = [h for h in _list(c.get("gpu_serve_hosts")) if HOST_RE.fullmatch(h)]
         rr = c.get("root_report")
         self.root_report = rr if isinstance(rr, str) and PATH_OK.fullmatch(rr) else ""
         ports = c.get("ignore_ports")
@@ -701,6 +781,10 @@ class PolicyWatchCollector(BaseCollector):
                 args += [flag, ",".join(vals)]
         if self.root_report:
             args += ["--root-report", self.root_report]
+        if self.watch_gpu:
+            args += ["--gpu"]
+            if self.gpu_min_mem != 256:
+                args += ["--gpu-min-mem", str(self.gpu_min_mem)]
         return args
 
     def remote_command(self) -> str:
@@ -752,6 +836,8 @@ class PolicyWatchCollector(BaseCollector):
             targets += [(h, "node") for h in self._compute_nodes() if h != here and h not in self.login_hosts]
         except (CollectionError, OSError, subprocess.SubprocessError) as e:
             self.note = f"compute nodes not asked: {e}"
+        picked = {h for h, _r in targets} | {here}
+        targets += [(h, "workstation") for h in self.workstations if h not in picked]   # asked as workstations (1.21)
         when = datetime.now().isoformat(timespec="seconds")
         self._note_sweep(when, 1 + len(targets))
         rows: list[dict] = []
@@ -804,7 +890,8 @@ class PolicyWatchCollector(BaseCollector):
                        findings=findings_of(d, host, role, listeners_on_nodes=self.listeners_on_nodes,
                                             ignore_users=self.ignore_users,
                                             ignore_programs=self.ignore_programs,
-                                            ignore_ports=self.ignore_ports, servers=self.servers()))
+                                            ignore_ports=self.ignore_ports, servers=self.servers(),
+                                            gpu_serve_hosts=self.gpu_serve_hosts))
         return row
 
     # -- keeping it -------------------------------------------------------------------------

@@ -161,6 +161,18 @@ check_services = ["slurmd", "munge"]
 # here -- failed sudo/su per account, new setuid files in user-writable
 # places. Give the same path the helper writes. See docs/policy_watch.md.
 # root_report = "/var/lib/nomad-watch/root_signals.json"
+# GPU workstations (1.21): list GPU boxes to ask over ssh (as "workstation").
+# workstations = ["ml-ws01", "ml-ws02"]
+# The GPU watch (on by default; nothing where there is no GPU) lists each GPU
+# compute process (nvidia-smi); one reachable from the network -- it listens
+# on a port open to the network, or its account also runs a tunnel/relay/
+# forward -- is a warning (gpu_served): the shape of reselling or an open
+# inference server. Graphics (Xorg, a browser) don't show. A context below
+# gpu_min_mem (MiB) is a probe, not a workload. gpu_serve_hosts names boxes
+# where serving a GPU is sanctioned (then listed, not alerted).
+# watch_gpu = true
+# gpu_min_mem = 256
+# gpu_serve_hosts = ["shared-infer01"]
 
 # Compute nodes' local disks (1.14): on the head node, df of each path on
 # every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the

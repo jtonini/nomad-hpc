@@ -27,7 +27,13 @@ other accounts' processes: hidepid):
   not alerted (--agents adds to the built-in list; AI use is not misuse);
 - a process running as root whose parent is owned by a regular account and
   is not a sanctioned privilege helper (sudo, su, pkexec, ...): the shape
-  of a process that reached root outside the usual path (escalation).
+  of a process that reached root outside the usual path (escalation);
+- with --gpu, GPU compute processes (nvidia-smi, unprivileged): each listed
+  (gpu), or flagged (gpu_served) when it listens on a port open to the
+  network or its account also runs a tunnel/relay/forward -- a GPU reachable
+  from outside, the shape of reselling or an open inference server. Graphics
+  (Xorg, a browser) are not compute apps, so they don't show; a context below
+  --gpu-min-mem (256 MiB) is a probe, not a workload, and is left out.
 
 With --root-report, findings a root helper (watch_root_probe.py) left in a
 JSON file are read here too and travel the same pipeline: counts only, of
@@ -67,7 +73,7 @@ holds (within limits: policy_watch.keep).
     /usr/bin/python3 -I -S - [--min-uid N] [--trusted NET@PORT,...]
         [--campus NET,...] [--cluster NET,...] [--ignore-users a,b]
         [--ignore-programs a,b] [--agents a,b] [--root-report PATH]
-        [--proc DIR] < watch_probe.py
+        [--gpu] [--gpu-min-mem MiB] [--proc DIR] < watch_probe.py
 """
 import hashlib
 import ipaddress
@@ -76,6 +82,7 @@ import os
 import pwd
 import re
 import socket
+import subprocess
 import sys
 
 TUNNELS = ("ngrok", "cloudflared", "frpc", "frps", "chisel", "rathole", "inlets", "zrok", "pinggy",
@@ -118,6 +125,14 @@ MAX_PER = 5                      # programs kept per account and kind (the rest:
 SYSTEM_SSH = ("/usr/bin/ssh", "/bin/ssh")    # as root, a forward's key only for these
 PRIVATE = tuple(ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 LINK_LOCAL = tuple(ipaddress.ip_network(n) for n in ("169.254.0.0/16", "fe80::/10"))
+# The GPU watch (1.21): nvidia-smi, unprivileged, where it is found. A compute
+# context smaller than this (MiB) is a probe, not a workload, and is left out.
+NVIDIA = ("nvidia-smi", "/usr/bin/nvidia-smi", "/bin/nvidia-smi")
+GPU_MIN_MEM = 256
+# Findings that make an account's doings reachable from outside: a GPU held by
+# such an account is served, even when its own listener can't be read (no root).
+# A verified reverse forward is the admin's own and doesn't count (see main).
+EXPOSURE_KINDS = ("tunnel", "relay", "code_tunnel", "ssh_reverse", "ssh_socks")
 
 
 def _nets(text, ports=False):
@@ -139,7 +154,7 @@ def _nets(text, ports=False):
 def _args():
     out = {"min_uid": 1000, "proc": "/proc", "trusted": [], "campus": [], "cluster": [],
            "ignore_users": frozenset(), "ignore_programs": frozenset(), "agents": list(AGENTS),
-           "root_report": ""}
+           "root_report": "", "gpu": False, "gpu_min_mem": GPU_MIN_MEM}
     a = sys.argv[1:]
     i = 0
     while i < len(a):
@@ -163,6 +178,15 @@ def _args():
             i += 2
         elif a[i] == "--root-report" and i + 1 < len(a):
             out["root_report"] = a[i + 1]
+            i += 2
+        elif a[i] == "--gpu":
+            out["gpu"] = True
+            i += 1
+        elif a[i] == "--gpu-min-mem" and i + 1 < len(a):
+            try:
+                out["gpu_min_mem"] = max(0, int(a[i + 1]))
+            except ValueError:
+                pass
             i += 2
         else:
             i += 1
@@ -1016,6 +1040,175 @@ def root_signals(path):
     return rows
 
 
+# -- the GPU watch (1.21) -------------------------------------------------------------
+
+def _nvidia_smi(query):
+    """One ``nvidia-smi --query-... --format=csv,noheader,nounits`` as a list
+    of stripped lines, or [] when there is no GPU here (the tool is missing,
+    fails, or says nothing). No GPU -> no GPU findings, so a host without one
+    costs the watch nothing. Unprivileged: nvidia-smi shows every account's
+    compute apps."""
+    for exe in NVIDIA:
+        try:
+            r = subprocess.run([exe, query, "--format=csv,noheader,nounits"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue                                     # this name isn't here: try the next
+        if r.returncode != 0:
+            return []                                    # the tool is here but failed: no GPU, a driver error
+        return [ln.strip() for ln in r.stdout.decode("utf-8", "replace").splitlines() if ln.strip()]
+    return []
+
+
+def gpu_compute():
+    """({pid: mem_MiB} for GPU *compute* processes, [(index, util%, used, total)]
+    per GPU). Compute apps are CUDA contexts -- training, inference, miners --
+    not graphics (Xorg, a browser), which --query-compute-apps never lists.
+    Empty when there is no GPU."""
+    per_pid = {}
+    for line in _nvidia_smi("--query-compute-apps=pid,used_gpu_memory"):
+        p = [x.strip() for x in line.split(",")]
+        if len(p) >= 2 and p[0].isdigit() and p[1].isdigit():
+            per_pid[p[0]] = int(p[1])
+    gpus = []
+    for line in _nvidia_smi("--query-gpu=index,utilization.gpu,memory.used,memory.total"):
+        p = [x.strip() for x in line.split(",")]
+        try:
+            gpus.append((int(p[0]), int(p[1]), int(p[2]), int(p[3])))
+        except (ValueError, IndexError):
+            continue                                     # a field is [N/A] (MIG, an older driver)
+    return per_pid, gpus
+
+
+def _serving_pids(proc, pids):
+    """Of ``pids``, which listen on a TCP port open to the network, and on
+    which ports: {pid: [(port, is the port an ephemeral one)]}. The pid's own
+    socket inodes (its fds, readable as the owner or root) against
+    /proc/net/tcp(6) LISTEN rows with a non-loopback local address. An
+    ephemeral port is the kernel's own range (where a distributed job's
+    rendezvous lands); it is marked so a compute node's training isn't taken
+    for an exposed service. Without root, another account's fds can't be read,
+    so a GPU it serves is caught by its account's exposure instead."""
+    inode_pid, want = {}, {}
+    for pid in pids:
+        try:
+            for f in os.listdir(os.path.join(proc, pid, "fd")):
+                try:
+                    t = os.readlink(os.path.join(proc, pid, "fd", f))
+                except OSError:
+                    continue
+                if t.startswith("socket:["):
+                    inode_pid[t[8:-1]] = pid
+        except OSError:
+            continue
+    if not inode_pid:
+        return want
+    lo, hi = _ephemeral(proc)
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(proc, "net", name)) as fh:
+                rows = fh.read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            p = row.split()
+            if len(p) < 10 or p[3] != "0A":
+                continue
+            pid = inode_pid.get(p[9])
+            if not pid:
+                continue
+            try:
+                lip, lport = p[1].split(":")
+                port = int(lport, 16)
+            except ValueError:
+                continue
+            if not _loopback(lip):
+                want.setdefault(pid, []).append((port, lo <= port <= hi))
+    return want
+
+
+def _detached(proc, pid):
+    """A process with no controlling terminal whose parent is init or systemd:
+    the shape of a job running unattended (nohup, a service, a detached agent),
+    not from a login shell. A heuristic -- an overnight training run looks the
+    same -- so it only annotates a GPU finding, never alerts on its own."""
+    try:
+        stat = _read(os.path.join(proc, pid, "stat"), 4096).decode("utf-8", "replace")
+        after = stat.rsplit(")", 1)[1].split()
+        tty, ppid = (after[4] if len(after) > 4 else "0"), after[1]
+    except (OSError, IndexError, ValueError):
+        return False
+    if tty != "0":
+        return False
+    parent = _status(os.path.join(proc, ppid))
+    return ppid == "1" or (parent is not None and parent[2] in ("systemd", "init"))
+
+
+def gpu_findings(proc, min_uid, agents=AGENTS, ignore_users=frozenset(), ignore_programs=frozenset(),
+                 exposure_uids=frozenset(), min_mem=GPU_MIN_MEM):
+    """GPU compute processes (nvidia-smi), placed by owner and by whether each
+    is served to the network. A process holding a compute context of at least
+    ``min_mem`` MiB is listed as ``gpu`` (info), or ``gpu_served`` (a warning)
+    when it listens on a port open to the network, or its account also runs a
+    tunnel, relay or forward -- a GPU reachable from outside, the shape of
+    reselling or an open inference server. The mem is kept in the note, not the
+    key, so a finding doesn't churn as it moves; at most five per account and
+    kind, then +N more. Nothing when there is no GPU; never kills."""
+    per_pid, gpus = gpu_compute()
+    big = {pid: mem for pid, mem in per_pid.items() if mem >= min_mem}
+    if not big:
+        return []
+    serving = _serving_pids(proc, set(big))
+    found = {}
+    for pid, mem in big.items():
+        st = _status(os.path.join(proc, pid))
+        if st is None:
+            continue
+        uid, _ppid, comm = st
+        if uid < min_uid or (ignore_users and _name(uid) in ignore_users):
+            continue
+        try:
+            argv = [x.decode("utf-8", "replace")
+                    for x in _read(os.path.join(proc, pid, "cmdline")).split(b"\0") if x]
+        except OSError:
+            argv = []
+        names = _candidates(argv, comm) if argv else [((comm or "").lower(), False)]
+        aka = sorted({safe(n) for n, _ in names} - {"?"})
+        if ignore_programs and aka and set(aka) <= set(ignore_programs):
+            continue
+        program = safe(argv[0]) if argv and safe(argv[0]) != "?" else safe(comm)
+        agent = next((_is(nm, agents, sc) for nm, sc in names if _is(nm, agents, sc)), "")
+        ports = serving.get(pid, [])
+        listens = bool(ports)
+        served = listens or uid in exposure_uids
+        # "via": a port of its own open to the network, or its account's exposure (a tunnel)
+        via = "listen" if listens else ("account" if served else "")
+        ephemeral = listens and all(e for _p, e in ports)   # every open port is an ephemeral one
+        kind = "gpu_served" if served else "gpu"
+        detail = str(min(p for p, _e in ports)) if ports else ""
+        key = (uid, kind, program, detail)
+        n, a2, memmax, ag, det, vv, ep = found.get(key, (0, set(), 0, "", False, "", True))
+        found[key] = (n + 1, a2 | set(aka), max(memmax, mem), ag or (agent or ""),
+                      det or _detached(proc, pid), vv or via, ep and ephemeral)
+    rows, per = [], {}
+    for (uid, kind, program, detail), (n, aka, mem, agent, det, via, ephemeral) in sorted(
+            found.items(), key=lambda kv: str(kv[0])):
+        g = (uid, kind)
+        per[g] = per.get(g, 0) + 1
+        if per[g] > MAX_PER:
+            continue
+        rows.append({"uid": uid, "user": _name(uid), "kind": kind, "program": program, "detail": detail,
+                     "aka": sorted(aka), "processes": n,
+                     "gpu": {"mem_mb": mem, "agent": agent or "", "detached": bool(det),
+                             "served": kind == "gpu_served", "via": via,
+                             "ephemeral": bool(ephemeral and via == "listen")}})
+    for (uid, kind), total in per.items():
+        if total > MAX_PER:
+            rows.append({"uid": uid, "user": _name(uid), "kind": kind, "program": f"+{total - MAX_PER} more",
+                         "detail": "", "aka": [], "processes": 0, "gpu": {}})
+    return rows
+
+
 def main():
     a = _args()
     ssh = {}
@@ -1029,6 +1222,15 @@ def main():
     accounts = reach(a["proc"], uids, a["trusted"], a["campus"], system, a["cluster"]) if uids else {}
     check(found, accounts, ssh)
     found = found + escalations(a["proc"], a["min_uid"], a["ignore_programs"])
+    if a["gpu"]:
+        # An account that makes its traffic reachable from outside -- a tunnel,
+        # relay, SOCKS or an unverified reverse forward (a verified -R is the
+        # admin's own) -- serves any GPU it holds, even where its own listener
+        # can't be read.
+        exposure = {f["uid"] for f in found if f["kind"] in EXPOSURE_KINDS
+                    and not (f["kind"] == "ssh_reverse" and f.get("verified"))}
+        found = found + gpu_findings(a["proc"], a["min_uid"], a["agents"], a["ignore_users"],
+                                     a["ignore_programs"], exposure, a["gpu_min_mem"])
     out = {
         "host": socket.gethostname().split(".")[0],
         "uid": os.getuid(),

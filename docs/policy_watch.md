@@ -18,6 +18,8 @@ Of accounts from `min_uid` (1000) up -- system services aren't people; nor are S
 | `escalation` | a process running as root whose parent is owned by a regular account and isn't a sanctioned helper (`sudo`, `su`, `pkexec`, ...): the shape of a process that reached root outside the usual path (1.20) | critical |
 | `agent` | an AI agent command-line program (Claude Code, Codex, aider, ...): **listed, not alerted** -- AI use is not misuse (1.20) | listed |
 | `auth_failures`, `setuid_new` | from the root helper only (below): repeated failed privilege attempts per account, and new setuid/setgid files in user-writable places (1.20) | warning |
+| `gpu` | a GPU compute process (nvidia-smi): **listed, not alerted** -- the note says the memory held, whether it is detached (no terminal: the shape of an unattended job), and whether it is an AI agent (1.21) | listed |
+| `gpu_served` | a GPU compute process reachable from the network: it listens on a port open to the network, or its account also runs a tunnel/relay/forward -- the shape of reselling or an open inference server (1.21) | warning |
 
 A program is known by its name as it started (argv[0]), its kernel name (`comm`: what `exec -a` doesn't change), a download's suffix aside (`cloudflared-linux-amd64`, `chisel_1.10.1_linux_amd64`), and, for an interpreter (python, node, java, sh, ...), the script or module it runs, by its exact name (`python3 -m sshuttle`, `sh pagekite.py`; `rigel_fit.py` isn't the rigel miner). An `ignore_programs` entry leaves a finding out only if it names every name the process goes by.
 
@@ -83,6 +85,10 @@ enabled = true
 #                              # an address or a network (ports below 1024 unless one is given)
 # campus_networks = []         # public ranges that are campus, a label: ["141.166.0.0/16"]
 # cluster_networks = []        # the cluster's own, where a host's default route is on it: ["10.1.1.0/24"]
+# workstations = []            # GPU workstations to ask over ssh (role "workstation"): ["ml-ws01"]
+# watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
+# gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
+# gpu_serve_hosts = []         # boxes where serving a GPU is sanctioned (then listed): ["shared-infer01"]
 # keep_days = 365              # findings not seen for this long are removed
 ```
 
@@ -93,7 +99,7 @@ The collector's account needs ssh to the nodes without a password (as `node_disk
 ```
 nomad watch list              findings of the last 7 days, the most serious first (* seen in the last sweep),
                               and verified forwards
-nomad watch list --all        also what is only listed (ephemeral ports on compute nodes)
+nomad watch list --all        also what is only listed (ephemeral ports on compute nodes, agents, GPU processes)
 nomad watch list --mask       stand-ins for people and hosts, for anything shared outside ARC
 nomad watch list --json
 nomad watch status            the last sweep: each host, whether it answered, what it could see
@@ -120,6 +126,25 @@ The meeting that prompted this named two harms, and neither depends on which too
 ```
 
 Then point the collector at the same path: `root_report = "/var/lib/nomad-watch/root_signals.json"`. It writes, for review, never a command line or a file's contents: `auth_failures` (failed `sudo`/`su` per account, read on from where it stopped last run) and `setuid_new` (setuid/setgid files under `--roots` owned by a person that weren't there last run, by basename). The output is world-readable (the collector isn't root); its state file, beside it, is `0600`. What the helper needs from the site's administrators (an IS ticket at UR) is the one cron entry as root on each node and a writable `--out` directory; it installs nothing and keeps nothing secret.
+
+## GPU workstations (1.21)
+
+On a GPU workstation the person usually already has `sudo` on their own box, so reaching root isn't the worry — **the GPU being served out is.** The money threat is a card turned into an inference API or a rented machine, and the quiet one is a job pegging the GPU with nobody at the keyboard. So the watch goes to the workstations and keys on what the GPU shows.
+
+**Where it looks.** `workstations = ["ml-ws01", ...]` lists GPU boxes to ask over ssh, with the role `workstation` (login and compute nodes aside). Their findings reach the hub and the Console the same way everything else does. The collector's account needs passwordless ssh to them, as to the nodes.
+
+**What it reads.** With `watch_gpu` (on by default), the probe runs `nvidia-smi` — unprivileged, and nothing where there is no GPU, so it costs a host without one nothing. It reads the **compute** processes (`--query-compute-apps`): CUDA contexts — training, inference, miners — **not** graphics, so Xorg and a browser's GPU use never show. A context below `gpu_min_mem` (256 MiB) is a probe, not a workload, and is left out.
+
+- `gpu` (**listed, not alerted**): a GPU compute process, with its owner, program and the memory it holds. The note says *detached* when it has no controlling terminal and is parented to init or `systemd` — the shape of an unattended job (nohup, a service, a detached agent) — and *an AI agent* when the program is one. This is the inventory: it makes no claim of misuse.
+- `gpu_served` (**warning**): a GPU compute process reachable from the network — it listens on a port open to the network, **or** its account also runs a tunnel, relay, SOCKS or an unverified reverse forward (a *verified* `-R` is the admin's own and doesn't count). This is the reselling / open-inference signal.
+
+On a **compute** node a GPU job opens ports of its own — a distributed job's rendezvous (PyTorch, NCCL, Dask, Ray) — so a `gpu_served` that is only a listener there is **listed, not a warning**, exactly as a plain listener is, unless `listeners_on_nodes = true`; and even then a port in the kernel's ephemeral range (where that rendezvous lands) is listed. A GPU served through its account's *tunnel* still warns, on any host. On a workstation, a served GPU is always a warning — that is the box the signal is for.
+
+GPU miners don't need a kind of their own: a miner is caught by name on any host (the `miner` kind, critical), GPU or not.
+
+**Allowing what is meant to be there.** `gpu_serve_hosts = ["shared-infer01"]` names boxes where serving a GPU is sanctioned: there a served GPU is listed, not a warning. `ignore_programs` (e.g. `["ollama"]`) and `ignore_users` apply as everywhere, so a lab's own shared server or a service account is left out.
+
+**What it can't see, honestly.** Per-process GPU attribution goes opaque under MIG, and when the compute app runs in a container or a separate PID namespace. Reading *which* port a GPU process listens on needs to read that process's sockets — the probe's own, or any as root — so where it doesn't run as root, a GPU another account serves is caught through that account's exposure (a tunnel or forward it also runs), not its listener directly. *Detached* is a heuristic: an overnight training run looks the same as a rented job, which is why it only annotates a finding and never alerts on its own. As everywhere, these are signs to judge, not verdicts, and the watch sees only what runs when it looks.
 
 ## What it is not
 
