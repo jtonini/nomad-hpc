@@ -783,7 +783,14 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
     signals: list[Signal] = []
     now = datetime.now()
     cutoff = (now - timedelta(hours=hours)).isoformat()
-    conn = _get_conn(db_path, site)
+    # An alert is read unscoped and placed by what it is *about*, not by where
+    # it was stored. The hub raises a site's node alerts on its behalf (1.17.3):
+    # such an alert lives in the hub's own rows (source_site = the hub) but
+    # carries the site it is about in details.site. Attributing it by
+    # source_site would show vadur's "node down" under the hub (mingus), and
+    # hide it from vadur -- so the effective site is details.site when set,
+    # and source_site (or, on a single-site database, the lone site) otherwise.
+    conn = scope.connect(db_path, None)
     try:
         cols = scope.table_columns(conn, "alerts")
         if not cols:
@@ -794,20 +801,24 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
             what, host = ("category" if "category" in cols else "source"), "source"
         details = "details" if "details" in cols else "NULL"
         dedup = "dedup_key" if "dedup_key" in cols else "NULL"
+        has_site_col = "source_site" in cols
+        src = "source_site" if has_site_col else "NULL"
         rows = conn.execute(f"""
             SELECT severity, {what} AS what, {host} AS host, message,
-                   {details} AS details, timestamp, {dedup} AS dedup
+                   {details} AS details, timestamp, {dedup} AS dedup,
+                   {src} AS source_site
             FROM alerts WHERE timestamp >= ?
             ORDER BY timestamp DESC
         """, (cutoff,)).fetchall()
 
-        # Alerts merged without source_site carry their site in details
-        # (nomad 1.7.9+); older ones can't be placed.
+        # Place each alert by its subject (details.site, 1.7.9+), falling back
+        # to source_site (the hub-merged site) when it names none; older alerts
+        # that record neither can't be placed.
         unplaced = 0
-        if site and "source_site" not in cols:
+        if site:
             kept = []
             for r in rows:
-                s = _alert_site(r["details"])
+                s = _alert_site(r["details"]) or (r["source_site"] if has_site_col else None)
                 if s == site:
                     kept.append(r)
                 elif s is None:

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.20.1 (October 2026)
+
+### Fixes
+- Signals place an alert by what it is *about*, not where it was stored. A
+  hub that raises a site's node alerts on its behalf (`alerts = "hub"`, 1.17.3)
+  stores them in its own rows (`source_site` = the hub) while naming the site
+  in `details.site`; the Insight engine attributed them by `source_site`, so
+  the hub's Signals (e.g. mingus) showed another site's "node down" and that
+  site's own Signals (e.g. vadur) hid it. The alert signal now reads unscoped
+  and places each alert by `details.site`, falling back to `source_site`. No
+  database change; the Console picks it up once nomad is upgraded on the hub.
+
 ## v1.3.1 (April 2026)
 
 ### Fixes
