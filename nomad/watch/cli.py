@@ -72,6 +72,12 @@ def _masked_note(m, note) -> str:
 
 def _extra(f) -> str:
     """What follows a finding's kind: its program, port, and where it goes."""
+    if f.get("kind") == "escalation":
+        return _c(f" {f['program']}" if f.get("program") else "")     # the parent is on the note line
+    if f.get("kind") == "auth_failures":
+        return _c(f" ({f['detail']} attempts)" if f.get("detail") else "")
+    if f.get("kind") == "setuid_new":
+        return _c(f" {f['program']}" if f.get("program") else "")
     extra = f" {f['program']}" if f.get("program") else ""
     if f.get("detail"):
         extra += f" port {f['detail']}" if str(f["detail"]).isdigit() else f" {f['detail']}"
@@ -236,7 +242,9 @@ def probe_cmd(ctx, host, mask, as_json):
     if as_json:
         if mask:
             m = _Masker(True)
-            for f in (d.get("findings") or []) + (d.get("listeners") or []):
+            for f in (d.get("findings") or []) + (d.get("listeners") or []) + (d.get("root") or []):
+                if "kind" in f and f["kind"] == "root_report":
+                    continue
                 f["user"], f["uid"] = m("user", f.get("user") or f.get("uid")), None
             d["host"] = m("host", d.get("host"))
             d["addresses"], d["cluster"] = [], []

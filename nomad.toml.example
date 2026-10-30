@@ -147,6 +147,20 @@ check_services = ["slurmd", "munge"]
 # directly, on an interface with no default route); list one a node
 # routes out through, or with a spare default route on it:
 # cluster_networks = ["10.1.1.0/24"]
+# AI agents and reselling (1.20): an AI agent command-line program (Claude
+# Code, Codex, aider, ...) is listed, not alerted -- `nomad watch list --all`
+# shows them; AI use is not misuse. `agents` adds to the built-in list.
+# agents = []                             # e.g. ["myorg-agent", "llm"]
+# A process that reaches root whose parent is a user's and isn't a sanctioned
+# helper (sudo, su, pkexec, ...) is flagged (escalation, critical). To catch
+# reselling, turn on compute-node services too; then a service open to the
+# network on a node is a warning (a port in the ephemeral range is listed):
+# listeners_on_nodes = true
+# What needs root (off by default): a helper (scripts/watch_root_probe.py) run
+# as root by cron on each node writes a counts-only JSON that the probe reads
+# here -- failed sudo/su per account, new setuid files in user-writable
+# places. Give the same path the helper writes. See docs/policy_watch.md.
+# root_report = "/var/lib/nomad-watch/root_signals.json"
 
 # Compute nodes' local disks (1.14): on the head node, df of each path on
 # every node Slurm lists (not down), over ssh, every 30 minutes; alerts at the

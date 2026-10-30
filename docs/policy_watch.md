@@ -15,6 +15,9 @@ Of accounts from `min_uid` (1000) up -- system services aren't people; nor are S
 | `miner` | a miner by name (xmrig, t-rex, lolMiner, ...), xmrig's `--donate-level`, or a `stratum+tcp://` pool on the command line of a program that isn't a text tool (`grep stratum+tcp://` isn't a miner) | critical |
 | `relay` | a relay or proxy: socat listening, 3proxy, v2ray, shadowsocks, sing-box, ... | warning |
 | `listening` | a person's program listening on a port open to the network, on a login node | warning |
+| `escalation` | a process running as root whose parent is owned by a regular account and isn't a sanctioned helper (`sudo`, `su`, `pkexec`, ...): the shape of a process that reached root outside the usual path (1.20) | critical |
+| `agent` | an AI agent command-line program (Claude Code, Codex, aider, ...): **listed, not alerted** -- AI use is not misuse (1.20) | listed |
+| `auth_failures`, `setuid_new` | from the root helper only (below): repeated failed privilege attempts per account, and new setuid/setgid files in user-writable places (1.20) | warning |
 
 A program is known by its name as it started (argv[0]), its kernel name (`comm`: what `exec -a` doesn't change), a download's suffix aside (`cloudflared-linux-amd64`, `chisel_1.10.1_linux_amd64`), and, for an interpreter (python, node, java, sh, ...), the script or module it runs, by its exact name (`python3 -m sshuttle`, `sh pagekite.py`; `rigel_fit.py` isn't the rigel miner). An `ignore_programs` entry leaves a finding out only if it names every name the process goes by.
 
@@ -97,6 +100,27 @@ nomad watch status            the last sweep: each host, whether it answered, wh
 nomad watch probe [HOST]      look now
 ```
 
+## AI agents and getting root (1.20)
+
+The meeting that prompted this named two harms, and neither depends on which tool a person used, so the watch keys on what happens, not on the agent.
+
+**An agent (or anyone) trying to reach root.** The result is the strong signal: a process running as root whose parent is owned by a regular account, where the parent isn't one of the sanctioned ways up (`sudo`, `su`, `runuser`, `pkexec`, `doas`, and the service managers that start a user's work — `sshd`, `systemd`, `slurmstepd`, ...). That is the `escalation` kind, a critical finding; its note names the program that spawned it. It reads `/proc`, so under `hidepid` the collector sees only its own tree unless it runs as root (`nomad watch status` says when a host is blind). The attempts, rather than the result — failed `sudo`/`su`, new setuid files — are in root-only logs, so they come from the root helper below. The surest defence isn't detection, though: an unpatched node (vadur is RHEL 7.9, no security updates since June 2024) is the likeliest way up whatever the agent, so patching or retiring it does more than any alert.
+
+**Reselling the cluster's time through an agent.** This is mostly what the watch already does: tunnels, relays and miners, and a service open to the network. Turn on `listeners_on_nodes = true` so a service open to the network on a *compute* node is a warning (a port in the kernel's ephemeral range, which MPI/Dask/Ray use, is listed, not alerted). The firmer controls are the cluster's: compute nodes reaching the internet only through a proxy, and per-user job and query limits in Slurm.
+
+**AI agents themselves are listed, not alerted.** Using an agent is not misuse; what matters is what it does. The `agent` kind names agent command-line programs (Claude Code, Codex, aider, Gemini CLI, ollama, ...) so an admin can see them in `nomad watch list --all`; `agents = [...]` adds a site's own. An agent on a **login or compute node** is seen this way. An agent on a **laptop** driving the cluster over the user's own ssh looks, from the cluster, like the person typing — so the watch aims at the behaviour (bursts of submissions, jobs that fail in seconds over and over, cancel/resubmit loops, query rates), which catches a careless script just the same.
+
+### The root helper (off by default)
+
+`scripts/watch_root_probe.py` reads what the unprivileged probe can't. It is **off until a site turns it on**, because it needs root. Run it as root by cron on each node, writing a counts-only JSON that the probe reads back:
+
+```cron
+*/15 * * * * /usr/bin/python3 -I /path/to/watch_root_probe.py \
+    --out /var/lib/nomad-watch/root_signals.json --roots /home,/scratch,/localscratch
+```
+
+Then point the collector at the same path: `root_report = "/var/lib/nomad-watch/root_signals.json"`. It writes, for review, never a command line or a file's contents: `auth_failures` (failed `sudo`/`su` per account, read on from where it stopped last run) and `setuid_new` (setuid/setgid files under `--roots` owned by a person that weren't there last run, by basename). The output is world-readable (the collector isn't root); its state file, beside it, is `0600`. What the helper needs from the site's administrators (an IS ticket at UR) is the one cron entry as root on each node and a writable `--out` directory; it installs nothing and keeps nothing secret.
+
 ## What it is not
 
-It is a set of signs for a person to judge, not a verdict: an administrator's own tunnel, a sanctioned service or a research server may well be fine (`ignore_*`). It sees what runs while it looks (every 15 minutes), not what ran in between. It doesn't stop anything: closing these doors (compute nodes reachable only through Slurm with `pam_slurm_adopt`, outbound traffic from compute nodes allowed only where needed, limits on login nodes) is the cluster's configuration, and what is allowed is the site's policy.
+It is a set of signs for a person to judge, not a verdict: an administrator's own tunnel, a sanctioned service or a research server may well be fine (`ignore_*`). It sees what runs while it looks (every 15 minutes), not what ran in between. Without root it can't tell which process holds which socket, and an account determined to hide where a forward or a root shell came from still can; the checks make that deliberate, not easy. It doesn't stop anything: closing these doors (compute nodes reachable only through Slurm with `pam_slurm_adopt`, outbound traffic from compute nodes allowed only where needed, limits on login nodes) is the cluster's configuration, and what is allowed is the site's policy. an administrator's own tunnel, a sanctioned service or a research server may well be fine (`ignore_*`). It sees what runs while it looks (every 15 minutes), not what ran in between. It doesn't stop anything: closing these doors (compute nodes reachable only through Slurm with `pam_slurm_adopt`, outbound traffic from compute nodes allowed only where needed, limits on login nodes) is the cluster's configuration, and what is allowed is the site's policy.

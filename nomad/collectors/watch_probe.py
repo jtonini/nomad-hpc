@@ -22,7 +22,17 @@ other accounts' processes: hidepid):
 - TCP sockets listening, by owner, on loopback or open to the network
   (/proc/net/tcp and tcp6, readable by every account); a port in the
   kernel's ephemeral range is marked so (MPI, Dask, Ray pick those); at
-  most five per account and scope, then +N more.
+  most five per account and scope, then +N more;
+- AI agent command-line programs (Claude Code, Codex, aider, ...): listed,
+  not alerted (--agents adds to the built-in list; AI use is not misuse);
+- a process running as root whose parent is owned by a regular account and
+  is not a sanctioned privilege helper (sudo, su, pkexec, ...): the shape
+  of a process that reached root outside the usual path (escalation).
+
+With --root-report, findings a root helper (watch_root_probe.py) left in a
+JSON file are read here too and travel the same pipeline: counts only, of
+failed privilege attempts per account and of new setuid files in
+user-writable places.
 
 Only accounts from --min-uid up (1000) count: system services aren't
 people; --ignore-users and --ignore-programs (a site's own services) are
@@ -56,7 +66,8 @@ holds (within limits: policy_watch.keep).
 
     /usr/bin/python3 -I -S - [--min-uid N] [--trusted NET@PORT,...]
         [--campus NET,...] [--cluster NET,...] [--ignore-users a,b]
-        [--ignore-programs a,b] [--proc DIR] < watch_probe.py
+        [--ignore-programs a,b] [--agents a,b] [--root-report PATH]
+        [--proc DIR] < watch_probe.py
 """
 import hashlib
 import ipaddress
@@ -80,6 +91,20 @@ MINERS = ("xmrig", "xmr-stak", "t-rex", "lolminer", "nbminer", "gminer", "teamre
           "phoenixminer", "nanominer", "cpuminer", "minerd", "bzminer", "srbminer", "srbminer-multi",
           "rigel", "onezerominer", "wildrig", "ccminer", "bminer", "kawpowminer", "nheqminer", "cgminer",
           "bfgminer", "xmrig-cuda", "hellminer", "verus-solver")
+# AI agent command-line programs, listed (info), not alerted: AI use is not misuse. The site
+# adds its own with --agents; the list grows, so it is config, not fixed here.
+# Distinctive agent CLI names only; ambiguous dictionary words (goose, amp, ...) are left out so an
+# unrelated tool isn't labelled an agent. Info-only and config-extendable (--agents), so being
+# conservative costs little.
+AGENTS = ("claude", "claude-code", "codex", "aider", "opencode", "cursor-agent", "open-interpreter",
+          "gemini-cli", "copilot", "gh-copilot", "ollama", "llamafile", "sweagent", "openhands", "gptme",
+          "qwen-code", "smolagent", "autogpt", "metagpt", "devin")
+# Parents that legitimately start a process as root (the sanctioned way up, or an ordinary daemon
+# tree): a root child under one of these is not flagged as an escalation.
+SANCTIONED_PARENTS = ("sudo", "su", "runuser", "pkexec", "doas", "sshd", "systemd", "init", "login",
+                      "crond", "cron", "atd", "slurmstepd", "slurmd", "run-parts", "gdm", "gdm-session-wor",
+                      "lightdm", "sddm", "systemd-logind", "dbus-daemon", "polkitd", "machinectl",
+                      "systemd-run", "agetty", "getty", "container")
 INTERPRETERS = re.compile(r"^(python[0-9.]*|pypy[0-9.]*|node|nodejs|java|perl|ruby|sh|bash|dash|zsh|ksh)$")
 TEXT_TOOLS = ("grep", "egrep", "fgrep", "rg", "ag", "ack", "less", "more", "cat", "tail", "head", "vi",
               "vim", "nvim", "view", "nano", "emacs", "sed", "awk", "gawk", "find", "git", "man", "zgrep")
@@ -113,7 +138,8 @@ def _nets(text, ports=False):
 
 def _args():
     out = {"min_uid": 1000, "proc": "/proc", "trusted": [], "campus": [], "cluster": [],
-           "ignore_users": frozenset(), "ignore_programs": frozenset()}
+           "ignore_users": frozenset(), "ignore_programs": frozenset(), "agents": list(AGENTS),
+           "root_report": ""}
     a = sys.argv[1:]
     i = 0
     while i < len(a):
@@ -131,6 +157,12 @@ def _args():
             i += 2
         elif a[i] in ("--ignore-users", "--ignore-programs") and i + 1 < len(a):
             out[a[i][2:].replace("-", "_")] = frozenset(x for x in a[i + 1].split(",") if x)
+            i += 2
+        elif a[i] == "--agents" and i + 1 < len(a):
+            out["agents"] = list(AGENTS) + [x.lower() for x in a[i + 1].split(",") if x]
+            i += 2
+        elif a[i] == "--root-report" and i + 1 < len(a):
+            out["root_report"] = a[i + 1]
             i += 2
         else:
             i += 1
@@ -359,7 +391,7 @@ def _candidates(argv, comm):
     return [(n, sc) for n, sc in names if n]
 
 
-def _classify(argv, comm):
+def _classify(argv, comm, agents=AGENTS):
     """(kind, program, detail, shape, aka) for each thing a process is;
     shape: an ssh forward's (see _ssh), else None; aka: every name it goes
     by (an ignore list leaves it out only if it names them all)."""
@@ -401,6 +433,9 @@ def _classify(argv, comm):
         out.append(("relay", r, "", None))
     elif "socat" in progs and any(re.search(r"(?i)-listen|^listen", x) for x in args):
         out.append(("relay", "socat", "", None))
+    g = next((_is(nm, agents, sc) for nm, sc in names if _is(nm, agents, sc)), None)
+    if g:
+        out.append(("agent", g, "", None))
     return [(k, p, d, s, aka) for k, p, d, s in out]
 
 
@@ -417,7 +452,7 @@ def _merge(a, b):
             "proxied": bool(a["proxied"] or b["proxied"])}
 
 
-def processes(proc, min_uid, ignore_users=frozenset(), ignore_programs=frozenset(), ssh=None):
+def processes(proc, min_uid, ignore_users=frozenset(), ignore_programs=frozenset(), ssh=None, agents=AGENTS):
     """(findings, visible, of others, of others with a command line to read).
     ``ssh``, a dict, gets each account's ssh clients: {uid: {"pids": [...],
     "child": an ssh of it has a child process, "relay": one relays}}."""
@@ -467,7 +502,7 @@ def processes(proc, min_uid, ignore_users=frozenset(), ignore_programs=frozenset
             acc["pids"].append(d)
             acc["relay"] = acc["relay"] or "relay" in _ssh([argv[0]] + [x[:ARG] for x in argv[1:]])[1]
         real = None
-        for kind, program, detail, shape, aka in _classify(argv, comm):
+        for kind, program, detail, shape, aka in _classify(argv, comm, agents):
             if ignore_programs and aka and set(aka) <= ignore_programs:
                 continue
             if shape and real is None:
@@ -870,11 +905,122 @@ def check(found, accounts, ssh):
         f["verified"] = not why
 
 
+def _status(path):
+    """A process's real uid, parent pid and name from /proc/<pid>/status
+    (world-readable): (ruid, ppid, comm), or None. The REAL uid, not the
+    directory's owner -- the kernel makes /proc/<pid> root-owned for any
+    setuid program (ping, mount, Xorg, ...), whose real uid is still the
+    user, so the directory owner would call every setuid helper an
+    escalation. The real uid is 0 only for a process that truly runs as
+    root."""
+    try:
+        txt = _read(os.path.join(path, "status"), 8192).decode("utf-8", "replace")
+    except OSError:
+        return None
+    uid = ppid = None
+    comm = ""
+    for line in txt.splitlines():
+        if line.startswith("Uid:"):
+            parts = line[4:].split()
+            if parts and parts[0].isdigit():
+                uid = int(parts[0])                      # the real uid (not effective)
+        elif line.startswith("PPid:"):
+            ppid = line[5:].strip()
+        elif line.startswith("Name:"):
+            comm = safe(line[5:].strip())
+    return None if uid is None or ppid is None else (uid, ppid, comm)
+
+
+def escalations(proc, min_uid, ignore_programs=()):
+    """Processes whose REAL uid is root (0) and whose parent's real uid is a
+    regular account (>= min_uid) where the parent is not one of
+    SANCTIONED_PARENTS (sudo, su, pkexec, ...): the shape of a process that
+    reached root outside the usual path, for an administrator to review.
+    From /proc/<pid>/status, no root needed, though under hidepid only this
+    account's own tree is seen (nomad watch status says so). A setuid-root
+    helper keeps its user real uid, so it is not an escalation. The account
+    named is the one whose session owns the parent; kept are the two
+    programs' names, never a command line. ignore_programs leaves out a
+    site's own (a sanctioned root tool)."""
+    tab = {}
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        names = []
+    for d in names:
+        if not d.isdigit():
+            continue
+        st = _status(os.path.join(proc, d))
+        if st is not None:
+            tab[d] = st
+    return _escalations(tab, min_uid, ignore_programs)
+
+
+def _escalations(tab, min_uid, ignore_programs=()):
+    """The escalation findings from a process table {pid: (uid, ppid, comm)}:
+    a uid-0 process whose parent is a regular account's and is not a
+    sanctioned helper. Separated from the /proc walk so it can be tested
+    without having to own processes as several accounts."""
+    ignore = set(ignore_programs)
+    out = {}
+    for uid, ppid, comm in tab.values():
+        if uid != 0:
+            continue
+        parent = tab.get(ppid)
+        if not parent or parent[0] < min_uid:
+            continue                                    # parent is root or a system account: an ordinary tree
+        if parent[2] in SANCTIONED_PARENTS or comm in SANCTIONED_PARENTS:
+            continue                                    # the sanctioned way up (sudo, su, pkexec, ...)
+        if comm in ignore or parent[2] in ignore:
+            continue
+        key = (parent[0], comm or "?", parent[2] or "?")
+        out[key] = out.get(key, 0) + 1
+    rows = []
+    for (uid, comm, parent), n in sorted(out.items(), key=lambda kv: str(kv[0])):
+        rows.append({"uid": uid, "user": _name(uid), "kind": "escalation", "program": comm,
+                     "detail": parent, "processes": n})
+    return rows
+
+
+def root_signals(path):
+    """Findings a root helper (watch_root_probe.py) left in a JSON file, read
+    here as the collector so they travel the same pipeline. What it writes is
+    counts and short names only: failed privilege attempts per account
+    (auth_failures), and new setuid/setgid files in user-writable places
+    (setuid_new). A file that doesn't read, or isn't the shape expected, is
+    ignored."""
+    if not path:
+        return []
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(d, dict):
+        return []
+    rows = [{"kind": "root_report", "generated": str(d.get("generated", ""))[:32],
+             "stale": bool(d.get("stale"))}]
+    for a in (d.get("auth_failures") or [])[:200]:
+        if not isinstance(a, dict) or not a.get("user"):
+            continue
+        uid = a.get("uid") if isinstance(a.get("uid"), int) else None
+        n = a.get("count") if isinstance(a.get("count"), int) and 0 < a.get("count") < 10 ** 7 else 0
+        rows.append({"uid": uid, "user": str(a.get("user", ""))[:64], "kind": "auth_failures",
+                     "program": "", "detail": str(n), "processes": n})
+    for a in (d.get("setuid_new") or [])[:200]:
+        if not isinstance(a, dict) or not a.get("user"):
+            continue
+        uid = a.get("uid") if isinstance(a.get("uid"), int) else None
+        rows.append({"uid": uid, "user": str(a.get("user", ""))[:64], "kind": "setuid_new",
+                     "program": safe(str(a.get("name", ""))), "detail": "", "processes": 1})
+    return rows
+
+
 def main():
     a = _args()
     ssh = {}
     found, seen, others, others_cmd = processes(a["proc"], a["min_uid"], a["ignore_users"], a["ignore_programs"],
-                                                ssh=ssh)
+                                                ssh=ssh, agents=a["agents"])
     uids = {f["uid"] for f in found if f["kind"] in FORWARDS}
 
     def system(uid):
@@ -882,6 +1028,7 @@ def main():
 
     accounts = reach(a["proc"], uids, a["trusted"], a["campus"], system, a["cluster"]) if uids else {}
     check(found, accounts, ssh)
+    found = found + escalations(a["proc"], a["min_uid"], a["ignore_programs"])
     out = {
         "host": socket.gethostname().split(".")[0],
         "uid": os.getuid(),
@@ -894,6 +1041,7 @@ def main():
         "cluster": sorted(str(n) for n in cluster_networks(a["proc"], a["cluster"])),
         "findings": found,
         "listeners": listeners(a["proc"], a["min_uid"], a["ignore_users"]),
+        "root": root_signals(a["root_report"]),
     }
     sys.stdout.write(json.dumps(out) + "\n")
 

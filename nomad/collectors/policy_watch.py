@@ -35,6 +35,14 @@ accounts' processes: hidepid; then only this account's are seen, and
 - code_tunnel: `code tunnel` (VS Code's relay through Microsoft);
 - miner: a miner by name, or with a stratum pool on its command line;
 - relay: a proxy or relay (socat listening, 3proxy, v2ray, shadowsocks, ...);
+- escalation: a process running as root whose parent is owned by a regular
+  account and isn't a sanctioned helper (sudo, su, pkexec, ...): the shape
+  of a process that reached root outside the usual path (1.20);
+- agent: an AI agent command-line program (Claude Code, Codex, aider, ...),
+  listed, not alerted -- AI use is not misuse (``agents`` adds names; 1.20);
+- auth_failures, setuid_new: from a root helper (scripts/watch_root_probe.py,
+  ``root_report``; off by default), repeated failed privilege attempts per
+  account and new setuid files in user-writable places -- counts only (1.20);
 - listening: a program of a person's listening on a port open to the
   network, on a login node (``listeners_on_nodes = true`` for compute
   nodes too, where MPI, Dask or Ray open ports of their own; there, a port
@@ -78,6 +86,8 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     #                              # or "vadur:2222"); names, addresses or networks
     # campus_networks = []         # e.g. ["141.166.0.0/16"]: public ranges that are campus (a label)
     # cluster_networks = []        # e.g. ["10.1.1.0/24"]: where a host's way out is the cluster network
+    # agents = []                  # AI agent programs to add to the built-in list (listed, not alerted)
+    # root_report = ""             # path a root helper writes (scripts/watch_root_probe.py); off by default
     # keep_days = 365
 
 Tables: ``policy_findings`` (one row per finding: host, role, username,
@@ -117,11 +127,17 @@ PATH_OK = re.compile(r"/[A-Za-z0-9/._+-]+")       # fullmatch: no newline, no sh
 NAME_OK = re.compile(r"^(\+\d+ more|[A-Za-z0-9._+ -]{1,40})$")
 SEVERITY = {"tunnel": "warning", "ssh_reverse": "warning", "ssh_socks": "warning",
             "code_tunnel": "warning", "miner": "critical", "relay": "warning",
-            "listening": "warning"}
+            "listening": "warning", "escalation": "critical", "agent": "info",
+            "auth_failures": "warning", "setuid_new": "warning"}
 LABELS = {"tunnel": "a tunnel program", "ssh_reverse": "an ssh reverse forward (-R)",
           "ssh_socks": "an ssh SOCKS proxy (-D)", "code_tunnel": "a VS Code tunnel",
           "miner": "a miner", "relay": "a relay or proxy",
-          "listening": "a program listening on a port open to the network"}
+          "listening": "a program listening on a port open to the network",
+          "escalation": "a process that reached root outside the usual path",
+          "agent": "an AI agent", "auth_failures": "repeated failed privilege attempts",
+          "setuid_new": "a new setuid or setgid file"}
+# Kinds the probe sends that are a person's finding of their own (not an ssh forward's reach).
+ESCALATION = "escalation"
 REACH = {"inside": "stays inside", "campus": "on campus", "outside": "connects outside"}
 # Why a forward isn't verified, as the probe says it (watch_probe.reach, check), in this order.
 WHY = {"outside": "{n} connection{s} outside", "campus": "{n} connection{s} on campus",
@@ -291,7 +307,7 @@ def entry_labels(entries, *, here: str = "", login_hosts=()) -> set:
 KEYS = {"enabled", "interval", "interval_minutes", "nodes", "login_hosts", "min_uid", "listeners_on_nodes",
         "ignore_users", "watch_self", "ignore_programs", "ignore_ports", "owners_in_alerts", "parallel", "timeout",
         "max_seconds", "ssh_user", "python", "trusted_hosts", "campus_networks", "cluster_networks", "keep_days",
-        "alerts_enabled", "max_retries", "retry_delay"}
+        "agents", "root_report", "alerts_enabled", "max_retries", "retry_delay"}
 
 
 def _list(v) -> list:
@@ -346,7 +362,7 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
     lists = {}
     like = {"trusted_hosts": '["vadur"]', "campus_networks": '["141.166.0.0/16"]',
             "cluster_networks": '["10.1.1.0/24"]', "login_hosts": '["login02"]', "ignore_users": '["slurm"]',
-            "ignore_programs": '["tailscaled"]'}
+            "ignore_programs": '["tailscaled"]', "agents": '["myorg-agent"]'}
     for k, ex in like.items():
         v = conf.get(k)
         ok = v is None or isinstance(v, str) or (isinstance(v, list) and all(isinstance(x, str) for x in v))
@@ -358,6 +374,10 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
     campus, n1 = networks(lists["campus_networks"], "campus network")
     cluster, n2 = networks(lists["cluster_networks"], "cluster network")
     problems += [f"[collectors.policy_watch] {n}" for n in n1 + n2]
+    rr = conf.get("root_report")
+    if rr not in (None, "") and not (isinstance(rr, str) and PATH_OK.fullmatch(rr)):
+        problems.append("[collectors.policy_watch] root_report: an absolute path with no spaces or shell "
+                        'characters, like "/var/lib/nomad-watch/root_signals.json"')
     info = [f"trusted: {line}" for line in describe_trusted(entries)]
     if campus:
         info.append("campus: " + ", ".join(campus) + " (and private addresses beyond the cluster)")
@@ -446,15 +466,18 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
         names = {n for n in (aka or []) if n} or ({prog} if prog else set())
         return bool(names) and names <= programs
 
+    port_kinds = {"ssh_reverse", "ssh_socks", "listening"}      # kinds whose detail is a port
     for f in probe.get("findings") or []:
         prog, detail = _clean(f.get("program")), _clean(f.get("detail"))
         aka = [_clean(n) for n in f.get("aka") or []]
-        if f.get("user") in users or ignored(prog, aka) or (detail and detail in ports):
-            continue
         kind = f.get("kind") if f.get("kind") in SEVERITY else "other"
+        if f.get("user") in users or ignored(prog, aka) or (detail and detail in ports and kind in port_kinds):
+            continue
         verified, reach, note, why = False, "", None, None
         if kind in ("ssh_reverse", "ssh_socks"):
             verified, reach, note, why = forward_note(dict(f, kind=kind, detail=detail), servers)
+        if kind == ESCALATION and detail:
+            note = f"its parent is a {detail}"            # the program that spawned the root process
         sev = "info" if verified else SEVERITY.get(kind, "info")
         procs = f.get("procs") if isinstance(f.get("procs"), str) and re.fullmatch(r"[0-9a-f]{16}", f["procs"]) \
             else None
@@ -479,6 +502,17 @@ def findings_of(probe: dict, host: str, role: str, *, listeners_on_nodes: bool =
                         "detail": "" if str(port).startswith("+") else _clean(port),
                         "reach": "ephemeral" if eph else "", "verified": None, "note": None,
                         "severity": "info" if (eph and role == "node") else SEVERITY["listening"]})
+    for r in probe.get("root") or []:            # findings a root helper left (watch_root_probe.py)
+        kind = r.get("kind")
+        if kind not in ("auth_failures", "setuid_new"):
+            continue                             # root_report meta and anything unknown: not a finding
+        prog, detail = _clean(r.get("program")), _clean(r.get("detail"))
+        if r.get("user") in users:
+            continue
+        out.append({"host": host, "role": role, "username": _clean(r.get("user"), user_ok),
+                    "uid": r.get("uid") if isinstance(r.get("uid"), int) else None,
+                    "kind": kind, "program": prog, "detail": detail, "reach": "", "verified": None,
+                    "note": None, "severity": SEVERITY[kind]})
     return out
 
 
@@ -558,6 +592,9 @@ class PolicyWatchCollector(BaseCollector):
             except (ImportError, KeyError):
                 pass
         self.ignore_programs = _list(c.get("ignore_programs"))
+        self.agents = _list(c.get("agents"))             # names to add to the probe's built-in agent list
+        rr = c.get("root_report")
+        self.root_report = rr if isinstance(rr, str) and PATH_OK.fullmatch(rr) else ""
         ports = c.get("ignore_ports")
         self.ignore_ports = list(ports) if isinstance(ports, list) else [ports] if ports not in (None, "") else []
         self.owners_in_alerts = c.get("owners_in_alerts", False) is True
@@ -657,10 +694,13 @@ class PolicyWatchCollector(BaseCollector):
         if self.cluster:
             args += ["--cluster", ",".join(self.cluster)]
         safe_list = re.compile(r"^[A-Za-z0-9._+-]{1,64}$")
-        for flag, vals in (("--ignore-users", self.ignore_users), ("--ignore-programs", self.ignore_programs)):
+        for flag, vals in (("--ignore-users", self.ignore_users), ("--ignore-programs", self.ignore_programs),
+                           ("--agents", self.agents)):
             vals = [v for v in vals if isinstance(v, str) and safe_list.fullmatch(v)]
             if vals:
                 args += [flag, ",".join(vals)]
+        if self.root_report:
+            args += ["--root-report", self.root_report]
         return args
 
     def remote_command(self) -> str:
@@ -887,12 +927,15 @@ class PolicyWatchCollector(BaseCollector):
         def what(fs):
             progs = []
             for f in fs:
-                p = f["program"] + (f" port {f['detail']}" if f["detail"].isdigit() else
-                                    f" {f['detail']}" if f["detail"] else "")
-                if f.get("reach") in REACH:
-                    p += f", {REACH[f['reach']]}"
-                if f.get("note") and f["kind"] == "ssh_reverse":
-                    p += f" ({f['note']})"
+                if f["kind"] == ESCALATION:
+                    p = f["program"] + (f" ({f['note']})" if f.get("note") else "")
+                else:
+                    p = f["program"] + (f" port {f['detail']}" if f["detail"].isdigit() else
+                                        f" {f['detail']}" if f["detail"] else "")
+                    if f.get("reach") in REACH:
+                        p += f", {REACH[f['reach']]}"
+                    if f.get("note") and f["kind"] == "ssh_reverse":
+                        p += f" ({f['note']})"
                 if p.strip() and p.strip() not in progs:
                     progs.append(p.strip())
             return ", ".join(progs[:3]) + (f", +{len(progs) - 3} more" if len(progs) > 3 else "")
