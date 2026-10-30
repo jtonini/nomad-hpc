@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.23.0 (October 2026)
+
+### Features
+- The `auth_failures` and `setuid_new` signals (failed `sudo`/`su` per account,
+  and a person's setuid/setgid files) can now be read **unprivileged**, by the
+  probe itself, with no root helper and no cron — retiring the only part of the
+  watch that needed root:
+  - **`watch_auth` (on by default):** failed `sudo`/`su` in the last
+    `auth_window_hours` (24), counted per account, read straight from the auth
+    log (`/var/log/secure` or `auth_log`) **wherever the collector's account may
+    read it** — e.g. where it's group-readable (`installer` is in `securegrp` on
+    spydur). A no-op, with no error, where the log is root-only. The actor is
+    taken from the log's structured fields, matched on the line's head before any
+    `COMMAND=` so a command string can't inject a fake account, and `su` to root
+    is counted against whoever ran it.
+  - **`setuid_roots` (off until set):** the probe scans the directories listed
+    (e.g. `["/localscratch"]`) for a person's setuid/setgid files (basename
+    only), staying on each root's own filesystem, following no symlink, bounded.
+    "New" comes from the finding's first-seen — a file that appears alerts once.
+  - The kinds, folding, severities and Console labels already existed (1.20), so
+    these just add an unprivileged source. The root helper
+    (`scripts/watch_root_probe.py` + `root_report`) still works where root is
+    available instead. No database change.
+
 ## v1.22.0 (October 2026)
 
 ### Features

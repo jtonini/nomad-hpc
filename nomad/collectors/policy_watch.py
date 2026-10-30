@@ -40,9 +40,14 @@ accounts' processes: hidepid; then only this account's are seen, and
   of a process that reached root outside the usual path (1.20);
 - agent: an AI agent command-line program (Claude Code, Codex, aider, ...),
   listed, not alerted -- AI use is not misuse (``agents`` adds names; 1.20);
-- auth_failures, setuid_new: from a root helper (scripts/watch_root_probe.py,
-  ``root_report``; off by default), repeated failed privilege attempts per
-  account and new setuid files in user-writable places -- counts only (1.20);
+- auth_failures, setuid_new: repeated failed privilege attempts per account,
+  and setuid files of a person's in the places listed -- counts only (1.20).
+  Read unprivileged by the probe where the collector's account may (1.23):
+  ``watch_auth`` reads the auth log (/var/log/secure where it is group-readable
+  to the collector, a no-op elsewhere; ``auth_window_hours``), ``setuid_roots``
+  the directories to scan (off until set). A root helper
+  (scripts/watch_root_probe.py, ``root_report``) can still feed the same two
+  where root is available instead;
 - listening: a program of a person's listening on a port open to the
   network, on a login node (``listeners_on_nodes = true`` for compute
   nodes too, where MPI, Dask or Ray open ports of their own; there, a port
@@ -119,6 +124,10 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     # cluster_networks = []        # e.g. ["10.1.1.0/24"]: where a host's way out is the cluster network
     # agents = []                  # AI agent programs to add to the built-in list (listed, not alerted)
     # root_report = ""             # path a root helper writes (scripts/watch_root_probe.py); off by default
+    # watch_auth = true            # failed sudo/su from the auth log, where the collector may read it (1.23)
+    # auth_log = ""                # the auth log path (default: /var/log/secure or /var/log/auth.log)
+    # auth_window_hours = 24       # how far back failed attempts are counted
+    # setuid_roots = []            # e.g. ["/localscratch"]: scan these for a person's setuid files (off until set)
     # workstations = []            # e.g. ["ml-ws01"]: GPU workstations to ask over ssh (role "workstation")
     # watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
     # gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
@@ -362,7 +371,8 @@ KEYS = {"enabled", "interval", "interval_minutes", "nodes", "login_hosts", "min_
         "agents", "root_report", "alerts_enabled", "max_retries", "retry_delay",
         "workstations", "watch_gpu", "gpu_min_mem", "gpu_serve_hosts",
         "watch_heavy", "heavy_cpu", "heavy_min_seconds", "watch_jobs", "job_window_hours",
-        "burst_jobs", "burst_minutes", "fail_fast_jobs", "fail_fast_seconds", "churn_repeats"}
+        "burst_jobs", "burst_minutes", "fail_fast_jobs", "fail_fast_seconds", "churn_repeats",
+        "watch_auth", "auth_log", "auth_window_hours", "setuid_roots"}
 
 # Job-behaviour thresholds (1.22) and their defaults; validated as whole numbers.
 JOB_DEFAULTS = {"window_hours": 24, "burst_jobs": 60, "burst_minutes": 10,
@@ -435,9 +445,23 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
     gm = conf.get("gpu_min_mem")
     if gm is not None and not (isinstance(gm, int) and not isinstance(gm, bool) and gm >= 0):
         problems.append("[collectors.policy_watch] gpu_min_mem: a whole number of MiB, like 256")
-    for b in ("watch_gpu", "watch_heavy", "watch_jobs"):
+    for b in ("watch_gpu", "watch_heavy", "watch_jobs", "watch_auth"):
         if conf.get(b) is not None and not isinstance(conf.get(b), bool):
             problems.append(f"[collectors.policy_watch] {b}: true or false")
+    aw = conf.get("auth_window_hours")
+    if aw is not None and not (isinstance(aw, int) and not isinstance(aw, bool) and aw > 0):
+        problems.append("[collectors.policy_watch] auth_window_hours: a whole number of hours, like 24")
+    al = conf.get("auth_log")
+    if al not in (None, "") and not (isinstance(al, str) and PATH_OK.fullmatch(al)):
+        problems.append("[collectors.policy_watch] auth_log: an absolute path with no spaces or shell "
+                        'characters, like "/var/log/secure"')
+    sr = conf.get("setuid_roots")
+    if sr is not None and not (isinstance(sr, list) and all(isinstance(x, str) for x in sr)):
+        problems.append('[collectors.policy_watch] setuid_roots: a list of absolute paths, like ["/localscratch"]')
+    else:
+        for x in _list(sr):
+            if not PATH_OK.fullmatch(x):
+                problems.append(f"[collectors.policy_watch] setuid_roots {x[:60]!r}: not an absolute path")
     for k in _JOB_KEYS:
         v = conf.get(k)
         if v is not None and not (isinstance(v, int) and not isinstance(v, bool) and v > 0):
@@ -480,6 +504,14 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
         if conf.get("watch_jobs") is not False:
             on.append("job bursts, fail-fast and churn")
         info.append("behaviour: " + ("; ".join(on) if on else "off"))
+    if {"watch_auth", "auth_log", "auth_window_hours", "setuid_roots"} & set(conf):
+        on = []
+        if conf.get("watch_auth") is not False:
+            on.append("failed sudo/su from the auth log (where readable)")
+        roots = _list(conf.get("setuid_roots"))
+        if roots:
+            on.append("setuid files under " + ", ".join(roots))
+        info.append("privilege: " + ("; ".join(on) if on else "off"))
     return problems, info
 
 
@@ -867,6 +899,15 @@ class PolicyWatchCollector(BaseCollector):
             v = c.get(key)
             if isinstance(v, int) and not isinstance(v, bool) and v > 0:
                 self.job_cfg[inner] = v
+        # Failed sudo/su and new setuid files, read unprivileged by the probe where
+        # the collector's account may (1.23): watch_auth reads the auth log where
+        # it is readable (a no-op elsewhere); setuid_roots is off until set.
+        self.watch_auth = c.get("watch_auth", True) is not False
+        self.auth_log = c["auth_log"] if isinstance(c.get("auth_log"), str) and PATH_OK.fullmatch(c["auth_log"]) \
+            else ""
+        self.auth_window_hours = int(c["auth_window_hours"]) if isinstance(c.get("auth_window_hours"), int) \
+            and not isinstance(c.get("auth_window_hours"), bool) and c["auth_window_hours"] > 0 else 24
+        self.setuid_roots = [r for r in _list(c.get("setuid_roots")) if PATH_OK.fullmatch(r)]
         rr = c.get("root_report")
         self.root_report = rr if isinstance(rr, str) and PATH_OK.fullmatch(rr) else ""
         ports = c.get("ignore_ports")
@@ -985,6 +1026,15 @@ class PolicyWatchCollector(BaseCollector):
                 args += ["--heavy-cpu", repr(self.heavy_cpu)]
             if self.heavy_min != 600:
                 args += ["--heavy-min", str(self.heavy_min)]
+        if self.watch_auth:
+            if self.auth_log:
+                args += ["--auth-log", self.auth_log]
+            else:
+                args += ["--auth"]
+            if self.auth_window_hours != 24:
+                args += ["--auth-window", str(self.auth_window_hours)]
+        if self.setuid_roots:
+            args += ["--setuid-roots", ",".join(self.setuid_roots)]
         return args
 
     def remote_command(self) -> str:

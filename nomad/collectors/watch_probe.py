@@ -44,6 +44,12 @@ JSON file are read here too and travel the same pipeline: counts only, of
 failed privilege attempts per account and of new setuid files in
 user-writable places.
 
+With --auth (and --setuid-roots), those same two are read here, unprivileged,
+where this account may -- failed sudo/su in the last --auth-window hours from
+the auth log (/var/log/secure or /var/log/auth.log, read only where it is
+readable, e.g. group-readable to the collector), and setuid/setgid files of a
+person's under --setuid-roots (basename only). No root helper, no cron.
+
 Only accounts from --min-uid up (1000) count: system services aren't
 people; --ignore-users and --ignore-programs (a site's own services) are
 left out before anything is counted. Nothing of a command line is kept but
@@ -78,7 +84,8 @@ holds (within limits: policy_watch.keep).
         [--campus NET,...] [--cluster NET,...] [--ignore-users a,b]
         [--ignore-programs a,b] [--agents a,b] [--root-report PATH]
         [--gpu] [--gpu-min-mem MiB] [--heavy] [--heavy-cpu CORES]
-        [--heavy-min SECONDS] [--proc DIR] < watch_probe.py
+        [--heavy-min SECONDS] [--auth] [--auth-log PATH] [--auth-window H]
+        [--setuid-roots A,B,C] [--proc DIR] < watch_probe.py
 """
 import hashlib
 import ipaddress
@@ -89,6 +96,7 @@ import re
 import socket
 import subprocess
 import sys
+from datetime import datetime, timedelta
 
 TUNNELS = ("ngrok", "cloudflared", "frpc", "frps", "chisel", "rathole", "inlets", "zrok", "pinggy",
            "localtunnel", "tailscaled", "tailscale", "zerotier-one", "sish", "ligolo", "ligolo-ng",
@@ -146,6 +154,26 @@ HEAVY_CORES = 2.0
 HEAVY_MIN_SECONDS = 600
 HZ = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") and "SC_CLK_TCK" in os.sysconf_names else 100
 PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") and "SC_PAGE_SIZE" in os.sysconf_names else 4096
+# Failed privilege attempts (1.23), read unprivileged from the auth log where the
+# collector's account may read it (e.g. /var/log/secure group-readable). Matched
+# on the line's head (before COMMAND=), so a command string can't inject one.
+AUTH_LOGS = ("/var/log/secure", "/var/log/auth.log")
+AUTH_WINDOW_HOURS = 24
+FAIL = re.compile(r"pam_unix\((?:sudo|su|su-l):auth\): authentication failure|"
+                  r"FAILED SU|FAILED su|incorrect password attempt")
+_ANAME = r"([A-Za-z0-9._-]{1,64})"
+# The account that made the attempt (the actor), from the structured fields, NOT
+# from user= (which names the target -- so su to root is counted, not dropped).
+AUTH_ACTORS = (re.compile(r"\bsudo:\s+" + _ANAME + r"\s+:"),
+               re.compile(r"\b(?:ruser|logname)=" + _ANAME),
+               re.compile(r"FAILED SU \(to \S+\) " + _ANAME),
+               re.compile(r"\bby " + _ANAME + r"\b"))
+_MONTHS = {m: i for i, m in enumerate(
+    ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"), 1)}
+_TS_ISO = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})")
+_TS_BSD = re.compile(r"^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})")
+SETUID_MAX_FILES = 400000
+SETUID_MAX_REPORT = 200
 
 
 def _nets(text, ports=False):
@@ -168,7 +196,8 @@ def _args():
     out = {"min_uid": 1000, "proc": "/proc", "trusted": [], "campus": [], "cluster": [],
            "ignore_users": frozenset(), "ignore_programs": frozenset(), "agents": list(AGENTS),
            "root_report": "", "gpu": False, "gpu_min_mem": GPU_MIN_MEM,
-           "heavy": False, "heavy_cores": HEAVY_CORES, "heavy_min": HEAVY_MIN_SECONDS}
+           "heavy": False, "heavy_cores": HEAVY_CORES, "heavy_min": HEAVY_MIN_SECONDS,
+           "auth": False, "auth_log": "", "auth_window": AUTH_WINDOW_HOURS, "setuid_roots": []}
     a = sys.argv[1:]
     i = 0
     while i < len(a):
@@ -216,6 +245,22 @@ def _args():
                 out["heavy_min"] = max(0, int(a[i + 1]))
             except ValueError:
                 pass
+            i += 2
+        elif a[i] == "--auth":
+            out["auth"] = True
+            i += 1
+        elif a[i] == "--auth-log" and i + 1 < len(a):
+            out["auth"] = True
+            out["auth_log"] = a[i + 1]
+            i += 2
+        elif a[i] == "--auth-window" and i + 1 < len(a):
+            try:
+                out["auth_window"] = max(1, int(a[i + 1]))
+            except ValueError:
+                pass
+            i += 2
+        elif a[i] == "--setuid-roots" and i + 1 < len(a):
+            out["setuid_roots"] = [r for r in a[i + 1].split(",") if r]
             i += 2
         else:
             i += 1
@@ -1069,6 +1114,126 @@ def root_signals(path):
     return rows
 
 
+# -- failed privilege attempts and new setuid files, unprivileged (1.23) -------------
+
+_UIDS = {}
+
+
+def _uid(name):
+    if name not in _UIDS:
+        try:
+            _UIDS[name] = pwd.getpwnam(name).pw_uid
+        except (KeyError, TypeError):
+            _UIDS[name] = None
+    return _UIDS[name]
+
+
+def _logtime(line, now):
+    """A syslog line's time, ISO (rsyslog) or BSD (Oct 30 16:25:01); the BSD
+    form has no year, so the current one is used, less a year when that would
+    put it in the future (a December line read in January)."""
+    m = _TS_ISO.match(line)
+    if m:
+        try:
+            return datetime.strptime(m.group(1) + " " + m.group(2), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    m = _TS_BSD.match(line)
+    if not m:
+        return None
+    mon = _MONTHS.get(m.group(1))
+    if not mon:
+        return None
+    try:
+        dt = datetime(now.year, mon, int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    except ValueError:
+        return None
+    return dt.replace(year=now.year - 1) if dt - now > timedelta(days=1) else dt
+
+
+def auth_failures(log, window_hours=AUTH_WINDOW_HOURS, min_uid=1000, now=None):
+    """Failed sudo/su attempts in the last ``window_hours``, counted per account,
+    read straight from the auth log where the collector's account may read it
+    (no root helper). The actor comes from the log's structured fields, matched
+    on the head before any COMMAND= so a command string can't inject one; only
+    accounts from ``min_uid`` up (root's own excluded). Returns root-channel
+    rows (the shape root_signals gives), or [] when the log can't be read."""
+    now = now or datetime.now()
+    cutoff = now - timedelta(hours=window_hours)
+    if not log:
+        return []
+    counts = {}
+    try:
+        with open(log, errors="replace") as f:
+            for line in f:
+                head = line.split("COMMAND=", 1)[0]
+                if not FAIL.search(head):
+                    continue
+                t = _logtime(line, now)
+                if t is not None and t < cutoff:
+                    continue
+                who = next((m.group(1) for m in (rx.search(head) for rx in AUTH_ACTORS) if m), None)
+                if not who:
+                    continue
+                uid = _uid(who)
+                if uid is None or uid < min_uid:
+                    continue
+                counts[who] = counts.get(who, 0) + 1
+    except OSError:
+        return []                                        # not readable here: no signal, no error
+    return [{"uid": _uid(u), "user": u, "kind": "auth_failures", "program": "",
+             "detail": str(n), "processes": n} for u, n in sorted(counts.items())]
+
+
+def _setuid_iter(roots, min_uid, max_files):
+    """setuid/setgid regular files under ``roots`` owned by a person, bounded,
+    staying on each root's own filesystem, following no symlink."""
+    seen = 0
+    for root in roots:
+        try:
+            dev = os.stat(root).st_dev
+        except OSError:
+            continue
+        stack = [root]
+        while stack and seen < max_files:
+            try:
+                it = os.scandir(stack.pop())
+            except OSError:
+                continue
+            with it:
+                for e in it:
+                    if seen >= max_files:
+                        break
+                    seen += 1
+                    try:
+                        if e.is_symlink():
+                            continue
+                        if e.is_dir(follow_symlinks=False):
+                            if e.stat(follow_symlinks=False).st_dev == dev:
+                                stack.append(e.path)
+                            continue
+                        if not e.is_file(follow_symlinks=False):
+                            continue
+                        stt = e.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    if stt.st_mode & 0o6000 and stt.st_uid >= min_uid:
+                        yield e.path, stt.st_uid
+
+
+def setuid_files(roots, min_uid=1000, max_files=SETUID_MAX_FILES, max_report=SETUID_MAX_REPORT):
+    """setuid/setgid files of a person's under ``roots`` (basename only). The
+    collector's first-seen lifecycle makes a newly-appeared one a new finding,
+    so the probe stays stateless. Returns root-channel rows."""
+    rows = []
+    for path, uid in _setuid_iter(roots, min_uid, max_files):
+        rows.append({"uid": uid, "user": _name(uid), "kind": "setuid_new",
+                     "program": safe(os.path.basename(path)), "detail": "", "processes": 1})
+        if len(rows) >= max_report:
+            break
+    return rows
+
+
 # -- the GPU watch (1.21) -------------------------------------------------------------
 
 def _nvidia_smi(query):
@@ -1339,6 +1504,15 @@ def main():
     if a["heavy"]:
         found = found + heavy(a["proc"], a["min_uid"], a["heavy_cores"], a["heavy_min"],
                               a["ignore_users"], a["ignore_programs"])
+    # The root channel: what a root helper left (root_report, 1.20), and -- read
+    # here, unprivileged, where this account may (1.23) -- failed sudo/su from the
+    # auth log and setuid files under the configured roots. Same rows either way.
+    root = root_signals(a["root_report"])
+    if a["auth"]:
+        log = a["auth_log"] or next((p for p in AUTH_LOGS if os.path.exists(p)), "")
+        root = root + auth_failures(log, a["auth_window"], a["min_uid"])
+    if a["setuid_roots"]:
+        root = root + setuid_files(a["setuid_roots"], a["min_uid"])
     out = {
         "host": socket.gethostname().split(".")[0],
         "uid": os.getuid(),
@@ -1351,7 +1525,7 @@ def main():
         "cluster": sorted(str(n) for n in cluster_networks(a["proc"], a["cluster"])),
         "findings": found,
         "listeners": listeners(a["proc"], a["min_uid"], a["ignore_users"]),
-        "root": root_signals(a["root_report"]),
+        "root": root,
     }
     sys.stdout.write(json.dumps(out) + "\n")
 

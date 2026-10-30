@@ -161,6 +161,14 @@ check_services = ["slurmd", "munge"]
 # here -- failed sudo/su per account, new setuid files in user-writable
 # places. Give the same path the helper writes. See docs/policy_watch.md.
 # root_report = "/var/lib/nomad-watch/root_signals.json"
+# Failed sudo/su and new setuid files, read unprivileged (1.23) where the
+# collector's account may: watch_auth reads the auth log (e.g. /var/log/secure
+# where it is group-readable; a no-op where it isn't), setuid_roots scans the
+# dirs you list for a person's setuid files (off until set). No root, no cron.
+# watch_auth = true
+# auth_log = ""
+# auth_window_hours = 24
+# setuid_roots = ["/localscratch"]
 # GPU workstations (1.21): list GPU boxes to ask over ssh (as "workstation").
 # workstations = ["ml-ws01", "ml-ws02"]
 # The GPU watch (on by default; nothing where there is no GPU) lists each GPU

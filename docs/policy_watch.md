@@ -17,7 +17,7 @@ Of accounts from `min_uid` (1000) up -- system services aren't people; nor are S
 | `listening` | a person's program listening on a port open to the network, on a login node | warning |
 | `escalation` | a process running as root whose parent is owned by a regular account and isn't a sanctioned helper (`sudo`, `su`, `pkexec`, ...): the shape of a process that reached root outside the usual path (1.20) | critical |
 | `agent` | an AI agent command-line program (Claude Code, Codex, aider, ...): **listed, not alerted** -- AI use is not misuse (1.20) | listed |
-| `auth_failures`, `setuid_new` | from the root helper only (below): repeated failed privilege attempts per account, and new setuid/setgid files in user-writable places (1.20) | warning |
+| `auth_failures`, `setuid_new` | repeated failed `sudo`/`su` per account, and setuid/setgid files of a person's in the places scanned — read unprivileged where the collector's account may (1.23), or from the root helper (below) where root is available (1.20) | warning |
 | `gpu` | a GPU compute process (nvidia-smi): **listed, not alerted** -- the note says the memory held, whether it is detached (no terminal: the shape of an unattended job), and whether it is an AI agent (1.21) | listed |
 | `gpu_served` | a GPU compute process reachable from the network: it listens on a port open to the network, or its account also runs a tunnel/relay/forward -- the shape of reselling or an open inference server (1.21) | warning |
 | `heavy` | a user process holding real CPU (by lifetime average: its whole CPU time / its age) of at least `heavy_cpu` cores on a **login** node -- a computation run where it shouldn't be (1.22) | warning |
@@ -93,6 +93,10 @@ enabled = true
 # watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU
 # gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload
 # gpu_serve_hosts = []         # boxes where serving a GPU is sanctioned (then listed): ["shared-infer01"]
+# watch_auth = true            # failed sudo/su from the auth log, where the collector may read it (1.23)
+# auth_log = ""                # the auth log path (default: /var/log/secure or /var/log/auth.log)
+# auth_window_hours = 24       # how far back failed attempts are counted
+# setuid_roots = []            # scan these for a person's setuid files, off until set: ["/localscratch"]
 # watch_heavy = true           # heavy use of a login node (a user process holding real CPU)
 # heavy_cpu = 2.0              # cores (by lifetime average) at or above which it is heavy
 # heavy_min_seconds = 600      # CPU-seconds the process must have used (so a brief spike doesn't count)
@@ -130,9 +134,20 @@ The meeting that prompted this named two harms, and neither depends on which too
 
 **AI agents themselves are listed, not alerted.** Using an agent is not misuse; what matters is what it does. The `agent` kind names agent command-line programs (Claude Code, Codex, aider, Gemini CLI, ollama, ...) so an admin can see them in `nomad watch list --all`; `agents = [...]` adds a site's own. An agent on a **login or compute node** is seen this way. An agent on a **laptop** driving the cluster over the user's own ssh looks, from the cluster, like the person typing — so the watch aims at the behaviour (bursts of submissions, jobs that fail in seconds over and over, cancel/resubmit loops, query rates), which catches a careless script just the same.
 
-### The root helper (off by default)
+### Failed `sudo`/`su` and new setuid files
 
-`scripts/watch_root_probe.py` reads what the unprivileged probe can't. It is **off until a site turns it on**, because it needs root. Run it as root by cron on each node, writing a counts-only JSON that the probe reads back:
+Two of these signals — failed privilege attempts (`auth_failures`) and a person's setuid/setgid files (`setuid_new`) — are what the ordinary `/proc` walk can't see. There are two ways to get them; prefer the first.
+
+**Unprivileged (1.23), no root, no cron.** The probe reads them itself, as the collector's account, wherever it's allowed to:
+
+- `auth_failures` — failed `sudo`/`su` in the last `auth_window_hours` (24), counted per account, straight from the auth log (`/var/log/secure`, or `auth_log`). This needs read access to the auth log, which `installer` often already has: on spydur `/var/log/secure` is `root:securegrp 0640` and `installer` is in `securegrp`, so it just works on the login node (`watch_auth = true`, the default). On a host where the log is root-only it reads nothing and says nothing — no error. The actor is taken from the log's structured fields and matched on the line's head before any `COMMAND=`, so a command string can't inject a fake account, and `su` to root is counted against whoever ran it (not dropped as "root").
+- `setuid_new` — set `setuid_roots = ["/localscratch"]` (off until set) and the probe lists a person's setuid/setgid files there (basename only), staying on each root's own filesystem, following no symlink, bounded. "New" comes for free from the finding's first-seen: a file that appears is a new finding (and alerts once); one that persists just updates its last-seen.
+
+Note that the auth log is **per host and usually not forwarded**, so this covers the login node (where interactive `sudo` happens); to cover the compute nodes too, make their `/var/log/secure` group-readable to the collector the same way (`chgrp securegrp … && chmod 0640`, plus a matching `create` line in `logrotate`) — a config change, not a cron or a script. The setuid scan needs no such grant and runs on every host.
+
+### The root helper (off by default, needs root)
+
+Where the auth log can't be made readable and root is available, `scripts/watch_root_probe.py` feeds the same two signals from a root context instead. It is **off until a site turns it on**. Run it as root by cron on each node, writing a counts-only JSON that the probe reads back:
 
 ```cron
 */15 * * * * /usr/bin/python3 -I /path/to/watch_root_probe.py \
