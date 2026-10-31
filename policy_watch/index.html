@@ -1,0 +1,2369 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Lightweight HPC monitoring, visualization, and predictive analytics">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/policy_watch/">
+      
+      
+        <link rel="prev" href="../storage/">
+      
+      
+        <link rel="next" href="../impact/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Policy Watch - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#policy-watch" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Policy Watch
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../dashboard/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Technical
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../collectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../submit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../condo-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Condo Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-finds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it finds
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it finds">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwards-to-servers-you-trust-1191" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwards to servers you trust (1.19.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-kept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is kept
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turning-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning it on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#looking-at-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Looking at it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai-agents-and-getting-root-120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI agents and getting root (1.20)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AI agents and getting root (1.20)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#failed-sudosu-and-new-setuid-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed sudo/su and new setuid files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-root-helper-off-by-default-needs-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The root helper (off by default, needs root)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-workstations-121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU workstations (1.21)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#behaviour-the-agent-the-proc-watch-cant-see-122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behaviour: the agent the /proc watch can't see (1.22)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../facts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Facts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-finds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it finds
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What it finds">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#forwards-to-servers-you-trust-1191" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Forwards to servers you trust (1.19.1)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-kept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is kept
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#turning-it-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Turning it on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#looking-at-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Looking at it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ai-agents-and-getting-root-120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AI agents and getting root (1.20)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AI agents and getting root (1.20)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#failed-sudosu-and-new-setuid-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Failed sudo/su and new setuid files
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-root-helper-off-by-default-needs-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The root helper (off by default, needs root)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-workstations-121" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU workstations (1.21)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#behaviour-the-agent-the-proc-watch-cant-see-122" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Behaviour: the agent the /proc watch can't see (1.22)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-is-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it is not
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="policy-watch">Policy watch<a class="headerlink" href="#policy-watch" title="Permanent link">&para;</a></h1>
+<p>What runs on a cluster's login and compute nodes that its rules usually forbid, for an administrator to look at (1.19). It reads; it never stops, changes or reports anything to anyone but the site's admins.</p>
+<h2 id="what-it-finds">What it finds<a class="headerlink" href="#what-it-finds" title="Permanent link">&para;</a></h2>
+<p>Of accounts from <code>min_uid</code> (1000) up -- system services aren't people; nor are Slurm's and munge's accounts, nor the collector's own (<code>ignore_users</code>, <code>watch_self</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>What</th>
+<th>Alerted</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tunnel</code></td>
+<td>a program that opens a way in or out: ngrok, cloudflared, frp, chisel, Tailscale, ZeroTier, sshuttle, wstunnel, iodine, ... (and <code>ssh -w</code>); generic names (bore, gost, naive, xray, ...) only with an argument that listens or proxies</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>ssh_reverse</code></td>
+<td>an ssh client forwarding a port from outside to here (<code>-R</code>, <code>RemoteForward</code>), before or after the destination, as ssh reads them (checked against <code>ssh -G</code>)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>ssh_socks</code></td>
+<td>an ssh SOCKS proxy (<code>-D</code>, <code>DynamicForward</code>): this host's traffic carried out through another</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>code_tunnel</code></td>
+<td><code>code tunnel</code>: VS Code's relay through Microsoft (Remote-SSH's server isn't one)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>miner</code></td>
+<td>a miner by name (xmrig, t-rex, lolMiner, ...), xmrig's <code>--donate-level</code>, or a <code>stratum+tcp://</code> pool on the command line of a program that isn't a text tool (<code>grep stratum+tcp://</code> isn't a miner)</td>
+<td>critical</td>
+</tr>
+<tr>
+<td><code>relay</code></td>
+<td>a relay or proxy: socat listening, 3proxy, v2ray, shadowsocks, sing-box, ...</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>listening</code></td>
+<td>a person's program listening on a port open to the network, on a login node</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>escalation</code></td>
+<td>a process running as root whose parent is owned by a regular account and isn't a sanctioned helper (<code>sudo</code>, <code>su</code>, <code>pkexec</code>, ...): the shape of a process that reached root outside the usual path (1.20)</td>
+<td>critical</td>
+</tr>
+<tr>
+<td><code>agent</code></td>
+<td>an AI agent command-line program (Claude Code, Codex, aider, ...): <strong>listed, not alerted</strong> -- AI use is not misuse (1.20)</td>
+<td>listed</td>
+</tr>
+<tr>
+<td><code>auth_failures</code>, <code>setuid_new</code></td>
+<td>repeated failed <code>sudo</code>/<code>su</code> per account, and setuid/setgid files of a person's in the places scanned — read unprivileged where the collector's account may (1.23), or from the root helper (below) where root is available (1.20)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>gpu</code></td>
+<td>a GPU compute process (nvidia-smi): <strong>listed, not alerted</strong> -- the note says the memory held, whether it is detached (no terminal: the shape of an unattended job), and whether it is an AI agent (1.21)</td>
+<td>listed</td>
+</tr>
+<tr>
+<td><code>gpu_served</code></td>
+<td>a GPU compute process reachable from the network: it listens on a port open to the network, or its account also runs a tunnel/relay/forward -- the shape of reselling or an open inference server (1.21)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>heavy</code></td>
+<td>a user process holding real CPU (by lifetime average: its whole CPU time / its age) of at least <code>heavy_cpu</code> cores on a <strong>login</strong> node -- a computation run where it shouldn't be (1.22)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>job_burst</code></td>
+<td>at least <code>burst_jobs</code> sbatches within <code>burst_minutes</code> by one user (an array counts as one) -- <strong>listed, not alerted</strong>, since a parameter sweep bursts too (1.22)</td>
+<td>listed</td>
+</tr>
+<tr>
+<td><code>fail_fast</code></td>
+<td>at least <code>fail_fast_jobs</code> of a user's jobs that FAILED within <code>fail_fast_seconds</code> of starting -- the shape of an agent resubmitting what it doesn't understand (1.22)</td>
+<td>warning</td>
+</tr>
+<tr>
+<td><code>job_churn</code></td>
+<td>the same job name resubmitted at least <code>churn_repeats</code> times by one user with cancellations between (1.22)</td>
+<td>warning</td>
+</tr>
+</tbody>
+</table>
+<p>A program is known by its name as it started (argv[0]), its kernel name (<code>comm</code>: what <code>exec -a</code> doesn't change), a download's suffix aside (<code>cloudflared-linux-amd64</code>, <code>chisel_1.10.1_linux_amd64</code>), and, for an interpreter (python, node, java, sh, ...), the script or module it runs, by its exact name (<code>python3 -m sshuttle</code>, <code>sh pagekite.py</code>; <code>rigel_fit.py</code> isn't the rigel miner). An <code>ignore_programs</code> entry leaves a finding out only if it names every name the process goes by.</p>
+<p><strong>What a user writes never lowers a finding.</strong> Each ssh forward says where its account's connections on that host go, from what the kernel shows (<code>/proc/net</code>), not from the destination on its command line (a user's own <code>~/.ssh/config</code> can map any name anywhere): <em>stays inside</em> (this host, the cluster's own networks, the servers you list), <em>on campus</em> (private addresses beyond the cluster, and <code>campus_networks</code>), or <em>connects outside</em>. That is a label; it changes nothing by itself.</p>
+<h3 id="forwards-to-servers-you-trust-1191">Forwards to servers you trust (1.19.1)<a class="headerlink" href="#forwards-to-servers-you-trust-1191" title="Permanent link">&para;</a></h3>
+<p>An <code>ssh -R</code> to a server you list in <code>trusted_hosts</code> (and to the cluster's own login hosts: this one and <code>login_hosts</code>) is <strong>verified</strong>: shown by <code>nomad watch list</code> as info, with why, and not alerted. Only when all of this holds, on that host, at that sweep:</p>
+<ul>
+<li>the forward opens one port that leads to this host (<code>-R 2222:localhost:22</code>; any port here: what it exposes is the user's choice, and the note says the far end), asks for loopback on the far end (no bind address, or <code>localhost</code>), and has no <code>-J</code>, <code>-W</code>, <code>-F</code> or <code>-o HostName/ProxyJump/ProxyCommand/ProxyUseFdpass</code> of its own; a SOCKS proxy on either end (<code>-R 2222</code>, <code>-D</code>) never is;</li>
+<li>every connection its account has there goes to a listed server (on a port below 1024, which only root opens, or the one you give: <code>"vadur:2222"</code>), into the cluster below port 1024, or to a service on this host of a system account (below <code>min_uid</code>, or in <code>ignore_users</code>) -- and at least one to a listed server or into the cluster. A connection anywhere else, to a port of a person's on this host (its own <code>-L</code>, say: a relay) or above 1023 on a node, keeps it a warning. Connections <em>into</em> the account's own listening ports count only by where they come from (from this host, the cluster or a listed server: fine); a UDP socket counts by where it is connected to;</li>
+<li>the account has at least as many such connections as ssh processes (an ssh with no connection of its own, between connection attempts, could be going anywhere);</li>
+<li>no ssh of that account has a child process (<code>ProxyCommand</code> and <code>ProxyJump</code> from <code>~/.ssh/config</code> start one: a jump through a listed server to somewhere else) or relays (<code>-W</code>, <code>-J</code>, a proxy, a local forward from a socket);</li>
+<li>the account has no UDP socket open that isn't connected (it may send anywhere) beyond loopback, and no raw or ICMP socket.</li>
+</ul>
+<p>The names in <code>trusted_hosts</code> are resolved by the collector (its own DNS and <code>/etc/hosts</code>), each sweep; <code>nomad watch probe</code> and <code>nomad config check</code> say what they resolve to. The far end is what was <em>asked</em>: that server's sshd decides (with <code>GatewayPorts</code>).</p>
+<p><strong>Once verified, it stays verified while the same ssh runs.</strong> An ssh keeps the connection it made for as long as it runs, so what its account does afterwards (a Jupyter reached through <code>ssh -L</code>, a name that doesn't resolve at one sweep) can't move its far end: the note says what is new ("... (the same ssh since; now: 1 connection to a person's port on this host)"). The probe names a forward's processes by a key (a hash of the boot, their pids and start times), only when each is ssh by its kernel name (<code>exec -a ssh</code> changes argv[0] alone; a user can set the kernel name too, so this stops only the simplest pose; where the probe runs as root, the program file must be the system's <code>/usr/bin/ssh</code>). It stops being kept when its account reaches anywhere at two of its last four sweeps -- campus, outside, a person's port on a listed server or a node, an open UDP or raw socket, no connection to a listed server (one such sweep, a <code>git pull</code>, is fine; a program posing as ssh that carries the forward elsewhere would show at more) -- or when you take its server off <code>trusted_hosts</code>. Without limit it rides through only what carries nothing elsewhere by itself: a connection to a person's port on this host (a Jupyter through <code>ssh -L</code>), and the account's other ssh processes, which are themselves counted. A new ssh (a new one on the same port, or <code>autossh</code> starting it again) is checked afresh: until a sweep finds its account quiet it is a warning, and alerts, its note saying why ("not verified: 1 connection outside; far end loopback"). An <code>autossh</code> row is verified when its ssh is ("as its ssh: ...").</p>
+<p>The cluster's own networks are the private ones each host reaches directly, on an interface with no default route for that IP version (one with a default route is a way out, shared with whatever else is there); where a compute node's way out is the cluster network (through the head node), or a spare default route is on it, list it: <code>cluster_networks = ["10.1.1.0/24"]</code>.</p>
+<p><strong>A site's own ProxyCommand</strong> (FreeIPA's <code>/etc/ssh/ssh_config.d/04-ipa.conf</code> on older clients: <code>ProxyCommand /usr/bin/sss_ssh_knownhostsproxy</code>) gives every ssh a child process, so nothing is verified there; the note names the child by its kernel name, cut at 15 characters ("an ssh with a child process (sss_ssh_knownho: ...)"). The probe can't tell a site's proxy from a user's copy of it without root, so it doesn't try; newer sssd uses <code>KnownHostsCommand</code>, which starts no child. To see whether a host has one: <code>grep -ri proxycommand /etc/ssh/ssh_config /etc/ssh/ssh_config.d/</code>.</p>
+<p>What it can't see without root: which process holds which connection. An account that hands ssh a ready connection through a socket of its own (<code>ProxyUseFdpass</code> in its <code>~/.ssh/config</code>, a relay of its own making), or runs a program of its own that poses as ssh, can hide where a forward goes, and so can two accounts working together; the check makes that deliberate, not easy. Like everything the watch sees, it sees only what runs when it looks: what runs between sweeps, it doesn't.</p>
+<p>On compute nodes, programs listening are not findings unless <code>listeners_on_nodes = true</code>: MPI, NCCL, Dask and Ray open ports of their own there (and with it, a port in the kernel's ephemeral range is listed only). Listening on loopback only (VS Code's server, a Jupyter reached through <code>ssh -L</code>) is never one, nor is a local forward (<code>ssh -L</code>).</p>
+<p>A host that answered before and hasn't for 3 sweeps raises its own alert: a probe that can't finish there sees nothing, and someone may be hiding.</p>
+<p>Not seen: a forward set in someone's <code>~/.ssh/config</code> (it isn't on the command line), and what runs between sweeps.</p>
+<h2 id="how">How<a class="headerlink" href="#how" title="Permanent link">&para;</a></h2>
+<p>Every <code>interval_minutes</code> (15), a probe (<code>watch_probe.py</code>, standard library only, Python 3.6 or later) runs on the login node the collector runs on and, over ssh (BatchMode, no agent or X forwarding), on each compute node Slurm lists that is up, a few at a time, for at most <code>max_seconds</code>. It is piped to a fixed interpreter, the first of <code>python</code> (<code>/usr/bin/python3</code>, <code>/usr/libexec/platform-python</code>) that exists, with <code>-I -S</code>: not whatever <code>python3</code> comes first on the account's PATH, and no site-packages or <code>.pth</code> files, so nothing a user could put in the collector's way runs as its account. Nothing is installed on the nodes. It reads <code>/proc</code> as the collector's account: every account's processes and their command lines (at most 64 KB each), and the listening sockets with their owners (<code>/proc/net/tcp</code>, readable by every account). No root is needed, unless <code>/proc</code> is mounted with <code>hidepid</code>: then only the collector's own processes are seen (sockets still are), and <code>nomad watch status</code> says so. Which program listens on a port is known only to root (another account's sockets are its own): elsewhere a listener is its owner and port, and <code>ignore_ports</code> leaves out a sanctioned one.</p>
+<h2 id="what-is-kept">What is kept<a class="headerlink" href="#what-is-kept" title="Permanent link">&para;</a></h2>
+<p>The host, the account, the kind, the program's name (a short word: letters, digits, <code>. _ + -</code>; at most five per account and kind on a host, listeners too, then <code>+N more</code>), the port it forwards or listens on, and for an ssh forward where its account's connections go (inside, campus, outside), whether it is verified and why, as last seen (in the watch's own words, naming only the servers you listed, by the name or network you gave without its port, the cluster's own hosts, and the kernel name of a child process), and a key of its processes (a hash): <strong>never a command line, or an address or host a user gave.</strong> <code>--mask</code> replaces the server names in notes too, and <code>nomad watch probe --mask</code> shows no addresses or settings. Each finding has a first and a last time seen, and how many sweeps saw it, in <code>policy_findings</code>, which the hub gets with every other table: admins see NetIDs, as elsewhere in the Console. <code>policy_watch_hosts</code> keeps, per sweep, which hosts answered and what the probe could see there.</p>
+<p>Findings raise one alert per account and kind, on whatever hosts (renaming a program, or the same thing on many nodes, makes no new one; something new in it makes one more, itself deduplicated; deduplicated, with reminders as for every alert) that names no one unless <code>owners_in_alerts = true</code>: alerts also go to Slack and webhooks, and their key is the finding's number on the site, which says nothing of the account. <code>policy_watch_hosts</code> (7 days) and <code>policy_watch_sweeps</code> stay on the site.</p>
+<h2 id="turning-it-on">Turning it on<a class="headerlink" href="#turning-it-on" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">[collectors.policy_watch]</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1"># interval_minutes = 15</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># nodes = "slurm"              # every node Slurm lists that is up; or a list; or [] for this host only</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># login_hosts = []             # other login nodes, asked over ssh</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># min_uid = 1000</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># listeners_on_nodes = false</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># ignore_users = ["slurm", "munge"]   # services' accounts above min_uid (the default)</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># watch_self = false           # the collector's own account (an admin's: it may run services) left out</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="c1"># ignore_programs = []         # e.g. ["tailscaled"] where IT runs it</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># ignore_ports = []</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># owners_in_alerts = false</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># parallel = 8</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># timeout = 15</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="c1"># max_seconds = 180</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="c1"># ssh_user = "..."</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1"># python = ["/usr/bin/python3", "/usr/libexec/platform-python"]</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="c1"># trusted_hosts = []           # servers an ssh -R may go to, verified: ["vadur"], "vadur:2222",</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="c1">#                              # an address or a network (ports below 1024 unless one is given)</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="c1"># campus_networks = []         # public ranges that are campus, a label: ["141.166.0.0/16"]</span>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="c1"># cluster_networks = []        # the cluster's own, where a host's default route is on it: ["10.1.1.0/24"]</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a><span class="c1"># workstations = []            # GPU workstations to ask over ssh (role "workstation"): ["ml-ws01"]</span>
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a><span class="c1"># watch_gpu = true             # GPU compute processes (nvidia-smi); nothing where there is no GPU</span>
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a><span class="c1"># gpu_min_mem = 256            # a compute context smaller than this (MiB) is a probe, not a workload</span>
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a><span class="c1"># gpu_serve_hosts = []         # boxes where serving a GPU is sanctioned (then listed): ["shared-infer01"]</span>
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a><span class="c1"># watch_auth = true            # failed sudo/su from the auth log, where the collector may read it (1.23)</span>
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a><span class="c1"># auth_log = ""                # the auth log path (default: /var/log/secure or /var/log/auth.log)</span>
+<a id="__codelineno-0-28" name="__codelineno-0-28" href="#__codelineno-0-28"></a><span class="c1"># auth_window_hours = 24       # how far back failed attempts are counted</span>
+<a id="__codelineno-0-29" name="__codelineno-0-29" href="#__codelineno-0-29"></a><span class="c1"># setuid_roots = []            # scan these for a person's setuid files, off until set: ["/localscratch"]</span>
+<a id="__codelineno-0-30" name="__codelineno-0-30" href="#__codelineno-0-30"></a><span class="c1"># watch_heavy = true           # heavy use of a login node (a user process holding real CPU)</span>
+<a id="__codelineno-0-31" name="__codelineno-0-31" href="#__codelineno-0-31"></a><span class="c1"># heavy_cpu = 2.0              # cores (by lifetime average) at or above which it is heavy</span>
+<a id="__codelineno-0-32" name="__codelineno-0-32" href="#__codelineno-0-32"></a><span class="c1"># heavy_min_seconds = 600      # CPU-seconds the process must have used (so a brief spike doesn't count)</span>
+<a id="__codelineno-0-33" name="__codelineno-0-33" href="#__codelineno-0-33"></a><span class="c1"># watch_jobs = true            # job-submission patterns from this site's jobs table</span>
+<a id="__codelineno-0-34" name="__codelineno-0-34" href="#__codelineno-0-34"></a><span class="c1"># job_window_hours = 24</span>
+<a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a><span class="c1"># burst_jobs = 60              # sbatches within burst_minutes to list a burst (an array is one)</span>
+<a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="c1"># burst_minutes = 10</span>
+<a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="c1"># fail_fast_jobs = 15          # jobs that FAILED within fail_fast_seconds to warn</span>
+<a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="c1"># fail_fast_seconds = 60</span>
+<a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="c1"># churn_repeats = 8            # resubmissions of one job (with cancellations) to warn</span>
+<a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="c1"># keep_days = 365              # findings not seen for this long are removed</span>
+</code></pre></div>
+<p>The collector's account needs ssh to the nodes without a password (as <code>node_disks</code> does). Before turning it on, <code>nomad watch probe</code> (here) and <code>nomad watch probe NODE</code> show what a sweep would find, storing nothing.</p>
+<h2 id="looking-at-it">Looking at it<a class="headerlink" href="#looking-at-it" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>nomad watch list              findings of the last 7 days, the most serious first (* seen in the last sweep),
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>                              and verified forwards
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>nomad watch list --all        also what is only listed (ephemeral ports on compute nodes, agents, GPU processes)
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>nomad watch list --mask       stand-ins for people and hosts, for anything shared outside ARC
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>nomad watch list --json
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>nomad watch status            the last sweep: each host, whether it answered, what it could see
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>nomad watch probe [HOST]      look now
+</code></pre></div>
+<h2 id="ai-agents-and-getting-root-120">AI agents and getting root (1.20)<a class="headerlink" href="#ai-agents-and-getting-root-120" title="Permanent link">&para;</a></h2>
+<p>The meeting that prompted this named two harms, and neither depends on which tool a person used, so the watch keys on what happens, not on the agent.</p>
+<p><strong>An agent (or anyone) trying to reach root.</strong> The result is the strong signal: a process running as root whose parent is owned by a regular account, where the parent isn't one of the sanctioned ways up (<code>sudo</code>, <code>su</code>, <code>runuser</code>, <code>pkexec</code>, <code>doas</code>, and the service managers that start a user's work — <code>sshd</code>, <code>systemd</code>, <code>slurmstepd</code>, ...). That is the <code>escalation</code> kind, a critical finding; its note names the program that spawned it. It reads <code>/proc</code>, so under <code>hidepid</code> the collector sees only its own tree unless it runs as root (<code>nomad watch status</code> says when a host is blind). The attempts, rather than the result — failed <code>sudo</code>/<code>su</code>, new setuid files — are in root-only logs, so they come from the root helper below. The surest defence isn't detection, though: an unpatched node (vadur is RHEL 7.9, no security updates since June 2024) is the likeliest way up whatever the agent, so patching or retiring it does more than any alert.</p>
+<p><strong>Reselling the cluster's time through an agent.</strong> This is mostly what the watch already does: tunnels, relays and miners, and a service open to the network. Turn on <code>listeners_on_nodes = true</code> so a service open to the network on a <em>compute</em> node is a warning (a port in the kernel's ephemeral range, which MPI/Dask/Ray use, is listed, not alerted). The firmer controls are the cluster's: compute nodes reaching the internet only through a proxy, and per-user job and query limits in Slurm.</p>
+<p><strong>AI agents themselves are listed, not alerted.</strong> Using an agent is not misuse; what matters is what it does. The <code>agent</code> kind names agent command-line programs (Claude Code, Codex, aider, Gemini CLI, ollama, ...) so an admin can see them in <code>nomad watch list --all</code>; <code>agents = [...]</code> adds a site's own. An agent on a <strong>login or compute node</strong> is seen this way. An agent on a <strong>laptop</strong> driving the cluster over the user's own ssh looks, from the cluster, like the person typing — so the watch aims at the behaviour (bursts of submissions, jobs that fail in seconds over and over, cancel/resubmit loops, query rates), which catches a careless script just the same.</p>
+<h3 id="failed-sudosu-and-new-setuid-files">Failed <code>sudo</code>/<code>su</code> and new setuid files<a class="headerlink" href="#failed-sudosu-and-new-setuid-files" title="Permanent link">&para;</a></h3>
+<p>Two of these signals — failed privilege attempts (<code>auth_failures</code>) and a person's setuid/setgid files (<code>setuid_new</code>) — are what the ordinary <code>/proc</code> walk can't see. There are two ways to get them; prefer the first.</p>
+<p><strong>Unprivileged (1.23), no root, no cron.</strong> The probe reads them itself, as the collector's account, wherever it's allowed to:</p>
+<ul>
+<li><code>auth_failures</code> — failed <code>sudo</code>/<code>su</code> in the last <code>auth_window_hours</code> (24), counted per account, straight from the auth log (<code>/var/log/secure</code>, or <code>auth_log</code>). This needs read access to the auth log, which <code>installer</code> often already has: on spydur <code>/var/log/secure</code> is <code>root:securegrp 0640</code> and <code>installer</code> is in <code>securegrp</code>, so it just works on the login node (<code>watch_auth = true</code>, the default). On a host where the log is root-only it reads nothing and says nothing — no error. The actor is taken from the log's structured fields and matched on the line's head before any <code>COMMAND=</code>, so a command string can't inject a fake account, and <code>su</code> to root is counted against whoever ran it (not dropped as "root").</li>
+<li><code>setuid_new</code> — set <code>setuid_roots = ["/localscratch"]</code> (off until set) and the probe lists a person's setuid/setgid files there (basename only), staying on each root's own filesystem, following no symlink, bounded. "New" comes for free from the finding's first-seen: a file that appears is a new finding (and alerts once); one that persists just updates its last-seen.</li>
+</ul>
+<p>Note that the auth log is <strong>per host and usually not forwarded</strong>, so this covers the login node (where interactive <code>sudo</code> happens); to cover the compute nodes too, make their <code>/var/log/secure</code> group-readable to the collector the same way (<code>chgrp securegrp … &amp;&amp; chmod 0640</code>, plus a matching <code>create</code> line in <code>logrotate</code>) — a config change, not a cron or a script. The setuid scan needs no such grant and runs on every host.</p>
+<h3 id="the-root-helper-off-by-default-needs-root">The root helper (off by default, needs root)<a class="headerlink" href="#the-root-helper-off-by-default-needs-root" title="Permanent link">&para;</a></h3>
+<p>Where the auth log can't be made readable and root is available, <code>scripts/watch_root_probe.py</code> feeds the same two signals from a root context instead. It is <strong>off until a site turns it on</strong>. Run it as root by cron on each node, writing a counts-only JSON that the probe reads back:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>*/15 * * * * /usr/bin/python3 -I /path/to/watch_root_probe.py \
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    --out /var/lib/nomad-watch/root_signals.json --roots /home,/scratch,/localscratch
+</code></pre></div>
+<p>Then point the collector at the same path: <code>root_report = "/var/lib/nomad-watch/root_signals.json"</code>. It writes, for review, never a command line or a file's contents: <code>auth_failures</code> (failed <code>sudo</code>/<code>su</code> per account, read on from where it stopped last run) and <code>setuid_new</code> (setuid/setgid files under <code>--roots</code> owned by a person that weren't there last run, by basename). The output is world-readable (the collector isn't root); its state file, beside it, is <code>0600</code>. What the helper needs from the site's administrators (an IS ticket at UR) is the one cron entry as root on each node and a writable <code>--out</code> directory; it installs nothing and keeps nothing secret.</p>
+<h2 id="gpu-workstations-121">GPU workstations (1.21)<a class="headerlink" href="#gpu-workstations-121" title="Permanent link">&para;</a></h2>
+<p>On a GPU workstation the person usually already has <code>sudo</code> on their own box, so reaching root isn't the worry — <strong>the GPU being served out is.</strong> The money threat is a card turned into an inference API or a rented machine, and the quiet one is a job pegging the GPU with nobody at the keyboard. So the watch goes to the workstations and keys on what the GPU shows.</p>
+<p><strong>Where it looks.</strong> <code>workstations = ["ml-ws01", ...]</code> lists GPU boxes to ask over ssh, with the role <code>workstation</code> (login and compute nodes aside). Their findings reach the hub and the Console the same way everything else does. The collector's account needs passwordless ssh to them, as to the nodes.</p>
+<p><strong>What it reads.</strong> With <code>watch_gpu</code> (on by default), the probe runs <code>nvidia-smi</code> — unprivileged, and nothing where there is no GPU, so it costs a host without one nothing. It reads the <strong>compute</strong> processes (<code>--query-compute-apps</code>): CUDA contexts — training, inference, miners — <strong>not</strong> graphics, so Xorg and a browser's GPU use never show. A context below <code>gpu_min_mem</code> (256 MiB) is a probe, not a workload, and is left out.</p>
+<ul>
+<li><code>gpu</code> (<strong>listed, not alerted</strong>): a GPU compute process, with its owner, program and the memory it holds. The note says <em>detached</em> when it has no controlling terminal and is parented to init or <code>systemd</code> — the shape of an unattended job (nohup, a service, a detached agent) — and <em>an AI agent</em> when the program is one. This is the inventory: it makes no claim of misuse.</li>
+<li><code>gpu_served</code> (<strong>warning</strong>): a GPU compute process reachable from the network — it listens on a port open to the network, <strong>or</strong> its account also runs a tunnel, relay, SOCKS or an unverified reverse forward (a <em>verified</em> <code>-R</code> is the admin's own and doesn't count). This is the reselling / open-inference signal.</li>
+</ul>
+<p>On a <strong>compute</strong> node a GPU job opens ports of its own — a distributed job's rendezvous (PyTorch, NCCL, Dask, Ray) — so a <code>gpu_served</code> that is only a listener there is <strong>listed, not a warning</strong>, exactly as a plain listener is, unless <code>listeners_on_nodes = true</code>; and even then a port in the kernel's ephemeral range (where that rendezvous lands) is listed. A GPU served through its account's <em>tunnel</em> still warns, on any host. On a workstation, a served GPU is always a warning — that is the box the signal is for.</p>
+<p>GPU miners don't need a kind of their own: a miner is caught by name on any host (the <code>miner</code> kind, critical), GPU or not.</p>
+<p><strong>Allowing what is meant to be there.</strong> <code>gpu_serve_hosts = ["shared-infer01"]</code> names boxes where serving a GPU is sanctioned: there a served GPU is listed, not a warning. <code>ignore_programs</code> (e.g. <code>["ollama"]</code>) and <code>ignore_users</code> apply as everywhere, so a lab's own shared server or a service account is left out.</p>
+<p><strong>What it can't see, honestly.</strong> Per-process GPU attribution goes opaque under MIG, and when the compute app runs in a container or a separate PID namespace. Reading <em>which</em> port a GPU process listens on needs to read that process's sockets — the probe's own, or any as root — so where it doesn't run as root, a GPU another account serves is caught through that account's exposure (a tunnel or forward it also runs), not its listener directly. <em>Detached</em> is a heuristic: an overnight training run looks the same as a rented job, which is why it only annotates a finding and never alerts on its own. As everywhere, these are signs to judge, not verdicts, and the watch sees only what runs when it looks.</p>
+<h2 id="behaviour-the-agent-the-proc-watch-cant-see-122">Behaviour: the agent the /proc watch can't see (1.22)<a class="headerlink" href="#behaviour-the-agent-the-proc-watch-cant-see-122" title="Permanent link">&para;</a></h2>
+<p>An agent on a login or compute node shows up as <code>agent</code>. But an agent (or a careless script) running on someone's <strong>laptop</strong> and driving the cluster over the user's own ssh looks, from the cluster, exactly like the person typing — there's no agent process on the cluster to find. So the watch also reads <em>what was done</em>, not who typed it, from two things it already has: the process table, and this site's <code>jobs</code> table.</p>
+<ul>
+<li><strong><code>heavy</code> (warning):</strong> a user process holding real CPU — by <strong>lifetime average</strong>, its whole CPU time (<code>utime</code>+<code>stime</code>) over its age, so a steady computation shows and a brief spike doesn't — of at least <code>heavy_cpu</code> cores (default 2), having used at least <code>heavy_min_seconds</code> CPU-seconds (default 600). Only on a <strong>login</strong> node: a compute node is where jobs are <em>meant</em> to be heavy, so <code>heavy</code> is dropped there (as a plain listener is). This is the long-standing "someone's running their work on the head node" catch, and it needs no root. <code>ignore_users</code> / <code>ignore_programs</code> leave out a sanctioned service.</li>
+<li><strong>From the <code>jobs</code> table</strong> (<code>watch_jobs</code>, read on the site each sweep; nothing where there's no Slurm):</li>
+<li><strong><code>job_burst</code> (listed, not alerted):</strong> at least <code>burst_jobs</code> (default 60) sbatches by one user within <code>burst_minutes</code> (default 10). An <strong>array counts as one</strong> (its tasks share a submit time), so a 1,000-task array isn't a burst. It's <em>listed</em> rather than alerted because a legitimate parameter sweep bursts the same way — it surfaces who is submitting heavily, for you to glance at.</li>
+<li><strong><code>fail_fast</code> (warning):</strong> at least <code>fail_fast_jobs</code> (default 15) of a user's jobs that <strong>FAILED within <code>fail_fast_seconds</code></strong> (default 60) of starting. The shape of an agent resubmitting something it doesn't understand (node failures don't count — those aren't the user's doing).</li>
+<li><strong><code>job_churn</code> (warning):</strong> the same job name resubmitted at least <code>churn_repeats</code> (default 8) times by one user, with cancellations between — a cancel/resubmit loop.</li>
+</ul>
+<p>The job findings are attributed to the login host where the collector runs, with the user's NetID, and raise one alert per user and kind (as every finding does). Thresholds are all in the TOML; raise them, or <code>ignore_users</code> a service account, if a site's normal work trips one. As everywhere: signs to judge, not verdicts — a burst or a run of failures can be an ordinary bad day. We don't watch query rates (sacct/squeue hammering): nomad doesn't record user queries, so there's no honest signal there.</p>
+<h2 id="what-it-is-not">What it is not<a class="headerlink" href="#what-it-is-not" title="Permanent link">&para;</a></h2>
+<p>It is a set of signs for a person to judge, not a verdict: an administrator's own tunnel, a sanctioned service or a research server may well be fine (<code>ignore_*</code>). It sees what runs while it looks (every 15 minutes), not what ran in between. Without root it can't tell which process holds which socket, and an account determined to hide where a forward or a root shell came from still can; the checks make that deliberate, not easy. It doesn't stop anything: closing these doors (compute nodes reachable only through Slurm with <code>pam_slurm_adopt</code>, outbound traffic from compute nodes allowed only where needed, limits on login nodes) is the cluster's configuration, and what is allowed is the site's policy. an administrator's own tunnel, a sanctioned service or a research server may well be fine (<code>ignore_*</code>). It sees what runs while it looks (every 15 minutes), not what ran in between. It doesn't stop anything: closing these doors (compute nodes reachable only through Slurm with <code>pam_slurm_adopt</code>, outbound traffic from compute nodes allowed only where needed, limits on login nodes) is the cluster's configuration, and what is allowed is the site's policy.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
