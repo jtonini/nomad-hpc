@@ -380,6 +380,16 @@ def _q(v) -> str:
 WRAPPER = r'''
 exec 3<&0
 _ns_lc="${LC_CTYPE+1}:${LC_CTYPE-}"
+# nomad's own steps run without the job's loader settings (a cluster's
+# LD_LIBRARY_PATH can break system tools: ssh, rsync, python); the script
+# gets them back as they were.
+_ns_ldlp="${LD_LIBRARY_PATH+1}:${LD_LIBRARY_PATH-}"
+_ns_ldpre="${LD_PRELOAD+1}:${LD_PRELOAD-}"
+unset LD_LIBRARY_PATH LD_PRELOAD
+_ns_putback() {
+    case $_ns_ldlp in 1:*) export LD_LIBRARY_PATH="${_ns_ldlp#1:}";; esac
+    case $_ns_ldpre in 1:*) export LD_PRELOAD="${_ns_ldpre#1:}";; esac
+}
 _ns_say() { printf 'nomad-stage: %s\n' "$*" >&2; }
 _ns_stop=
 trap '_ns_stop=${_ns_stop:-usr1}' USR1
@@ -525,16 +535,18 @@ if [ "$_ns_mode" = local ] && [ -n "$_ns_hadpath" ] && [ -e "$_ns_local/.nomad-s
         && mkdir -p "$_ns_local/.nomad-stage/bin" 2>/dev/null; then
     # A job it sends (sbatch in a helper script, a workflow tool) would start in
     # this node's copy, gone when this job ends: it starts where this one came from.
-    { printf '#!/bin/bash\n'; printf 'exec %q -I %q sbatch-shim %q %q %q "$@"\n' "$_ns_py" \
+    { printf '#!/bin/bash\n'
+      printf 'exec /usr/bin/env -u LD_LIBRARY_PATH -u LD_PRELOAD %q -I %q sbatch-shim --restore LD_LIBRARY_PATH "${LD_LIBRARY_PATH+1}:${LD_LIBRARY_PATH-}" --restore LD_PRELOAD "${LD_PRELOAD+1}:${LD_PRELOAD-}" --restore LC_CTYPE "${LC_CTYPE+1}:${LC_CTYPE-}" %q %q %q "$@"\n' "$_ns_py" \
         "$_ns_local/.nomad-stage/helper.py" "$_ns_local/.nomad-stage/bin" "$_ns_local" "$_ns_here"; } \
         > "$_ns_local/.nomad-stage/bin/sbatch" \
         && chmod 700 "$_ns_local/.nomad-stage/bin/sbatch" && _ns_shim=$_ns_local/.nomad-stage/bin
 fi
 if [ -n "$_ns_hadpath" ]; then export PATH="${_ns_shim:+$_ns_shim:}$_ns_path0"; else unset PATH; fi
 if [ -n "$_ns_py" ]; then
-    "$_ns_py" -I -c "$_NS_HELPER" exec --lc-ctype "$_ns_lc" "$_ns_interp" ${_ns_arg:+"$_ns_arg"} "$_ns_snap" "$@" <&3 3<&- &
+    "$_ns_py" -I -c "$_NS_HELPER" exec --restore LC_CTYPE "$_ns_lc" --restore LD_LIBRARY_PATH "$_ns_ldlp" \
+        --restore LD_PRELOAD "$_ns_ldpre" "$_ns_interp" ${_ns_arg:+"$_ns_arg"} "$_ns_snap" "$@" <&3 3<&- &
 else
-    "$_ns_interp" ${_ns_arg:+"$_ns_arg"} "$_ns_snap" "$@" <&3 3<&- &
+    ( _ns_putback; exec "$_ns_interp" ${_ns_arg:+"$_ns_arg"} "$_ns_snap" "$@" ) <&3 3<&- &
 fi
 _ns_pid=$!
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin${_ns_path0:+:$_ns_path0}"

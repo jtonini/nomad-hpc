@@ -1323,19 +1323,32 @@ def cmd_reap(argv):
     return 0
 
 
+def _restores(argv, env):
+    """Leading --restore NAME "1:VALUE"|"0:" pairs (and --lc-ctype VALUE):
+    variables put back in ``env`` as the job had them (nomad's own steps run
+    without the job's LD_LIBRARY_PATH and LD_PRELOAD; Python sets LC_CTYPE
+    when the locale is C). The arguments after them."""
+    while argv:
+        if argv[0] == "--restore" and len(argv) >= 3:
+            name, was, argv = argv[1], argv[2], argv[3:]
+        elif argv[0] == "--lc-ctype" and len(argv) >= 2:
+            name, was, argv = "LC_CTYPE", argv[1], argv[2:]
+        else:
+            break
+        if was.startswith("1:"):
+            env[name] = was[2:]
+        else:
+            env.pop(name, None)
+    return argv
+
+
 def cmd_exec(argv):
     """Run the person's script as a program starts: every signal back to
     its default (a background job's shell ignores INT and QUIT; Python
-    ignores PIPE and XFSZ), its locale as the job had it (Python sets
-    LC_CTYPE when the locale is C: --lc-ctype "1:VALUE" it was set, "0:"
-    it wasn't), then exec it in place."""
+    ignores PIPE and XFSZ), its environment as the job had it (--restore),
+    then exec it in place."""
     env = dict(os.environ)
-    if len(argv) >= 2 and argv[0] == "--lc-ctype":
-        was, argv = argv[1], argv[2:]
-        if was.startswith("1:"):
-            env["LC_CTYPE"] = was[2:]
-        else:
-            env.pop("LC_CTYPE", None)
+    argv = _restores(argv, env)
     if not argv:
         return BAD
     for n in range(1, signal.NSIG):
@@ -1475,6 +1488,7 @@ def cmd_sbatch_shim(argv):
     """sbatch, run from inside a job's local copy: when the job it sends
     would work in the copy (gone once this job ends), it is sent to work in
     the same folder where this job came from; else exactly as it is."""
+    argv = _restores(argv, os.environ)              # the real sbatch, and the job it sends, get them back
     if len(argv) < 3:
         return BAD
     shimdir, local, submit, words = argv[0], os.path.realpath(argv[1]), argv[2], argv[3:]

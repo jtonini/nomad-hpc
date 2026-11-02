@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.24.1 (November 2026)
+
+### Fixes
+- A job sent through local scratch runs nomad's own steps on the node (the
+  copy in and back, the checks, Slurm's commands, the node's `python3` and
+  `rsync`) without the job's `LD_LIBRARY_PATH` and `LD_PRELOAD`: a cluster's
+  login environment can point those at libraries that break system tools (on
+  spydur, `ssh` fails with `undefined symbol: EVP_KDF_ctrl`). The person's
+  script gets them back exactly as they were, and so does a job it sends
+  through nomad's `sbatch` stand-in.
+
 ## v1.24.0 (November 2026)
 
 ### Features
