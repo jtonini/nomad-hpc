@@ -522,6 +522,7 @@ def cluster_here(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(argv, 0, "4242;hpc1\n", "")
     monkeypatch.setattr(sc, "_run_sbatch", sbatch)
     monkeypatch.setenv("NOMAD_LOGS", "here")       # never a real scratch folder or scontrol (1.18.2)
+    monkeypatch.setenv("NOMAD_LOCALSCRATCH", "off")   # the script sent as it is (1.24 stages it)
     monkeypatch.chdir(w)
     return w, sent
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nomad-hpc"
-version = "1.23.0"
+version = "1.24.0"
 description = "A lightweight HPC monitoring and predictive analytics tool"
 readme = "README.md"
 license = {text = "AGPL-3.0-or-later"}
@@ -130,6 +130,7 @@ ignore = ["E501", "B008", "E402", "W291", "W293", "B904", "B905", "B007", "E722"
 # Run by each site's own python3 (3.6 or later), not the package's 3.10+:
 # pyupgrade's rewrites are not for it.
 "nomad/db/delta_site.py" = ["UP"]
+"nomad/submit/stage_helper.py" = ["UP"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["nomad"]

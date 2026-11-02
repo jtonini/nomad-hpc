@@ -15,6 +15,14 @@ def _registry_config_restored():
         del registry._config
 
 
+@pytest.fixture(autouse=True)
+def _staged_copies_kept_aside(tmp_path, monkeypatch):
+    """nomad submit keeps its local-scratch copies of job scripts in
+    ~/.local/share/nomad/staged: never the real home's in a test."""
+    from nomad.submit import stage
+    monkeypatch.setattr(stage, "STORE", str(tmp_path / "home-staged"))
+
+
 # --- Idea 18 Component 1 fixtures ------------------------------------------
 
 def _bootstrap_db_with_migrations(db_path: str) -> None:

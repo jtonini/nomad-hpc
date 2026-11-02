@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.24.0 (November 2026)
+
+### Features
+- `nomad submit` runs a job on one node **through its node's local scratch**,
+  by default. nomad sends its own small script in place of the person's; on
+  the node the job copies its folder to `/localscratch/USER/job_JOBID`
+  (private, locked while the job lives; after checking the node keeps room),
+  runs the person's script there, then copies **only what is new or changed**
+  back to the folder it ran from (as if it had run there), checks every file it
+  copied (sha256 on both sides, read back from the server), and only then
+  removes the local copy. What doesn't check out stays on the node, the `.out`
+  says so, and a job that had succeeded ends with exit 75. What changed in the
+  folder while the job ran is never undone: the job's version of such a file
+  goes in `nomad-conflicts-JOBID/` (exit 75), and a file both only added to
+  (a log, a table of rows) gets the job's new lines after the others'.
+  - Before the time limit (`--signal=B:USR1`, 10 minutes, less for limits under
+    an hour) the job stops the program, copies back, then waits for the limit
+    so Slurm still records `TIMEOUT`; `scancel -b -s USR1 JOB` stops it the same
+    way any time. Cancelled or preempted jobs keep part of `KillWait` for the
+    program, the rest for the copy back.
+  - What a stopped job leaves on a node is brought back by a small job it sends
+    pinned to that node (`nomad-recover-JOBID`, after it ends) or by the
+    person's next staged job there, only once its lock is free, and always into
+    a folder of its own (`nomad-recovered-NODE-TIME/` in the job's folder):
+    nothing recovered overwrites anything.
+  - Sent as it is, saying why: jobs on several nodes, arrays (unless
+    `--localscratch`), limits under 30 minutes, scripts that `cd` out of their
+    folder or send jobs themselves (sbatch, workflow tools), folders over 50 GB
+    (`NOMAD_STAGE_MAX`), the home folder itself, no `#!` or DOS line breaks,
+    `--wrap`/`--test-only`/heterogeneous jobs; on the node, no `/localscratch`,
+    no `python3` or no room: it runs where it is.
+  - `--no-localscratch` / `--localscratch`; `NOMAD_LOCALSCRATCH=off` (a site or
+    a person), or another folder with `{user}`. The node needs only its own
+    `python3` (and uses `rsync` where there is one): the script carries
+    `nomad/submit/stage_helper.py` (stdlib, Python 3.6+).
+  - nomad's copy of the script is kept in `~/.local/share/nomad/staged/` and
+    names the person's own, so `nomad submit --again` and past-run comparison
+    still use the person's script; the tag gains `stage=l`. See
+    docs/submit.md, "Through local scratch". No database change.
+
 ## v1.23.0 (October 2026)
 
 ### Features

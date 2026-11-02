@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import click
 
-from nomad.submit import apps, cluster, forms, history, logs as logs_, sizing, spec
+from nomad.submit import apps, cluster, forms, history, logs as logs_, sizing, spec, stage as stage_
 
 
 class NotYou(click.ClickException):
@@ -108,6 +108,7 @@ def name_programs(runs: list, limit: int = 120) -> None:
     files; at most ``limit`` scripts looked for)."""
     found: dict = {}
     seen: dict = {}
+    own: dict = {}                                  # nomad's copy that ran it -> the person's script
     for r in runs:
         sub = spec.parse_submit_line(r.submit_line) if r.submit_line else None
         if sub is None or not sub.readable or not sub.script or sub.wrap is not None:
@@ -124,8 +125,12 @@ def name_programs(runs: list, limit: int = 120) -> None:
             continue
         if r.script not in seen:
             text = read_text(r.script, spec.MAX_SCRIPT)
+            inner = stage_.unwrap(text)
+            if inner is not None:                   # sent through local scratch: the script it carried
+                own[r.script], text = inner
             seen[r.script] = apps.program_of(spec.sbatch_lines(text)[1]) if text else None
         prog = seen[r.script]
+        r.script = own.get(r.script, r.script)
         if prog is not None:
             r.family, r.executable = prog.family, prog.executable
 
@@ -207,9 +212,21 @@ def plan(script_path: str | None, *, job: str | None = None, user: str | None = 
         if script_path is None:
             script_path, guessed, at = _rerun_script(line, outcome.workdir)
             script_unsure = guessed
+            inner = stage_.unwrap(read_text(script_path, spec.MAX_SCRIPT)) if script_path else None
+            gone = False
+            if inner is not None:
+                if os.path.isfile(inner[0]):
+                    notes.append(f"Job {job} ran through local scratch; its own script is {inner[0]}.")
+                    script_path = inner[0]
+                else:
+                    notes.append(f"Job {job} ran through local scratch, and its own script ({inner[0]}) isn't "
+                                 "there now: sized from the job's own settings.")
+                    script_path, gone = None, True
             if at:
                 line.script, line.args = line.rest[at], list(line.rest[at + 1:])
-            if script_path is None:
+            if gone:
+                pass
+            elif script_path is None:
                 notes.append("Slurm's record doesn't say which script this job ran (or it came on "
                              "standard input, or has moved): sized from the job's own settings.")
             elif at:
@@ -429,7 +446,7 @@ def old_tag(line: spec.SubmitLine | None) -> dict | None:
 
 
 def tag(sizing_: sizing.Sizing, again: str | None = None, via: str = "cli",
-        before: dict | None = None) -> str:
+        before: dict | None = None, staged: bool = False) -> str:
     """'nomad=1.18.0;via=cli;cpus=s;mem=h;time=h;gpus=d;part=s': who chose
     each value (s: the script's own, u: the person on nomad's command line,
     h: nomad from their past runs, i: from the input file or command line,
@@ -451,6 +468,8 @@ def tag(sizing_: sizing.Sizing, again: str | None = None, via: str = "cli",
         bits.append(f"{short}={code}")
     if again:
         bits.append(f"again={again}")
+    if staged:
+        bits.append("stage=l")                      # through the node's local scratch
     return ";".join(bits)
 
 
@@ -514,12 +533,15 @@ def _yours(s: sizing.Sizing, cpus, mem, time_, gpus, partition, keep: bool) -> N
     s.problems = sizing.check(s)
 
 
-def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False) -> dict:
+def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: str | None = None,
+            job_name: str | None = None) -> dict:
     """The sbatch command: {"argv", "display", "notes"}. Only what changes
     is set on the command line (sbatch reads the rest from the script); a
     job sent again gets its own command line's other options first, and its
     folder. ``delay``: sent to start in logs.DELAY s, for nomad to set
-    where its output goes first."""
+    where its output goes first. ``script``: what sbatch is given instead
+    of the person's script (nomad's copy that runs it through local
+    scratch), named ``job_name`` as sbatch would have named theirs."""
     s = pl.sizing
     notes = []
     argv = ["sbatch", "--parsable"] + ([f"--begin=now+{logs_.DELAY}"] if delay else [])
@@ -550,9 +572,11 @@ def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False) -> dict:
             notes.append(f"All of array {pl.job} runs again (the script's own --array).")
         argv.append(f"--chdir={pl.folder}")
     argv += s.options()
+    if job_name:
+        argv.append(f"--job-name={job_name}")
     if tagged:
-        argv.append(f"--extra={tag(s, pl.job, before=old_tag(pl.line))}")
-    argv.append(pl.script)
+        argv.append(f"--extra={tag(s, pl.job, before=old_tag(pl.line), staged=script is not None)}")
+    argv.append(script or pl.script)
     argv += list(args)
     # Shown without nomad's --begin: the command to run by hand.
     shown = [a for i, a in enumerate(argv) if not (delay and i == 2)]
@@ -583,7 +607,7 @@ def _run_sbatch(argv: list, cwd: str) -> subprocess.CompletedProcess:
 
 
 _OURS = {"--again", "--cpus", "--mem", "--time", "--gpus", "--partition", "--keep", "--yes", "-y",
-         "--dry-run", "--days", "--logs"}
+         "--dry-run", "--days", "--logs", "--localscratch", "--no-localscratch"}
 
 
 def logs_for(pl: Plan, flag: str | None, user: str, env=None) -> tuple:
@@ -664,7 +688,12 @@ def _name_for(pl: Plan, env=None) -> str | None:
 @click.option("--logs", metavar="here|FOLDER",
               help="Where the job's Slurm output goes: a folder of its own in FOLDER, or `here` "
                    "(Slurm's own place). Default: $NOMAD_LOGS, else /scratch/USER/jobs/JOBID-NAME.")
-def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs):
+@click.option("--localscratch/--no-localscratch", "localscratch", default=None,
+              help="Run it through its node's local scratch: the job's folder copied there, what is new "
+                   "or changed copied back to the job's own folder. Default: on for a job on one node "
+                   "($NOMAD_LOCALSCRATCH=off turns it off).")
+def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs,
+               localscratch):
     """Size a job and submit it: nomad's values, or yours.
 
     \b
@@ -676,7 +705,10 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     command it will run; asks before running it. The job is tagged with
     who chose each value (Slurm's "extra" field, Slurm 23.02 and later).
     Its Slurm output goes in a folder of its own, /scratch/USER/jobs/JOBID-NAME
-    (--logs, $NOMAD_LOGS), unless the job says where."""
+    (--logs, $NOMAD_LOGS), unless the job says where. A job on one node runs
+    through its node's local scratch (/localscratch/USER/job_JOBID): its
+    folder copied there, what it makes or changes copied back to its own
+    folder and checked (--no-localscratch: as it is)."""
     if not script and not job:
         raise click.UsageError("give a job script, or --again JOB")
     if job and args:
@@ -704,7 +736,8 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     ok, why = extra_ok(pl)
     user = me()
     out, warn = logs_for(pl, logs, user)
-    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay)
+    st, st_note, wrapper, wpath, job_name = _staging(pl, localscratch, user, out)
+    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=wpath, job_name=job_name)
     for n in cmd["notes"] + ([why] if why else []):
         click.echo(f"\n  {n}")
     if warn:
@@ -719,6 +752,10 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         click.echo(click.style("\n  ! nomad isn't sure the script below is the one that ran: check it.",
                                fg="yellow"))
     click.echo(f"\n  sbatch command:\n    {cmd['display']}")
+    if st is not None:
+        click.echo(f"\n  {st.describe(user)}\n  ({wpath} is nomad's copy of {pl.script} that does it.)")
+    elif st_note:
+        click.echo(f"\n  {st_note}")
     if out.pattern:
         click.echo(f"\n  Its output: {logs_.shown(out.pattern, user=user, name=_name_for(pl))}/"
                    f" (nomad sends it to start in {logs_.DELAY // 60} minutes, sets that, and lets it "
@@ -741,6 +778,14 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
             return
     where = pl.submit_dir or pl.folder
     said, failed, placed = [], None, None
+    if st is not None:
+        try:
+            stage_.keep(wpath, wrapper)
+        except OSError as e:
+            click.echo(click.style(f"\n  ! nomad couldn't keep its copy ({e.strerror or e}: {wpath}): the job is "
+                                   "sent as it is, not through local scratch.", fg="yellow"))
+            st = None
+            cmd = command(pl, args=list(args), tagged=ok, delay=out.delay)
     try:
         r = _run_sbatch(cmd["argv"], where)
         if r.returncode != 0 and ok and "--extra" in (r.stderr or "") and (
@@ -755,10 +800,36 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     jid, on = logs_.job_number(r.stdout) if r is not None else (None, None)
     if jid and out.pattern:
         placed = logs_.place(out, jid, on, user=user)
-    _said_after(pl, out, r, jid, placed, failed, said)
+    _said_after(pl, out, r, jid, placed, failed, said, staged=st is not None)
 
 
-def _said_after(pl, out, r, jid, placed, failed, said) -> None:
+def _staging(pl: Plan, flag: bool | None, user: str, out, env=None) -> tuple:
+    """Whether the job goes through local scratch: (stage.Stage or None,
+    what to say when it doesn't, nomad's script, where it is kept, the
+    --job-name sbatch needs)."""
+    env = os.environ if env is None else env
+    text = read_text(pl.script, spec.MAX_SCRIPT) if pl.script else None
+    options = list(pl.script_sub.options) + (list(pl.line.options) if pl.line is not None else [])
+    final = pl.sizing.final()                    # as it will be sent: nomad's values with the job's own
+    limit = final.time_s
+    if limit is None and not getattr(final, "time_unlimited", False):
+        ps = sizing._going_to(final, pl.sizing.partitions)
+        limit = ps[0].time_default_s() if len(ps) == 1 else None
+    array = any(n == "array" for n, _v in options) or (pl.outcome is not None and pl.whole_array)
+    st, note = stage_.decide(flag=flag, env=env, user=user, script=pl.script, text=text, folder=pl.folder,
+                             logs=out, name=_name_for(pl, env), nodes=final.nodes, options=options,
+                             limit_s=limit, array=array)
+    if st is None:
+        return None, note, None, None, None
+    from nomad import __version__
+    wrapper = stage_.wrapper_text(pl.script, text, st, __version__)
+    named = spec.script_options(text).has("job-name") or (pl.line is not None and pl.line.has("job-name")) \
+        or "SBATCH_JOB_NAME" in env           # (the plan names a script's job in its options: not sbatch)
+    return st, None, wrapper, stage_.store_path(pl.script, wrapper), \
+        (None if named else posixpath.basename(pl.script))
+
+
+def _said_after(pl, out, r, jid, placed, failed, said, staged: bool = False) -> None:
     """What `nomad submit` says once the job is sent."""
     for n in said:
         click.echo(f"\n  {n}")
@@ -787,6 +858,9 @@ def _said_after(pl, out, r, jid, placed, failed, said) -> None:
         if placed.late:
             click.echo(f"  It starts in {logs_.DELAY // 60} minutes at the latest (nomad couldn't move its "
                        "start to now).")
+    if staged:
+        click.echo(f"  It runs in its node's local scratch; what it makes or changes comes back to "
+                   f"{pl.folder} when it ends.")
     text = (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
     if pl.script_sub.has("hold") or (pl.line is not None and pl.line.has("hold")) or "h" in _pbs_options(text):
         click.echo(f"  It is held, as the job asks: scontrol release {jid} when it should run.")

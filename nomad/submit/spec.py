@@ -102,7 +102,7 @@ job-name kill-on-invalid-dep licenses mail-type mail-user mcs-label mem mem-bind
 mem-per-gpu mincpus network nodefile nodelist nodes ntasks ntasks-per-core ntasks-per-gpu
 ntasks-per-node ntasks-per-socket open-mode output partition power prefer priority profile qos
 reservation signal sockets-per-node switches thread-spec threads-per-core time time-min tmp
-tres-bind tres-per-task uid wait-all-nodes wckey wrap
+tres-bind tres-per-task uid wait-all-nodes wckey wrap segment ntasks-per-tres tasks-per-node cluster
 """.split())
 # Options taking a value only when written --name=value (sbatch's optional
 # arguments): --nice job.sh is --nice, then the script.
