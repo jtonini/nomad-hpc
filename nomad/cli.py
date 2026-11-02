@@ -6012,6 +6012,11 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
         hours = minutes / 60
         return f"{hours:.0f} h" if hours < 48 else f"{hours / 24:.0f} days"
 
+    def minutes_since(when):
+        # By the clock, not the calendar: local times an hour apart across a
+        # change of daylight saving time are that hour apart (1.25.3).
+        return (now.timestamp() - when.timestamp()) / 60 if when else None
+
     due = []      # (key, subject, severity, message, details)
     for name, why in sorted(failing.items()):
         # The last live pull: what the combined DB says, or the cached copy's
@@ -6024,7 +6029,7 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
             except OSError:
                 pass
         since = max(times) if times else None
-        minutes = (now - since).total_seconds() / 60 if since else None
+        minutes = minutes_since(since)
         if minutes is not None and minutes < after:
             continue
         if minutes is None:
@@ -6052,7 +6057,7 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
                 built = datetime.fromtimestamp(combined_path.stat().st_mtime)
             except OSError:
                 built = None
-        minutes = (now - built).total_seconds() / 60 if built else None
+        minutes = minutes_since(built)
         if minutes is not None and minutes >= after:
             due.append(("hub:combined", "combined.db",
                         "critical" if minutes >= 24 * 60 else "warning",

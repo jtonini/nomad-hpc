@@ -49,6 +49,21 @@ LEVELS = [
 ]
 
 
+# A job that ran less than this isn't judged on its CPU use or its time
+# limit (1.25.3): starting up, staging and Slurm's own steps are most of it,
+# and a limit can't usefully be cut much below a few minutes.
+SHORT_JOB_SECONDS = 300
+
+
+def _short(job: dict) -> bool:
+    runtime = job.get("runtime_seconds") or 0
+    return 0 < runtime < SHORT_JOB_SECONDS
+
+
+def _not_judged(name: str, detail: str) -> DimensionScore:
+    return DimensionScore(name=name, score=50, level="Unknown", detail=detail, applicable=False)
+
+
 def proficiency_level(score: float) -> str:
     """Map a 0-100 score to a proficiency level."""
     for threshold, label in LEVELS:
@@ -244,8 +259,14 @@ class JobFingerprint:
         return sum(d.score for d in applicable) / len(applicable)
 
     @property
+    def scored(self) -> bool:
+        """Whether anything in the job could be judged (1.25.3): a short test
+        job on one core asking the least memory has nothing to score."""
+        return any(d.applicable for d in self.dimensions.values())
+
+    @property
     def overall_level(self) -> str:
-        return proficiency_level(self.overall)
+        return proficiency_level(self.overall) if self.scored else "Not scored"
 
     @property
     def needs_work(self) -> list[DimensionScore]:
@@ -290,6 +311,16 @@ def score_cpu(job: dict, summary: dict) -> DimensionScore:
             detail="No CPU utilization data available for this job.",
             applicable=False,
         )
+    # Nothing the person could have asked smaller is held against them
+    # (1.25.3): one core is the least a job can ask, and a job of a few
+    # minutes is mostly starting up.
+    if (req_cpus or 1) <= 1 and avg_cpu < 65:
+        return _not_judged("CPU Efficiency",
+                           f"One core, the least a job can ask, used at {avg_cpu:.0f}%: nothing to ask less of.")
+    if _short(job):
+        return _not_judged("CPU Efficiency",
+                           f"Ran under {SHORT_JOB_SECONDS // 60} minutes ({avg_cpu:.0f}% of {req_cpus} cores): too "
+                           "short to judge, starting up is most of it.")
 
     score = min(100, avg_cpu * 1.1)
     cores_used = max(1, round(avg_cpu / 100 * req_cpus))
@@ -338,6 +369,8 @@ def score_cpu(job: dict, summary: dict) -> DimensionScore:
             rationale=(f"only {cores_used} of {req_cpus} cores used; "
                        f"if single-threaded, request 1 core"),
         )
+    if suggestion is not None and suggestion.suggested_value >= (req_cpus or 1):
+        suggestion = None                           # never "ask for what you asked"
 
     return DimensionScore(
         name="CPU Efficiency",
@@ -439,6 +472,14 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
 
     utilization = (peak_mem_gb / req_mem_gb) * 100
     waste_gb = max(0, req_mem_gb - peak_mem_gb)
+
+    # Already as small as nomad would suggest (1.25.3): the peak with room to
+    # spare, rounded up to a size Slurm takes, is no less than what was asked
+    # (a 12 MB job asking 1G): nothing to ask less of.
+    if utilization < 50 and round_memory_up(peak_mem_gb * 1024 * 2) >= req_mem_mb:
+        return _not_judged("Memory Efficiency",
+                           f"Asked {format_memory(req_mem_mb)} and peaked at {peak_mem_gb * 1024:,.0f} MB: "
+                           f"{format_memory(req_mem_mb)} is already as little as nomad would suggest.")
 
     # Score formula
     if 50 <= utilization <= 90:
@@ -564,6 +605,11 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
             detail="No runtime data available.",
             applicable=False,
         )
+    if _short(job):
+        return _not_judged("Time Estimation",
+                           f"Ran {format_duration_human(runtime)} of {format_duration_human(req_time)}: under "
+                           f"{SHORT_JOB_SECONDS // 60} minutes, too short to judge a time limit by (a test, or a "
+                           "job that stopped early: its outcome says which).")
 
     ratio = runtime / req_time
 

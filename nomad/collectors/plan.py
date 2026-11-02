@@ -59,6 +59,10 @@ SPECS: tuple[Spec, ...] = (
          ("mpstat",), (), ("mpstat_summary", "mpstat_core")),
     Spec("vmstat", "vmstat", "VMStatCollector", True, "every host",
          ("vmstat",), (), ("vmstat",)),
+    # Pressure stall information (1.25.3): records where the kernel has it on
+    # (psi=1), says so where it is off.
+    Spec("pressure", "pressure", "PressureCollector", True, "every Linux host (PSI on: psi=1)",
+         (), (), ("pressure", "pressure_status")),
     Spec("node_state", "node_state", "NodeStateCollector", True, "Slurm head node",
          ("scontrol",), (), ("node_state", "partition_settings", "partition_changes")),
     Spec("node_disks", "node_disks", "NodeDisksCollector", False,

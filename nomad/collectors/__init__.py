@@ -27,6 +27,7 @@ from .slurm import SlurmCollector
 from .slurm_usage import SlurmUsageCollector
 from .storage import StorageCollector
 from .vmstat import VMStatCollector
+from .pressure import PressureCollector
 from .workstation import WorkstationCollector
 
 
@@ -45,6 +46,7 @@ __all__ = [
     'IOStatCollector',
     'MPStatCollector',
     'VMStatCollector',
+    'PressureCollector',
     'NodeStateCollector',
     'GPUCollector',
     'NFSCollector',

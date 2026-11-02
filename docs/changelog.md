@@ -1,5 +1,51 @@
 # Changelog
 
+## v1.25.3 (November 2026)
+
+### Changes
+- **A job's scores hold against the person only what they could have asked
+  less of.** One core is the least a job can ask, and a memory request
+  already as small as nomad would suggest can't be smaller: neither is
+  "Needs Work" any more ("not judged", with why), and no recommendation is
+  the value already asked (a one-minute test job asking 1 CPU and 1G was
+  told to ask for 1 CPU and 1G). A job that ran under five minutes isn't
+  judged on its CPU use or its time limit (one that ran out of time still
+  is). A job with nothing to judge has no overall score (`overall_score`
+  null, "Not scored"), isn't stored as a score, and isn't told "all good".
+- **Sync alerts count hours by the clock.** How long a site hasn't synced,
+  or the combined database hasn't been replaced, was an hour off across a
+  change of daylight saving time (45 hours said as 44).
+
+### Features
+- **nomad-gate save**: a job script written as the person, for the
+  Console's editor. Off unless both sides say so: the hub (`edit = true` in
+  the site's `[[hub.sites]]`) and the cluster (`nomad gate install-key
+  --edit`, so sshd runs `nomad-gate serve --edit` for the hub's key: with
+  it, that key could run code as anyone the gate acts for, so it is the
+  cluster's own choice). Only their own job script (a regular file they
+  own, not a link, beginning with `#!`, as the new text must; no hidden
+  part in its path as given nor in its folder as it really is), only over
+  the very text they opened (`--sha256`, checked again just before it is
+  replaced) or as a new file (`--new`, never over one that is there; it is
+  the person's alone, mode 600, since the gate can't know the umask their
+  login sets). A script that isn't UTF-8 isn't saved over (the editor would
+  change it where it wasn't edited; `show` says `utf8`). The text comes on
+  standard input (`--body-sha256` its sha256, at most 256 KB of UTF-8); it
+  is written beside the file and put in its place in one step, with the
+  file's permissions, group and access lists (POSIX and NFSv4; none taken
+  from the folder's default list); the text before is kept first, private,
+  in `~/.local/share/nomad/versions` (the last 20 of each script, ids in
+  UTC; never through a link nor a folder someone else owns):
+  `versions` lists them, `recall` gives one back. Each save is in the
+  gate's syslog with the sha256 before and after. `nomad gate test` says
+  whether saving is on, on each side.
+- **Pressure stall information** (`pressure` collector, on by default):
+  how much of the time work on a host waited for CPU, memory or I/O
+  (/proc/pressure: "some" and "full", over 10 s, 1 and 5 minutes). Where
+  the kernel has it off (RHEL and Rocky leave it off: boot with `psi=1`),
+  it says so (`pressure_status`) and records nothing, until the host is
+  booted with it.
+
 ## v1.25.2 (November 2026)
 
 ### Changes

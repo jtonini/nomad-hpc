@@ -24,6 +24,13 @@ list:
     cancel --job N              scancel N (Slurm refuses another's job anyway)
     ls     --dir PATH           what a folder holds (names, kinds, sizes, times): to pick a script
     show   --script PATH        a job script's text and its sha256, to look at before sending it
+    save   --script PATH (--sha256 HEX | --new) --body-sha256 HEX
+                                the script's new text (on standard input), written as the person
+                                over the very text they opened, or as a new file (1.25.3); only
+                                where the cluster says so too: `nomad-gate serve --edit` in the
+                                hub key's authorized_keys line (nomad gate install-key --edit)
+    versions --script PATH      the earlier texts kept when it was saved
+    recall --script PATH --id ID  one of them
 
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
@@ -43,6 +50,7 @@ Installed beside nomad for users (/usr/local/sw/nomad/bin/nomad-gate, by
 scripts/install_nomad_for_users.sh). It refuses to serve when it, or the
 nomad and Python it runs, could be changed by anyone but its owner or root.
 """
+import errno
 import fcntl
 import json
 import os
@@ -86,8 +94,9 @@ _PATH = re.compile("/[^\x00-\x1f\x7f-\x9f\xad\u034f\u061c\u115f\u1160\u17b4\u17b
                    "\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb"
                    "\ud800-\udfff\U000e0000-\U000e0fff]{0,4095}")
 _SHA = re.compile(r"[0-9a-f]{64}")
+_VID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{12}")       # an earlier version kept (1.25.3)
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
-          "path": _PATH, "sha": _SHA}
+          "path": _PATH, "sha": _SHA, "vid": _VID}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
@@ -103,9 +112,18 @@ OPS = {
     "cancel": {"--job": "job"},
     "ls": {"--dir": "path"},
     "show": {"--script": "path"},
+    # A job script written as the person (1.25.3): its new text on standard
+    # input (--body-sha256 its sha256), over the one they opened (--sha256)
+    # or as a new file (--new); the one before kept (versions; recall: its text).
+    "save": {"--script": "path", "--sha256": "sha", "--new": "flag", "--body-sha256": "sha"},
+    "versions": {"--script": "path"},
+    "recall": {"--script": "path", "--id": "vid"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
-            "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"]}
+            "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
+            "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"]}
+# The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
+WITH_BODY = {"save"}
 
 
 class Refused(Exception):
@@ -157,6 +175,8 @@ def parse(words: list) -> tuple:
             raise Refused(f"{op} needs {r}")
     if op == "size" and ("--script" in got) == ("--job" in got):
         raise Refused("size needs --script or --job (one of them)")
+    if op == "save" and ("--sha256" in got) == ("--new" in got):
+        raise Refused("save needs --sha256 (the text it replaces) or --new (one of them)")
     if "--localscratch" in got and "--no-localscratch" in got:
         raise Refused("--localscratch or --no-localscratch, not both")
     if "--cpus" in got and not 1 <= int(got["--cpus"]) <= 4096:
@@ -543,8 +563,28 @@ def _sudo() -> str:
     raise Refused("no sudo here")
 
 
-def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
+def _read_body(stream) -> str:
+    """A request's body (1.25.3): at most MAX_SCRIPT bytes of UTF-8 text."""
+    data = stream.read(MAX_SCRIPT + 1) if stream is not None else b""
+    if isinstance(data, str):
+        data = data.encode("utf-8", errors="surrogateescape")
+    if len(data) > MAX_SCRIPT:
+        raise Refused(f"the text is over {MAX_SCRIPT // 1024} KB")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise Refused("the text isn't UTF-8") from None
+
+
+# What writes a person's files (1.25.3): served only with `serve --edit`,
+# the cluster's own say (the hub's [[hub.sites]] edit = true is the hub's).
+EDITS = {"save"}
+
+
+def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False) -> int:
     env = os.environ if env is None else env
+    if stdin is None:
+        stdin = sys.stdin.buffer
     run_ = run_ or subprocess.run
     original = env.get("SSH_ORIGINAL_COMMAND")
     if original is None:
@@ -565,6 +605,18 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
         return refuse(str(e))
     who = pw.pw_name if pw else "-"
     asked = " ".join(shlex.quote(w) for w in words_of(op, got))
+    if op in EDITS and not edit:
+        _log(f"user={who} {asked}: refused: saving is off here")
+        return refuse("saving scripts from the Console isn't turned on on this cluster (its nomad account's "
+                      "authorized_keys line for the hub's key runs nomad-gate serve, not nomad-gate serve "
+                      "--edit: nomad gate install-key --edit)")
+    body = None
+    if op in WITH_BODY:
+        try:
+            body = _read_body(stdin)
+        except Refused as e:
+            _log(f"user={who} {asked}: refused: {e}")
+            return refuse(str(e))
     plain = {"PATH": TOOL_PATH, "LANG": "C", "LC_ALL": "C"}     # sudo's own words, the same everywhere
     sends = op in ("submit", "again")
     try:
@@ -580,7 +632,7 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
             _log(f"refused (unsafe install): {why}")
             return refuse(f"the gate won't serve as it is installed: {why}", 3)
         if pw is None:
-            return answer(_version())
+            return answer({**_version(), "edit": bool(edit)})
         # May this account act as them? sudo says so by its exit status alone.
         try:
             pre = run_([sudo, "-n", "-l", "-u", pw.pw_name, me, "run"], stdin=subprocess.DEVNULL,
@@ -593,9 +645,10 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
             return refuse(f"this account may not act as {pw.pw_name} here (sudo), so the Console can't "
                           "do it for them: they can paste the command on the cluster instead", 5)
         argv = [sudo, "-n", "-u", pw.pw_name, me, "run"] + words_of(op, got)
+        given = {"input": body} if body is not None else {"stdin": subprocess.DEVNULL}
         try:
-            r = run_(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                     text=True, errors="replace", timeout=SERVE_TIMEOUT, env=plain)
+            r = run_(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                     text=True, errors="replace", timeout=SERVE_TIMEOUT, env=plain, **given)
         except subprocess.TimeoutExpired:
             _log(f"user={pw.pw_name} {asked}: no answer in {SERVE_TIMEOUT} s")
             if sends:
@@ -626,7 +679,12 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
         return refuse(why, 4)
     job = doc.get("job")
     done = f" -> job {job}" if op in ("submit", "again") and isinstance(job, str) and _JOB.fullmatch(job) else ""
+    if op == "save" and doc.get("ok"):
+        old = got.get("--sha256", "new")[:12]
+        done = f" -> {old} => {str(doc.get('sha256'))[:12]}" + (f", kept {doc['kept']}" if doc.get("kept") else "")
     _log(f"user={pw.pw_name} {asked}: {'ok' if doc.get('ok') else 'not done'}{done}")
+    if op == "version":
+        doc["edit"] = bool(edit)                    # the cluster's say on saving (1.25.3)
     return answer(doc, r.returncode)
 
 
@@ -848,9 +906,18 @@ def run(words: list, me: str, run_=None) -> int:
         if op == "show":
             data = script_bytes(got["--script"])
             return answer({"ok": True, "script": got["--script"], "text": data.decode("utf-8", errors="replace"),
-                           "sha256": sha256_of(data), **_warning(got["--script"])})
+                           "sha256": sha256_of(data), "utf8": is_utf8(data), **_warning(got["--script"])})
         if op == "ls":
             return answer({"ok": True, **listing(got["--dir"])})
+        if op == "save":
+            text = _read_body(sys.stdin.buffer)
+            return answer(save(got["--script"], text, body_sha=got["--body-sha256"], old_sha=got.get("--sha256"),
+                               new="--new" in got))
+        if op == "versions":
+            return answer({"ok": True, "script": got["--script"], "versions": versions(got["--script"])})
+        if op == "recall":
+            return answer({"ok": True, "script": got["--script"], "id": got["--id"],
+                           "text": recall(got["--script"], got["--id"])})
         if op == "size":
             if "--script" in got:
                 script_bytes(got["--script"])
@@ -1046,6 +1113,384 @@ def listing(path: str) -> dict:
     return {"dir": os.path.normpath(path), "entries": rows[:MAX_LS], "more": len(rows) > MAX_LS}
 
 
+# ── save: a job script written as the person (1.25.3) ──────────────────────
+# Only their own job script (a regular file they own, not a link, beginning
+# with #!, as the new text must; no part of its path hidden, as given nor
+# as it really is), only over the very text they opened (its sha256, checked
+# again just before it is replaced) or as a new file (never over one that is
+# there). The new text is written beside it and put in its place in one step
+# (never half a script), with its permissions, group and access list; the
+# one before is kept, private, in ~/.local/share/nomad/versions (the last
+# KEEP_VERSIONS of each), to go back to. Those folders are walked one at a
+# time, never through a link nor into one someone else owns: ~/.local may be
+# open to others (account_open says so), and what is kept is theirs alone.
+KEEP_VERSIONS = 20
+VERSIONS = ".local/share/nomad/versions"
+
+
+def _job_text(text: str) -> None:
+    if not text.startswith("#!"):
+        raise Refused("a job script begins with #! (its shell): not saved")
+    if "\x00" in text:
+        raise Refused("the text holds a NUL byte: not saved")
+
+
+def _place(path: str) -> tuple:
+    """(folder, name) of a script to write: an absolute path, no part of it
+    hidden (a dot file or folder: login files, ~/.ssh, ...)."""
+    if not path.startswith("/") or path.endswith("/"):
+        raise Refused(f"{path}: give the script's full path")
+    if any(part.startswith(".") for part in path.split("/") if part):
+        raise Refused(f"{path}: not a hidden file or folder")
+    folder, name = os.path.split(path)
+    return folder, name
+
+
+def _sha(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_at(dfd: int, name: str, what: str) -> tuple:
+    """(bytes, stat, access list or None) of the person's own job script
+    ``name`` in the folder dfd."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError as e:
+        if e.errno == 40 or os.path.islink(what):           # ELOOP: a link
+            raise Refused(f"{what} is a link: give the script itself") from None
+        raise Refused(f"{what}: {e.strerror}") from None
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused(f"{what} isn't a file")
+        if st.st_uid != _uid():
+            raise Refused(f"{what} isn't yours")
+        data = f.read(MAX_SCRIPT + 1)
+        acl = {}
+        for attr in ACL_ATTRS:
+            try:
+                acl[attr] = os.getxattr(f.fileno(), attr)
+            except (OSError, AttributeError):
+                pass
+    if len(data) > MAX_SCRIPT:
+        raise Refused(f"{what} is over {MAX_SCRIPT // 1024} KB")
+    if not data.startswith(b"#!"):
+        raise Refused(f"{what} isn't a job script (it doesn't begin with #!): not saved")
+    return data, st, acl
+
+
+_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+# A file's access lists, copied to the text that replaces it.
+ACL_ATTRS = ("system.posix_acl_access", "system.nfs4_acl")
+# A new script is the person's alone (chmod shares it): the gate can't know
+# the umask their login sets.
+NEW_MODE = 0o600
+
+
+def is_utf8(data: bytes) -> bool:
+    try:
+        data.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def _walk(parts: tuple, make: bool) -> int | None:
+    """A folder of the person's own under their home (each of ``parts`` a
+    name), opened one step at a time: never through a link, never one
+    someone else owns (made, private, when ``make`` and it isn't there).
+    Its descriptor, or None (not there, or not theirs alone to use)."""
+    try:
+        fd = os.open(_home(), os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return None
+    try:
+        for i, part in enumerate(parts):
+            try:
+                nfd = os.open(part, _DIR, dir_fd=fd)
+            except FileNotFoundError:
+                if not make:
+                    return None
+                try:
+                    os.mkdir(part, 0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                nfd = os.open(part, _DIR, dir_fd=fd)
+            os.close(fd)
+            fd = nfd
+            st = os.fstat(fd)
+            if st.st_uid != _uid():
+                return None
+            if i >= 3 and stat.S_IMODE(st.st_mode) & 0o077:     # versions/ and below: theirs alone
+                os.fchmod(fd, 0o700)
+        out, fd = fd, -1
+        return out
+    except OSError:
+        return None
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _versions_parts(path: str) -> tuple:
+    return tuple(VERSIONS.split("/")) + (_sha(path.encode("utf-8", errors="surrogateescape"))[:16],)
+
+
+def _write_new(dfd: int, name: str, data: bytes, mode: int = 0o600) -> None:
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, mode, dir_fd=dfd)
+    with os.fdopen(fd, "wb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1 or st.st_uid != _uid():   # never through a link
+            raise OSError("not a file of its own")
+        f.truncate(0)
+        f.write(data)
+
+
+def _kept_names(dfd: int) -> list:
+    out = []
+    for n in os.listdir(dfd):
+        if n.endswith(".sh") and _VID.fullmatch(n[:-3]):
+            try:
+                if stat.S_ISREG(os.stat(n, dir_fd=dfd, follow_symlinks=False).st_mode):
+                    out.append(n)
+            except OSError:
+                pass
+    return sorted(out)
+
+
+def _keep(path: str, data: bytes) -> str | None:
+    """The text before, kept privately; its id (None if it couldn't be)."""
+    import time as _t
+    dfd = _walk(_versions_parts(path), make=True)
+    if dfd is None:
+        return None
+    try:
+        _write_new(dfd, "path", (path + "\n").encode("utf-8", errors="surrogateescape"))
+        vid = f"{_t.strftime('%Y%m%dT%H%M%S', _t.gmtime())}-{_sha(data)[:12]}"     # UTC: in order
+        _write_new(dfd, vid + ".sh", data)
+        for n in _kept_names(dfd)[:-KEEP_VERSIONS]:
+            os.unlink(n, dir_fd=dfd)
+        return vid
+    except OSError:
+        return None
+    finally:
+        os.close(dfd)
+
+
+def _unkeep(path: str, vid: str) -> None:
+    """A version kept for a save that then didn't happen: taken back."""
+    dfd = _walk(_versions_parts(path), make=False)
+    if dfd is None:
+        return
+    try:
+        os.unlink(vid + ".sh", dir_fd=dfd)
+    except OSError:
+        pass
+    finally:
+        os.close(dfd)
+
+
+def versions(path: str) -> list:
+    """The earlier versions of ``path`` kept when it was saved, newest first."""
+    dfd = _walk(_versions_parts(path), make=False)
+    if dfd is None:
+        return []
+    out = []
+    try:
+        for n in reversed(_kept_names(dfd)):
+            try:
+                st = os.stat(n, dir_fd=dfd, follow_symlinks=False)
+            except OSError:
+                continue
+            out.append({"id": n[:-3], "size": st.st_size, "mtime": int(st.st_mtime)})
+    except OSError:
+        return []
+    finally:
+        os.close(dfd)
+    return out
+
+
+def recall(path: str, vid: str) -> str:
+    """One earlier version's text."""
+    if not _VID.fullmatch(vid):
+        raise Refused("not a version")
+    dfd = _walk(_versions_parts(path), make=False)
+    try:
+        if dfd is None:
+            raise FileNotFoundError
+        fd = os.open(vid + ".sh", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError:
+        raise Refused(f"no version {vid} of {path} is kept") from None
+    finally:
+        if dfd is not None:
+            os.close(dfd)
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise Refused(f"no version {vid} of {path} is kept")
+        data = f.read(MAX_SCRIPT + 1)
+    return data[:MAX_SCRIPT].decode("utf-8", errors="replace")
+
+
+def _real_folder(dfd: int, folder: str) -> str:
+    try:
+        return os.readlink(f"/proc/self/fd/{dfd}")
+    except OSError:
+        return os.path.realpath(folder)
+
+
+def _same_as(dfd: int, name: str, fd: int) -> bool:
+    try:
+        a, b = os.stat(name, dir_fd=dfd, follow_symlinks=False), os.fstat(fd)
+    except OSError:
+        return False
+    return (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino)
+
+
+def _as_before(fd: int, st, acl: dict, notes: list) -> None:
+    """The new text's file given the one before's group, permissions and
+    access lists (POSIX and NFSv4); what can't be is said in ``notes``."""
+    now_gid = os.fstat(fd).st_gid         # a setgid folder gives its own group
+    if now_gid != st.st_gid:
+        try:
+            os.fchown(fd, -1, st.st_gid)
+        except OSError:
+            notes.append(f"its group is now {_group_of(now_gid)}, not {_group_of(st.st_gid)} (you aren't in that "
+                         "group): its group permissions are now for that one")
+    os.fchmod(fd, stat.S_IMODE(st.st_mode) & 0o777)        # after chown, which clears setgid
+    if acl.get("system.posix_acl_access"):
+        try:
+            os.setxattr(fd, "system.posix_acl_access", acl["system.posix_acl_access"])
+        except OSError:
+            notes.append("its access list couldn't be copied")
+    else:
+        # none before: none inherited from the folder's default list either
+        try:
+            os.removexattr(fd, "system.posix_acl_access")
+        except OSError as e:
+            if e.errno not in (errno.ENODATA, errno.EOPNOTSUPP, errno.ENOTSUP):
+                notes.append("it may carry the folder's default access list")
+    if acl.get("system.nfs4_acl"):
+        try:
+            os.setxattr(fd, "system.nfs4_acl", acl["system.nfs4_acl"])
+        except OSError:
+            notes.append("its access list (NFSv4) couldn't be copied")
+
+
+def save(path: str, text: str, *, body_sha: str, old_sha: str | None = None, new: bool = False) -> dict:
+    """Write ``text`` as the person's job script ``path`` (see above)."""
+    data = text.encode("utf-8")
+    if _sha(data) != body_sha:
+        raise Refused("the text didn't arrive whole (its sha256 differs): not saved")
+    if len(data) > MAX_SCRIPT:
+        raise Refused(f"the text is over {MAX_SCRIPT // 1024} KB")
+    _job_text(text)
+    folder, name = _place(path)
+    try:
+        dfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as e:
+        raise Refused(f"{folder}: {e.strerror}") from None
+    try:
+        return _save_in(dfd, folder, name, path, data, old_sha, new)
+    except OSError as e:                                    # said, as every refusal is
+        raise Refused(f"{path}: not saved ({e.strerror or e})") from None
+    finally:
+        os.close(dfd)
+
+
+def _save_in(dfd: int, folder: str, name: str, path: str, data: bytes, old_sha, new: bool) -> dict:
+    import secrets as _secrets
+    real = _real_folder(dfd, folder)
+    if any(part.startswith(".") for part in real.split("/") if part):
+        raise Refused(f"{folder} is really {real}: not a hidden folder")
+    changed = f"{path} changed since you opened it: open it again (your text is not lost)"
+    before, st, acl = None, None, {}
+    if new:
+        try:
+            os.stat(name, dir_fd=dfd, follow_symlinks=False)
+            raise Refused(f"{path} is there already: save under another name")
+        except FileNotFoundError:
+            pass
+    else:
+        before, st, acl = _read_at(dfd, name, path)
+        if _sha(before) != old_sha:
+            raise Refused(changed)
+        if not is_utf8(before):
+            raise Refused(f"{path} isn't UTF-8 text: saved from here it would change where you didn't edit it "
+                          "(edit it on the cluster)")
+    tmp = f".{name}.nomad-{_secrets.token_hex(6)}.tmp"
+    try:
+        tfd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dfd)
+    except OSError as e:
+        raise Refused(f"can't write in {folder}: {e.strerror}") from None
+    notes, kept = [], None
+    try:
+        with os.fdopen(tfd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+            if st is not None:
+                _as_before(f.fileno(), st, acl, notes)
+            else:
+                os.fchmod(f.fileno(), NEW_MODE)
+        if new:
+            try:
+                os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+            except FileExistsError:
+                raise Refused(f"{path} is there already: save under another name") from None
+            except OSError:
+                _new_in_place(dfd, name, path, data)       # no hard links here (some shared file systems)
+        else:
+            # The text before kept first; then the last look, and the swap right after it.
+            kept = _keep(path, before)
+            again, _st2, _acl2 = _read_at(dfd, name, path)
+            if _sha(again) != old_sha:
+                if kept:
+                    _unkeep(path, kept)
+                raise Refused(changed)
+            os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+    finally:
+        try:
+            os.unlink(tmp, dir_fd=dfd)
+        except OSError:
+            pass
+    try:
+        os.fsync(dfd)
+    except OSError:
+        pass
+    if new:
+        notes.append("a new script is yours alone to read (chmod g+r shares it with its group)")
+    elif kept is None:
+        notes.append("the text before couldn't be kept (nomad's folder for it, ~/.local/share/nomad/versions, "
+                     "couldn't be written or isn't yours alone)")
+    out = {"ok": True, "script": path, "sha256": _sha(data), "size": len(data), "new": new, "kept": kept,
+           "notes": notes}
+    return {**out, **_warning(path)}
+
+
+def _new_in_place(dfd: int, name: str, path: str, data: bytes) -> None:
+    """A new script written where hard links can't be made: never over one
+    there, and never left half written."""
+    try:
+        nfd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, NEW_MODE, dir_fd=dfd)
+    except FileExistsError:
+        raise Refused(f"{path} is there already: save under another name") from None
+    try:
+        with os.fdopen(nfd, "wb", closefd=False) as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError:
+        if _same_as(dfd, name, nfd):
+            try:
+                os.unlink(name, dir_fd=dfd)
+            except OSError:
+                pass
+        raise
+    finally:
+        os.close(nfd)
+
+
 USAGE = """usage: nomad-gate serve            (run by sshd for the hub's key)
        nomad-gate run OP [OPTIONS]  (as yourself: what the hub would get)
        nomad-gate version | check   (check: whether it would serve as installed)
@@ -1058,8 +1503,8 @@ def main(argv: list | None = None, me: str | None = None) -> int:
     """``me``: the gate's own path (bin/nomad-gate, as its launcher gives it)."""
     argv = sys.argv[1:] if argv is None else list(argv)
     me = os.path.abspath(me or sys.argv[0])
-    if argv[:1] == ["serve"] and len(argv) == 1:
-        return serve(me)
+    if argv[:1] == ["serve"] and argv[1:] in ([], ["--edit"]):
+        return serve(me, edit=argv[1:] == ["--edit"])
     if argv[:1] == ["run"]:
         return run(argv[1:], me)
     if argv[:1] == ["exec"]:

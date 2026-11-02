@@ -72,6 +72,13 @@ def mode(site: dict | None) -> str:
     return "gate" if str((site or {}).get("submit") or "").strip().lower() == "gate" else "copy"
 
 
+def editing(site: dict | None) -> bool:
+    """Whether the Console may save a person's scripts on this site (1.25.3):
+    only where its [[hub.sites]] says edit = true (and it has a gate). The
+    cluster has its say too: its gate saves only as `serve --edit`."""
+    return mode(site) == "gate" and (site or {}).get("edit") is True
+
+
 def key_path(hub: dict | None = None, site: dict | None = None) -> Path:
     return Path(os.path.expanduser(str((site or {}).get("gate_key") or (hub or {}).get("gate_key")
                                        or DEFAULT_KEY)))
@@ -98,9 +105,10 @@ def settings(site: dict, hub: dict | None = None) -> dict:
             "key": str(key)}
 
 
-def ssh_argv(s: dict, words: list) -> list:
-    """The ssh command that asks the gate ``words`` (an op and its options)."""
-    argv = ["ssh", "-F", "/dev/null", "-T", "-n", "-x", "-a", "-i", s["key"],
+def ssh_argv(s: dict, words: list, body: bool = False) -> list:
+    """The ssh command that asks the gate ``words`` (an op and its options);
+    ``body``: the request carries text on standard input (save, 1.25.3)."""
+    argv = ["ssh", "-F", "/dev/null", "-T"] + ([] if body else ["-n"]) + ["-x", "-a", "-i", s["key"],
             "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
             "-o", "ControlMaster=no", "-o", "ControlPath=none",
@@ -132,7 +140,8 @@ def request(op: str, user: str | None = None, **options) -> list:
     return words
 
 
-def ask(site: dict, words: list, hub: dict | None = None, *, run_=None, timeout: int = SSH_TIMEOUT) -> dict:
+def ask(site: dict, words: list, hub: dict | None = None, *, run_=None, timeout: int = SSH_TIMEOUT,
+        body: str | None = None) -> dict:
     """The site's gate's answer to ``words`` (a dict with "ok", "error"
     when not ok, and "where": hub, ssh or site when it went wrong before the
     gate answered). Never raises for what ssh or the gate said."""
@@ -145,9 +154,12 @@ def ask(site: dict, words: list, hub: dict | None = None, *, run_=None, timeout:
     sends = bool(words) and words[0] in ("submit", "again")
     maybe = {"maybe": True} if sends else {}
     later = " (it may have been submitted: check the jobs before sending it again)" if sends else ""
+    if (body is not None) != (bool(words) and words[0] in gate.WITH_BODY):
+        return {"ok": False, "error": f"{words[0] if words else '?'}: a body goes with save alone", "where": "hub"}
+    given = {"input": body} if body is not None else {"stdin": subprocess.DEVNULL}
     try:
-        r = run_(ssh_argv(s, words), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                 stderr=subprocess.PIPE, text=True, errors="replace", timeout=timeout, env=SSH_ENV())
+        r = run_(ssh_argv(s, words, body=body is not None), stdout=subprocess.PIPE,
+                 stderr=subprocess.PIPE, text=True, errors="replace", timeout=timeout, env=SSH_ENV(), **given)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"{s['name']}: no answer in {timeout} s{later}", "where": "ssh", **maybe}
     except OSError as e:
@@ -196,13 +208,17 @@ def _why(s: dict, r) -> str:
 
 
 def call(site: dict, op: str, user: str | None = None, hub: dict | None = None, *, run_=None,
-         timeout: int = SSH_TIMEOUT, **options) -> dict:
-    """Ask the site's gate ``op`` as ``user`` (see request and ask)."""
+         timeout: int = SSH_TIMEOUT, body: str | None = None, **options) -> dict:
+    """Ask the site's gate ``op`` as ``user`` (see request and ask); body:
+    the text a save writes (its sha256 goes with it as --body-sha256)."""
+    if body is not None:
+        import hashlib
+        options["body_sha256"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
     try:
         words = request(op, user, **options)
     except gate.Refused as e:
         return {"ok": False, "error": str(e), "where": "hub"}
-    return ask(site, words, hub, run_=run_, timeout=timeout)
+    return ask(site, words, hub, run_=run_, timeout=timeout, body=body)
 
 
 # ── the gate's key, on the hub and on a site ────────────────────────────────
@@ -216,10 +232,11 @@ def ensure_key(path: Path | None = None) -> tuple[Path, str]:
 _PLAIN_PATH = re.compile(r"/[A-Za-z0-9/._-]{1,1000}")
 
 
-def forced_command(gate_path: str, owners: set | None = None) -> str:
+def forced_command(gate_path: str, owners: set | None = None, edit: bool = False) -> str:
     """What sshd runs for the gate's key (through this account's login
     shell, so the path holds only letters, digits and / . _ -). ``owners``:
-    the path must be safe to run from for them (gate.unsafe)."""
+    the path must be safe to run from for them (gate.unsafe). ``edit``
+    (1.25.3): the gate may save people's scripts (serve --edit)."""
     if not _PLAIN_PATH.fullmatch(gate_path) or os.path.basename(gate_path) != gate.GATE \
             or "/../" in gate_path + "/":
         raise ValueError(f"--gate: the full path of {gate.GATE} on this cluster, in letters, digits and / . _ - "
@@ -229,14 +246,15 @@ def forced_command(gate_path: str, owners: set | None = None) -> str:
         if why:
             raise ValueError(f"--gate {gate_path}: not safe to run from ({why}); install_nomad_for_users.sh "
                              "1.25.0 or later puts it there")
-    return f"{gate_path} serve"
+    return f"{gate_path} serve --edit" if edit else f"{gate_path} serve"
 
 
 def install_key(pubkey: str, *, origins: str | None, gate_path: str, apply: bool = False,
-                path: Path | None = None) -> tuple:
+                path: Path | None = None, edit: bool = False) -> tuple:
     """What adding the hub's gate key to authorized_keys changes (and, with
-    apply, changing it): restricted to ``gate_path serve``, from ``origins``."""
+    apply, changing it): restricted to ``gate_path serve`` (``serve --edit``
+    with edit), from ``origins``."""
     from nomad.actions.agent import install_key as install
     return install(pubkey, from_pattern=origins, apply=apply, path=path,
-                   command=forced_command(gate_path, {0, os.getuid()}), what=f"`{gate.GATE} serve`",
-                   tag="nomad-gate")
+                   command=forced_command(gate_path, {0, os.getuid()}, edit=edit),
+                   what=f"`{gate.GATE} serve{' --edit' if edit else ''}`", tag="nomad-gate")

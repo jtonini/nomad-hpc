@@ -359,14 +359,23 @@ def format_terminal(
             f"   {c.level_color(dim.level)}{dim.level}{c.RESET}"
         )
 
+    # What wasn't judged, and why (1.25.3): one core, the least memory, a
+    # job of a few minutes -- nothing the person could have asked less of.
+    for dim in fingerprint.dimensions.values():
+        if not dim.applicable and dim.detail and dim.name != "GPU Utilization":
+            lines.append(f"    {dim.name:<20s} {c.DIM}not judged: {dim.detail}{c.RESET}")
+
     lines.append(f"    {'─' * 52}")
-    overall = fingerprint.overall
-    oc = c.score_color(overall)
-    lines.append(
-        f"    {'Overall Score':<20s} {oc}{bar(overall)}{c.RESET}"
-        f"  {oc}{overall:>5.1f}%{c.RESET}"
-        f"   {oc}{fingerprint.overall_level}{c.RESET}"
-    )
+    if fingerprint.scored:
+        overall = fingerprint.overall
+        oc = c.score_color(overall)
+        lines.append(
+            f"    {'Overall Score':<20s} {oc}{bar(overall)}{c.RESET}"
+            f"  {oc}{overall:>5.1f}%{c.RESET}"
+            f"   {oc}{fingerprint.overall_level}{c.RESET}"
+        )
+    else:
+        lines.append(f"    {'Overall Score':<20s} {c.DIM}not scored: nothing in this job could be judged{c.RESET}")
     lines.append("")
 
     # ── Recommendations ──────────────────────────────────────────
@@ -392,7 +401,7 @@ def format_terminal(
                 for sline in suggestion_text.split("\n"):
                     lines.append(f"      {c.CYAN}{sline}{c.RESET}")
             lines.append("")
-    else:
+    elif fingerprint.scored:
         lines.append(f"  {c.GREEN}All dimensions look good — nice work!{c.RESET}")
         lines.append("")
 
@@ -434,7 +443,8 @@ def format_json(
         # Which job this is (1.17.3): a number can have been given out again.
         "site": job.get("source_site") or job.get("cluster"),
         "submit_time": job.get("submit_time"),
-        "overall_score": round(fingerprint.overall, 1),
+        # None (1.25.3): nothing in the job could be judged.
+        "overall_score": round(fingerprint.overall, 1) if fingerprint.scored else None,
         "overall_level": fingerprint.overall_level,
         "dimensions": {},
         "progress": progress,
@@ -505,8 +515,9 @@ def explain_job(
     # Score the job
     fingerprint = score_job(job, summary)
 
-    # Save proficiency score to database for historical tracking
-    if record:
+    # Save proficiency score to database for historical tracking (a job
+    # with nothing to judge isn't a score: 1.25.3)
+    if record and fingerprint.scored:
         save_proficiency_score(db_path, fingerprint)
 
     # Compute progress if requested

@@ -23,8 +23,9 @@ def gate_group():
       nomad gate install-key 'PUBKEY' --from HUB-ADDRESS    (a dry run; --apply writes it)
     \b
     The key the hub uses for this can run nothing but nomad-gate, which does
-    only its own short list (size, submit, again, jobs, cancel, ls, show) as
-    the person asked for, with the cluster account's sudo.
+    only its own short list (size, submit, again, jobs, job, cancel, ls,
+    show; save only with install-key --edit) as the person asked for, with
+    the cluster account's sudo.
     """
 
 
@@ -59,8 +60,10 @@ def key_cmd(ctx):
 @click.option("--from-anywhere", is_flag=True, help="No from= (not advised: the key acts as people here).")
 @click.option("--gate", "gate_path", default=DEFAULT_GATE, show_default=True,
               help="nomad-gate's full path here (install_nomad_for_users.sh puts it in its bin/).")
+@click.option("--edit", is_flag=True, help="The Console may also save people's job scripts here, as them "
+              "(nomad-gate serve --edit; 1.25.3). The hub's [[hub.sites]] must say edit = true too.")
 @click.option("--apply", is_flag=True, help="Write it (otherwise show what would change).")
-def install_key_cmd(pubkey, origins, from_anywhere, gate_path, apply):
+def install_key_cmd(pubkey, origins, from_anywhere, gate_path, edit, apply):
     """Let the hub's gate key run `nomad-gate serve` here, and nothing else.
 
     Adds PUBKEY to ~/.ssh/authorized_keys with `restrict` (no terminal, no
@@ -68,6 +71,11 @@ def install_key_cmd(pubkey, origins, from_anywhere, gate_path, apply):
     asks, sshd runs nomad-gate serve). A line already holding the same key
     is replaced. Run as the cluster's nomad account (the one whose sudo may
     act as the people who use it); nomad-gate must be there already.
+
+    With --edit, the hub's key may also write people's job scripts as them
+    (the Console's Edit): whoever holds that key could then run code as
+    anyone the gate acts for, not only send the scripts they have. Left off,
+    the gate refuses every save.
     """
     from nomad.submit import remote
     if not origins and not from_anywhere:
@@ -75,7 +83,7 @@ def install_key_cmd(pubkey, origins, from_anywhere, gate_path, apply):
     if origins and from_anywhere:
         raise click.UsageError("--from or --from-anywhere, not both")
     try:
-        status, lines = remote.install_key(pubkey, origins=origins, gate_path=gate_path, apply=apply)
+        status, lines = remote.install_key(pubkey, origins=origins, gate_path=gate_path, apply=apply, edit=edit)
     except (ValueError, OSError) as exc:
         raise click.ClickException(str(exc)) from None
     for ln in lines:
@@ -117,6 +125,10 @@ def test_cmd(ctx, site_name, user):
     a = say("the gate answers", remote.call(s, "version", hub=hub))
     if a.get("ok"):
         click.echo(f"       nomad-gate {a.get('gate')}, nomad {a.get('nomad')}, as {a.get('account')}")
+        if "edit" in a:
+            here = "on" if a["edit"] else "off (install-key --edit turns it on)"
+            hub_says = "on" if remote.editing(s) else "off (edit = true in its [[hub.sites]])"
+            click.echo(f"       saving scripts from the Console: the cluster {here}; the hub {hub_says}")
     if user and a.get("ok"):
         b = say(f"it acts as {user}", remote.call(s, "version", user, hub=hub))
         if b.get("ok") and b.get("account") != user:

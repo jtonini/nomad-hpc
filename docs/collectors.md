@@ -20,6 +20,7 @@ enabled = false
 | `iostat` | on | every host | `iostat` (sysstat) | `iostat_device`, `iostat_cpu` |
 | `mpstat` | on | every host | `mpstat` (sysstat) | `mpstat_summary`, `mpstat_core` |
 | `vmstat` | on | every host | `vmstat` | `vmstat` |
+| `pressure` | on | every Linux host | the kernel's pressure stall information (`/proc/pressure`; RHEL and Rocky need `psi=1` on the kernel's command line) | `pressure`, `pressure_status` |
 | `node_state` | on | Slurm head node | `scontrol` | `node_state`, `partition_settings`, `partition_changes` |
 | `gpu` | on | hosts with NVIDIA GPUs, or a head node reaching GPU nodes over SSH | `nvidia-smi` (DCGM if present) | `gpu_stats`, `gpu_health` |
 | `nfs` | on | hosts that mount NFS (client side) | `nfsiostat` (nfs-utils, in `/usr/sbin`) | `nfs_stats` |
@@ -40,6 +41,8 @@ An `enabled = [...]` list under `[collectors]`, which older example configs carr
 `node_state` also reads each partition's settings (`scontrol --all --oneliner show partition`, hidden partitions and ones this account may not use included: limits, default and maximum time, default memory, who may use it, priority tier, preemption) and stores them only when something changes: `partition_settings` holds each partition as it is now, `partition_changes` when one appeared, changed (old and new values) or went. `nomad partitions` shows them; `nomad partitions --changes`, what changed. A cluster whose `scontrol` won't show partitions still has its nodes stored.
 
 `slurm` records, from `squeue`, the last reason Slurm gave while a job waited (`pending_reason`: Resources, Priority, QOSMaxJobsPerUserLimit, Dependency...), since when it has waited for the cluster without a break (`ready_since`: Resources or Priority; cleared by a reading that shows it held by its own limits, and by a requeue) and how many nodes it asked for (`req_nodes`), from 1.18 on: whether, and from when, a job waited for the cluster rather than for its own limits. The first sync after upgrading sends each site's jobs table whole once (it gained columns).
+
+`pressure` (1.25.3) reads `/proc/pressure/cpu`, `memory` and `io`: the share of time some work on the host ("some"), or all of it ("full"), waited for that resource, over 10 seconds, 1 minute and 5 minutes, and the total time waited. Where the kernel was built with it off by default (`CONFIG_PSI_DEFAULT_DISABLED`, as RHEL 8 and 9 and Rocky are), the files aren't there until the host boots with `psi=1`: the collector then records only that (`pressure_status`, with the reason), so a page can say why there is nothing yet, and starts recording by itself after that boot.
 
 `nomad collect -C disk,nfs` (or `-C disk -C nfs`) runs only those, if enabled. An unknown name is warned about and skipped; if no name is known, nothing runs and the command says so.
 
