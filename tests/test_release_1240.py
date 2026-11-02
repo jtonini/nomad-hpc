@@ -728,10 +728,12 @@ def test_submit_sends_nomads_script(scratch):  # noqa: F811
     tmp, w, sent, slurm = scratch
     r = CliRunner().invoke(submit_cmd, ["--yes", "job.sh"])
     assert r.exit_code == 0, r.output
-    script = sent[-1][-1]
-    assert script.startswith(stage.STORE) and script.endswith(".sh")
-    assert stat.S_IMODE(os.stat(script).st_mode) == 0o600
-    assert stage.unwrap(open(script).read())[0] == str(w / "job.sh")
+    assert all(a.startswith("--") for a in sent[-1][1:])        # no file: sbatch reads it (1.25.2)
+    assert stage.unwrap(sent[-1].data.decode())[0] == str(w / "job.sh")
+    record = stage.record_of_job("4242")                        # nomad's record of it, by the job's number
+    assert record.startswith(stage.STORE) and record.endswith(".sh")
+    assert stat.S_IMODE(os.stat(record).st_mode) == 0o600 and open(record, "rb").read() == sent[-1].data
+    assert f"< {record}" in r.output
     assert "--job-name=job.sh" not in sent[-1]                 # the script names itself (-J water)
     assert any(a.startswith("--extra=") and a.endswith(";stage=l") for a in sent[-1])
     assert "Through local scratch" in r.output and "comes back to" in r.output
@@ -775,7 +777,7 @@ def test_a_job_on_two_nodes_is_sent_as_it_is(scratch):  # noqa: F811
     assert sent[-1][-1] == str(w / "job.sh") and "Not through local scratch: it asks for 2 nodes" in r.output
 
 
-def test_a_copy_nomad_cant_keep_sends_it_as_it_is(scratch, monkeypatch):  # noqa: F811
+def test_a_record_nomad_cant_keep_is_said(scratch, monkeypatch):  # noqa: F811
     from nomad.submit.cli import submit_cmd
     tmp, w, sent, slurm = scratch
 
@@ -783,7 +785,9 @@ def test_a_copy_nomad_cant_keep_sends_it_as_it_is(scratch, monkeypatch):  # noqa
         raise PermissionError(13, "Permission denied")
     monkeypatch.setattr(stage, "keep", refuse)
     r = CliRunner().invoke(submit_cmd, ["--yes", "job.sh"])
-    assert r.exit_code == 0 and sent[-1][-1] == str(w / "job.sh") and "couldn't keep its copy" in r.output
+    assert r.exit_code == 0, r.output
+    assert stage.unwrap(sent[-1].data.decode())[0] == str(w / "job.sh")     # still through local scratch
+    assert "couldn't keep its record" in r.output and stage.record_of_job("4242") is None
 
 
 def test_a_staged_job_sent_again_runs_its_own_script(scratch, monkeypatch):  # noqa: F811
@@ -791,15 +795,17 @@ def test_a_staged_job_sent_again_runs_its_own_script(scratch, monkeypatch):  # n
     from tests.test_release_1180 import SACCT, Fake
     tmp, w, sent, slurm = scratch
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "job.sh"])
-    wrapper = sent[-1][-1]
-    line = f"sbatch --parsable --begin=now+120 --extra=nomad=1.24.0;via=cli;stage=l {wrapper}"
-    f = Fake(sacct=SACCT.replace("/home/amy/w", str(w)).replace("sbatch job.sh", line, 1))
-    monkeypatch.setattr(sc, "plan", lambda *a, **k: REAL_PLAN(*a, **{**k, "user": "amy", "run_sacct": f,
-                                                                   "run_slurm": f}))
-    r = CliRunner().invoke(sc.submit_cmd, ["--yes", "--again", "101"])
-    assert r.exit_code == 0, r.output
-    assert "ran through local scratch; its own script is" in r.output
-    assert stage.unwrap(open(sent[-1][-1]).read())[0] == str(w / "job.sh")      # staged again, its own
+    record = stage.record_of_job("4242")
+    for line in (f"sbatch --parsable --begin=now+120 --extra=nomad=1.24.0;via=cli;stage=l {record}",  # by 1.24
+                 "sbatch --parsable --begin=now+120 --extra=nomad=1.25.2;via=cli;stage=l"):           # on stdin
+        stage.note_job("101", record, when=stage.epoch("2026-10-01T10:00:00"))              # when Slurm says 101 was sent
+        f = Fake(sacct=SACCT.replace("/home/amy/w", str(w)).replace("sbatch job.sh", line, 1))
+        monkeypatch.setattr(sc, "plan", lambda *a, f=f, **k: REAL_PLAN(*a, **{**k, "user": "amy", "run_sacct": f,
+                                                                            "run_slurm": f}))
+        r = CliRunner().invoke(sc.submit_cmd, ["--yes", "--again", "101"])
+        assert r.exit_code == 0, r.output
+        assert "ran through local scratch; its own script is" in r.output
+        assert stage.unwrap(sent[-1].data.decode())[0] == str(w / "job.sh")      # staged again, its own
 
 
 def test_past_runs_sent_through_local_scratch_are_their_scripts(tmp_path):

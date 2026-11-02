@@ -438,7 +438,7 @@ def test_size_jobs_cancel_and_ls(person, capsys):
     answers["out"] = b"module: loaded\n{ stray\n" + json.dumps(plan, indent=2).encode() + b"\n"
     assert call("size", "--script", str(w / "job.sh")) == 0
     assert _out(capsys) == {"ok": True, "plan": plan}
-    assert said[-1][5:] == [str(w.parent / "bin" / "nomad"), "size", "--json", str(w / "job.sh")]
+    assert said[-1][5:] == [str(w.parent / "bin" / "nomad"), "size", "--json", "--via", "console", str(w / "job.sh")]
     assert call("size", "--job", "4242") == 0 and said[-1][4] == str(w.parent)
     capsys.readouterr()
     answers["out"] = b"Error: no such job\n"
@@ -449,11 +449,11 @@ def test_size_jobs_cancel_and_ls(person, capsys):
     assert _out(capsys)["jobs"] == [{"job": "4242", "name": "my job", "state": "RUNNING", "time": "1:02",
                                      "limit": "4:00:00", "nodes": "1", "where": "spdr02",
                                      "workdir": "/scratch/jdoe/run 1"}]
-    assert said[-1][5:8] == ["squeue", "-u", str(PERSON)]          # uid 5123 has no name here
+    assert said[-1][6:10] == ["exec", "squeue", "-u", str(PERSON)]   # uid 5123 has no name here; by the gate's exec (1.25.2)
     answers.update(out=b"scancel: error: Kill job error on job id 9: Access/permission denied\n", code=1)
     assert call("cancel", "--job", "9") == 6
     doc = _out(capsys)
-    assert doc["ok"] is False and "permission denied" in doc["said"] and said[-1][5:] == ["scancel", "9"]
+    assert doc["ok"] is False and "permission denied" in doc["said"] and said[-1][6:] == ["exec", "scancel", "9"]
     (w / ".hidden").write_text("")
     (w / "sub").mkdir()
     assert call("ls", "--dir", str(w)) == 0

@@ -281,14 +281,39 @@ def scratch(tmp_path, monkeypatch):
     monkeypatch.setattr(logs, "fs_type", lambda p: "nfs4")
     sent = []
 
-    def sbatch(argv, cwd):
-        sent.append(argv)
+    def sbatch(argv, cwd, data=None):
+        sent.append(Sent(argv, data))
         return subprocess.CompletedProcess(argv, 0, "4242;hpc1\n", "")
     monkeypatch.setattr(sc, "_run_sbatch", sbatch)
+    bindir = fake_sbatch_on_path(monkeypatch)
     slurm = Slurm(show(wd=str(w)))
     monkeypatch.setattr(logs, "_run", slurm)
     monkeypatch.chdir(w)
-    return tmp_path, w, sent, slurm
+    yield tmp_path, w, sent, slurm
+    import shutil
+    shutil.rmtree(bindir, ignore_errors=True)
+
+
+class Sent(list):
+    """An sbatch command as nomad ran it, and what it gave sbatch on its
+    standard input (``data``: the script itself, 1.25.2)."""
+    def __init__(self, argv, data=None):
+        super().__init__(argv)
+        self.data = data
+
+
+def fake_sbatch_on_path(monkeypatch):
+    """An sbatch on PATH (from the Console nomad runs the one PATH finds,
+    by its full path; never run here: _run_sbatch is replaced), in a folder
+    of its own that the tests' own folders don't open; its folder (to be
+    removed)."""
+    import tempfile
+    b = tempfile.mkdtemp(prefix="nomad-test-sbatch-")
+    with open(os.path.join(b, "sbatch"), "w") as f:
+        f.write("#!/bin/sh\nexit 99\n")
+    os.chmod(os.path.join(b, "sbatch"), 0o755)
+    monkeypatch.setenv("PATH", f"{b}:{os.environ.get('PATH', '')}")
+    return b
 
 
 def _again_line(scratch, monkeypatch, line):
@@ -398,7 +423,7 @@ def test_again_of_a_quiet_job_isnt_quiet(scratch, monkeypatch):
 def test_a_wrapper_line_before_the_number(scratch, monkeypatch):
     import nomad.submit.cli as sc
     tmp, w, sent, slurm = scratch
-    monkeypatch.setattr(sc, "_run_sbatch", lambda argv, cwd: subprocess.CompletedProcess(
+    monkeypatch.setattr(sc, "_run_sbatch", lambda argv, cwd, data=None: subprocess.CompletedProcess(
         argv, 0, "Remember: /scratch is purged after 30 days\n4242\n", ""))
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "job.sh"])
     assert r.exit_code == 0 and slurm.calls[0][-1] == "4242" and "Submitted job 4242." in r.output
@@ -407,7 +432,7 @@ def test_a_wrapper_line_before_the_number(scratch, monkeypatch):
 def test_sbatch_failing_after_it_submitted(scratch, monkeypatch):
     import nomad.submit.cli as sc
     tmp, w, sent, slurm = scratch
-    monkeypatch.setattr(sc, "_run_sbatch", lambda argv, cwd: subprocess.CompletedProcess(
+    monkeypatch.setattr(sc, "_run_sbatch", lambda argv, cwd, data=None: subprocess.CompletedProcess(
         argv, -9, "4242\n", ""))
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "job.sh"])
     assert r.exit_code != 0 and "but it had submitted job 4242" in r.output
@@ -418,7 +443,7 @@ def test_sbatch_not_answering(scratch, monkeypatch):
     import nomad.submit.cli as sc
     tmp, w, sent, slurm = scratch
 
-    def slow(argv, cwd):
+    def slow(argv, cwd, data=None):
         raise subprocess.TimeoutExpired(argv, 300)
     monkeypatch.setattr(sc, "_run_sbatch", slow)
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "job.sh"])

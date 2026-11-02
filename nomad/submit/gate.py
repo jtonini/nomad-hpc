@@ -28,9 +28,12 @@ list:
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
 person's own file, with the very text they were shown (--sha256, 1.25.1):
-nomad checks it once more and sends its own copy of that text, so nothing
-changes it on the way. A script or folder others could change is said
-(``warning``), not refused. nomad runs in the person's login environment (`bash -l`,
+nomad checks it once more and gives sbatch that text itself, on its
+standard input (1.25.2), so nothing changes it on the way. A script, folder
+or account others could change is said (``warning``), not refused; a
+Slurm program (sbatch, squeue, ...) others could have put on the person's
+PATH is refused, before any of them runs: from the Console each is found
+once and run by its full path (nomad.submit.programs). nomad runs in the person's login environment (`bash -l`,
 as when they log in and type it) and in the script's folder, so the job
 gets the environment it would get by hand. Each request is logged to the
 cluster's syslog (who, what, the job it made), and each answer is one JSON
@@ -232,33 +235,146 @@ def _chain(p: str, owners: set, private: set = frozenset()) -> str | None:
         p, first = os.path.dirname(p), False
 
 
-def exposure(path: str, uid: int, private: set = frozenset()) -> str | None:
-    """What could let someone else change ``path`` (a person's own script):
-    the first of it and the folders above it, as named and as they really
-    are, that another account owns or others may write; with the command
-    that closes it. None when only they (and root) can."""
-    p0 = os.path.abspath(path)
-    for q in dict.fromkeys((p0, os.path.realpath(p0))):
+def link_steps(path: str, limit: int = 40) -> list:
+    """``path``, each path it becomes as its links are followed one at a
+    time (any part of it a link), and where it really is: each holds a
+    folder someone could change to change where it leads."""
+    p = os.path.abspath(path)
+    out = [p]
+    for _ in range(limit):
+        parts = p.split("/")[1:]
+        cur, step = "/", None
+        for i, part in enumerate(parts):
+            here = os.path.join(cur, part)
+            try:
+                if not stat.S_ISLNK(os.lstat(here).st_mode):
+                    cur = here
+                    continue
+                target = os.readlink(here)
+            except OSError:
+                break
+            step = os.path.normpath(os.path.join(cur, target, *parts[i + 1:]))
+            break
+        if step is None or step in out:
+            break
+        out.append(step)
+    real = os.path.realpath(p)
+    return out if real in out else out + [real]
+
+
+def _first_open(path: str, owners: set | None, private: set = frozenset()):
+    """The first of ``path`` and the folders above it -- as named, as each
+    link in it leads (link_steps), and as it really is -- that someone else
+    could change: (where, how) -- how is ("owner", uid) when an account not
+    in ``owners`` owns it (None: any owner will do), or ("mode", who, mode)
+    when others may write it (a folder above it may be sticky, as /tmp is,
+    when its owner is one of ``owners``). None when no one else can."""
+    for q in link_steps(path):
         p, first = q, True
         while True:
             try:
                 st = os.lstat(p)
             except OSError:
                 break
+            if owners is not None and st.st_uid not in owners:
+                return p, ("owner", st.st_uid)
             if not stat.S_ISLNK(st.st_mode):
                 sticky_dir = not first and stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
                 mine = st.st_gid in private and not (st.st_mode & 0o020 and _acl(p))
                 others = st.st_mode & (0o002 if mine else 0o022)
-                if st.st_uid not in (0, uid):
-                    return f"{p} belongs to {_name_of(st.st_uid)}, who can change what is in it"
                 if others and not sticky_dir:
                     who = "anyone" if st.st_mode & 0o002 else f"anyone in the group {_group_of(st.st_gid)}"
-                    return (f"{p} can be changed by {who} (mode {stat.S_IMODE(st.st_mode):o}): they could change "
-                            f"your files; to close it: chmod go-w {shlex.quote(p)}")
+                    return p, ("mode", who, stat.S_IMODE(st.st_mode))
             if p == "/":
                 break
             p, first = os.path.dirname(p), False
     return None
+
+
+def exposure(path: str, uid: int, private: set = frozenset()) -> str | None:
+    """What could let someone else change ``path`` (a person's own script):
+    the first of it and the folders above it, as named and as they really
+    are, that another account owns or others may write; with the command
+    that closes it. None when only they (and root) can."""
+    hit = _first_open(path, {0, uid}, private)
+    if hit is None:
+        return None
+    p, how = hit
+    if how[0] == "owner":
+        return f"{p} belongs to {_name_of(how[1])}, who can change what is in it"
+    return (f"{p} can be changed by {how[1]} (mode {how[2]:o}): they could change "
+            f"your files; to close it: chmod go-w {shlex.quote(p)}")
+
+
+# What in a person's own account others could change so as to run programs
+# as them (1.25.2): their home, what bash reads when they log in (the gate
+# runs nomad in their login, as when they log in), and ~/.local (programs
+# on PATH, Python's own packages, nomad's records). Said, not refused: it is
+# open with or without the Console, and closes when they (or the site)
+# close it.
+LOGIN_FILES = (".bash_profile", ".bash_login", ".profile", ".bashrc")
+LOCAL_SPOTS = (".local", ".local/bin", ".local/lib", ".local/share", ".local/share/nomad",
+               ".local/share/nomad/staged", ".local/share/nomad/staged/jobs")
+
+
+def account_open(home: str, uid: int, private: set = frozenset()) -> str | None:
+    """The first place in the person's account (``home``) that someone else
+    could change, so as to run programs as them; with the command that
+    closes it. None when there is none."""
+    import glob
+    local = os.path.join(home, ".local")
+    spots = [home] + [os.path.join(home, f) for f in LOGIN_FILES] + [os.path.join(home, d) for d in LOCAL_SPOTS]
+    spots += sorted(glob.glob(os.path.join(glob.escape(local), "lib", "python*", "site-packages")))[:8]
+    for spot in spots:
+        if not os.path.lexists(spot):
+            continue
+        hit = _first_open(spot, {0, uid}, private)
+        if hit is None:
+            continue
+        p, how = hit
+        inside = p == home or p.startswith(home.rstrip("/") + "/")
+        if how[0] == "owner":
+            return (f"{p} belongs to {_name_of(how[1])}, who could run programs as you, with or without the "
+                    "Console")
+        if p == local or p.startswith(local + "/"):
+            fix = f"chmod -R go-w {shlex.quote(local)}"
+        elif inside:
+            fix = f"chmod go-w {shlex.quote(p)}"
+        else:
+            fix = f"the cluster's admins: chmod go-w {shlex.quote(p)}"
+        return (f"{p} can be changed by {how[1]} (mode {how[2]:o}): they could run programs as you, with or "
+                f"without the Console; to close it: {fix}")
+    return None
+
+
+def trusted_owners(uid: int | None = None) -> set:
+    """Who may own a program nomad runs as the person, and the folders it
+    is in: root, the person, the account nomad itself is installed by
+    (installer, on spydur), and Slurm's own account."""
+    out = {0, os.getuid() if uid is None else uid}
+    try:
+        out.add(os.stat(os.path.dirname(os.path.abspath(__file__))).st_uid)
+    except OSError:
+        pass
+    try:
+        out.add(pwd.getpwnam("slurm").pw_uid)
+    except KeyError:
+        pass
+    return out
+
+
+def program_open(path: str, private: set = frozenset(), owners: set | None = None) -> str | None:
+    """Why a program nomad is to run (sbatch, found on the person's PATH)
+    could have been put there by someone else: it, a folder above it, or a
+    link on the way to it, that another account owns (trusted_owners) or
+    others may write. None when no one else could."""
+    hit = _first_open(path, trusted_owners() if owners is None else owners, private)
+    if hit is None:
+        return None
+    p, how = hit
+    if how[0] == "owner":
+        return f"{p} belongs to {_name_of(how[1])}"
+    return f"{p} can be changed by {how[1]} (mode {how[2]:o})"
 
 
 def _name_of(uid: int) -> str:
@@ -565,8 +681,48 @@ def sha256_of(data: bytes) -> str:
 
 
 def _warning(path: str) -> dict:
-    why = exposure(path, _uid(), private_groups(_account()))
-    return {"warning": why} if why else {}
+    """What the page says above the script: who else could change it, and
+    (1.25.2) who else could run programs as the person."""
+    private = private_groups(_account())
+    said = [w for w in (exposure(path, _uid(), private), account_open(_home(), _uid(), private)) if w]
+    return {"warning": ". Also, ".join(said)} if said else {}
+
+
+# The Slurm programs the gate itself runs as the person (jobs, job, cancel):
+# through `nomad-gate exec NAME ...` in their login, which finds NAME on
+# that login's PATH and runs it by its full path, or refuses (1.25.2:
+# nomad.submit.programs).
+EXEC = ("squeue", "scancel", "scontrol", "sacct")
+EXEC_REFUSED = 96
+EXEC_SAYS = "nomad-gate: not run: "
+
+
+def exec_slurm(words: list) -> int:
+    """`nomad-gate exec NAME ARGS...`: one of EXEC, as this account's PATH
+    finds it, unless someone else could have put it there."""
+    from nomad.submit import programs
+    if not words or words[0] not in EXEC:
+        sys.stderr.write(EXEC_SAYS + "only " + ", ".join(EXEC) + "\n")
+        return EXEC_REFUSED
+    try:
+        found = programs.check(words[0], private=private_groups(_account()))
+    except programs.Unsafe as e:
+        sys.stderr.write(f"{EXEC_SAYS}{e}\n")
+        return EXEC_REFUSED
+    if found is None:
+        sys.stderr.write(f"{EXEC_SAYS}there's no {words[0]} on your PATH here\n")
+        return EXEC_REFUSED
+    sys.stdout.flush()
+    try:
+        os.execv(found, [words[0]] + list(words[1:]))
+    except OSError as e:
+        sys.stderr.write(f"{EXEC_SAYS}{found}: {e.strerror or e}\n")
+    return EXEC_REFUSED
+
+
+def _slurm(me: str, argv: list) -> list:
+    """A Slurm step as the person: through the gate's own exec (above)."""
+    return [me, "exec"] + list(argv)
 
 
 # The person's own shell setup may define functions, cd among them: not used here.
@@ -604,6 +760,8 @@ def in_login(folder: str, argv: list, timeout: int = STEP_TIMEOUT, run_=None) ->
     said = out.decode("utf-8", errors="replace")
     if r.returncode == 97 and CD_FAILED in said:
         raise Refused(f"couldn't go into {folder}")
+    if r.returncode == EXEC_REFUSED and EXEC_SAYS in said:
+        raise Refused(said[said.index(EXEC_SAYS) + len(EXEC_SAYS):].strip().splitlines()[0])
     return r.returncode, said
 
 
@@ -696,9 +854,10 @@ def run(words: list, me: str, run_=None) -> int:
         if op == "size":
             if "--script" in got:
                 script_bytes(got["--script"])
-                folder, argv = os.path.dirname(got["--script"]), [nomad, "size", "--json", got["--script"]]
+                folder, argv = os.path.dirname(got["--script"]), [nomad, "size", "--json", "--via", "console",
+                                                                  got["--script"]]
             else:
-                folder, argv = _home(), [nomad, "size", "--json", "--job", got["--job"]]
+                folder, argv = _home(), [nomad, "size", "--json", "--via", "console", "--job", got["--job"]]
             code, said = in_login(folder, argv, run_=run_)
             plan = json_in(said, ("choices", "request"))
             if code != 0 or plan is None:
@@ -707,7 +866,7 @@ def run(words: list, me: str, run_=None) -> int:
         if op in ("submit", "again"):
             pin = ["--script-sha256", got["--sha256"]]
             if op == "submit":
-                pinned(got["--script"], got["--sha256"])          # nomad checks again, and sends its own copy
+                pinned(got["--script"], got["--sha256"])          # nomad checks again, and gives sbatch that text
                 folder = os.path.dirname(got["--script"])
                 argv = [nomad, "submit", "--yes", "--via", "console"] + pin + _choices(got) + [got["--script"]]
             else:
@@ -722,16 +881,17 @@ def run(words: list, me: str, run_=None) -> int:
             doc = submitted(code, said)
             return answer(doc, 0 if doc["ok"] else 6)
         if op == "jobs":
-            code, said = in_login(_home(), ["squeue", "-u", _account(), "-h", "-o", _SQUEUE], 60, run_=run_)
+            code, said = in_login(_home(), _slurm(me, ["squeue", "-u", _account(), "-h", "-o", _SQUEUE]), 60,
+                                  run_=run_)
             if code != 0:
                 raise Refused(f"squeue: {said.strip()[-300:]}")
             rows = [dict(zip(JOB_FIELDS, f)) for f in (line.split("\x1f") for line in said.splitlines())
                     if len(f) == len(JOB_FIELDS)]
             return answer({"ok": True, "jobs": rows})
         if op == "job":
-            return answer(dict(ok=True, **job_details(got["--job"], run_=run_)))
+            return answer(dict(ok=True, **job_details(got["--job"], run_=run_, me=me)))
         if op == "cancel":
-            code, said = in_login(_home(), ["scancel", got["--job"]], 60, run_=run_)
+            code, said = in_login(_home(), _slurm(me, ["scancel", got["--job"]]), 60, run_=run_)
             return answer({"ok": code == 0, "job": got["--job"], "exit": code, "said": said.strip()[-2000:]},
                           0 if code == 0 else 6)
     except Refused as e:
@@ -799,21 +959,22 @@ def _output_path(pattern: str, fields: dict, job: str) -> str | None:
     return out
 
 
-def job_details(job: str, run_=None) -> dict:
+def job_details(job: str, run_=None, *, me: str) -> dict:
     """One job of the person's: Slurm's view of it now (scontrol), its
     accounting (sacct: steps, memory, CPU time) and the end of its output.
-    Someone else's job is refused, whatever Slurm would show."""
-    me = _account()
+    Someone else's job is refused, whatever Slurm would show. ``me``: the
+    gate's own path (its Slurm steps go through its exec)."""
+    gate_, me = me, _account()
     now, acct = {}, []
-    code, said = in_login(_home(), ["scontrol", "show", "job", "-o", job], 60, run_=run_)
+    code, said = in_login(_home(), _slurm(gate_, ["scontrol", "show", "job", "-o", job]), 60, run_=run_)
     if code == 0:
         for line in said.splitlines():
             if line.startswith("JobId="):
                 now = shown_fields(line)
                 break
     try:
-        code, said = in_login(_home(), ["sacct", "-j", job, "-u", me, "-P", "-n", "--delimiter", SEP,
-                                        "-o", ",".join(ACCT_FIELDS)], 60, run_=run_)
+        code, said = in_login(_home(), _slurm(gate_, ["sacct", "-j", job, "-u", me, "-P", "-n", "--delimiter",
+                                                      SEP, "-o", ",".join(ACCT_FIELDS)]), 60, run_=run_)
     except Refused:
         code, said = 1, ""                         # (slow or too much: what scontrol says still stands)
     if code == 0:
@@ -834,8 +995,10 @@ def job_details(job: str, run_=None) -> dict:
             paths.append(now["StdErr"])
     else:
         try:
-            code, said = in_login(_home(), ["sacct", "-j", job, "-u", me, "-X", "-P", "-n", "--delimiter", SEP,
-                                            "-o", "StdOut,StdErr,JobName,WorkDir,JobID,JobIDRaw"], 60, run_=run_)
+            code, said = in_login(_home(), _slurm(gate_, ["sacct", "-j", job, "-u", me, "-X", "-P", "-n",
+                                                          "--delimiter", SEP, "-o",
+                                                          "StdOut,StdErr,JobName,WorkDir,JobID,JobIDRaw"]), 60,
+                                  run_=run_)
         except Refused:
             code, said = 1, ""
         rows = [x.split(SEP) for x in said.strip().splitlines()] if code == 0 else []
@@ -886,6 +1049,8 @@ def listing(path: str) -> dict:
 USAGE = """usage: nomad-gate serve            (run by sshd for the hub's key)
        nomad-gate run OP [OPTIONS]  (as yourself: what the hub would get)
        nomad-gate version | check   (check: whether it would serve as installed)
+       nomad-gate exec NAME ARGS    (squeue, scancel, scontrol, sacct: as your PATH finds it,
+                                     unless someone else could have put it there)
 """
 
 
@@ -897,6 +1062,8 @@ def main(argv: list | None = None, me: str | None = None) -> int:
         return serve(me)
     if argv[:1] == ["run"]:
         return run(argv[1:], me)
+    if argv[:1] == ["exec"]:
+        return exec_slurm(argv[1:])
     if argv in (["version"], ["--version"]):
         return answer(_version())
     if argv == ["check"]:

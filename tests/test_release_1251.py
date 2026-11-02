@@ -2,9 +2,10 @@
 # Copyright (C) 2026 João Tonini
 """1.25.1: a job sent from the Console is the very text the person was
 shown -- its sha256 checked by the gate and again by nomad, and sbatch is
-given nomad's own copy of it, never the path -- so a folder others can
-change is said rather than refused; and a job's own details (Slurm's view
-of it, its accounting and the end of its output), for the Console."""
+given that text, never the path (on its standard input since 1.25.2) -- so
+a folder others can change is said rather than refused; and a job's own
+details (Slurm's view of it, its accounting and the end of its output),
+for the Console."""
 import hashlib
 import os
 import subprocess
@@ -33,8 +34,9 @@ def test_sbatch_is_given_nomads_copy_of_the_text_shown(scratch, monkeypatch):  #
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "--no-localscratch",
                                         "job.sh"])
     assert r.exit_code == 0, r.output
-    copy = sent[-1][-1]
-    assert copy != str(w / "job.sh") and os.path.dirname(copy) == os.path.expanduser(stage.STORE)
+    assert sent[-1].data == original and str(w / "job.sh") not in sent[-1]     # the text itself, no path
+    copy = stage.record_of_job("4242")                                        # nomad's record of it
+    assert os.path.dirname(copy) == os.path.expanduser(stage.STORE)
     assert open(copy, "rb").read() == original and oct(os.stat(copy).st_mode & 0o777) == "0o600"
     assert stage.carried_from(copy) == str(w / "job.sh")
     assert "is nomad's copy of" in r.output and "as you saw it" in r.output
@@ -46,7 +48,7 @@ def test_sbatch_is_given_nomads_copy_of_the_text_shown(scratch, monkeypatch):  #
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", _sha(w / "job.sh"),
                                         "--no-localscratch", "job.sh"])
     assert r.exit_code == 0, r.output
-    assert "--job-name=job.sh" in sent[-1] and sent[-1][-1] != str(w / "job.sh")
+    assert "--job-name=job.sh" in sent[-1] and str(w / "job.sh") not in sent[-1]
     # changed since the person looked: not sent
     n = len(sent)
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "job.sh"])
@@ -68,13 +70,14 @@ def test_through_local_scratch_the_wrapper_carries_the_text_shown(scratch, monke
     monkeypatch.setattr(sc, "_pinned", pinned_then_changed)
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "job.sh"])
     assert r.exit_code == 0, r.output
-    script, text = stage.unwrap(open(sent[-1][-1]).read())
+    script, text = stage.unwrap(sent[-1].data.decode())
     assert script == str(w / "job.sh") and text.encode() == shown            # what was shown, not the swap
     # ... and sized from it too: the Gaussian input it names (8 threads), not the swapped script
     assert "--cpus-per-task=8" in sent[-1]
 
 
-def test_a_copy_nomad_cant_keep_isnt_sent_from_the_console(scratch, monkeypatch):  # noqa: F811
+def test_a_record_nomad_cant_keep_is_said_and_the_text_still_sent(scratch, monkeypatch):  # noqa: F811
+    # 1.25.1 refused: sbatch read nomad's copy. Since 1.25.2 it reads the text itself.
     from nomad.submit.cli import submit_cmd
     tmp, w, sent, slurm = scratch
 
@@ -85,8 +88,8 @@ def test_a_copy_nomad_cant_keep_isnt_sent_from_the_console(scratch, monkeypatch)
     sha = _sha(w / "job.sh")
     for flag in ("--no-localscratch", "--localscratch"):
         r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, flag, "job.sh"])
-        assert r.exit_code != 0 and "couldn't keep its copy" in r.output and "not sent" in r.output
-    assert sent == []
+        assert r.exit_code == 0 and "couldn't keep its record" in r.output and sent[-1].data
+    assert stage.record_of_job("4242") is None
 
 
 def test_sent_again_from_the_persons_own_script(scratch, monkeypatch):  # noqa: F811
@@ -97,8 +100,8 @@ def test_sent_again_from_the_persons_own_script(scratch, monkeypatch):  # noqa: 
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha,
                                            "--no-localscratch", "job.sh"])
     assert r.exit_code == 0, r.output
-    copy = sent[-1][-1]
-    line = f"sbatch --parsable --extra=nomad=1.25.1;via=console {copy}"
+    copy = stage.record_of_job("4242")
+    line = f"sbatch --parsable --extra=nomad=1.25.1;via=console {copy}"         # as 1.25.1 sent it
     f = Fake(sacct=SACCT.replace("/home/amy/w", str(w)).replace("sbatch job.sh", line, 1))
     monkeypatch.setattr(sc, "plan", lambda *a, **k: REAL_PLAN(*a, **{**k, "user": "amy", "run_sacct": f,
                                                                    "run_slurm": f}))
@@ -106,7 +109,7 @@ def test_sent_again_from_the_persons_own_script(scratch, monkeypatch):  # noqa: 
                                            "--no-localscratch"])
     assert r.exit_code == 0, r.output
     assert "was sent from the Console; its own script is" in r.output
-    assert stage.carried_from(sent[-1][-1]) == str(w / "job.sh")
+    assert sent[-1].data == (w / "job.sh").read_bytes() and stage.carried_from(stage.record_of_job("4242"))
     # the person's script changed since: sent again only once they have looked at it
     (w / "job.sh").write_text("#!/bin/bash\n#SBATCH -J water\necho new\n")
     r = CliRunner().invoke(sc.submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "--again", "101"])
@@ -157,8 +160,9 @@ def test_a_jobs_details_its_record_and_the_end_of_its_output(person, capsys):
     asked = []
 
     def run_(argv, **kw):
-        asked.append(argv[5:])
-        if argv[5] == "scontrol":
+        assert argv[6] == "exec"                                   # the gate's own exec, in the login (1.25.2)
+        asked.append(argv[7:])
+        if argv[7] == "scontrol":
             return subprocess.CompletedProcess(argv, 0, SHOW.format(out=out).encode() + b"\n")
         rows = ("86307|job.sh|jdoe|RUNNING|0:0|2026-11-02T09:46:00|2026-11-02T09:46:05|Unknown|00:01:02|"
                 "00:40:00|1|spdr01|1|1G||00:00:01|cpu=1,mem=1G,node=1|/home/jdoe/my run\n"
@@ -179,7 +183,7 @@ def test_a_jobs_details_its_record_and_the_end_of_its_output(person, capsys):
 
 def test_someone_elses_job_isnt_shown(person, capsys):
     def run_(argv, **kw):
-        if argv[5] == "scontrol":
+        if argv[7] == "scontrol":
             return subprocess.CompletedProcess(argv, 0, SHOW.format(out="/x").replace("jdoe(5123)", "amy(5124)")
                                                .encode())
         return subprocess.CompletedProcess(argv, 0, b"")
@@ -236,7 +240,8 @@ def test_what_nomad_said_when_it_refused():
     assert not doc["ok"] and doc["error"].startswith("/x/job.sh changed since you looked at it")
 
 
-def test_from_the_console_nomads_folder_is_made_private_or_nothing_is_sent(scratch, monkeypatch):  # noqa: F811
+def test_from_the_console_nomads_folder_is_made_private_and_one_above_doesnt_stop_it(scratch,  # noqa: F811
+                                                                                       monkeypatch):
     from nomad.submit.cli import submit_cmd
     tmp, w, sent, slurm = scratch
     store = os.path.expanduser(stage.STORE)
@@ -249,12 +254,12 @@ def test_from_the_console_nomads_folder_is_made_private_or_nothing_is_sent(scrat
     assert r.exit_code == 0, r.output                                  # its own folders: made private
     assert oct(os.stat(store).st_mode & 0o777) == "0o700"
     up = os.path.dirname(os.path.dirname(store))
-    os.chmod(up, 0o777)                                                # a folder above, not nomad's: refused
+    os.chmod(up, 0o777)              # a folder above, not nomad's: sent all the same (1.25.2: nothing to swap)
     try:
         n = len(sent)
         r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "job.sh"])
-        assert r.exit_code != 0 and "someone could swap it" in r.output and "chmod go-w" in r.output
-        assert len(sent) == n
+        assert r.exit_code == 0, r.output
+        assert len(sent) == n + 1 and stage.unwrap(sent[-1].data.decode())[1].encode() == (w / "job.sh").read_bytes()
     finally:
         os.chmod(up, 0o755)
 
@@ -267,4 +272,5 @@ def test_a_script_that_isnt_utf8_is_sent_exactly(scratch):  # noqa: F811
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", hashlib.sha256(data).hexdigest(),
                                         "job.sh"])
     assert r.exit_code == 0, r.output
-    assert open(sent[-1][-1], "rb").read() == data and "isn't plain UTF-8" in r.output
+    assert sent[-1].data == data and "isn't plain UTF-8" in r.output
+    assert open(stage.record_of_job("4242"), "rb").read() == data

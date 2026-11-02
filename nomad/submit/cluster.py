@@ -119,7 +119,8 @@ def _add_shape(p: Partition, mem, cpus, gpus, count: int = 1) -> None:
 
 
 def _run(argv: list, timeout: int = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+    from nomad.submit import programs
+    return subprocess.run(programs.argv(argv), capture_output=True, text=True, timeout=timeout,
                           stdin=subprocess.DEVNULL)
 
 
@@ -271,6 +272,22 @@ def extra_is_constraints(run=_run) -> bool | None:
         if key.strip() == "SchedulerParameters":
             return "extra_constraints" in value
     return False
+
+
+def cluster_name(run=_run) -> str | None:
+    """Slurm's name for this cluster (ClusterName), or None."""
+    try:
+        r = run(["scontrol", "show", "config"])
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if r.returncode != 0:
+        return None
+    for line in (r.stdout or "").splitlines():
+        key, _, value = line.partition("=")
+        if key.strip() == "ClusterName":
+            v = value.strip()
+            return v if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", v) else None
+    return None
 
 
 def slurm_version(run=_run) -> tuple | None:

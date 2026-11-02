@@ -3,6 +3,7 @@
 """1.18.0: `nomad size` and `nomad submit` -- what a job should ask for, from
 its script, its program's input file or command line, the person's past
 runs and the cluster's partitions; and sending it with that."""
+import os
 import subprocess
 
 import click
@@ -517,10 +518,15 @@ def cluster_here(tmp_path, monkeypatch):
     monkeypatch.setattr(sc.cluster, "extra_is_constraints", lambda run=None: False)
     sent = []
 
-    def sbatch(argv, cwd):
+    def sbatch(argv, cwd, data=None):
         sent.append((argv, cwd))
         return subprocess.CompletedProcess(argv, 0, "4242;hpc1\n", "")
     monkeypatch.setattr(sc, "_run_sbatch", sbatch)
+    b = tmp_path / "slurm-bin"                     # an sbatch on PATH: from the Console, nomad runs that one
+    b.mkdir()
+    (b / "sbatch").write_text("#!/bin/sh\nexit 99\n")
+    (b / "sbatch").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{b}:{os.environ.get('PATH', '')}")
     monkeypatch.setenv("NOMAD_LOGS", "here")       # never a real scratch folder or scontrol (1.18.2)
     monkeypatch.setenv("NOMAD_LOCALSCRATCH", "off")   # the script sent as it is (1.24 stages it)
     monkeypatch.chdir(w)
@@ -653,7 +659,7 @@ def test_an_unknown_extra_is_retried_untagged(cluster_here, monkeypatch):
     w, sent = cluster_here
     calls = []
 
-    def sbatch(argv, cwd):
+    def sbatch(argv, cwd, data=None):
         calls.append(argv)
         if any(a.startswith("--extra=") for a in argv):
             return subprocess.CompletedProcess(argv, 1, "", "sbatch: unrecognized option '--extra=nomad=x'")

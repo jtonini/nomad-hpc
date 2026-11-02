@@ -109,7 +109,7 @@ def script_path(submit_line: str | None, workdir: str | None) -> str | None:
     script is read from the folder sbatch ran in, which nomad doesn't know
     then; None)."""
     sub = parse_submit_line(submit_line)
-    if not sub.readable or not sub.script or sub.wrap is not None:
+    if not sub.readable or not sub.script or sub.wrap is not None or sub.script == "/dev/stdin":
         return None
     if sub.script.startswith("/"):
         return posixpath.normpath(sub.script)
@@ -126,7 +126,8 @@ _FIELDS = ("JobIDRaw", "JobID", "JobName", "State", "Partition", "AllocCPUS", "A
 
 
 def _run(argv: list, timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
+    from nomad.submit import programs
+    return subprocess.run(programs.argv(argv), capture_output=True, text=True, timeout=timeout,
                           stdin=subprocess.DEVNULL)
 
 

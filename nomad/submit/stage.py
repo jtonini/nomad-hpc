@@ -690,15 +690,16 @@ def unwrap(text: str | None) -> tuple[str, str] | None:
 
 
 def store_path(script: str, wrapper: str, home: str | None = None) -> str:
-    """Where nomad keeps the script it sends (named for the person's, and
-    its content: the same job sent again is the same file)."""
+    """Where nomad keeps its record of the script it sends (named for the
+    person's, and its content: the same job sent again is the same file).
+    sbatch is given the text itself, not this file (1.25.2)."""
     store = os.path.expanduser(STORE) if home is None else os.path.join(home, STORE[2:])
     digest = hashlib.sha256(wrapper.encode("utf-8")).hexdigest()[:16]
     return os.path.join(store, f"{logs_.safe_name(posixpath_base(script))}-{digest}.sh")
 
 
 def keep(path: str, wrapper: str) -> str:
-    """Write it (private), unless it is there already; old ones removed."""
+    """Write nomad's record of what it sends (private); old ones removed."""
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o700, exist_ok=True)
     # Always written anew (1.25.1): a file already there is never trusted to
@@ -730,15 +731,15 @@ def prune(folder: str, days: int = KEEP_DAYS) -> None:
 
 
 # ── a script sent from the Console as it was shown (1.25.1) ─────────────────
-# nomad's own copy of the very text the person saw (its sha256 checked), so
-# nothing changes it between the check and sbatch reading it; beside it, the
-# path of the person's own script, so the job is sent again (and compared
-# with) from theirs.
+# nomad's record of the very text the person saw (its sha256 checked), which
+# is what sbatch is given (on its standard input, 1.25.2: nothing on disk to
+# change on the way); beside it, the path of the person's own script, so the
+# job is sent again (and compared with) from theirs.
 SRC = ".src"
 
 
 def carry(path: str, data: bytes, script: str) -> str:
-    """Write nomad's copy of ``data`` (private) at ``path``, and where it
+    """Write nomad's record of ``data`` (private) at ``path``, and where it
     came from beside it."""
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o700, exist_ok=True)
@@ -784,3 +785,139 @@ def sent(path: str | None, text: str | None):
     if src is not None and text is not None:
         return src, text, "carried"
     return None
+
+
+# ── which record a job was sent from (1.25.2) ───────────────────────────────
+# sbatch reads what nomad sends on its standard input, so Slurm keeps no
+# file name for it: nomad notes, by the job's cluster and number, which of
+# its records holds what it sent, with the folder and the time it was sent
+# (checked against Slurm's record of the job: another cluster sharing the
+# home, or a number Slurm used again, isn't taken for it). A note only says
+# where to look: what is sent again is read from the person's script, and
+# from the Console only once they have seen it.
+JOBS = "jobs"
+STDIN = "/dev/stdin"                   # sbatch's script when it has arguments to give it
+NOTE_SLACK = 3600                      # s between nomad's note and Slurm's submit time
+PRUNE_EVERY = 86400                    # s: notes are looked over at most once a day
+_RECORD = re.compile(r"[A-Za-z0-9._+-]{1,64}-c?[0-9a-f]{16}\.sh")
+_JOB_NUMBER = re.compile(r"[0-9]{1,12}")
+_CLUSTER = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_NOTE = re.compile(r"(?:[A-Za-z0-9_-]{1,64}\.)?[0-9]{1,12}")
+
+
+def _store(home: str | None = None) -> str:
+    return os.path.expanduser(STORE) if home is None else os.path.join(home, STORE[2:])
+
+
+def _note_name(jid: str, cluster: str | None) -> str:
+    return f"{cluster}.{jid}" if cluster and _CLUSTER.fullmatch(cluster) else str(jid)
+
+
+def epoch(value) -> float | None:
+    """A time as Slurm gives it ('2026-11-02T13:08:00', local) or seconds."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        import datetime
+        return datetime.datetime.fromisoformat(str(value)).timestamp()
+    except ValueError:
+        return None
+
+
+def note_job(jid: str, record: str, home: str | None = None, *, cluster: str | None = None,
+             folder: str | None = None, when: float | None = None) -> str | None:
+    """Note that job ``jid`` (of ``cluster``, run in ``folder``) was sent
+    from nomad's record at ``record``; the note's path, or None when either
+    isn't one nomad notes."""
+    import json
+    store = _store(home)
+    name = os.path.basename(record)
+    if not _JOB_NUMBER.fullmatch(str(jid)) or not _RECORD.fullmatch(name) or \
+            os.path.dirname(os.path.abspath(record)) != os.path.abspath(store):
+        return None
+    folder_ = os.path.join(store, JOBS)
+    os.makedirs(folder_, mode=0o700, exist_ok=True)
+    path = os.path.join(folder_, _note_name(jid, cluster))
+    doc = {"record": name, "cluster": cluster if cluster and _CLUSTER.fullmatch(cluster) else None,
+           "folder": folder, "sent": int(time.time() if when is None else when)}
+    tmp = f"{path}.{os.getpid()}.new"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(doc) + "\n")
+    os.replace(tmp, path)
+    prune_notes(folder_)
+    return path
+
+
+def _same_folder(a: str | None, b: str | None) -> bool:
+    if not a or not b:
+        return True                    # not known: not a reason to doubt it
+    return os.path.realpath(a) == os.path.realpath(b) or os.path.normpath(a) == os.path.normpath(b)
+
+
+def record_of_job(jid: str | None, home: str | None = None, *, cluster: str | None = None,
+                  folder: str | None = None, submitted=None) -> str | None:
+    """The record job ``jid`` (an array's own number for its tasks) was
+    sent from, when nomad noted one, its note agrees with Slurm's record of
+    the job (its cluster, folder and submit time, when known), and the
+    record is still there."""
+    import json
+    if not jid or not _JOB_NUMBER.fullmatch(str(jid)):
+        return None
+    store = _store(home)
+    names = ([_note_name(jid, cluster)] if cluster else []) + [str(jid)]
+    if not cluster:                    # this cluster's name not known: any cluster's note, checked as below
+        import glob
+        names += sorted(os.path.basename(n) for n in glob.glob(os.path.join(glob.escape(os.path.join(store, JOBS)),
+                                                                            f"*.{jid}")))
+    when = epoch(submitted)
+    for note in dict.fromkeys(names):
+        try:
+            with open(os.path.join(store, JOBS, note), encoding="utf-8") as f:
+                doc = json.loads(f.read(4096))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        name = doc.get("record")
+        if not isinstance(name, str) or not _RECORD.fullmatch(name):
+            continue
+        if cluster and doc.get("cluster") and doc["cluster"] != cluster:
+            continue
+        if not _same_folder(doc.get("folder") if isinstance(doc.get("folder"), str) else None, folder):
+            continue
+        sent = doc.get("sent")
+        if when is not None and isinstance(sent, (int, float)) and abs(when - sent) > NOTE_SLACK:
+            continue                   # another job with that number (Slurm used it again)
+        path = os.path.join(store, name)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def prune_notes(folder: str, days: int = KEEP_DAYS, every: int = PRUNE_EVERY) -> None:
+    """Notes older than nomad's records removed, at most once a day (by
+    their times alone: a note whose record is gone leads nowhere anyway)."""
+    mark = os.path.join(folder, ".pruned")
+    now = time.time()
+    try:
+        if now - os.stat(mark).st_mtime < every:
+            return
+    except OSError:
+        pass
+    cut = now - days * 86400
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                try:
+                    if _NOTE.fullmatch(e.name) and e.is_file(follow_symlinks=False) and \
+                            e.stat(follow_symlinks=False).st_mtime < cut:
+                        os.unlink(e.path)
+                except OSError:
+                    pass
+        with open(mark, "w"):
+            pass
+    except OSError:
+        pass

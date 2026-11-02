@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.25.2 (November 2026)
+
+### Changes
+- **sbatch reads what nomad sends on its standard input.** The text the
+  Console showed (or nomad's local-scratch script, which carries a script's
+  text) goes to sbatch itself, never as a file of nomad's that someone could
+  change before sbatch reads it (`/dev/stdin` before the job's arguments when
+  it has some). So the Console sends from accounts set up as they are on
+  spydur, where `~/.local` is writable by everyone's group: 1.25.1 refused
+  them. nomad still keeps its record of what it sent (private, in
+  `~/.local/share/nomad/staged/`) and notes which record each job came from
+  by its cluster and number (`staged/jobs/CLUSTER.JOBID`, with the job's
+  folder and when it was sent, checked against Slurm's record of the job),
+  for `--again` and past runs: Slurm keeps no file name for a script it read
+  on its standard input. A record it can't keep is said, not a reason not to
+  send.
+- **Who else could run programs as the person** is said when the Console
+  shows a script (`show`'s `warning`, after the script's own): the first of
+  their home folder, their login files and `~/.local` that others could
+  change, with the `chmod` that closes it. Not refused: it is open with or
+  without the Console, and nothing is said once it is closed.
+- From the Console, Slurm's programs (`sbatch`, `scontrol`, `sinfo`, `sacct`,
+  `sacctmgr`, `squeue`, `scancel`) are found once on the person's login PATH,
+  before any runs, and run by their full paths; nothing runs when one could
+  have been put there by someone else (it, a folder above it or a link on the
+  way to it is another account's -- not root's, the person's, nomad's
+  installer's or Slurm's -- or others may write it). `nomad size` takes the gate's `--via console` too, and the gate's
+  own steps go through `nomad-gate exec`. By hand, as before.
+
 ## v1.25.1 (November 2026)
 
 ### Changes

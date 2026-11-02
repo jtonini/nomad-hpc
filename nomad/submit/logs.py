@@ -278,8 +278,9 @@ def job_number(stdout: str | None) -> tuple:
 
 
 def _run(argv: list) -> subprocess.CompletedProcess:
+    from nomad.submit import programs
     # Times in Slurm's standard form, whatever the person's SLURM_TIME_FORMAT.
-    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    return subprocess.run(programs.argv(argv), capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=60, stdin=subprocess.DEVNULL,
                           env={**os.environ, "SLURM_TIME_FORMAT": "standard"})
 

@@ -19,8 +19,11 @@ def _registry_config_restored():
 def _staged_copies_kept_aside(tmp_path, monkeypatch):
     """nomad submit keeps its local-scratch copies of job scripts in
     ~/.local/share/nomad/staged: never the real home's in a test."""
-    from nomad.submit import stage
+    from nomad.submit import programs, stage
     monkeypatch.setattr(stage, "STORE", str(tmp_path / "home-staged"))
+    programs.unpin()                       # Slurm's programs by name, unless a test pins them (1.25.2)
+    yield
+    programs.unpin()
 
 
 # --- Idea 18 Component 1 fixtures ------------------------------------------
