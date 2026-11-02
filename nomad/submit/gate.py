@@ -14,18 +14,23 @@ list:
     version                     the gate's and nomad's versions; with --user, as that person
     size   --script PATH        nomad size --json: what the job should ask for
            --job N              ... for a job of theirs that ran, to send it again
-    submit --script PATH        nomad submit --yes, with the person's own values if any
+    submit --script PATH --sha256 HEX
+                                nomad submit --yes, with the person's own values if any
                                 (--cpus --mem --time --gpus --partition --keep
                                 --localscratch/--no-localscratch)
-    again  --job N              nomad submit --yes --again N (the same values may be given)
+    again  --job N --sha256 HEX nomad submit --yes --again N (the same values may be given)
     jobs                        the person's jobs now (squeue -u PERSON)
+    job    --job N              one job of theirs: Slurm's record of it, and the end of its output
     cancel --job N              scancel N (Slurm refuses another's job anyway)
     ls     --dir PATH           what a folder holds (names, kinds, sizes, times): to pick a script
-    show   --script PATH        a job script's text, to look at before sending it
+    show   --script PATH        a job script's text and its sha256, to look at before sending it
 
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
-person's own file. nomad runs in the person's login environment (`bash -l`,
+person's own file, with the very text they were shown (--sha256, 1.25.1):
+nomad checks it once more and sends its own copy of that text, so nothing
+changes it on the way. A script or folder others could change is said
+(``warning``), not refused. nomad runs in the person's login environment (`bash -l`,
 as when they log in and type it) and in the script's folder, so the job
 gets the environment it would get by hand. Each request is logged to the
 cluster's syslog (who, what, the job it made), and each answer is one JSON
@@ -77,25 +82,27 @@ _PARTITION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _PATH = re.compile("/[^\x00-\x1f\x7f-\x9f\xad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f"
                    "\u200b-\u200f\u2028-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufffb"
                    "\ud800-\udfff\U000e0000-\U000e0fff]{0,4095}")
+_SHA = re.compile(r"[0-9a-f]{64}")
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
-          "path": _PATH}
+          "path": _PATH, "sha": _SHA}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
             "--no-localscratch": "flag"}
-# op -> {option: kind}; kinds: path, job, int, mem, time, partition, flag
+# op -> {option: kind}; kinds: path, job, int, mem, time, partition, sha, flag
 OPS = {
     "version": {},
     "size": {"--script": "path", "--job": "job"},
-    "submit": {"--script": "path", **_CHOICES},
-    "again": {"--job": "job", **_CHOICES},
+    "submit": {"--script": "path", "--sha256": "sha", **_CHOICES},
+    "again": {"--job": "job", "--sha256": "sha", **_CHOICES},
     "jobs": {},
+    "job": {"--job": "job"},
     "cancel": {"--job": "job"},
     "ls": {"--dir": "path"},
     "show": {"--script": "path"},
 }
-REQUIRED = {"submit": ["--script"], "again": ["--job"], "cancel": ["--job"], "ls": ["--dir"],
-            "show": ["--script"]}
+REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
+            "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"]}
 
 
 class Refused(Exception):
@@ -223,6 +230,50 @@ def _chain(p: str, owners: set, private: set = frozenset()) -> str | None:
         if p == "/":
             return None
         p, first = os.path.dirname(p), False
+
+
+def exposure(path: str, uid: int, private: set = frozenset()) -> str | None:
+    """What could let someone else change ``path`` (a person's own script):
+    the first of it and the folders above it, as named and as they really
+    are, that another account owns or others may write; with the command
+    that closes it. None when only they (and root) can."""
+    p0 = os.path.abspath(path)
+    for q in dict.fromkeys((p0, os.path.realpath(p0))):
+        p, first = q, True
+        while True:
+            try:
+                st = os.lstat(p)
+            except OSError:
+                break
+            if not stat.S_ISLNK(st.st_mode):
+                sticky_dir = not first and stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
+                mine = st.st_gid in private and not (st.st_mode & 0o020 and _acl(p))
+                others = st.st_mode & (0o002 if mine else 0o022)
+                if st.st_uid not in (0, uid):
+                    return f"{p} belongs to {_name_of(st.st_uid)}, who can change what is in it"
+                if others and not sticky_dir:
+                    who = "anyone" if st.st_mode & 0o002 else f"anyone in the group {_group_of(st.st_gid)}"
+                    return (f"{p} can be changed by {who} (mode {stat.S_IMODE(st.st_mode):o}): they could change "
+                            f"your files; to close it: chmod go-w {shlex.quote(p)}")
+            if p == "/":
+                break
+            p, first = os.path.dirname(p), False
+    return None
+
+
+def _name_of(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return f"uid {uid}"
+
+
+def _group_of(gid: int) -> str:
+    import grp
+    try:
+        return grp.getgrgid(gid).gr_name
+    except KeyError:
+        return f"gid {gid}"
 
 
 def tree_unsafe(top: str, owners: set) -> str | None:
@@ -465,11 +516,9 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None) -> int:
 
 # ── run: as the person ──────────────────────────────────────────────────────
 
-def own_script(path: str, strict: bool = True) -> str:
-    """The text of the person's own job script at ``path``: a regular file
-    they own (not a link), at most 256 KB, beginning with #!. ``strict``
-    (to send it): neither it nor a folder above it can be changed by anyone
-    but them or root, so what is sent is what they have."""
+def script_bytes(path: str) -> bytes:
+    """The person's own job script at ``path``, as it is on disk: a regular
+    file they own (not a link), at most 256 KB, beginning with #!."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as e:
@@ -488,14 +537,36 @@ def own_script(path: str, strict: bool = True) -> str:
             data = f.read(MAX_SCRIPT + 1)
         except OSError as e:
             raise Refused(f"{path}: {e.strerror}")
+    if len(data) > MAX_SCRIPT:
+        raise Refused(f"{path} is over {MAX_SCRIPT // 1024} KB")
     if not data.startswith(b"#!"):
         raise Refused(f"{path} doesn't start with #!: not a job script")
-    if strict:
-        why = unsafe(path, {0, _uid()}, private_groups(_account()))
-        if why:
-            raise Refused(f"{path} could be changed by someone else before it is sent ({why}): send it from "
-                          "a folder only you can change, or with nomad submit on the cluster")
-    return data.decode("utf-8", errors="replace")
+    return data
+
+
+def own_script(path: str) -> str:
+    """The text of the person's own job script (script_bytes)."""
+    return script_bytes(path).decode("utf-8", errors="replace")
+
+
+def pinned(path: str, sha: str) -> bytes:
+    """The script at ``path``, only if it is still the text whose sha256
+    the person was shown (else Refused: it changed since)."""
+    import hashlib
+    data = script_bytes(path)
+    if hashlib.sha256(data).hexdigest() != sha:
+        raise Refused(f"{path} changed since you looked at it: look at it again before sending it")
+    return data
+
+
+def sha256_of(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def _warning(path: str) -> dict:
+    why = exposure(path, _uid(), private_groups(_account()))
+    return {"warning": why} if why else {}
 
 
 # The person's own shell setup may define functions, cd among them: not used here.
@@ -575,6 +646,10 @@ def submitted(code: int, said: str) -> dict:
     elif "may have been submitted" in said or "sbatch didn't answer" in said:
         doc.update(maybe=True, error="sbatch didn't answer in time: it may have been submitted; check your "
                                      "jobs before sending it again")
+    else:
+        errors = [x.strip()[len("Error:"):].strip() for x in said.splitlines() if x.strip().startswith("Error:")]
+        if errors:
+            doc["error"] = errors[-1]                    # nomad's own words for why it wasn't sent
     return doc
 
 
@@ -613,13 +688,14 @@ def run(words: list, me: str, run_=None) -> int:
         if op == "version":
             return answer({**_version(), "home": _home()})
         if op == "show":
-            return answer({"ok": True, "script": got["--script"],
-                           "text": own_script(got["--script"], strict=False)})
+            data = script_bytes(got["--script"])
+            return answer({"ok": True, "script": got["--script"], "text": data.decode("utf-8", errors="replace"),
+                           "sha256": sha256_of(data), **_warning(got["--script"])})
         if op == "ls":
             return answer({"ok": True, **listing(got["--dir"])})
         if op == "size":
             if "--script" in got:
-                own_script(got["--script"], strict=False)
+                script_bytes(got["--script"])
                 folder, argv = os.path.dirname(got["--script"]), [nomad, "size", "--json", got["--script"]]
             else:
                 folder, argv = _home(), [nomad, "size", "--json", "--job", got["--job"]]
@@ -629,13 +705,15 @@ def run(words: list, me: str, run_=None) -> int:
                 raise Refused(f"nomad size didn't answer (exit {code}): {said.strip()[-600:]}")
             return answer({"ok": True, "plan": plan})
         if op in ("submit", "again"):
+            pin = ["--script-sha256", got["--sha256"]]
             if op == "submit":
-                own_script(got["--script"])
+                pinned(got["--script"], got["--sha256"])          # nomad checks again, and sends its own copy
                 folder = os.path.dirname(got["--script"])
-                argv = [nomad, "submit", "--yes", "--via", "console"] + _choices(got) + [got["--script"]]
+                argv = [nomad, "submit", "--yes", "--via", "console"] + pin + _choices(got) + [got["--script"]]
             else:
                 folder = _home()
-                argv = [nomad, "submit", "--yes", "--via", "console", "--again", got["--job"]] + _choices(got)
+                argv = [nomad, "submit", "--yes", "--via", "console", "--again", got["--job"]] + pin + \
+                    _choices(got)
             try:
                 code, said = in_login(folder, argv, SEND_TIMEOUT, run_=run_)
             except TimedOut as e:
@@ -650,6 +728,8 @@ def run(words: list, me: str, run_=None) -> int:
             rows = [dict(zip(JOB_FIELDS, f)) for f in (line.split("\x1f") for line in said.splitlines())
                     if len(f) == len(JOB_FIELDS)]
             return answer({"ok": True, "jobs": rows})
+        if op == "job":
+            return answer(dict(ok=True, **job_details(got["--job"], run_=run_)))
         if op == "cancel":
             code, said = in_login(_home(), ["scancel", got["--job"]], 60, run_=run_)
             return answer({"ok": code == 0, "job": got["--job"], "exit": code, "said": said.strip()[-2000:]},
@@ -657,6 +737,118 @@ def run(words: list, me: str, run_=None) -> int:
     except Refused as e:
         return refuse(str(e))
     return refuse(f"{op}: not done")
+
+
+# What Slurm says of one job (scontrol, while it knows it), and its accounting record
+_SHOWN = re.compile(r"(?:^|\s)([A-Za-z][A-Za-z0-9_:/]*)=")
+ACCT_FIELDS = ("JobID", "JobName", "User", "State", "ExitCode", "Submit", "Start", "End", "Elapsed", "Timelimit",
+               "NNodes", "NodeList", "AllocCPUS", "ReqMem", "MaxRSS", "TotalCPU", "AllocTRES", "WorkDir")
+TAIL = 64 * 1024
+TAIL_LINES = 200
+SEP = "\x1f"                    # sacct's separator: nothing in a job's name or folder holds it
+MAX_STEPS = 200
+
+
+def shown_fields(line: str) -> dict:
+    """scontrol show job -o's one line as {Key: value}; values may hold spaces."""
+    keys = list(_SHOWN.finditer(line))
+    out = {}
+    for i, m in enumerate(keys):
+        end = keys[i + 1].start() if i + 1 < len(keys) else len(line)
+        out[m.group(1)] = line[m.end():end].strip()
+    return out
+
+
+def _tail(path: str) -> dict:
+    """The end of an output file, read as the person (who can read it)."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        return {"path": path, "error": e.strerror or str(e)}
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            return {"path": path, "error": "not a file"}
+        f.seek(max(0, st.st_size - TAIL))
+        data = f.read(TAIL)
+    lines = data.decode("utf-8", errors="replace").splitlines()
+    if st.st_size > TAIL and lines:
+        lines = lines[1:]                          # a part line
+    return {"path": path, "size": st.st_size, "mtime": int(st.st_mtime),
+            "tail": "\n".join(lines[-TAIL_LINES:]), "cut": st.st_size > TAIL or len(lines) > TAIL_LINES}
+
+
+def _output_path(pattern: str, fields: dict, job: str) -> str | None:
+    """sacct's StdOut, its %-patterns as Slurm fills them (the common ones;
+    %j is the job's own number, an array task's too; %5j pads with zeros)."""
+    if not pattern or pattern in ("(null)", "None"):
+        return None
+    jid = fields.get("JobID") or job
+    arr, _, task = jid.partition("_")
+    raw = fields.get("JobIDRaw") or (arr if not task else "")
+    subst = {"j": raw or arr, "x": fields.get("JobName", ""), "u": _account(), "A": arr, "a": task, "%": "%"}
+
+    def fill(m):
+        v = subst.get(m.group(2))
+        if v is None:
+            return m.group(0)
+        return v.zfill(int(m.group(1))) if m.group(1) and v.isdigit() else v
+    out = re.sub(r"%(\d*)([jxuAa%])", fill, pattern)
+    if not out.startswith("/"):
+        out = os.path.join(fields.get("WorkDir") or _home(), out)
+    return out
+
+
+def job_details(job: str, run_=None) -> dict:
+    """One job of the person's: Slurm's view of it now (scontrol), its
+    accounting (sacct: steps, memory, CPU time) and the end of its output.
+    Someone else's job is refused, whatever Slurm would show."""
+    me = _account()
+    now, acct = {}, []
+    code, said = in_login(_home(), ["scontrol", "show", "job", "-o", job], 60, run_=run_)
+    if code == 0:
+        for line in said.splitlines():
+            if line.startswith("JobId="):
+                now = shown_fields(line)
+                break
+    try:
+        code, said = in_login(_home(), ["sacct", "-j", job, "-u", me, "-P", "-n", "--delimiter", SEP,
+                                        "-o", ",".join(ACCT_FIELDS)], 60, run_=run_)
+    except Refused:
+        code, said = 1, ""                         # (slow or too much: what scontrol says still stands)
+    if code == 0:
+        for line in said.splitlines()[:MAX_STEPS]:
+            parts = line.split(SEP)
+            if len(parts) == len(ACCT_FIELDS) and parts[2] in ("", me):
+                acct.append(dict(zip(ACCT_FIELDS, parts)))
+    owner = (now.get("UserId") or "").split("(")[0] or next((r["User"] for r in acct if r.get("User")), "")
+    if not now and not acct:
+        raise Refused(f"Slurm knows no job {job} of yours")
+    if owner != me:
+        raise Refused(f"job {job} isn't yours")
+    out = {"job": job, "now": now, "acct": acct}
+    paths = []
+    if now.get("StdOut"):
+        paths.append(now["StdOut"])
+        if now.get("StdErr") and now["StdErr"] != now["StdOut"]:
+            paths.append(now["StdErr"])
+    else:
+        try:
+            code, said = in_login(_home(), ["sacct", "-j", job, "-u", me, "-X", "-P", "-n", "--delimiter", SEP,
+                                            "-o", "StdOut,StdErr,JobName,WorkDir,JobID,JobIDRaw"], 60, run_=run_)
+        except Refused:
+            code, said = 1, ""
+        rows = [x.split(SEP) for x in said.strip().splitlines()] if code == 0 else []
+        rows = [r for r in rows if len(r) == 6]
+        row = next((r for r in rows if r[4] == job or r[5] == job), rows[0] if len(rows) == 1 else None)
+        if row:
+            fields = {"JobName": row[2], "WorkDir": row[3], "JobID": row[4], "JobIDRaw": row[5]}
+            for pat in dict.fromkeys(row[:2]):
+                p = _output_path(pat, fields, job)
+                if p:
+                    paths.append(p)
+    out["output"] = [_tail(p) for p in paths[:2]]
+    return out
 
 
 def listing(path: str) -> dict:

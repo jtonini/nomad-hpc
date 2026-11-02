@@ -701,14 +701,13 @@ def keep(path: str, wrapper: str) -> str:
     """Write it (private), unless it is there already; old ones removed."""
     folder = os.path.dirname(path)
     os.makedirs(folder, mode=0o700, exist_ok=True)
-    if not os.path.isfile(path):
-        tmp = f"{path}.{os.getpid()}.new"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(wrapper)
-        os.replace(tmp, path)
-    else:
-        os.utime(path)                     # used again: kept as long as the newest use
+    # Always written anew (1.25.1): a file already there is never trusted to
+    # be what its name says.
+    tmp = f"{path}.{os.getpid()}.new"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(wrapper)
+    os.replace(tmp, path)
     prune(folder)
     return path
 
@@ -722,7 +721,66 @@ def prune(folder: str, days: int = KEEP_DAYS) -> None:
                     if e.name.endswith(".sh") and e.is_file(follow_symlinks=False) and \
                             e.stat(follow_symlinks=False).st_mtime < cut:
                         os.unlink(e.path)
+                    elif e.name.endswith(".sh" + SRC) and not os.path.isfile(e.path[:-len(SRC)]):
+                        os.unlink(e.path)            # its copy is gone
                 except OSError:
                     pass
     except OSError:
         pass
+
+
+# ── a script sent from the Console as it was shown (1.25.1) ─────────────────
+# nomad's own copy of the very text the person saw (its sha256 checked), so
+# nothing changes it between the check and sbatch reading it; beside it, the
+# path of the person's own script, so the job is sent again (and compared
+# with) from theirs.
+SRC = ".src"
+
+
+def carry(path: str, data: bytes, script: str) -> str:
+    """Write nomad's copy of ``data`` (private) at ``path``, and where it
+    came from beside it."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    for target, content in ((path, data), (path + SRC, (script + "\n").encode("utf-8"))):   # the copy first
+        tmp = f"{target}.{os.getpid()}.new"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.replace(tmp, target)
+    prune(folder)
+    return path
+
+
+def carry_path(script: str, data: bytes, home: str | None = None) -> str:
+    store = os.path.expanduser(STORE) if home is None else os.path.join(home, STORE[2:])
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    return os.path.join(store, f"{logs_.safe_name(posixpath_base(script))}-c{digest}.sh")
+
+
+def carried_from(path: str | None) -> str | None:
+    """The person's own script that nomad's copy at ``path`` was made from,
+    when it is one (in nomad's own folder, with its note beside it)."""
+    if not path or not path.endswith(".sh"):
+        return None
+    try:
+        if os.path.realpath(os.path.dirname(path)) != os.path.realpath(os.path.expanduser(STORE)):
+            return None
+        with open(path + SRC, encoding="utf-8") as f:
+            src = f.readline().rstrip("\n")
+    except OSError:
+        return None
+    return src if src.startswith("/") else None
+
+
+def sent(path: str | None, text: str | None):
+    """For a script nomad sent itself: (the person's own script, its text as
+    sent, how: "staged" through local scratch, or "carried" from the
+    Console). None for any other script."""
+    inner = unwrap(text)
+    if inner is not None:
+        return inner[0], inner[1], "staged"
+    src = carried_from(path)
+    if src is not None and text is not None:
+        return src, text, "carried"
+    return None

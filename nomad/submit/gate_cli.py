@@ -141,7 +141,9 @@ def ask_cmd(ctx, site_name, user, words):
     \b
       nomad gate ask --site spydur --user jdoe jobs
       nomad gate ask --site spydur --user jdoe size --script /scratch/jdoe/run/job.sh
-      nomad gate ask --site spydur --user jdoe submit --script /scratch/jdoe/run/job.sh --mem 8G
+      nomad gate ask --site spydur --user jdoe show --script /scratch/jdoe/run/job.sh
+      nomad gate ask --site spydur --user jdoe submit --script /scratch/jdoe/run/job.sh --sha256 HEX --mem 8G
+      nomad gate ask --site spydur --user jdoe job --job 4815162
     """
     from nomad.submit import remote
     s, hub = _site(ctx, site_name)

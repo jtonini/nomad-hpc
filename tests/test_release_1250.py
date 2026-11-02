@@ -4,6 +4,7 @@
 (the Console's Submit page): a key that can run nothing but `nomad-gate
 serve`, a short list of requests checked twice, sudo to the person, and
 nomad run in their login environment."""
+import hashlib
 import json
 import os
 import pwd
@@ -20,6 +21,7 @@ from tests.test_release_1180 import cluster_here  # noqa: F401
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PERSON = 5123
+H = "a" * 64                                   # a sha256 (1.25.1: what sends must carry)
 PUB = ("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOKcK0YnNS1eRrXKk0wYdYq7lOq1Bv6c5mH8tqcR1Hx1 "
        "nomad-gate@hub")
 
@@ -37,9 +39,10 @@ def _out(capsys):
     ["version", "--user", "jdoe"],
     ["size", "--script", "/scratch/jdoe/a b/job.sh"],
     ["size", "--job", "4815162"],
-    ["submit", "--script", "/s/j.sh", "--cpus", "8", "--mem", "1.5T", "--time", "1-12:00:00", "--gpus", "0",
+    ["submit", "--script", "/s/j.sh", "--sha256", H, "--cpus", "8", "--mem", "1.5T", "--time", "1-12:00:00",
+     "--gpus", "0",
      "--partition", "gpu_a100", "--keep", "--no-localscratch"],
-    ["again", "--job", "4242_7", "--mem", "12G"],
+    ["again", "--job", "4242_7", "--sha256", H, "--mem", "12G"],
     ["jobs", "--user", "jdoe"],
     ["cancel", "--job", "4242"],
     ["ls", "--dir", "/scratch/jdoe"],
@@ -59,11 +62,11 @@ def test_requests_the_gate_takes(words):
     (["submit", "--script", "/x/j.sh", "--mem", "8G;id"], "not a mem"),
     (["submit", "--script", "/x/j.sh", "--time", "soon"], "not a time"),
     (["submit", "--script", "/x/j.sh", "--partition", "-x"], "not a partition"),
-    (["submit", "--script", "/x/j.sh", "--cpus", "0"], "--cpus: 1 to 4096"),
-    (["submit", "--script", "/x/j.sh", "--gpus", "99"], "at most 64"),
+    (["submit", "--script", "/x/j.sh", "--sha256", H, "--cpus", "0"], "--cpus: 1 to 4096"),
+    (["submit", "--script", "/x/j.sh", "--sha256", H, "--gpus", "99"], "at most 64"),
     (["submit", "--script", "/x/j.sh", "--dependency", "afterok:1"], "doesn't take --dependency"),
     (["submit", "--script", "/x/j.sh", "--script", "/y.sh"], "given twice"),
-    (["submit", "--script", "/x/j.sh", "--localscratch", "--no-localscratch"], "not both"),
+    (["submit", "--script", "/x/j.sh", "--sha256", H, "--localscratch", "--no-localscratch"], "not both"),
     (["submit", "--script", "/x/\nj.sh"], "not a path"),
     (["cancel", "--job", "4242;rm"], "not a job"),
     (["cancel", "--job"], "without its value"),
@@ -177,8 +180,9 @@ def test_serve_asks_sudo_for_the_person_and_passes_the_answer_on(served, capsys)
     # a path with spaces and quotes stays one word, never a shell's
     answers["out"] = 'motd\n{"ok": true, "job": "4242", "output": null}\n'
     path = "/scratch/jdoe/my run/it's $(id).sh"
-    assert call(shlex.join([gate.GATE, "submit", "--user", "jdoe", "--script", path, "--mem", "8G"])) == 0
-    assert sent[-1][0][-5:] == ["submit", "--script", path, "--mem", "8G"]
+    assert call(shlex.join([gate.GATE, "submit", "--user", "jdoe", "--script", path, "--sha256", H,
+                            "--mem", "8G"])) == 0
+    assert sent[-1][0][-7:] == ["submit", "--script", path, "--sha256", H, "--mem", "8G"]
     assert _out(capsys)["job"] == "4242" and logged[-1].endswith(": ok -> job 4242")
     # the gate's full path, as the hub may send it
     assert call("/usr/local/sw/nomad/bin/nomad-gate cancel --job 7 --user jdoe") == 0
@@ -186,8 +190,8 @@ def test_serve_asks_sudo_for_the_person_and_passes_the_answer_on(served, capsys)
     capsys.readouterr()
     # what the person's side says is logged only as a job number, and as plain text
     answers["out"] = json.dumps({"ok": True, "job": "1\nuser=root submit: ok -> job 7"}) + "\n"
-    assert call("nomad-gate again --job 7 --user jdoe") == 0
-    assert logged[-1] == "user=jdoe again --job 7: ok"
+    assert call(f"nomad-gate again --job 7 --sha256 {H} --user jdoe") == 0
+    assert logged[-1] == f"user=jdoe again --job 7 --sha256 {H}: ok"
     capsys.readouterr()
     assert gate.clean("a\nb \udcff \u202e") == "a\\nb \\udcff \\u202e"
 
@@ -240,7 +244,7 @@ def test_serve_says_when_sudo_may_not_or_nothing_came_back(served, capsys, monke
 def test_what_may_have_been_sent_says_so(served, capsys, monkeypatch):
     call, sent, answers, logged = served
     answers.update(out="", err="Killed", code=137)            # the person's side died: no answer
-    assert call("nomad-gate submit --user jdoe --script /s/j.sh") == 4
+    assert call(f"nomad-gate submit --user jdoe --script /s/j.sh --sha256 {H}") == 4
     doc = _out(capsys)
     assert doc["maybe"] and "it may have been submitted" in doc["error"]
     assert call("nomad-gate jobs --user jdoe") == 4 and "maybe" not in _out(capsys)
@@ -249,7 +253,7 @@ def test_what_may_have_been_sent_says_so(served, capsys, monkeypatch):
         if argv[2] == "-l":
             return subprocess.CompletedProcess(argv, 0, "", "")
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
-    assert gate.serve("/x/nomad-gate", env={"SSH_ORIGINAL_COMMAND": "nomad-gate again --job 4 --user jdoe"},
+    assert gate.serve("/x/nomad-gate", env={"SSH_ORIGINAL_COMMAND": f"nomad-gate again --job 4 --sha256 {H} --user jdoe"},
                       run_=slow, slot_=lambda: os.open(os.devnull, os.O_RDONLY), check_=lambda me: None) == 4
     assert _out(capsys)["maybe"]
     doc = gate.submitted(1, "Error: sbatch didn't answer in 5 minutes: check squeue before sending it again "
@@ -323,28 +327,33 @@ def test_submit_runs_nomad_in_the_login_environment_from_the_scripts_folder(pers
     call, said, answers, w = person
     answers["out"] = (b"Welcome to the cluster\n  Its output: /scratch/jdoe/jobs/JOBID-job.sh/ (nomad sends it ...)\n"
                       b"\n  Submitted job 4242. nomad set: memory.\n  Its output: /scratch/jdoe/jobs/4242-job.sh\n")
-    assert call("submit", "--script", str(w / "job.sh"), "--mem", "8G", "--no-localscratch") == 0
+    sha = hashlib.sha256((w / "job.sh").read_bytes()).hexdigest()
+    assert call("submit", "--script", str(w / "job.sh"), "--sha256", sha, "--mem", "8G", "--no-localscratch") == 0
     doc = _out(capsys)
     assert doc["ok"] and doc["job"] == "4242" and doc["output"] == "/scratch/jdoe/jobs/4242-job.sh"
     argv, = said
     nomad = str(w.parent / "bin" / "nomad")
     assert argv == ["/bin/bash", "-lc", gate.LOGIN, "nomad-gate", str(w),
-                    nomad, "submit", "--yes", "--via", "console", "--mem", "8G", "--no-localscratch",
-                    str(w / "job.sh")]
+                    nomad, "submit", "--yes", "--via", "console", "--script-sha256", sha, "--mem", "8G",
+                    "--no-localscratch", str(w / "job.sh")]
+    # not the text the person was shown: not sent
+    assert call("submit", "--script", str(w / "job.sh"), "--sha256", H) == 2
+    assert "changed since you looked at it" in _out(capsys)["error"] and len(said) == 1
     # sent again: from the home folder, the job's own values unless given
     answers["out"] = b"  Submitted job 4243.\n"
-    assert call("again", "--job", "4242") == 0
-    assert said[-1][4:] == [str(w.parent), nomad, "submit", "--yes", "--via", "console", "--again", "4242"]
+    assert call("again", "--job", "4242", "--sha256", sha) == 0
+    assert said[-1][4:] == [str(w.parent), nomad, "submit", "--yes", "--via", "console", "--again", "4242",
+                            "--script-sha256", sha]
     assert _out(capsys)["job"] == "4243"
     # sbatch refused: not ok, and nomad's words said
     answers.update(out=b"Error: sbatch refused it: invalid partition\n", code=1)
-    assert call("again", "--job", "4242") == 6
+    assert call("again", "--job", "4242", "--sha256", sha) == 6
     doc = _out(capsys)
     assert doc["ok"] is False and doc["job"] is None and "invalid partition" in doc["said"]
 
     def slow(argv, **kw):
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
-    assert gate.run(["again", "--job", "4242"], str(w.parent / "bin" / "nomad-gate"), run_=slow) == 6
+    assert gate.run(["again", "--job", "4242", "--sha256", H], str(w.parent / "bin" / "nomad-gate"), run_=slow) == 6
     doc = _out(capsys)
     assert doc["maybe"] and "it may have been submitted" in doc["error"] and "600 s" in doc["error"]
 
@@ -374,34 +383,39 @@ def test_only_the_persons_own_job_script(person, capsys, tmp_path):
     os.chown(w / "big.sh", PERSON, -1)
     for name, why in (("theirs.sh", "isn't yours"), ("notes.txt", "doesn't start with #!"),
                       ("link.sh", "is a link"), ("big.sh", "over 256 KB"), ("none.sh", "No such file")):
-        assert call("submit", "--script", str(w / name)) == 2
+        assert call("submit", "--script", str(w / name), "--sha256", H) == 2
         assert why in _out(capsys)["error"]
         assert call("show", "--script", str(w / name)) == 2
         assert why in _out(capsys)["error"]
     assert said == []
     assert call("show", "--script", str(w / "job.sh")) == 0
-    assert _out(capsys)["text"].startswith("#!/bin/bash\n#SBATCH -c 2")
-    # to send it: neither it nor a folder above it may be changeable by others
+    doc = _out(capsys)
+    assert doc["text"].startswith("#!/bin/bash\n#SBATCH -c 2") and "warning" not in doc
+    assert doc["sha256"] == hashlib.sha256((w / "job.sh").read_bytes()).hexdigest()
+    # a folder others can change: said, with what closes it; not refused (1.25.1: the text is pinned)
     shared = w / "lab"
     shared.mkdir()
     os.chmod(shared, 0o775)
     (shared / "j.sh").write_text("#!/bin/bash\n")
     os.chown(shared / "j.sh", PERSON, -1)
-    assert call("submit", "--script", str(shared / "j.sh")) == 2
-    assert "could be changed by someone else before it is sent" in _out(capsys)["error"]
-    assert call("show", "--script", str(shared / "j.sh")) == 0 and _out(capsys)["ok"]     # looking is fine
+    assert call("show", "--script", str(shared / "j.sh")) == 0
+    doc = _out(capsys)
+    assert f"{shared} can be changed by anyone in the group" in doc["warning"] and "chmod go-w" in doc["warning"]
+    answers["out"] = b"  Submitted job 9.\n"
+    assert call("submit", "--script", str(shared / "j.sh"), "--sha256", doc["sha256"]) == 0
+    assert _out(capsys)["job"] == "9"
+    said.clear()
     os.chmod(shared, 0o755)
+    os.chmod(shared / "j.sh", 0o666)
+    assert call("show", "--script", str(shared / "j.sh")) == 0
+    assert "can be changed by anyone (mode 666)" in _out(capsys)["warning"]
     os.chmod(shared / "j.sh", 0o664)
-    assert call("submit", "--script", str(shared / "j.sh")) == 2
-    assert "mode 664" in _out(capsys)["error"]
-    # ... unless the group is the person's own (a user private group: no one else in it)
+    # ... nothing said when the group is the person's own (a user private group: no one else in it)
     gid = os.stat(shared / "j.sh").st_gid
     real_private = gate.private_groups
     gate.private_groups = lambda name: {gid}
     try:
-        answers["out"] = b"  Submitted job 9.\n"
-        assert call("submit", "--script", str(shared / "j.sh")) == 0 and _out(capsys)["job"] == "9"
-        said.clear()
+        assert call("show", "--script", str(shared / "j.sh")) == 0 and "warning" not in _out(capsys)
     finally:
         gate.private_groups = real_private
     import grp
@@ -478,7 +492,8 @@ def test_the_login_shell_gets_the_folder_and_words_as_arguments(tmp_path):
 def test_the_tag_says_it_came_from_the_console(cluster_here):  # noqa: F811
     from nomad.submit.cli import submit_cmd
     w, sent = cluster_here
-    r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "job.sh"])
+    sha = hashlib.sha256((w / "job.sh").read_bytes()).hexdigest()
+    r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", sha, "job.sh"])
     assert r.exit_code == 0, r.output
     assert ";via=console;" in next(a for a in sent[-1][0] if a.startswith("--extra="))
     doc = gate.submitted(0, r.output)
@@ -486,11 +501,12 @@ def test_the_tag_says_it_came_from_the_console(cluster_here):  # noqa: F811
     assert "--via" not in CliRunner().invoke(submit_cmd, ["--help"]).output     # for the gate, not people
     r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "web", "job.sh"])
     assert r.exit_code != 0
-    # from the Console, nomad checks the script once more itself: here, someone else could change it
+    r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "job.sh"])  # no checksum: not from the Console
+    assert r.exit_code != 0 and "needs --script-sha256" in r.output
+    # from the Console, nomad checks the script once more itself: not what the person saw, not sent
     n = len(sent)
-    os.chmod(w / "job.sh", 0o666)
-    r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "job.sh"])
-    assert r.exit_code != 0 and "could be changed by someone else" in r.output and len(sent) == n
+    r = CliRunner().invoke(submit_cmd, ["--yes", "--via", "console", "--script-sha256", H, "job.sh"])
+    assert r.exit_code != 0 and "changed since you looked at it" in r.output and len(sent) == n
     r = CliRunner().invoke(submit_cmd, ["--yes", "job.sh"])                    # by hand: as before
     assert r.exit_code == 0 and len(sent) == n + 1
 
@@ -515,11 +531,12 @@ def test_a_site_asked_through_its_gate(tmp_path):
                      ({"gate_key": str(tmp_path / "none")}, "isn't there")):
         with pytest.raises(remote.GateError, match=why):
             remote.settings({**s, **bad})
-    words = remote.request("submit", "jdoe", script="/s/my run/job.sh", mem="8G", localscratch=False, keep=True)
-    assert words == ["submit", "--user", "jdoe", "--script", "/s/my run/job.sh", "--mem", "8G",
+    words = remote.request("submit", "jdoe", script="/s/my run/job.sh", sha256=H, mem="8G", localscratch=False,
+                           keep=True)
+    assert words == ["submit", "--user", "jdoe", "--script", "/s/my run/job.sh", "--sha256", H, "--mem", "8G",
                      "--no-localscratch", "--keep"]
     with pytest.raises(gate.Refused):
-        remote.request("submit", "jdoe", script="/s/j.sh", mem="8G --wrap=id")
+        remote.request("submit", "jdoe", script="/s/j.sh", sha256=H, mem="8G --wrap=id")
     argv = remote.ssh_argv(dict(cfg, port=2222), words)
     assert argv[1:3] == ["-F", "/dev/null"]                      # none of this account's ssh settings
     for o in ("IdentitiesOnly=yes", "IdentityAgent=none", "BatchMode=yes", "StrictHostKeyChecking=yes",
@@ -553,10 +570,10 @@ def test_the_hubs_answers(tmp_path):
                                                   code=127))
     assert "nomad-gate isn't installed there" in doc["error"]
     # no answer: never got in (nothing sent), or lost on the way (a job may have been sent)
-    doc = remote.call(s, "submit", "jdoe", script="/s/j.sh",
+    doc = remote.call(s, "submit", "jdoe", script="/s/j.sh", sha256=H,
                       run_=ssh(err="Connection to spydur.example.edu closed by remote host.", code=255))
     assert doc["maybe"] and "may have been submitted" in doc["error"]
-    doc = remote.call(s, "submit", "jdoe", script="/s/j.sh",
+    doc = remote.call(s, "submit", "jdoe", script="/s/j.sh", sha256=H,
                       run_=ssh(err="ssh: connect to host spydur port 22: Connection refused", code=255))
     assert "maybe" not in doc
     doc = remote.call(s, "jobs", "jdoe", run_=ssh(err="Connection to x closed by remote host.", code=255))
@@ -564,7 +581,7 @@ def test_the_hubs_answers(tmp_path):
 
     def late(argv, **kw):
         raise subprocess.TimeoutExpired(argv, kw["timeout"])
-    assert remote.call(s, "again", "jdoe", job="4", run_=late)["maybe"]
+    assert remote.call(s, "again", "jdoe", job="4", sha256=H, run_=late)["maybe"]
     assert remote.SSH_TIMEOUT > gate.WAIT_FOR_SLOT + gate.PREFLIGHT_TIMEOUT + gate.SERVE_TIMEOUT
     doc = remote.call(s, "submit", "jdoe", script="relative.sh", run_=ssh())
     assert doc["where"] == "hub" and "not a path" in doc["error"]

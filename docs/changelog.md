@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.25.1 (November 2026)
+
+### Changes
+- **What the Console shows is what it sends.** A job sent from the Console
+  carries the sha256 of the script text the person was shown (`--sha256`);
+  the gate refuses a script that has changed since ("look at it again"),
+  `nomad submit` checks it once more, and sbatch is given nomad's own copy of
+  that text, never the path: the local-scratch script, else a private copy in
+  `~/.local/share/nomad/staged/` that knows the person's own script (so the
+  job is sent again from theirs). A folder others can change no longer stops
+  a job being sent from the Console (on spydur every `/scratch/USER` is
+  writable by everyone's group): the gate says so instead (`show`'s
+  `warning`), with the `chmod` that closes it. The script is read once and
+  that text is what is sized, staged and sent; nomad's own folder for its
+  copies is made private, and a send is refused while a folder above it
+  (`~/.local`, the home folder) can be changed by others. `keep()` always
+  writes its copy anew.
+
+### Features
+- `nomad-gate job --job N`: one of the person's jobs -- Slurm's view of it
+  now (`scontrol`), its accounting (`sacct`: steps, memory, CPU time) and the
+  end of its output, read as them; someone else's job is refused. For the
+  Console's job details.
+
 ## v1.25.0 (November 2026)
 
 ### Features

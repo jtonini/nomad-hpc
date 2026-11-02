@@ -125,9 +125,9 @@ def name_programs(runs: list, limit: int = 120) -> None:
             continue
         if r.script not in seen:
             text = read_text(r.script, spec.MAX_SCRIPT)
-            inner = stage_.unwrap(text)
-            if inner is not None:                   # sent through local scratch: the script it carried
-                own[r.script], text = inner
+            inner = stage_.sent(r.script, text)
+            if inner is not None:                   # nomad's own copy: the person's script it carried
+                own[r.script], text = inner[0], inner[1]
             seen[r.script] = apps.program_of(spec.sbatch_lines(text)[1]) if text else None
         prog = seen[r.script]
         r.script = own.get(r.script, r.script)
@@ -151,6 +151,8 @@ class Plan:
     script_unsure: bool = False         # a job sent again: its script found, but not for certain
     submit_dir: str | None = None       # where sbatch runs (the person's folder; a job sent again: its own)
     whole_array: bool = False           # --again gave an array's own number: all its tasks again
+    text: str | None = None             # the script as it was read: sized, staged and sent from this
+    shown: bytes | None = None          # from the Console: the bytes the person was shown (sha256 checked)
 
     def to_dict(self) -> dict:
         out = self.sizing.to_dict()
@@ -188,8 +190,11 @@ def _rerun_script(line: spec.SubmitLine, workdir: str | None) -> tuple[str | Non
 
 def plan(script_path: str | None, *, job: str | None = None, user: str | None = None,
          days: int = 180, db: str | None = None, site: str | None = None, args: list | None = None,
-         run_sacct=history._run, run_slurm=cluster._run) -> Plan:
-    """Size a script before it runs, or a job of the person's to run again."""
+         run_sacct=history._run, run_slurm=cluster._run, pin: str | None = None) -> Plan:
+    """Size a script before it runs, or a job of the person's to run again.
+    ``pin`` (from the Console): the sha256 of the script as the person was
+    shown it; the script is read once, checked against it, and that text is
+    what is sized and sent (1.25.1)."""
     user = user or me()
     notes: list = []
     outcome = None
@@ -212,14 +217,15 @@ def plan(script_path: str | None, *, job: str | None = None, user: str | None = 
         if script_path is None:
             script_path, guessed, at = _rerun_script(line, outcome.workdir)
             script_unsure = guessed
-            inner = stage_.unwrap(read_text(script_path, spec.MAX_SCRIPT)) if script_path else None
+            inner = stage_.sent(script_path, read_text(script_path, spec.MAX_SCRIPT)) if script_path else None
             gone = False
             if inner is not None:
+                how = "ran through local scratch" if inner[2] == "staged" else "was sent from the Console"
                 if os.path.isfile(inner[0]):
-                    notes.append(f"Job {job} ran through local scratch; its own script is {inner[0]}.")
+                    notes.append(f"Job {job} {how}; its own script is {inner[0]}.")
                     script_path = inner[0]
                 else:
-                    notes.append(f"Job {job} ran through local scratch, and its own script ({inner[0]}) isn't "
+                    notes.append(f"Job {job} {how}, and its own script ({inner[0]}) isn't "
                                  "there now: sized from the job's own settings.")
                     script_path, gone = None, True
             if at:
@@ -238,7 +244,14 @@ def plan(script_path: str | None, *, job: str | None = None, user: str | None = 
                              "could have). Check it before sending it.")
         if line.args:
             unsure = True
-    text = read_text(script_path, spec.MAX_SCRIPT) if script_path else None
+    shown = None
+    if pin is not None:
+        if not script_path:
+            raise click.ClickException("nomad doesn't know this job's script, so it can't be sent from the Console")
+        shown = _pinned(os.path.abspath(script_path), pin)
+        text = shown.decode("utf-8", errors="replace")
+    else:
+        text = read_text(script_path, spec.MAX_SCRIPT) if script_path else None
     if script_path and text is None:
         if job:
             notes.append(f"{script_path} can't be read now (moved, or changed): sized from the job's "
@@ -331,7 +344,7 @@ def plan(script_path: str | None, *, job: str | None = None, user: str | None = 
     return Plan(sizing=s, script=abs_script if job else script_path, folder=folder, job=job,
                 outcome=outcome, line=line, script_sub=script_sub, needs=needs, notes=notes,
                 args_unsure=unsure, script_unsure=script_unsure, submit_dir=folder if job else here_now,
-                whole_array=whole_array)
+                whole_array=whole_array, text=text, shown=shown)
 
 
 # ── showing it ──────────────────────────────────────────────────────────────
@@ -534,7 +547,7 @@ def _yours(s: sizing.Sizing, cpus, mem, time_, gpus, partition, keep: bool) -> N
 
 
 def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: str | None = None,
-            job_name: str | None = None, via: str = "cli") -> dict:
+            job_name: str | None = None, via: str = "cli", staged: bool | None = None) -> dict:
     """The sbatch command: {"argv", "display", "notes"}. Only what changes
     is set on the command line (sbatch reads the rest from the script); a
     job sent again gets its own command line's other options first, and its
@@ -542,7 +555,10 @@ def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: 
     where its output goes first. ``script``: what sbatch is given instead
     of the person's script (nomad's copy that runs it through local
     scratch), named ``job_name`` as sbatch would have named theirs. ``via``:
-    where the person sent it from, in the tag (cli, or console: nomad-gate)."""
+    where the person sent it from, in the tag (cli, or console: nomad-gate).
+    ``staged``: whether ``script`` is the local-scratch wrapper (default: when
+    there is one) or nomad's plain copy of the script (from the Console)."""
+    staged = (script is not None) if staged is None else staged
     s = pl.sizing
     notes = []
     argv = ["sbatch", "--parsable"] + ([f"--begin=now+{logs_.DELAY}"] if delay else [])
@@ -576,7 +592,7 @@ def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: 
     if job_name:
         argv.append(f"--job-name={job_name}")
     if tagged:
-        argv.append(f"--extra={tag(s, pl.job, via=via, before=old_tag(pl.line), staged=script is not None)}")
+        argv.append(f"--extra={tag(s, pl.job, via=via, before=old_tag(pl.line), staged=staged)}")
     argv.append(script or pl.script)
     argv += list(args)
     # Shown without nomad's --begin: the command to run by hand.
@@ -608,7 +624,7 @@ def _run_sbatch(argv: list, cwd: str) -> subprocess.CompletedProcess:
 
 
 _OURS = {"--again", "--cpus", "--mem", "--time", "--gpus", "--partition", "--keep", "--yes", "-y",
-         "--dry-run", "--days", "--logs", "--localscratch", "--no-localscratch", "--via"}
+         "--dry-run", "--days", "--logs", "--localscratch", "--no-localscratch", "--via", "--script-sha256"}
 
 
 def logs_for(pl: Plan, flag: str | None, user: str, env=None) -> tuple:
@@ -624,7 +640,7 @@ def logs_for(pl: Plan, flag: str | None, user: str, env=None) -> tuple:
     for var in ("SBATCH_OUTPUT", "SBATCH_ERROR"):
         if var in env:                               # set, even empty, sbatch takes it
             own = own or f"${var}"
-    text = (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
+    text = pl.text if pl.text is not None else (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
     ignore_pbs = "SBATCH_IGNORE_PBS" in env or pl.script_sub.has("ignore-pbs") or line.has("ignore-pbs")
     pbs = set() if ignore_pbs else _pbs_options(text)
     if not own and pbs & {"o", "e"}:
@@ -695,8 +711,11 @@ def _name_for(pl: Plan, env=None) -> str | None:
                    "($NOMAD_LOCALSCRATCH=off turns it off).")
 @click.option("--via", type=click.Choice(["cli", "console"]), default="cli", hidden=True,
               help="Where it was sent from, for the tag (console: nomad-gate, for the Console).")
+@click.option("--script-sha256", "pin", default=None, hidden=True,
+              help="With --via console: the sha256 of the script as the person was shown it; nomad sends only "
+                   "that text, from its own copy.")
 def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs,
-               localscratch, via):
+               localscratch, via, pin):
     """Size a job and submit it: nomad's values, or yours.
 
     \b
@@ -714,19 +733,22 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     folder and checked (--no-localscratch: as it is)."""
     if not script and not job:
         raise click.UsageError("give a job script, or --again JOB")
+    if via == "console" and not (pin and re.fullmatch(r"[0-9a-f]{64}", pin)):
+        raise click.UsageError("--via console needs --script-sha256: the script as the person was shown it")
+    if pin and via != "console":
+        raise click.UsageError("--script-sha256 goes with --via console")
     if job and args:
         raise click.UsageError("--again sends the job with its own arguments; give no others")
     stray = [a for a in args if a.split("=")[0] in _OURS]
-    pl = plan(script, job=job, days=days, args=list(args))
+    pl = plan(script, job=job, days=days, args=list(args), pin=pin)
     if not pl.script:
         raise click.ClickException("nomad doesn't know this job's script, so it can't send it again "
                                    "(submit the script itself: nomad submit SCRIPT)")
     script_path = os.path.abspath(pl.script)
-    if read_text(script_path, spec.MAX_SCRIPT) is None:
+    if pl.text is None and read_text(script_path, spec.MAX_SCRIPT) is None:
         raise click.ClickException(f"{script_path} can't be read: nothing to submit")
     pl.script = script_path
-    if via == "console":
-        _theirs(script_path)
+    shown = pl.shown                                     # from the Console: the bytes the person saw, checked
     _yours(pl.sizing, cpus, mem, time_, gpus, partition, keep)
     show(pl, hints=False)
     if job:
@@ -741,8 +763,23 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     ok, why = extra_ok(pl)
     user = me()
     out, warn = logs_for(pl, logs, user)
-    st, st_note, wrapper, wpath, job_name = _staging(pl, localscratch, user, out)
-    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=wpath, job_name=job_name, via=via)
+    text = pl.text
+    if shown is not None:
+        _private_store()                                 # nomad's copy, where no one else can change it
+    plain = shown is None or _utf8(shown)
+    st, st_note, wrapper, wpath, job_name = _staging(pl, localscratch if plain else False, user, out, text=text)
+    if not plain and localscratch is not False:
+        st_note = "Not through local scratch: the script isn't plain UTF-8 text, so it is sent exactly as it is."
+    carried = None
+    if st is None and shown is not None:
+        # From the Console: sbatch is given nomad's own copy of the text the
+        # person saw, never the path (which someone could change meanwhile).
+        carried = stage_.carry_path(pl.script, shown)
+        job_name = _job_name(pl, text)
+        cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=carried, job_name=job_name,
+                      via=via, staged=False)
+    else:
+        cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=wpath, job_name=job_name, via=via)
     for n in cmd["notes"] + ([why] if why else []):
         click.echo(f"\n  {n}")
     if warn:
@@ -761,6 +798,8 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         click.echo(f"\n  {st.describe(user)}\n  ({wpath} is nomad's copy of {pl.script} that does it.)")
     elif st_note:
         click.echo(f"\n  {st_note}")
+    if carried:
+        click.echo(f"\n  ({carried} is nomad's copy of {pl.script} as you saw it: what sbatch is given.)")
     if out.pattern:
         click.echo(f"\n  Its output: {logs_.shown(out.pattern, user=user, name=_name_for(pl))}/"
                    f" (nomad sends it to start in {logs_.DELAY // 60} minutes, sets that, and lets it "
@@ -787,12 +826,17 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
         try:
             stage_.keep(wpath, wrapper)
         except OSError as e:
+            if shown is not None:
+                raise click.ClickException(f"nomad couldn't keep its copy ({e.strerror or e}: {wpath}): not sent")
             click.echo(click.style(f"\n  ! nomad couldn't keep its copy ({e.strerror or e}: {wpath}): the job is "
                                    "sent as it is, not through local scratch.", fg="yellow"))
             st = None
             cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, via=via)
-    if via == "console":
-        _theirs(script_path)                       # once more, just before sbatch reads it
+    if carried:
+        try:
+            stage_.carry(carried, shown, pl.script)
+        except OSError as e:
+            raise click.ClickException(f"nomad couldn't keep its copy ({e.strerror or e}: {carried}): not sent")
     try:
         r = _run_sbatch(cmd["argv"], where)
         if r.returncode != 0 and ok and "--extra" in (r.stderr or "") and (
@@ -810,23 +854,64 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     _said_after(pl, out, r, jid, placed, failed, said, staged=st is not None)
 
 
-def _theirs(path: str) -> None:
-    """Sent from the Console (nomad-gate): the script must be the person's
-    own, and neither it nor a folder above it changeable by anyone but them
-    or root, so what is sent is what they have (a job sent again too)."""
+def _pinned(path: str, sha: str) -> bytes:
+    """Sent from the Console (nomad-gate): the person's own script, only if
+    it is still the very text they were shown (its sha256); a job sent
+    again too. What is sent is nomad's copy of these bytes."""
     from nomad.submit import gate
     try:
-        gate.own_script(path)
+        return gate.pinned(path, sha)
     except gate.Refused as e:
         raise click.ClickException(str(e)) from None
 
 
-def _staging(pl: Plan, flag: bool | None, user: str, out, env=None) -> tuple:
+def _utf8(data: bytes) -> bool:
+    try:
+        data.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def _private_store() -> None:
+    """From the Console: nomad's own folder for the copies it sends is the
+    person's alone (nomad makes it so), and no folder above it can be
+    changed by anyone else; else nothing is sent (someone could swap the
+    copy before sbatch reads it)."""
+    from nomad.submit import gate
+    store = os.path.expanduser(stage_.STORE)
+    try:
+        os.makedirs(store, mode=0o700, exist_ok=True)
+        for d in (os.path.dirname(store), store):                # ~/.local/share/nomad and its staged/
+            st_ = os.lstat(d)
+            if stat.S_ISDIR(st_.st_mode) and st_.st_uid == os.getuid() and st_.st_mode & 0o077:
+                os.chmod(d, 0o700)
+    except OSError as e:
+        raise click.ClickException(f"nomad's own folder {store} can't be made private ({e.strerror or e}): not sent")
+    why = gate.exposure(store, os.getuid(), gate.private_groups(me()))
+    if why:
+        raise click.ClickException(f"nomad keeps the copy it sends in {store}, and {why}: someone could swap it "
+                                   "before sbatch reads it. Not sent; close it and send it again.")
+
+
+def _job_name(pl: Plan, text: str | None, env=None) -> str | None:
+    """--job-name for a job sbatch is given nomad's copy of: the person's
+    script's name, as sbatch would have named it (None when the job names
+    itself)."""
+    env = os.environ if env is None else env
+    named = spec.script_options(text).has("job-name") or (pl.line is not None and pl.line.has("job-name")) \
+        or "SBATCH_JOB_NAME" in env           # (the plan names a script's job in its options: not sbatch)
+    return None if named else posixpath.basename(pl.script)
+
+
+def _staging(pl: Plan, flag: bool | None, user: str, out, env=None, text: str | None = None) -> tuple:
     """Whether the job goes through local scratch: (stage.Stage or None,
     what to say when it doesn't, nomad's script, where it is kept, the
-    --job-name sbatch needs)."""
+    --job-name sbatch needs). ``text``: the script as it is sent (from the
+    Console: as the person saw it), else read from it."""
     env = os.environ if env is None else env
-    text = read_text(pl.script, spec.MAX_SCRIPT) if pl.script else None
+    if text is None:
+        text = read_text(pl.script, spec.MAX_SCRIPT) if pl.script else None
     options = list(pl.script_sub.options) + (list(pl.line.options) if pl.line is not None else [])
     final = pl.sizing.final()                    # as it will be sent: nomad's values with the job's own
     limit = final.time_s
@@ -841,10 +926,7 @@ def _staging(pl: Plan, flag: bool | None, user: str, out, env=None) -> tuple:
         return None, note, None, None, None
     from nomad import __version__
     wrapper = stage_.wrapper_text(pl.script, text, st, __version__)
-    named = spec.script_options(text).has("job-name") or (pl.line is not None and pl.line.has("job-name")) \
-        or "SBATCH_JOB_NAME" in env           # (the plan names a script's job in its options: not sbatch)
-    return st, None, wrapper, stage_.store_path(pl.script, wrapper), \
-        (None if named else posixpath.basename(pl.script))
+    return st, None, wrapper, stage_.store_path(pl.script, wrapper), _job_name(pl, text, env)
 
 
 def _said_after(pl, out, r, jid, placed, failed, said, staged: bool = False) -> None:
@@ -879,6 +961,6 @@ def _said_after(pl, out, r, jid, placed, failed, said, staged: bool = False) -> 
     if staged:
         click.echo(f"  It runs in its node's local scratch; what it makes or changes comes back to "
                    f"{pl.folder} when it ends.")
-    text = (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
+    text = pl.text if pl.text is not None else (read_text(pl.script, spec.MAX_SCRIPT) or "") if pl.script else ""
     if pl.script_sub.has("hold") or (pl.line is not None and pl.line.has("hold")) or "h" in _pbs_options(text):
         click.echo(f"  It is held, as the job asks: scontrol release {jid} when it should run.")
