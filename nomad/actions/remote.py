@@ -82,9 +82,10 @@ def site(name: str) -> dict:
     raise ActionError(f"{name!r} is not one of the hub's sites")
 
 
-def ensure_key(path: Path | None = None) -> tuple[Path, str]:
+def ensure_key(path: Path | None = None, comment: str = "nomad-actions") -> tuple[Path, str]:
     """The hub's agent key (made the first time, ed25519, no passphrase,
-    readable only by its owner) and its public line."""
+    readable only by its owner) and its public line. ``comment``: the new
+    key's, before @host (nomad-gate's key, 1.25)."""
     import fcntl
     path = path or hub_settings()["agent_key"]
     try:
@@ -93,13 +94,13 @@ def ensure_key(path: Path | None = None) -> tuple[Path, str]:
         with open(path.parent / ".lock", "w") as lock:       # two first runs at once make one key
             fcntl.flock(lock, fcntl.LOCK_EX)
             if not path.exists():
-                comment = f"nomad-actions@{socket.gethostname().split('.')[0]}"
-                subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", comment, "-f", str(path)],
+                who = f"{comment}@{socket.gethostname().split('.')[0]}"
+                subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", who, "-f", str(path)],
                                check=True, stdin=subprocess.DEVNULL, capture_output=True)
             os.chmod(path, 0o600)
             pub = Path(str(path) + ".pub").read_text().strip()
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise ActionError(f"the hub's agent key at {path} can't be made or read: {exc}") from None
+        raise ActionError(f"the hub's {comment} key at {path} can't be made or read: {exc}") from None
     return path, pub
 
 

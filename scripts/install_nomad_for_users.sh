@@ -28,6 +28,12 @@
 # - Nothing is left writable by anyone but the owner, nor owned by anyone
 #   else; uv's cache and downloads are in a private temporary folder; one
 #   run at a time.
+# - From 1.25.0, bin/nomad-gate too: what the hub's gate key runs here
+#   (sshd's forced command, `nomad gate install-key`), so the Console can
+#   size, submit and cancel a person's jobs as that person (with this
+#   account's sudo). It runs the same release as bin/nomad and is switched
+#   with it; it refuses to serve if anything it runs could be changed by
+#   anyone but this account or root.
 set -euo pipefail
 V=${1:?give the version, e.g. 1.18.1}
 UVV=0.13.5
@@ -96,9 +102,17 @@ only "$D" bin releases uv current check_current.sh .lock .nomad-removed venv pyt
 for x in bin releases uv venv python tools .nomad-removed; do
     if [ -L "$D/$x" ] || { [ -e "$D/$x" ] && [ ! -d "$D/$x" ]; }; then not_ours "$x isn't a folder"; fi
 done
-if [ -d "$D/bin" ]; then only "$D/bin" nomad nomad.before nomad.new nomad.before.new; fi
+if [ -d "$D/bin" ]; then
+    only "$D/bin" nomad nomad.before nomad.new nomad.before.new \
+        nomad-gate nomad-gate.before nomad-gate.new nomad-gate.before.new
+fi
 for x in nomad nomad.before; do
     if [ -e "$D/bin/$x" ] && ! grep -q "nomad.cli import main" "$D/bin/$x"; then not_ours "bin/$x isn't nomad's"; fi
+done
+for x in nomad-gate nomad-gate.before; do
+    if [ -e "$D/bin/$x" ] && ! grep -q "nomad.submit.gate import main" "$D/bin/$x"; then
+        not_ours "bin/$x isn't nomad's"
+    fi
 done
 if [ -d "$D/uv" ]; then only "$D/uv" 'uv-*'; fi
 if [ -d "$D/releases" ]; then
@@ -136,7 +150,8 @@ switched=""
 cleanup() {
     rm -rf "$work"
     if [ -z "$switched" ]; then
-        rm -f "$D/bin/nomad.new" "$D/bin/nomad.before.new" "$D/check_current.sh.new" "$D/current.new"
+        rm -f "$D/bin/nomad.new" "$D/bin/nomad.before.new" "$D/check_current.sh.new" "$D/current.new" \
+            "$D/bin/nomad-gate.new" "$D/bin/nomad-gate.before.new"
         if [ -n "$new" ]; then rm -rf "${D:?}/releases/$new"; fi
     fi
 }
@@ -237,6 +252,27 @@ if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad.new" --
     echo "$out" | tail -5 >&2
     stop "the new bin/nomad doesn't start (users keep the one they have)"
 fi
+# The gate (1.25.0 and later): the same release, given its own path (python
+# -c has none); switched with bin/nomad.
+# A release that has it must start it (a release without it, before 1.25.0, has none).
+gate=""
+if "$R/venv/bin/python" -I -B -c 'import importlib.util as u, sys; sys.exit(0 if u.find_spec("nomad.submit.gate") else 1)' \
+        </dev/null >/dev/null 2>&1; then
+    gate=yes
+    cat > "$D/bin/nomad-gate.new" <<EOF
+#!/bin/sh
+# nomad-gate ($V): the hub acting here as a person. sshd runs "nomad-gate serve"
+# for the hub's gate key alone (nomad gate install-key); it acts as a person
+# only through this account's sudo. Isolated (-I), as bin/nomad.
+exec "$R/venv/bin/python" -I -B -c 'import sys; from nomad.submit.gate import main; sys.exit(main(sys.argv[2:], me=sys.argv[1]))' "$D/bin/nomad-gate" "\$@"
+EOF
+    chmod 755 "$D/bin/nomad-gate.new"
+    if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad-gate.new" version </dev/null 2>&1) \
+            || ! printf '%s\n' "$out" | grep -q '"ok": true'; then
+        echo "$out" | tail -5 >&2
+        stop "the new bin/nomad-gate doesn't start (users keep the nomad they have)"
+    fi
+fi
 
 # Switch: bin/nomad is replaced in one step; then current and the check.
 # The release before is the one bin/nomad runs now (not what current says).
@@ -246,13 +282,17 @@ if [ -f "$D/bin/nomad" ]; then
 fi
 if [ -n "$before" ] && [ ! -x "$D/releases/$before/venv/bin/python" ]; then before=""; fi
 if [ -n "$before" ]; then cp -p "$D/bin/nomad" "$D/bin/nomad.before.new"; fi
+if [ -n "$before" ] && [ -f "$D/bin/nomad-gate" ]; then cp -p "$D/bin/nomad-gate" "$D/bin/nomad-gate.before.new"; fi
 switched=yes
 mv -f "$D/bin/nomad.new" "$D/bin/nomad"
+if [ -n "$gate" ]; then mv -f "$D/bin/nomad-gate.new" "$D/bin/nomad-gate"; else rm -f "$D/bin/nomad-gate"; fi
 ln -sfn "releases/$new" "$D/current.new"
 mv -Tf "$D/current.new" "$D/current"
 mv -f "$D/check_current.sh.new" "$D/check_current.sh"
 if [ -f "$D/bin/nomad.before.new" ]; then mv -f "$D/bin/nomad.before.new" "$D/bin/nomad.before"; fi
 if [ -z "$before" ]; then rm -f "$D/bin/nomad.before"; fi
+if [ -f "$D/bin/nomad-gate.before.new" ]; then mv -f "$D/bin/nomad-gate.before.new" "$D/bin/nomad-gate.before"
+else rm -f "$D/bin/nomad-gate.before"; fi
 
 # Kept: this release and the one before. Removed: older ones, other uv
 # versions, and an install made by 1.18.0's script (venv/, python/, tools/,
@@ -284,9 +324,12 @@ if [ -e "$D/.nomad-removed" ]; then gone "$D/.nomad-removed"; fi
 # Nothing writable but by the owner, nor owned by anyone else.
 chmod go-w "$D" "$D/bin" "$D/releases" "$D/uv" "$D/bin/nomad" "$D/check_current.sh"
 chmod a+rX "$D" "$D/bin" "$D/releases" "$D/uv" "$D/bin/nomad" "$D/check_current.sh"
+if [ -n "$gate" ]; then chmod 755 "$D/bin/nomad-gate"; fi
 back=""
 if [ -n "$before" ] && [ "$before" != "$new" ]; then
     back="mv -f $D/bin/nomad.before $D/bin/nomad && ln -sfn releases/$before $D/current.new && mv -Tf $D/current.new $D/current"
+    if [ -f "$D/bin/nomad-gate.before" ]; then back="$back && mv -f $D/bin/nomad-gate.before $D/bin/nomad-gate"
+    elif [ -n "$gate" ]; then back="$back && rm -f $D/bin/nomad-gate"; fi
 fi
 problem=""
 loose=$(find "$D" -not -type l -perm /022 2>/dev/null | head -5 || true)
@@ -299,6 +342,12 @@ $theirs"; fi
 if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad" --version </dev/null 2>&1); then
     problem="$problem
 $D/bin/nomad doesn't start: $(echo "$out" | tail -2)"
+fi
+if [ -n "$gate" ]; then
+    gate_said=$("$D/bin/nomad-gate" check </dev/null 2>&1 || true)
+    if ! printf '%s\n' "$gate_said" | grep -q '"ok": true'; then
+        echo "! bin/nomad-gate won't serve the hub as it is installed: $gate_said" >&2
+    fi
 fi
 if [ -n "$problem" ]; then
     echo "$problem" >&2
@@ -322,7 +371,7 @@ echo "   $D: $(du -sh "$D" 2>/dev/null | cut -f1), owner $me; releases/$new${bef
 
 cat <<EOF
 
-Users need $D/bin on their PATH (it holds only nomad). Either:
+Users need $D/bin on their PATH (it holds nomad, and nomad-gate for the hub). Either:
   - a link in a folder already on it, e.g.
         ln -s $D/bin/nomad /usr/local/sw/bin/nomad
   - or a module, e.g. a modulefile with

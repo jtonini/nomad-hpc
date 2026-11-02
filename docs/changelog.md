@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.25.0 (November 2026)
+
+### Features
+- **nomad-gate**: the one way the hub acts on a cluster as a person, for the
+  Console's Submit page and Run it again. The hub's own gate key (`nomad gate
+  key`) can run nothing but `nomad-gate serve` on the cluster (`nomad gate
+  install-key`: `restrict`, `from=` the hub, `command=`); the gate takes a
+  short list (`version`, `size`, `submit`, `again`, `jobs`, `cancel`, `ls`,
+  `show`), checks every value on the hub, as the cluster's account and again
+  as the person, and acts as the person with that account's sudo (`sudo -n -u
+  PERSON`), never as root or a system account. nomad runs in the person's
+  login environment, from the script's folder; the script must be their own
+  file, in folders no one else can change (checked again just before sbatch).
+  Each request is logged to syslog; each answer is one line of JSON; at most
+  four are served at once. It refuses to serve when anything in its release
+  could be changed by anyone but its owner or root (`nomad-gate check`).
+- `scripts/install_nomad_for_users.sh` installs `bin/nomad-gate` beside
+  `bin/nomad` (same release, switched with it, kept as `.before`).
+- `nomad gate test --site S --user U` (is it there, may it act as U) and
+  `nomad gate ask --site S --user U OP ...` (one request, its JSON answer), on
+  the hub; `submit = "gate"` in a site's `[[hub.sites]]` turns it on for the
+  Console.
+- `nomad submit --via console` (hidden): the tag says where the job was sent
+  from (`via=console`).
+
 ## v1.24.1 (November 2026)
 
 ### Fixes

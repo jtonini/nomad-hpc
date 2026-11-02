@@ -129,5 +129,38 @@ Running it again with another version upgrades: that is how a cluster follows no
 - **The right folder.** The script refuses a folder another account owns (run it as that account), and one that holds anything it doesn't recognise as its own or 1.18.0's script's (a wrong `NOMAD_USERS_DIR`, say): such a folder is left untouched.
 - **`bin/nomad`** starts nomad's Python isolated (`python -I`, writing no bytecode), so `PYTHONHOME` and `PYTHONPATH` a cluster sets for another Python (Anaconda's, say) don't reach it, while the jobs nomad submits get the environment as it is.
 - **Nothing writable but by the owner,** nor owned by anyone else; the script stops if it finds otherwise, and says so when a folder above the install is writable by others (who could then replace it).
-- **On users' PATH**: `bin/` holds only `nomad`, so it can't shadow anyone's Python. A link in a folder already on everyone's PATH (`ln -s /usr/local/sw/nomad/bin/nomad /usr/local/sw/bin/nomad`), or a module, or `/etc/profile.d`; last on the PATH, an account with its own nomad keeps it.
+- **On users' PATH**: `bin/` holds only `nomad` (and, from 1.25.0, `nomad-gate`: see below; run by anyone else it does only what they could do themselves), so it can't shadow anyone's Python. A link in a folder already on everyone's PATH (`ln -s /usr/local/sw/nomad/bin/nomad /usr/local/sw/bin/nomad`), or a module, or `/etc/profile.d`; last on the PATH, an account with its own nomad keeps it.
 - **`check_current.sh`**, beside it, says when nomad-hpc has a newer release than the one installed (and prints the command that upgrades) and says nothing otherwise: for the owner's crontab, weekly, with `MAILTO` set. It never upgrades anything itself.
+- **`bin/nomad-gate`** (1.25.0 and later): what the hub's gate key runs on the cluster (below). It runs the same release as `bin/nomad`, is switched with it (and kept as `bin/nomad-gate.before`), and is left out for a release that has none (a release that has it but whose gate doesn't start stops the install). After the switch the script asks it `nomad-gate check` and says if it wouldn't serve as installed. To go back from 1.25.0 or later, use the `back` command the script printed, or this script from 1.25.0 or later: an older checkout's script doesn't know `bin/nomad-gate` and stops.
+
+## From the Console: nomad-gate
+
+The Console's Submit page (and Run it again) sends a person's job **as that person**, through `nomad-gate` on the cluster:
+
+- **A key that can do one thing.** The hub has a key of its own for this (`~/.config/nomad/gate/id_ed25519` of the Console's account; `nomad gate key` makes it), apart from `nomad sync`'s and the actions' agent key. On the cluster its line in the nomad account's `authorized_keys` (`nomad gate install-key`, which refuses a gate path that isn't plain or isn't safe to run from) has `restrict` (no terminal, no forwarding), `from=` the hub's address (an address: host names work only where sshd has `UseDNS yes`) and `command="/usr/local/sw/nomad/bin/nomad-gate serve"`: whatever is sent with that key, sshd runs only the gate. The hub offers only that key (no agent, no other key, no shared connection, none of its account's ssh settings nor the system's: `-F /dev/null`, so the cluster is reached directly, with ssh's own defaults) and refuses an unknown host key: the Console's account needs the cluster's host key in its `~/.ssh/known_hosts` under the very name `host` gives (not an alias from an ssh config).
+- **A short list.** `version`, `size --script PATH | --job N`, `submit --script PATH` (with the person's own `--cpus --mem --time --gpus --partition --keep --localscratch/--no-localscratch` if they gave any), `again --job N` (the same), `jobs` (theirs, `squeue -u`), `cancel --job N`, `ls --dir PATH` (to pick a script) and `show --script PATH`. Every value is checked (a job number, `8G`, `4:00:00`, a partition's name, a full path without `.` or `..` parts or invisible characters), by the hub before sending, by the gate as the cluster's account, and again as the person; nothing ever goes through a shell. A script to send or show must be the person's own regular file (not a link), at most 256 KB, beginning with `#!`; to send it, neither it nor a folder above it may be changeable by anyone but them or root (their own private group aside, without an access list; a lab's shared, group-writable folder isn't: someone else could swap the script before it is sent; an NFSv4 access list on a NAS can't be seen), checked by the gate and again by `nomad submit` just before sbatch reads it; the same for the script a job sent again runs. At most four requests are served at once on the cluster; more are told it is busy.
+- **As the person.** The gate acts as the person with the cluster account's own sudo (`sudo -n -u PERSON nomad-gate run ...`), never as root, a system account (uid under 1000, `nobody`), the gate's own account or nomad's own accounts. It first asks sudo whether it may (`sudo -n -l`, by its exit status); where it may not (on spydur installer may act as members of `managed`), the answer says so, and the Console gives them the command to paste instead.
+- **As if they typed it.** nomad runs in the person's login environment (`bash -l`, as when they log in; a tcsh or zsh user gets bash's login setup, not their own), from the script's folder (from their home folder for `again`), with nothing on its input and the login's own locale, so the job gets the environment it would by hand; it is tagged `via=console`. Each answer is one line of JSON. A job that may have been sent without the gate being able to say so (sbatch slow to answer, the connection lost on the way) is said to be maybe sent, so it isn't sent twice; sending waits up to 10 minutes.
+- **Logged.** Each request goes to the cluster's syslog (authpriv, `/var/log/secure` on RHEL), as plain text: who, what, and the job it made; sudo logs it too.
+- **Refused when it is installed wrong.** The gate doesn't serve when it, the `nomad` beside it, their Python, or anything in the release's environment and Python could be changed by anyone but its owner or root (`nomad-gate check` says what). It is a check for a mistake in how it was installed, made when it serves (a pass is kept for a minute); it can't undo a change someone already made.
+
+Setting it up, once per cluster:
+
+```
+# on the hub, as the Console's account (where the Console runs as nomad, with /etc/nomad/nomad.toml):
+sudo -u nomad -H /opt/nomad/venv/bin/nomad -c /etc/nomad/nomad.toml gate key
+
+# on the cluster, as its nomad account (after install_nomad_for_users.sh 1.25.0 or later):
+/usr/local/sw/nomad/bin/nomad gate install-key 'ssh-ed25519 AAAA... nomad-gate@hub' --from HUB-ADDRESS
+/usr/local/sw/nomad/bin/nomad gate install-key 'ssh-ed25519 AAAA... nomad-gate@hub' --from HUB-ADDRESS --apply
+
+# on the hub: in that site's [[hub.sites]] of nomad.toml
+submit = "gate"
+#   gate_user / gate_host: when not ssh_user / host; [hub] gate_key: another key file
+
+# then, as the Console's account: is it there, and may it act as you?
+nomad gate test --site CLUSTER --user YOU
+nomad gate ask --site CLUSTER --user YOU size --script /scratch/YOU/run/job.sh
+```
+
+`nomad-gate run OP ...`, run by a person on the cluster, answers as the hub would get it, as them (`nomad-gate run jobs`): handy to see what the Console will show.

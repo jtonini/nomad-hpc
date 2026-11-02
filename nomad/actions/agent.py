@@ -222,9 +222,9 @@ def forced_command() -> str:
     return f"cd / && exec /usr/bin/env -u PYTHONHOME -u PYTHONPATH {shlex.quote(exe)} -m nomad.cli agent"
 
 
-def key_line(pubkey: str, from_pattern: str | None = None) -> str:
+def key_line(pubkey: str, from_pattern: str | None = None, command: str | None = None) -> str:
     kind, blob, comment = parse_public_key(pubkey)
-    opts = f'restrict,command="{forced_command()}"'
+    opts = f'restrict,command="{command or forced_command()}"'
     if from_pattern:
         if not _FROM.fullmatch(from_pattern):
             raise ValueError("--from takes host or address patterns, comma-separated")
@@ -233,10 +233,13 @@ def key_line(pubkey: str, from_pattern: str | None = None) -> str:
 
 
 def install_key(pubkey: str, *, from_pattern: str | None = None, apply: bool = False,
-                path: Path | None = None) -> tuple[str, list[str]]:
+                path: Path | None = None, command: str | None = None, what: str = "`nomad agent`",
+                tag: str = "nomad-agent") -> tuple[str, list[str]]:
     """What adding the hub's key to authorized_keys would change (and, with
-    apply, change it). Returns (status, lines to show)."""
-    line = key_line(pubkey, from_pattern)
+    apply, change it). Returns (status, lines to show). ``command``: what
+    the key runs instead of `nomad agent` (nomad-gate's key, 1.25), said as
+    ``what``; ``tag`` names the backup."""
+    line = key_line(pubkey, from_pattern, command)
     _, blob, _ = parse_public_key(pubkey)
     path = path or Path.home() / ".ssh" / "authorized_keys"
     if path.is_symlink():
@@ -244,7 +247,7 @@ def install_key(pubkey: str, *, from_pattern: str | None = None, apply: bool = F
     old = path.read_text().splitlines() if path.exists() else []
     same = [i for i, ln in enumerate(old) if blob in ln.split()]
     if same and len(same) == 1 and old[same[0]] == line:
-        return "present", [f"{path} already has this key, restricted to `nomad agent`."]
+        return "present", [f"{path} already has this key, restricted to {what}."]
     new = [ln for i, ln in enumerate(old) if i not in same] + [line]
     msg = []
     if same:
@@ -257,7 +260,7 @@ def install_key(pubkey: str, *, from_pattern: str | None = None, apply: bool = F
         return "would-change", msg
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.exists():
-        backup = path.with_name(path.name + ".bak-nomad-agent-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        backup = path.with_name(path.name + f".bak-{tag}-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
         shutil.copy2(path, backup)
         msg.append(f"Backup: {backup}")
     tmp = path.with_name(path.name + ".nomad-tmp")

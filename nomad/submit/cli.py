@@ -534,14 +534,15 @@ def _yours(s: sizing.Sizing, cpus, mem, time_, gpus, partition, keep: bool) -> N
 
 
 def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: str | None = None,
-            job_name: str | None = None) -> dict:
+            job_name: str | None = None, via: str = "cli") -> dict:
     """The sbatch command: {"argv", "display", "notes"}. Only what changes
     is set on the command line (sbatch reads the rest from the script); a
     job sent again gets its own command line's other options first, and its
     folder. ``delay``: sent to start in logs.DELAY s, for nomad to set
     where its output goes first. ``script``: what sbatch is given instead
     of the person's script (nomad's copy that runs it through local
-    scratch), named ``job_name`` as sbatch would have named theirs."""
+    scratch), named ``job_name`` as sbatch would have named theirs. ``via``:
+    where the person sent it from, in the tag (cli, or console: nomad-gate)."""
     s = pl.sizing
     notes = []
     argv = ["sbatch", "--parsable"] + ([f"--begin=now+{logs_.DELAY}"] if delay else [])
@@ -575,7 +576,7 @@ def command(pl: Plan, *, args: list, tagged: bool, delay: bool = False, script: 
     if job_name:
         argv.append(f"--job-name={job_name}")
     if tagged:
-        argv.append(f"--extra={tag(s, pl.job, before=old_tag(pl.line), staged=script is not None)}")
+        argv.append(f"--extra={tag(s, pl.job, via=via, before=old_tag(pl.line), staged=script is not None)}")
     argv.append(script or pl.script)
     argv += list(args)
     # Shown without nomad's --begin: the command to run by hand.
@@ -607,7 +608,7 @@ def _run_sbatch(argv: list, cwd: str) -> subprocess.CompletedProcess:
 
 
 _OURS = {"--again", "--cpus", "--mem", "--time", "--gpus", "--partition", "--keep", "--yes", "-y",
-         "--dry-run", "--days", "--logs", "--localscratch", "--no-localscratch"}
+         "--dry-run", "--days", "--logs", "--localscratch", "--no-localscratch", "--via"}
 
 
 def logs_for(pl: Plan, flag: str | None, user: str, env=None) -> tuple:
@@ -692,8 +693,10 @@ def _name_for(pl: Plan, env=None) -> str | None:
               help="Run it through its node's local scratch: the job's folder copied there, what is new "
                    "or changed copied back to the job's own folder. Default: on for a job on one node "
                    "($NOMAD_LOCALSCRATCH=off turns it off).")
+@click.option("--via", type=click.Choice(["cli", "console"]), default="cli", hidden=True,
+              help="Where it was sent from, for the tag (console: nomad-gate, for the Console).")
 def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs,
-               localscratch):
+               localscratch, via):
     """Size a job and submit it: nomad's values, or yours.
 
     \b
@@ -722,6 +725,8 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     if read_text(script_path, spec.MAX_SCRIPT) is None:
         raise click.ClickException(f"{script_path} can't be read: nothing to submit")
     pl.script = script_path
+    if via == "console":
+        _theirs(script_path)
     _yours(pl.sizing, cpus, mem, time_, gpus, partition, keep)
     show(pl, hints=False)
     if job:
@@ -737,7 +742,7 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     user = me()
     out, warn = logs_for(pl, logs, user)
     st, st_note, wrapper, wpath, job_name = _staging(pl, localscratch, user, out)
-    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=wpath, job_name=job_name)
+    cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, script=wpath, job_name=job_name, via=via)
     for n in cmd["notes"] + ([why] if why else []):
         click.echo(f"\n  {n}")
     if warn:
@@ -785,7 +790,9 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
             click.echo(click.style(f"\n  ! nomad couldn't keep its copy ({e.strerror or e}: {wpath}): the job is "
                                    "sent as it is, not through local scratch.", fg="yellow"))
             st = None
-            cmd = command(pl, args=list(args), tagged=ok, delay=out.delay)
+            cmd = command(pl, args=list(args), tagged=ok, delay=out.delay, via=via)
+    if via == "console":
+        _theirs(script_path)                       # once more, just before sbatch reads it
     try:
         r = _run_sbatch(cmd["argv"], where)
         if r.returncode != 0 and ok and "--extra" in (r.stderr or "") and (
@@ -801,6 +808,17 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     if jid and out.pattern:
         placed = logs_.place(out, jid, on, user=user)
     _said_after(pl, out, r, jid, placed, failed, said, staged=st is not None)
+
+
+def _theirs(path: str) -> None:
+    """Sent from the Console (nomad-gate): the script must be the person's
+    own, and neither it nor a folder above it changeable by anyone but them
+    or root, so what is sent is what they have (a job sent again too)."""
+    from nomad.submit import gate
+    try:
+        gate.own_script(path)
+    except gate.Refused as e:
+        raise click.ClickException(str(e)) from None
 
 
 def _staging(pl: Plan, flag: bool | None, user: str, out, env=None) -> tuple:
