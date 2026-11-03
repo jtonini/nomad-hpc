@@ -23,9 +23,9 @@ def gate_group():
       nomad gate install-key 'PUBKEY' --from HUB-ADDRESS    (a dry run; --apply writes it)
     \b
     The key the hub uses for this can run nothing but nomad-gate, which does
-    only its own short list (size, submit, again, jobs, job, cancel, ls,
-    show; save only with install-key --edit) as the person asked for, with
-    the cluster account's sudo.
+    only its own short list (size, submit, again, starts, jobs, job,
+    cancel, ls, show; save and read only with install-key --edit) as the
+    person asked for, with the cluster account's sudo.
     """
 
 

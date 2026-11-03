@@ -220,4 +220,50 @@ def excerpt_lines(err: ConfigError) -> list[str]:
     return out
 
 
-__all__ = ["ConfigError", "describe", "describe_safely", "unreadable", "excerpt_lines"]
+_TRUTH = {"true": "true", "false": "false"}
+
+
+def quoted_switches(data: dict, text: str = "") -> list[str]:
+    """Switches written as text (1.25.4): `edit = "true"` is the word true,
+    which nomad never takes for a yes (a switch is on only when it is the
+    value true). One line for each: where it is (its table, a [[...]] entry
+    by its name, the line when ``text`` is given) and the fix. Keys that
+    look like secrets are left alone."""
+    lines = text.splitlines() if text else []
+    out: list[str] = []
+    after: dict = {}
+
+    def line_of(key: str, value: str) -> int | None:
+        pat = re.compile(r"^\s*" + re.escape(key) + r"\s*=\s*([\"'])" + re.escape(value) + r"\1\s*(#.*)?$")
+        for i in range(after.get((key, value), 0), len(lines)):
+            if len(lines[i]) <= _MAX_LINE and pat.match(lines[i]):
+                after[(key, value)] = i + 1
+                return i + 1
+        return None
+
+    def place(table: list, entry: str | None, depth: int) -> str:
+        if entry is None:
+            return f"[{'.'.join(table)}]" if table else "the top level"
+        return entry if len(table) == depth else f"[{'.'.join(table)}] of {entry}"
+
+    def walk(node: dict, table: list, entry: str | None = None, depth: int = 0) -> None:
+        for k, v in node.items():
+            k = str(k)
+            if isinstance(v, str) and v.strip().lower() in _TRUTH and not _SECRET.search(k):
+                n = line_of(k, v)
+                out.append(f"{f'line {n}, ' if n else ''}{place(table, entry, depth)}: {k} = \"{v}\" is text, "
+                           f"not a switch: write {k} = {_TRUTH[v.strip().lower()]} (no quotes)")
+            elif isinstance(v, dict):
+                walk(v, table + [k], entry, depth)
+            elif isinstance(v, list):
+                for item in v:
+                    if isinstance(item, dict):
+                        name = item.get("name")
+                        walk(item, table + [k], f"[[{'.'.join(table + [k])}]]" +
+                             (f" ({name})" if isinstance(name, str) else ""), len(table) + 1)
+
+    walk(data if isinstance(data, dict) else {}, [])
+    return out
+
+
+__all__ = ["ConfigError", "describe", "describe_safely", "unreadable", "excerpt_lines", "quoted_switches"]

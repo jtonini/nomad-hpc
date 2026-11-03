@@ -31,6 +31,14 @@ list:
                                 hub key's authorized_keys line (nomad gate install-key --edit)
     versions --script PATH      the earlier texts kept when it was saved
     recall --script PATH --id ID  one of them
+    read   --path PATH          a text file of theirs to edit: a job script (#!) or a file
+                                with an extension on TEXT_EXTENSIONS (.py .R .inp ...); only
+                                with serve --edit, as save (1.25.4)
+    starts --script PATH --sha256 HEX --partitions P1,P2,...
+                                when Slurm would start that very text as nomad would send it
+                                (with --cpus --mem --time --gpus), in each partition: sbatch
+                                --test-only, nothing submitted; and their nodes' states (1.25.4)
+           --job N --sha256 HEX ...  for a job of theirs that ran, as again would send it
 
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
@@ -75,6 +83,7 @@ STEP_TIMEOUT = 300              # a step as the person: nomad size, squeue, ...
 SEND_TIMEOUT = 600              # nomad submit (its own sbatch may take 300 s, after sizing)
 SERVE_TIMEOUT = SEND_TIMEOUT + 60
 AT_ONCE = 4                     # requests served at once on this account; more are refused
+STARTS_HERE = 2                 # of them "starts" (up to 12 sbatch --test-only each, minutes): the rest stay free
 WAIT_FOR_SLOT = 20              # seconds a request waits for one
 PREFLIGHT_TIMEOUT = 60          # sudo -n -l
 CHECKED_FOR = 60                # seconds a passed install check is taken as still true
@@ -95,8 +104,10 @@ _PATH = re.compile("/[^\x00-\x1f\x7f-\x9f\xad\u034f\u061c\u115f\u1160\u17b4\u17b
                    "\ud800-\udfff\U000e0000-\U000e0fff]{0,4095}")
 _SHA = re.compile(r"[0-9a-f]{64}")
 _VID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{12}")       # an earlier version kept (1.25.3)
+_PARTS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(,[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,11}")   # 1.25.4
+_KIND_WORDS = {"parts": "a list of up to 12 partitions, comma between,", "vid": "a version id"}
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
-          "path": _PATH, "sha": _SHA, "vid": _VID}
+          "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
@@ -118,10 +129,17 @@ OPS = {
     "save": {"--script": "path", "--sha256": "sha", "--new": "flag", "--body-sha256": "sha"},
     "versions": {"--script": "path"},
     "recall": {"--script": "path", "--id": "vid"},
+    # A text file of theirs to edit (1.25.4): the job script's rules, or an extension on TEXT_EXTENSIONS.
+    "read": {"--path": "path"},
+    # When it would start in each partition (1.25.4): a read; the values as for submit.
+    # --job: a job of theirs that ran, as "again" would send it (--sha256: its script as shown).
+    "starts": {"--script": "path", "--job": "job", "--sha256": "sha", "--partitions": "parts", "--cpus": "int",
+               "--mem": "mem", "--time": "time", "--gpus": "int", "--keep": "flag"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
             "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
-            "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"]}
+            "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"],
+            "starts": ["--sha256", "--partitions"], "read": ["--path"]}
 # The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
 WITH_BODY = {"save"}
 
@@ -165,7 +183,7 @@ def parse(words: list) -> tuple:
             if not _NAME.fullmatch(v):
                 raise Refused("--user: not a user name")
         elif not _CHECK[kind].fullmatch(v):
-            raise Refused(f"{w} {v[:60]!r}: not a {kind} nomad takes")
+            raise Refused(f"{w} {v[:60]!r}: not {_KIND_WORDS.get(kind, 'a ' + kind)} nomad takes")
         elif kind == "path" and ("//" in v or any(x in (".", "..") for x in v.split("/"))):
             raise Refused(f"{w} {v[:60]!r}: give the path without . or .. in it")
         got[w] = v
@@ -173,8 +191,8 @@ def parse(words: list) -> tuple:
     for r in REQUIRED.get(op, []):
         if r not in got:
             raise Refused(f"{op} needs {r}")
-    if op == "size" and ("--script" in got) == ("--job" in got):
-        raise Refused("size needs --script or --job (one of them)")
+    if op in ("size", "starts") and ("--script" in got) == ("--job" in got):
+        raise Refused(f"{op} needs --script or --job (one of them)")
     if op == "save" and ("--sha256" in got) == ("--new" in got):
         raise Refused("save needs --sha256 (the text it replaces) or --new (one of them)")
     if "--localscratch" in got and "--no-localscratch" in got:
@@ -537,15 +555,17 @@ def state_dir() -> str:
     return os.path.join(os.path.expanduser("~"), ".local", "state", GATE)
 
 
-def _slot(place: str | None = None):
+def _slot(place: str | None = None, kind: str = "slot", n: int | None = None, wait: float | None = None):
     """One of AT_ONCE places for a request on this account (waiting up to
-    WAIT_FOR_SLOT s for one); the lock to release, or None when all are taken."""
+    WAIT_FOR_SLOT s for one); the lock to release, or None when all are taken.
+    ``kind``/``n``/``wait``: another set of places (starts: STARTS_HERE)."""
     place = place or state_dir()
     os.makedirs(place, mode=0o700, exist_ok=True)
-    deadline = time.time() + WAIT_FOR_SLOT
+    n = AT_ONCE if n is None else n
+    deadline = time.time() + (WAIT_FOR_SLOT if wait is None else wait)
     while True:
-        for i in range(AT_ONCE):
-            fd = os.open(os.path.join(place, f"slot{i}.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+        for i in range(n):
+            fd = os.open(os.path.join(place, f"{kind}{i}.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return fd
@@ -576,9 +596,11 @@ def _read_body(stream) -> str:
         raise Refused("the text isn't UTF-8") from None
 
 
-# What writes a person's files (1.25.3): served only with `serve --edit`,
-# the cluster's own say (the hub's [[hub.sites]] edit = true is the hub's).
-EDITS = {"save"}
+# What writes a person's files (1.25.3), and what reads their files beyond
+# job scripts for it, or the earlier texts saving kept (1.25.4): served only
+# with `serve --edit`, the cluster's own say (the hub's [[hub.sites]]
+# edit = true is the hub's).
+EDITS = {"save", "read", "versions", "recall"}
 
 
 def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False) -> int:
@@ -606,8 +628,8 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
     who = pw.pw_name if pw else "-"
     asked = " ".join(shlex.quote(w) for w in words_of(op, got))
     if op in EDITS and not edit:
-        _log(f"user={who} {asked}: refused: saving is off here")
-        return refuse("saving scripts from the Console isn't turned on on this cluster (its nomad account's "
+        _log(f"user={who} {asked}: refused: editing is off here")
+        return refuse("editing files from the Console isn't turned on on this cluster (its nomad account's "
                       "authorized_keys line for the hub's key runs nomad-gate serve, not nomad-gate serve "
                       "--edit: nomad gate install-key --edit)")
     body = None
@@ -619,11 +641,23 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
             return refuse(str(e))
     plain = {"PATH": TOOL_PATH, "LANG": "C", "LC_ALL": "C"}     # sudo's own words, the same everywhere
     sends = op in ("submit", "again")
+    long = None
     try:
+        if op == "starts":
+            # a few at most, so sending and the rest are never kept waiting by them
+            long = slot_() if slot_ else _slot(kind="starts", n=STARTS_HERE, wait=0)
+            if long is None:
+                _log(f"user={who} {asked}: busy (starts)")
+                return refuse(f"busy: {STARTS_HERE} people are asking where a job would start here; ask "
+                              "again in a minute", 4)
         slot = slot_() if slot_ else _slot()
     except OSError as e:
+        if long is not None:
+            os.close(long)
         return refuse(f"the gate has no place to keep its locks: {e.strerror or e}", 4)
     if slot is None:
+        if long is not None:
+            os.close(long)
         _log(f"user={who} {asked}: busy")
         return refuse(f"busy: {AT_ONCE} requests are being served here; ask again in a minute", 4)
     try:
@@ -660,6 +694,8 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
             return refuse(f"sudo could not run: {e}", 4)
     finally:
         os.close(slot)
+        if long is not None:
+            os.close(long)
     doc = None
     for line in reversed((r.stdout or "").strip().splitlines()):
         try:
@@ -899,7 +935,7 @@ def run(words: list, me: str, run_=None) -> int:
         if got.get("--user") not in (None, _account()):
             raise Refused("--user is for serve: run acts as whoever runs it")
         nomad = os.path.join(os.path.dirname(me), "nomad")
-        if op in ("size", "submit", "again") and not os.access(nomad, os.X_OK):
+        if op in ("size", "submit", "again", "starts") and not os.access(nomad, os.X_OK):
             raise Refused(f"no nomad beside the gate ({nomad})")
         if op == "version":
             return answer({**_version(), "home": _home()})
@@ -915,6 +951,21 @@ def run(words: list, me: str, run_=None) -> int:
                                new="--new" in got))
         if op == "versions":
             return answer({"ok": True, "script": got["--script"], "versions": versions(got["--script"])})
+        if op == "read":
+            return answer({"ok": True, **read_text_file(got["--path"])})
+        if op == "starts":
+            ask = [nomad, "submit", "--via", "console", "--script-sha256", got["--sha256"], "--starts",
+                   got["--partitions"]] + _choices(got)
+            if "--script" in got:
+                pinned(got["--script"], got["--sha256"])          # the very text shown: nomad checks again
+                folder, argv = os.path.dirname(got["--script"]), ask + [got["--script"]]
+            else:
+                folder, argv = _home(), ask[:4] + ["--again", got["--job"]] + ask[4:]   # nomad checks the pin
+            code, said = in_login(folder, argv, run_=run_)
+            doc = json_in(said, ("starts",))
+            if code != 0 or doc is None:
+                raise Refused(f"nomad didn't say when it would start (exit {code}): {said.strip()[-600:]}")
+            return answer({**doc, "ok": True})
         if op == "recall":
             return answer({"ok": True, "script": got["--script"], "id": got["--id"],
                            "text": recall(got["--script"], got["--id"])})
@@ -1083,8 +1134,8 @@ def job_details(job: str, run_=None, *, me: str) -> dict:
 
 def listing(path: str) -> dict:
     """A folder's entries as the person sees them (name, kind, size, time,
-    whether theirs, whether a job script), folders first; hidden ones left
-    out; at most 500."""
+    whether theirs, whether a job script, whether a text file of theirs the
+    Console may edit), folders first; hidden ones left out; at most 500."""
     try:
         with os.scandir(path) as it:
             entries = [e for e in it if not e.name.startswith(".")]
@@ -1107,8 +1158,10 @@ def listing(path: str) -> dict:
                     script = stat.S_ISREG(os.fstat(f.fileno()).st_mode) and f.read(2) == b"#!"
             except OSError:
                 pass
+        # a text file of theirs the Console may open to edit (1.25.4; only with serve --edit)
+        text = kind == "file" and mine and not script and st.st_size <= MAX_SCRIPT and text_kind(e.name)
         rows.append({"name": e.name, "kind": kind, "size": st.st_size, "mtime": int(st.st_mtime),
-                     "mine": mine, "script": script})
+                     "mine": mine, "script": script, "text": bool(text)})
     rows.sort(key=lambda r: (r["kind"] != "folder", r["name"].lower()))
     return {"dir": os.path.normpath(path), "entries": rows[:MAX_LS], "more": len(rows) > MAX_LS}
 
@@ -1128,11 +1181,28 @@ KEEP_VERSIONS = 20
 VERSIONS = ".local/share/nomad/versions"
 
 
-def _job_text(text: str) -> None:
-    if not text.startswith("#!"):
-        raise Refused("a job script begins with #! (its shell): not saved")
-    if "\x00" in text:
-        raise Refused("the text holds a NUL byte: not saved")
+# Text files edited from the Console besides job scripts (1.25.4): programs,
+# inputs and settings a job reads -- never a hidden file, nothing binary,
+# nothing over MAX_SCRIPT. Editing a job script is already running code as
+# the person; a program it runs is the same. What is kept before each save
+# (versions) covers an input edited by mistake.
+TEXT_EXTENSIONS = (".py", ".r", ".m", ".jl", ".sh", ".in", ".inp", ".com", ".gjf", ".yaml", ".yml", ".json",
+                   ".toml", ".cfg", ".conf", ".txt", ".md")
+
+
+def text_kind(name: str) -> bool:
+    """Whether a file of this name is one of TEXT_EXTENSIONS (whatever case)."""
+    base = os.path.basename(name)
+    return not base.startswith(".") and os.path.splitext(base)[1].lower() in TEXT_EXTENSIONS
+
+
+def _editable(name: str, data: bytes, what: str, doing: str = "edited from the Console") -> None:
+    """A job script (#!), or a text file by its extension; never with a NUL."""
+    if not (data.startswith(b"#!") or text_kind(name)):
+        raise Refused(f"{what} isn't a job script (#!) nor a text file nomad edits ({', '.join(TEXT_EXTENSIONS)}): "
+                      f"not {doing}")
+    if b"\x00" in data:
+        raise Refused(f"{what} holds a NUL byte (not text): not {doing}")
 
 
 def _place(path: str) -> tuple:
@@ -1166,6 +1236,9 @@ def _read_at(dfd: int, name: str, what: str) -> tuple:
             raise Refused(f"{what} isn't a file")
         if st.st_uid != _uid():
             raise Refused(f"{what} isn't yours")
+        if st.st_nlink > 1:
+            # another name for the same file may be anywhere (a hidden folder): never edited through it
+            raise Refused(f"{what} has other names (a hard link): edit it where it really is, or copy it")
         data = f.read(MAX_SCRIPT + 1)
         acl = {}
         for attr in ACL_ATTRS:
@@ -1175,8 +1248,7 @@ def _read_at(dfd: int, name: str, what: str) -> tuple:
                 pass
     if len(data) > MAX_SCRIPT:
         raise Refused(f"{what} is over {MAX_SCRIPT // 1024} KB")
-    if not data.startswith(b"#!"):
-        raise Refused(f"{what} isn't a job script (it doesn't begin with #!): not saved")
+    _editable(name, data, what)
     return data, st, acl
 
 
@@ -1377,6 +1449,28 @@ def _as_before(fd: int, st, acl: dict, notes: list) -> None:
             notes.append("its access list (NFSv4) couldn't be copied")
 
 
+def read_text_file(path: str) -> dict:
+    """A text file of the person's to edit (1.25.4): their own regular file
+    (not a link), no hidden part in its path nor in its folder as it really
+    is, at most MAX_SCRIPT, a job script or one of TEXT_EXTENSIONS, no NUL.
+    {"path", "text", "sha256", "utf8"} (the sha256 of its bytes, as save
+    checks)."""
+    folder, name = _place(path)
+    try:
+        dfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as e:
+        raise Refused(f"{folder}: {e.strerror}") from None
+    try:
+        real = _real_folder(dfd, folder)
+        if any(part.startswith(".") for part in real.split("/") if part):
+            raise Refused(f"{folder} is really {real}: not a hidden folder")
+        data, _st, _acl = _read_at(dfd, name, path)
+    finally:
+        os.close(dfd)
+    return {"path": path, "text": data.decode("utf-8", errors="replace"), "sha256": _sha(data),
+            "utf8": is_utf8(data), "size": len(data)}
+
+
 def save(path: str, text: str, *, body_sha: str, old_sha: str | None = None, new: bool = False) -> dict:
     """Write ``text`` as the person's job script ``path`` (see above)."""
     data = text.encode("utf-8")
@@ -1384,8 +1478,8 @@ def save(path: str, text: str, *, body_sha: str, old_sha: str | None = None, new
         raise Refused("the text didn't arrive whole (its sha256 differs): not saved")
     if len(data) > MAX_SCRIPT:
         raise Refused(f"the text is over {MAX_SCRIPT // 1024} KB")
-    _job_text(text)
     folder, name = _place(path)
+    _editable(name, data, "the text", "saved")
     try:
         dfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
     except OSError as e:

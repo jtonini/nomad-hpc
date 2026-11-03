@@ -168,10 +168,10 @@ def test_the_folder_as_it_really_is_and_only_over_a_job_script(me, tmp_path):
     with pytest.raises(gate.Refused, match="not a hidden folder"):
         gate.save(str(me / "keys" / "authorized_keys"), NEW, body_sha=_h(NEW), new=True)
     assert list(hidden.iterdir()) == []
-    (me / "notes.txt").write_text("not a script\n")
+    (me / "notes.dat").write_text("not a script\n")       # (1.25.4: .txt is a text file nomad edits)
     with pytest.raises(gate.Refused, match="isn't a job script"):
-        gate.save(str(me / "notes.txt"), NEW, body_sha=_h(NEW), old_sha=_h("not a script\n"))
-    assert (me / "notes.txt").read_text() == "not a script\n"
+        gate.save(str(me / "notes.dat"), NEW, body_sha=_h(NEW), old_sha=_h("not a script\n"))
+    assert (me / "notes.dat").read_text() == "not a script\n"
 
 
 def _acl(entries):
@@ -334,9 +334,9 @@ def test_what_is_never_written(me, tmp_path):
                       ("relative/j.sh", "full path")):
         with pytest.raises(gate.Refused, match=why):
             gate.save(path, NEW, body_sha=_h(NEW), new=True)
-    for text, why in (("echo no shell line\n", "begins with #!"), ("#!/bin/bash\n\x00\n", "NUL")):
+    for text, why in (("echo no shell line\n", "isn't a job script"), ("#!/bin/bash\n\x00\n", "NUL")):
         with pytest.raises(gate.Refused, match=why):
-            gate.save(str(me / "j.sh"), text, body_sha=_h(text), new=True)
+            gate.save(str(me / "j.job"), text, body_sha=_h(text), new=True)   # (1.25.4: .sh is a text file)
     big = "#!/bin/bash\n" + "#" * (gate.MAX_SCRIPT + 1)
     with pytest.raises(gate.Refused, match="over 256 KB"):
         gate.save(str(me / "big.sh"), big, body_sha=_h(big), new=True)

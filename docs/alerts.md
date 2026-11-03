@@ -189,6 +189,40 @@ the hub's alert database says its retry is due (after 15 minutes, then
 longer), not a day later. Leave the site's own `[alerts]` without backends,
 or it sends them too.
 
+### A node that fails every job at start (1.25.4)
+
+A node that is up, idle and taking jobs, but whose jobs all fail within
+seconds (a mount missing after a reboot, slurmd set up wrong after a
+reinstall, a program gone) looks healthy to Slurm and to the node-state
+alerts, and each job it fails frees it at once for the next: it can take a
+whole array in minutes. At each collection, the node_state collector reads
+this site's `jobs` table: a node where, among the single-node jobs that
+started there in the last `window_minutes`, at least `min_jobs` failed within
+`fail_fast_seconds` and they are at least `share` of them, while the very
+same work ran on other nodes in that time -- the same array (its job id
+before the `_`), else the same person's jobs of the same name: at least one
+of them ran past `fail_fast_seconds` elsewhere and at most a quarter of them
+failed fast there, for at least 2 of the node's failures. A broken script
+fails everywhere, and a person's other work proves nothing about the node:
+neither raises it. It can't be sure: an array whose last tasks lack their
+input fails them as fast, all on the node that frees first. So the warning
+names one of the jobs to look at before draining, and says how many
+different works failed there (several: likely the node). Such a node raises
+a warning (source `node_jobs`, the node as host): how many
+failed, of how many, between when, and for how many people (named to no
+one), with the `scontrol` line that drains it. A node already drained or
+down is left out. Once, again when worse, then every reminder, as other
+alerts.
+
+```toml
+[alerts.node_jobs]
+enabled = true
+window_minutes = 60
+fail_fast_seconds = 60
+min_jobs = 5
+share = 0.8
+```
+
 ## Backends
 
 ### Email

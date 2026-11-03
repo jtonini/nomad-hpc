@@ -38,6 +38,14 @@ def _storage_use_tables(conn) -> None:
     conn.executescript(SCHEMA)
 
 
+def _jobs_start_index(conn) -> None:
+    """jobs by start_time: the node_state collector reads the last hour's
+    starts each minute (1.25.4, alerts.node_jobs); jobs is kept for years."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone() and \
+            "start_time" in {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_start ON jobs(start_time)")
+
+
 def _policy_watch_tables(conn) -> None:
     from nomad.collectors.policy_watch import SCHEMA
     conn.executescript(SCHEMA)
@@ -448,6 +456,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (26, "Create policy_watch tables", _policy_watch_tables),
     # An ssh forward's verdict and why, as last seen (1.19.1).
     (27, "Add policy_findings verified, note, procs and away", _policy_watch_columns),
+    # The last hour's job starts, each minute (1.25.4: a node that fails every job at start).
+    (28, "Index jobs by start_time", _jobs_start_index),
 ]
 
 

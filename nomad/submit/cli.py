@@ -758,8 +758,11 @@ def _name_for(pl: Plan, env=None) -> str | None:
 @click.option("--script-sha256", "pin", default=None, hidden=True,
               help="With --via console: the sha256 of the script as the person was shown it; nomad gives "
                    "sbatch only that text, itself.")
+@click.option("--starts", "starts", default=None, metavar="P1,P2,...", hidden=True,
+              help="Submit nothing: when Slurm would start this job (as nomad would send it) in each of these "
+                   "partitions (sbatch --test-only), and their nodes' states; JSON (1.25.4, for the Console).")
 def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, dry_run, days, logs,
-               localscratch, via, pin):
+               localscratch, via, pin, starts):
     """Size a job and submit it: nomad's values, or yours.
 
     \b
@@ -797,6 +800,10 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     pl.script = script_path
     shown = pl.shown                                     # from the Console: the bytes the person saw, checked
     _yours(pl.sizing, cpus, mem, time_, gpus, partition, keep)
+    if starts is not None:
+        sent = list(pl.line.args) if job and pl.line is not None else list(args)   # --again: its own arguments
+        click.echo(json.dumps(start_times(pl, sent, starts, via=via, shown=shown), default=str))
+        return
     show(pl, hints=False)
     if job:
         args = list(pl.line.args) if pl.line is not None else []
@@ -913,6 +920,107 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
     if jid and out.pattern:
         placed = logs_.place(out, jid, on, user=user)
     _said_after(pl, out, r, jid, placed, failed, said, staged=st is not None)
+
+
+# ── when it would start (1.25.4) ─────────────────────────────────────────────
+# sbatch --test-only: Slurm's own plan for the job, given the queue and its
+# backfill, in each partition; nothing is submitted. "sbatch: Job 86313 to
+# start at 2026-11-02T13:55:12 using 1 processors on nodes spdr01 in
+# partition basic". Where no job has a time limit Slurm can't tell when a
+# node frees: then it is only "now" or "later".
+_TEST_ONLY = re.compile(r"to start at (\S+) using (\d+) processors? on nodes? (\S+) in partition (\S+)")
+MAX_STARTS = 12
+STARTS_AT_ONCE = 4          # sbatch --test-only calls at a time (each asks slurmctld)
+STARTS_TIMEOUT = 60         # one call: a busy slurmctld answers in seconds, or not at all
+
+
+def _test_only(argv: list, cwd: str, data: bytes) -> subprocess.CompletedProcess:
+    """sbatch --test-only: the script on standard input, the times in ISO
+    form whatever the person's SLURM_TIME_FORMAT, at most STARTS_TIMEOUT."""
+    env = {**os.environ, "SLURM_TIME_FORMAT": "standard"}
+    r = subprocess.run(programs.argv(argv), capture_output=True, timeout=STARTS_TIMEOUT, cwd=cwd, input=data,
+                       env=env)
+    return subprocess.CompletedProcess(argv, r.returncode, r.stdout.decode("utf-8", errors="replace"),
+                                       r.stderr.decode("utf-8", errors="replace"))
+
+
+def start_times(pl: Plan, args: list, partitions: str, *, via: str = "cli", shown: bytes | None = None,
+                run=None, now=None) -> dict:
+    """{"ok", "now", "starts": [{partition, start, soon, nodes, error}], "nodes": {partition: {state: n}}}
+    for the job as nomad would send it (the person's values in, nomad's
+    tag and output folder aside), in each of ``partitions`` (comma list)."""
+    from datetime import datetime, timedelta
+    names = [p.strip() for p in str(partitions).split(",") if p.strip()]
+    if not names or len(names) > MAX_STARTS or not all(_PARTITION.fullmatch(p) for p in names):
+        raise click.ClickException(f"--starts: 1 to {MAX_STARTS} partition names, comma between")
+    run = run or _test_only
+    fixed = now                                          # tests give one; else each call's own
+    now = now or datetime.now()
+    text = shown if shown is not None else (pl.text.encode("utf-8") if pl.text is not None
+                                             else (read_text(pl.script, spec.MAX_SCRIPT) or "").encode("utf-8"))
+    cmd = command(pl, args=list(args), tagged=False, delay=False, script=pl.script, job_name=_job_name(pl, text.decode(
+        "utf-8", errors="replace")), via=via, staged=False, on_stdin=True)
+    base = [a for a in cmd["argv"] if a != "--parsable" and not a.startswith(("--partition=", "--extra="))]
+    i = base.index("-p") if "-p" in base else None
+    if i is not None:
+        del base[i:i + 2]
+    where = pl.submit_dir or pl.folder or "."
+
+    def one(name: str) -> dict:
+        argv = base[:1] + ["--test-only", f"--partition={name}"] + base[1:]
+        row = {"partition": name, "start": None, "soon": False, "nodes": None, "error": None}
+        try:
+            asked_at = fixed or datetime.now()          # a call in the third round is asked minutes later
+            r = run(argv, where, text)
+            said = f"{r.stdout or ''}\n{r.stderr or ''}"
+            m = _TEST_ONLY.search(said)
+            if m and m.group(4) != name:
+                # the site's job_submit sent it elsewhere: an estimate for another partition, not this one
+                row["error"] = f"Slurm would run it in partition {m.group(4)[:64]}, not {name}"
+            elif m:
+                try:
+                    at = datetime.fromisoformat(m.group(1))
+                    row["start"] = at.isoformat(timespec="seconds")
+                    row["soon"] = at <= asked_at + timedelta(minutes=2)
+                except ValueError:
+                    row["start"] = m.group(1)
+                row["nodes"] = m.group(3)
+            else:
+                lines = [ln.strip() for ln in said.splitlines() if ln.strip()]
+                row["error"] = (lines[-1] if lines else f"sbatch --test-only ended with {r.returncode}")[:300]
+        except subprocess.TimeoutExpired:
+            row["error"] = f"sbatch --test-only didn't answer in {STARTS_TIMEOUT} s"
+        except OSError as e:
+            row["error"] = f"sbatch could not run here: {e}"
+        return row
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(STARTS_AT_ONCE, len(names))) as pool:
+        out = list(pool.map(one, names))                 # in the order asked
+    f = pl.sizing.final()
+    per_node = f.mem_mb if f.mem_mb else (f.mem_per_cpu_mb * -(-(f.cpus or 1) // max(1, f.nodes or 1))
+                                          if f.mem_per_cpu_mb else None)
+    job = {"cpus": f.cpus, "mem_mb": per_node or None, "time_s": None if f.time_unlimited else f.time_s,
+           "gpus": f.gpus or 0, "nodes": f.nodes or 1}
+    return {"ok": True, "now": now.isoformat(timespec="seconds"), "starts": out, "nodes": _node_states(names),
+            "job": job}
+
+
+def _node_states(names: list) -> dict:
+    """{partition: {state: nodes}} from sinfo (idle, mixed, allocated, ...)."""
+    try:
+        r = subprocess.run(programs.argv(["sinfo", "-h", "-p", ",".join(names), "-o", "%P|%T|%D"]),
+                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return {}
+    out: dict = {}
+    for line in (r.stdout or "").splitlines() if r.returncode == 0 else []:
+        bits = line.strip().split("|")
+        if len(bits) == 3 and bits[2].isdigit():
+            part = bits[0].rstrip("*")
+            out.setdefault(part, {})
+            state = bits[1].rstrip("*~#!%$@^-+").lower()
+            out[part][state] = out[part].get(state, 0) + int(bits[2])
+    return out
 
 
 def _pinned(path: str, sha: str) -> bytes:

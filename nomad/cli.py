@@ -419,6 +419,79 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
             click.echo(f"  - {item}")
 
 
+def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
+    """nomad partitions --site S --sorted: nomad.submit.where's sort, as
+    the Console would make it for someone in no lab (whose condo is whose
+    is the condo reports')."""
+    import json as _json
+    from nomad import partitions as parts
+    from nomad.condo import config as ccfg
+    from nomad.submit import where
+    why = None
+    try:
+        report = ccfg.load(None, ctx.obj.get('config_target'))
+    except ccfg.CondoConfigError as e:
+        report, why = None, str(e)
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = parts.current(conn, site)
+        specs = where.node_specs(conn, site)
+    finally:
+        conn.close()
+    if not rows:
+        raise click.ClickException(f"no partitions for site {site}")
+    listed = report is not None and report.cluster(site).configured
+    condos = where.my_condos(report, site, "", rows, lambda c: set()) if listed else []
+    lost = where.unplaced_condos(report, site, rows) if listed else []
+    sorted_parts = where.partitions(rows, specs, condos, report.cluster(site).guest_partitions if listed else [])
+    unconfirmed = sorted(c.name for c in report.cluster(site).condos.values() if not c.confirmed) if listed else []
+    from nomad.hostlist import expand_hostlist
+    unread = sorted({n for r in rows if r.get("nodes") for n in expand_hostlist(r["nodes"])
+                     if not (specs.get(n) or (None, 0))[0]})
+    notes = []
+    if why:
+        notes.append(f"report.toml couldn't be read ({why}): only the default partition is suggested")
+    elif not listed:
+        notes.append(f"report.toml has no [report.clusters.{site}.condos]: only the default partition is "
+                     "suggested (nomad usage-report condos init; an empty table for a site with no condos)")
+    elif lost:
+        notes.append(f"the nodes of {', '.join(lost)} can't be found (no nodes in report.toml, and its partition "
+                     "isn't one of Slurm's now): only the default partition is suggested until they are")
+    if unconfirmed:
+        notes.append(f"not confirmed yet (a condo's nodes, no one's own until then): {', '.join(unconfirmed)}")
+    unlisted = sorted(p.name for p in sorted_parts if p.kind == "condo" and not p.condos)
+    if unlisted:
+        notes.append(f"condo nodes report.toml lists no condo for (offered to guests, no one's own): "
+                     f"{', '.join(unlisted)}")
+    if unread:
+        notes.append(f"no memory reading for {', '.join(unread[:20])}{' ...' if len(unread) > 20 else ''}: "
+                     "their partitions count as several kinds (not suggested) until the node_state collector "
+                     "reads them")
+    if as_json:
+        click.echo(_json.dumps({"site": site, "partitions": [p.to_dict() for p in sorted_parts], "notes": notes},
+                               indent=2))
+        return
+    words = {"small": "shared, least memory", "big": "shared, big memory (overflow for short jobs)",
+             "gpu": "GPU nodes", "condo": "condo", "mixed": "several kinds: not suggested"}
+    click.echo(f"{site}: how Where it starts soonest sorts its partitions")
+    for p in sorted_parts:
+        mem = (f"{p.mem_mb // 1024} GB" if p.mem_mb == p.max_mem_mb else
+               f"{(p.mem_mb or 0) // 1024}-{(p.max_mem_mb or 0) // 1024} GB") if p.max_mem_mb else "memory ?"
+        extra = []
+        if p.default:
+            extra.append("the default: always offered")
+        if p.aliases:
+            extra.append(f"also {', '.join(p.aliases)}")
+        if p.condos:
+            extra.append(f"condos {', '.join(p.condos)}")
+        if p.gpus:
+            extra.append(f"{p.gpus} GPUs a node")
+        click.echo(f"  {p.name:<16} {words.get(p.kind, p.kind):<44} {len(p.nodes):>3} node"
+                   f"{'' if len(p.nodes) == 1 else 's'}  {mem}" + (f"  ({'; '.join(extra)})" if extra else ""))
+    for n in notes:
+        click.echo(f"  Note: {n}")
+
+
 @cli.command('partitions')
 @click.option('--site', help='Only this site (on a hub).')
 @click.option('--changes', 'show_changes', is_flag=True, help='When partitions appeared, changed or went.')
@@ -429,8 +502,11 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
 @click.option('--mask', is_flag=True,
               help="Partitions, accounts and groups as stand-ins (partition names often name a PI), "
                    "for sharing the output.")
+@click.option('--sorted', 'sorted_', is_flag=True,
+              help="With --site: how the Console's \"Where it starts soonest\" sorts them (1.25.4): condo, "
+                   "small, big, GPU, or several kinds (not suggested), and why.")
 @click.pass_context
-def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask):
+def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask, sorted_):
     """Each Slurm partition's limits, who may use it, and its preemption.
 
     \b
@@ -444,6 +520,10 @@ def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask):
     import json as _json
     from nomad import partitions as parts
     db_path = _usage_db(ctx, db)
+    if sorted_:
+        if not site:
+            raise click.UsageError("--sorted needs --site")
+        return _partitions_sorted(ctx, db_path, site, as_json)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         have = parts._has(conn, parts.SETTINGS)
@@ -7737,6 +7817,13 @@ def config_check(ctx):
     if sections:
         click.echo(f"  sections: {', '.join(sections)}")
     for problem in access_from(data, log=False).problems:
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.config.problems import quoted_switches
+    try:
+        text = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        text = ""
+    for problem in quoted_switches(data, text):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
     from nomad.impact import impact_from
     for problem in impact_from(data).problems:

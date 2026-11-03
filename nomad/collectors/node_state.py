@@ -164,6 +164,8 @@ class NodeStateCollector(BaseCollector):
         self.nodes = config.get('nodes', None)  # None = all nodes
         self.cluster_name = config.get('cluster_name', 'default')
         self._alert_config = config.get('alerts', {}).get('node_state', {})
+        from nomad.alerts import node_jobs
+        self._jobs_alerts = node_jobs.settings(config)       # a node failing every job at start (1.25.4)
         logger.info(f"NodeStateCollector: nodes={self.nodes or 'all'}")
 
     # The default state policies (module level since 1.17.3, kept here too).
@@ -187,6 +189,8 @@ class NodeStateCollector(BaseCollector):
             records = self._parse_scontrol_output(result.stdout)
             if self._alert_config.get('enabled', True):
                 self._dispatch_state_alerts(records)
+            if self._jobs_alerts['enabled']:
+                self._dispatch_job_alerts(records)
             parts = self._collect_partitions()
             if parts is not None:
                 records.append(parts)
@@ -257,6 +261,35 @@ class NodeStateCollector(BaseCollector):
                 logger.warning(
                     f"Failed to dispatch node-state alert for {node_name}: {e}"
                 )
+
+    def _dispatch_job_alerts(self, records: list[dict[str, Any]], now: datetime | None = None) -> None:
+        """A node failing every job at start (nomad.alerts.node_jobs), from
+        this site's jobs table; nodes already drained or down left out."""
+        import sqlite3
+        from nomad.alerts import node_jobs
+        skip = {r.get('node_name') for r in records
+                if any(w in str(r.get('state') or '').upper() for w in ('DRAIN', 'DOWN', 'FAIL', 'MAINT'))}
+        try:
+            conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=10)
+        except sqlite3.Error:
+            return
+        try:
+            found = node_jobs.failing_nodes(conn, now or datetime.now(), self._jobs_alerts, skip)
+        except sqlite3.Error:
+            found = []
+        finally:
+            conn.close()
+        for f in found:
+            try:
+                send_alert(
+                    severity='warning', source='node_jobs', host=f['node'], subject='jobs fail at start',
+                    message=node_jobs.message(f, self._jobs_alerts['fail_fast_seconds']),
+                    details={'failed': f['failed'], 'started': f['started'], 'people': f['people'],
+                             'first': f['first'].isoformat(), 'last': f['last'].isoformat(),
+                             'jobs': f['jobs'][:50], 'cluster': self.cluster_name},
+                )
+            except Exception as e:  # noqa: BLE001 -- an alert never stops the collection
+                logger.warning(f"Failed to dispatch the jobs-at-start alert for {f['node']}: {e}")
 
     def _parse_scontrol_output(self, output: str) -> list[dict[str, Any]]:
         """Parse scontrol show node output."""

@@ -1,5 +1,61 @@
 # Changelog
 
+## v1.25.4 (November 2026)
+
+### Features
+- **Where a job starts soonest** (the Console's Submit page; `nomad.submit.where`,
+  `nomad-gate starts`, `nomad submit --starts`): the partitions a person may
+  send a job to, in the site's order, each with Slurm's own estimate of when
+  it would start there (`sbatch --test-only` on the very text shown, as nomad
+  would send it; nothing submitted), the usual wait from nomad's records, and
+  why any can't be suggested. The order: the person's lab's condo (its
+  owners and members, from report.toml), the shared nodes, other labs'
+  condos as a guest (a job within the condo policy's guest limit), and the
+  few big-memory nodes last (a job that doesn't need them only with a time
+  limit of at most `overflow_max_hours`, and only while more than
+  `reserve_nodes` of them are idle). Partitions with the same nodes count as
+  one; one that spans nodes of several kinds isn't suggested; the default
+  partition always is. Whose condo it is: as the condo reports read
+  `members`. What nomad doesn't know it doesn't offer: a node without a
+  memory reading, a condo not yet confirmed, a guest partition's nodes
+  report.toml lists no condo for (to guests only), a site with no condos
+  table in report.toml or a condo whose nodes can't be found (then only the
+  default partition, and why). A start
+  Slurm puts 7 days or more away (where jobs have no time limits) is "later",
+  not ranked by. "Fastest start" takes nomad's pick, never another lab's
+  condo unless `fastest_guests`, and never over a partition the person
+  chose meanwhile. Run it again asks too (`starts --job N`). Up to 12
+  partitions, four at a time, each at most 60 s; an estimate for another
+  partition than the one asked isn't taken; the gate answers two at once
+  at most (`STARTS_HERE`), so sending is never held up. `[submit.where]` in the
+  hub's nomad.toml; `nomad partitions --site S --sorted` shows the sort.
+- **Text files edited from the Console**, besides job scripts: a person's
+  own `.py .R .m .jl .sh .in .inp .com .gjf .yaml .yml .json .toml .cfg .conf
+  .txt .md` (`TEXT_EXTENSIONS`), UTF-8, at most 256 KB, never hidden, no NUL.
+  `nomad-gate read --path PATH` gives one (only with `serve --edit`, as
+  `save`); `save` takes them too, with every safeguard it has for scripts
+  (the text opened, the earlier text kept, the group and access lists, the
+  folder as it really is). A file with another name (a hard link) is
+  neither read nor saved. `ls` marks them (`text`).
+- **A node that fails every job at start** (`[alerts.node_jobs]`, raised by
+  the node_state collector): one where, among the jobs that started there in
+  the last hour, at least 5 failed within a minute and they are at least 80%
+  of them, while the very same work (the array's other tasks, the person's
+  jobs of the same name) ran on other nodes and hardly failed there. A node
+  that looks idle and healthy to Slurm can take a whole array this way in
+  minutes. The alert names a job to look at before draining (an array's last
+  tasks without input fail the same way) and how many different works
+  failed there. A node already drained or down is left out; the alert names
+  no one. A new index on jobs(start_time) (migration 28) keeps the
+  minute's look cheap.
+
+### Changes
+- **`nomad config check` says a switch written as text** (`edit = "true"`
+  is the word true, which nomad never takes for a yes), with the line, the
+  table it is in and the fix.
+- **`nomad-gate versions` and `recall`** (the earlier texts saving kept) are
+  served only with `serve --edit`, as `save` and `read`.
+
 ## v1.25.3 (November 2026)
 
 ### Changes
