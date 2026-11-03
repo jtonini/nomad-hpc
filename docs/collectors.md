@@ -503,7 +503,8 @@ workstations = true                # a hub, or a lab's head node
 # keep_days = 30                   # each reading; each hour's for good
 ```
 
-Each reading is kept `keep_days`; each hour's lowest, mean and highest
+A chip's cores are one reading, their hottest (`cores`, "Cores (hottest)",
+1.25.7). Each reading is kept `keep_days`; each hour's lowest, mean and highest
 (`hw_temps_hourly`) for good, so day and night can be told apart over
 months. A run within 45 s of the last reads nothing (two timers asking at
 once). For alerts that mean minutes, run it every minute on its own timer

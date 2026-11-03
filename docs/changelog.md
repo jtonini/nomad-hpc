@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.25.7 (November 2026)
+
+### Fixes
+- **A CPU's cores are one temperature: their hottest.** Intel's coretemp
+  gives each core its own reading (26 a socket on spydur's Xeons: 1,674
+  rows a round, and their hours kept for good). Now one row a chip, `cores`
+  ("Cores (hottest)"); migration 29 takes out the per-core rows already
+  kept. The package's own reading is still the alert's.
+- **An alert with nowhere to go isn't counted as sent.** Raised with no
+  alert backend (mingus's `[alerts.email]` was off), it counted as raised,
+  so once email was set up it waited for its daily reminder. Now it is
+  tried again as a failed send is: 15 minutes later, then 30, an hour...
+- **`nomad temps --check --send` always sends** (a test, never counted as
+  raised), and says why when it can't: no alert backends, or below
+  `[alerts] min_severity`.
+- **The GPU collector over ssh** skips what a login prints first (a
+  workstation's banner) and logs in as ssh's own settings say unless
+  `ssh_user` is set (it forced `$USER`).
+
 ## v1.25.6 (November 2026)
 
 ### Features

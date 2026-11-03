@@ -124,7 +124,28 @@ def parse(node: str, output: str, when: str) -> list[dict[str, Any]]:
     for r in rows:
         if len(devices[r["chip"]]) > 1:
             r["chip"] = f"{r['chip']}@{r['device'] or '?'}"
-    return rows
+    return _cores_as_one(rows)
+
+
+CORES = "cores"            # the sensor kept for a chip's cores: their hottest
+
+
+def _cores_as_one(rows: list[dict]) -> list[dict]:
+    """coretemp's Core N readings, one a core (26 a socket on spydur's
+    Xeons: 1,674 rows a round there, 1.25.6), as one a chip: its hottest
+    core now (sensor ``cores``, "Cores (hottest)"). The package's own
+    reading is the alert's anyway."""
+    out, cores = [], {}
+    for r in rows:
+        if r["chip"].split("@")[0] == "coretemp" and (r["label"] or "").startswith("Core "):
+            cores.setdefault(r["chip"], []).append(r)
+        else:
+            out.append(r)
+    for chip, rs in cores.items():
+        hot = max(rs, key=lambda r: r["temp_c"])
+        out.append({**hot, "sensor": CORES, "label": "Cores (hottest)",
+                    "crit_c": max((r["crit_c"] for r in rs if r["crit_c"] is not None), default=None)})
+    return out
 
 
 def cpu_sensor(rows: list[dict]) -> list[dict]:
@@ -477,4 +498,4 @@ def hourly(conn: sqlite3.Connection, node: str, chip: str, sensor: str, since: d
 
 
 __all__ = ["TempsCollector", "remote_command", "parse", "cpu_sensor", "rules", "sustained", "check_cpu", "latest",
-           "hourly", "DEFAULTS"]
+           "hourly", "DEFAULTS", "CORES"]

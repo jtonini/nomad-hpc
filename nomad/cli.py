@@ -524,14 +524,22 @@ def temps_cmd(ctx, hosts, hours, all_sensors, brief, check, warning, critical, s
                     click.echo(f"  check: {f['severity']}: {f['message']}")
                     if send:
                         from nomad.alerts import init_dispatcher, send_alert
-                        init_dispatcher(config).db_path = str(path)
-                        sent = send_alert(severity=f["severity"], source="temps", host=node,
-                                          subject="CPU temperature (a test: nomad temps --check --send)",
-                                          message="(A test, from nomad temps --check --send.) " + f["message"],
-                                          details=f["details"])
-                        said = ", ".join(f"{k} {'sent' if v else 'FAILED'}" for k, v in (sent or {}).items())
-                        click.echo(f"  sent: {said}" if said else
-                                   "  not sent: no alert backends here, or already raised lately (the same test)")
+                        d = init_dispatcher(config)
+                        d.db_path = str(path)
+                        order = {"info": 0, "warning": 1, "critical": 2}
+                        if not getattr(d, "backends", None):
+                            click.echo("  not sent: no alert backends here ([alerts.email] enabled = false, or "
+                                       "none set up): nomad test-alerts --email says more")
+                        elif order.get(f["severity"], 0) < order.get(getattr(d, "min_severity", "warning"), 1):
+                            click.echo(f"  not sent: {f['severity']} is below [alerts] min_severity "
+                                       f"({d.min_severity}) here")
+                        else:
+                            sent = send_alert(severity=f["severity"], source="temps", host=node, test=True,
+                                              subject="CPU temperature (a test: nomad temps --check --send)",
+                                              message="(A test, from nomad temps --check --send.) " + f["message"],
+                                              details=f["details"])
+                            said = ", ".join(f"{k} {'sent' if v else 'FAILED'}" for k, v in (sent or {}).items())
+                            click.echo(f"  sent: {said}" if said else "  not sent (see the log above)")
                 if cpus and not found:
                     click.echo(f"  check: nothing to raise (warning {over['warning']:g}, critical "
                                f"{over['critical']:g} °C, for {over['sustain_minutes']:g} min)")

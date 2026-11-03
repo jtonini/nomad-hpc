@@ -147,8 +147,8 @@ class AlertDispatcher:
         key = alert_key(alert)
         decision = RAISE
         tracked = False
-        if alert.get('source') == 'test':
-            pass                          # nomad test-alerts: always sent
+        if alert.get('source') == 'test' or alert.get('test'):
+            pass                          # nomad test-alerts, a collector's own test: always sent
         elif self.db_path:
             # Under cron every run is a new process: what has been raised is
             # remembered in the database (alert_state), not in memory.
@@ -181,7 +181,10 @@ class AlertDispatcher:
                 results[backend_name] = False
 
         if tracked:
-            self._after_send(key, failed=bool(results) and not any(results.values()))
+            # Nothing reached anyone -- a backend failing, or none configured at all (1.25.7: an alert
+            # raised with nowhere to go counted as sent, and a backend set up later never heard of it
+            # until its reminder): tried again, as a failed send is.
+            self._after_send(key, failed=not any(results.values()))
         return results
 
     def _slack(self) -> timedelta:
@@ -470,6 +473,7 @@ def send_alert(
     config: dict = None,
     subject: str = None,
     site: str = None,
+    test: bool = False,
 ) -> dict[str, bool]:
     """
     Convenience function to send an alert.
@@ -486,6 +490,8 @@ def send_alert(
         site: The cluster it is about, when not this one (the hub sending a
             site's node alerts, 1.17.3): its name in the subject and the
             record, instead of this host's
+        test: A test of this alert (nomad temps --check --send, 1.25.7):
+            always sent, never counted as raised
     
     Returns:
         Dict mapping backend name to success status
@@ -520,5 +526,7 @@ def send_alert(
         alert['subject'] = str(subject)
     if site:
         alert['site'] = str(site)
+    if test:
+        alert['test'] = True
 
     return dispatcher.dispatch(alert)

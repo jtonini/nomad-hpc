@@ -223,6 +223,10 @@ def _determine_health_status(
     return "OK"
 
 
+# Printed over ssh just before a command: what the login prints first is not read as its output.
+SSH_MARK = "__NOMAD_GPU__"
+
+
 @registry.register
 class GPUCollector(BaseCollector):
     """
@@ -251,7 +255,8 @@ class GPUCollector(BaseCollector):
 
         gpu_config = self.config
         self._gpu_nodes: list[str] = gpu_config.get('gpu_nodes', [])
-        self._ssh_user: str = gpu_config.get('ssh_user', os.getenv('USER', ''))
+        # As ssh's own config logs in, unless set (1.25.7: $USER was forced, over ~/.ssh/config's User)
+        self._ssh_user: str | None = gpu_config.get('ssh_user') or None
 
         # Real Util weights — preset name or custom list
         weight_config = gpu_config.get('real_util_weights', 'ai')
@@ -270,16 +275,23 @@ class GPUCollector(BaseCollector):
     # ------------------------------------------------------------------
 
     def _run_command_ssh(self, cmd: str, host: str) -> str | None:
-        """Run a command on a remote host via SSH."""
+        """Run a command on a remote host via SSH. What the login itself
+        prints first (a workstation's banner from a shell startup file:
+        peterslabworkstation's prints its GPUs' own lines) is skipped: only
+        what follows a mark is the command's (1.25.7)."""
         ssh_cmd = [
-            'ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
+            'ssh', '-n', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
             '-o', 'StrictHostKeyChecking=no',
-            f'{self._ssh_user}@{host}', cmd,
+        ] + (['-l', str(self._ssh_user)] if self._ssh_user else []) + [
+            '--', host, f'echo {SSH_MARK}; {cmd}',
         ]
         try:
             result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=30)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
+            _head, mark, out = (result.stdout or '').partition(SSH_MARK + '\n')
+            if not mark:
+                out = ''
+            if result.returncode == 0 and out.strip():
+                return out.strip()
             if result.returncode != 0:
                 logger.debug(f"SSH to {host} failed (rc={result.returncode}): {result.stderr.strip()}")
             return None

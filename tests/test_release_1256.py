@@ -201,7 +201,8 @@ def test_nomad_temps_shows_now_the_day_and_tests_the_alert(peters, tmp_path, mon
     sent = []
     import nomad.alerts as A
     monkeypatch.setattr(A, "send_alert", lambda **k: sent.append(k) or {"EmailBackend": True})
-    monkeypatch.setattr(A, "init_dispatcher", lambda config: type("D", (), {})())
+    monkeypatch.setattr(A, "init_dispatcher", lambda config: type("D", (), {"backends": [object()],
+                                                                          "min_severity": "warning"})())
     r = CliRunner().invoke(cli, ["-c", str(toml), "temps", "--db", str(db), "--check", "--warning", "60",
                                  "--sustain", "0"])
     assert "check: warning:" in r.output and sent == []                       # said, not sent
@@ -291,9 +292,10 @@ def test_spiderweb_two_sockets_and_an_older_driver(tmp_path):
     (root / "devices" / "it87.656" / "temp1_input").write_text("38000\n")
     rows = T.parse("spiderweb", _read(root), "2026-11-03T10:30:00")
     got = sorted((r["chip"], r["label"] or r["sensor"], r["temp_c"]) for r in rows)
-    assert got == [("coretemp@coretemp.0", "Core 0", 45.0), ("coretemp@coretemp.0", "Core 1", 47.0),
-                   ("coretemp@coretemp.0", "Package id 0", 48.0), ("coretemp@coretemp.1", "Core 0", 49.0),
-                   ("coretemp@coretemp.1", "Package id 1", 51.0), ("it87", "temp1", 38.0)]
+    # (1.25.7) each socket's cores as one: their hottest
+    assert got == [("coretemp@coretemp.0", "Cores (hottest)", 47.0), ("coretemp@coretemp.0", "Package id 0", 48.0),
+                   ("coretemp@coretemp.1", "Cores (hottest)", 49.0), ("coretemp@coretemp.1", "Package id 1", 51.0),
+                   ("it87", "temp1", 38.0)]
     assert [(r["chip"], r["label"]) for r in T.cpu_sensor(rows)] == [("coretemp@coretemp.0", "Package id 0"),
                                                                     ("coretemp@coretemp.1", "Package id 1")]
     dup = "T|k10temp|x|temp1|Tctl|72000|\nT|k10temp|x|temp1|Tctl|72000|\n"

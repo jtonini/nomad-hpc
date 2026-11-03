@@ -46,6 +46,16 @@ def _jobs_start_index(conn) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_start ON jobs(start_time)")
 
 
+def _temps_cores_as_one(conn) -> None:
+    """1.25.6 kept each core's coretemp reading (1,674 rows a round on
+    spydur, and their hours for good); 1.25.7 keeps the chip's hottest
+    core: the per-core rows are taken out."""
+    have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    for table in ("hw_temps", "hw_temps_hourly"):
+        if table in have:
+            conn.execute(f"DELETE FROM {table} WHERE chip LIKE 'coretemp%' AND label LIKE 'Core %'")
+
+
 def _policy_watch_tables(conn) -> None:
     from nomad.collectors.policy_watch import SCHEMA
     conn.executescript(SCHEMA)
@@ -458,6 +468,8 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (27, "Add policy_findings verified, note, procs and away", _policy_watch_columns),
     # The last hour's job starts, each minute (1.25.4: a node that fails every job at start).
     (28, "Index jobs by start_time", _jobs_start_index),
+    # Each core's temperature, one row a core, taken out: the hottest core a chip is kept (1.25.7).
+    (29, "Temperatures: a chip's cores as one", _temps_cores_as_one),
 ]
 
 
