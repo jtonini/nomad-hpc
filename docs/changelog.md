@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.25.6 (November 2026)
+
+### Features
+- **Hardware temperatures** (the `temps` collector, `[alerts.temps]`, `nomad
+  temps`): what the kernel's sensors read (`/sys/class/hwmon`: CPU, drives,
+  integrated GPU), on this host or over ssh: the hosts listed, the
+  workstations the workstation collector reads (`workstations = true`), a
+  head node's Slurm nodes that answer (`slurm_nodes = true`); each reading
+  kept 30 days and each hour's lowest, mean and highest for good.
+  The CPU package's own sensor (k10temp Tctl, coretemp Package id) alerts
+  when every reading for `sustain_minutes` (3) is at or above `warning` (90
+  °C) or `critical` (95), a host's own limits in its own table; sent through
+  the collecting host's alerts. `nomad temps` shows each host's sensors now
+  and the CPU's last hours, day and night; `--check --warning N --send`
+  tests the alert. For peterslabworkstation, whose CPU cooler's fan died.
+
+### Fixes
+- **`[alerts.node_state]` and `[alerts.node_jobs]` now apply.** The
+  node_state collector read them from its own `[collectors.node_state]`
+  table, where nobody puts them, so the defaults always applied.
+- **"Your lab's condo" only for its owners and the members report.toml
+  names.** Without `members`, nomad took the owners' lab groups, as the
+  condo reports do; spydur's myang$ holds some 170 people (staff, other
+  PIs, a demo account), and all of them saw yang1, yang2 and yangnolin as
+  their own, with no guest limit, for "Fastest start" to take. Now a condo
+  without `members` is its owners' own, a guest's for everyone else.
+  `nomad partitions --site S --sorted` lists the condos without `members`.
+
 ## v1.25.5 (November 2026)
 
 ### Fixes

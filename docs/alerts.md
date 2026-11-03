@@ -223,6 +223,31 @@ min_jobs = 5
 share = 0.8
 ```
 
+### CPU temperatures (1.25.6)
+
+The `temps` collector ([Collectors](collectors.md), "Temperatures") reads
+each listed host's sensors; its CPU package's own (k10temp Tctl, zenpower
+Tctl or Tdie, coretemp Package id N) raises a warning or a critical (source
+`temps`, the host as host) when every reading for `sustain_minutes` is at or
+above the limit: a moment's spike is not an alert. It says how hot, for how
+long, the CPU's other sensors, and what to check. Limits are the CPU's: a
+Ryzen 7000 runs at 95 °C by design under full load, a Ryzen X3D's limit is
+89 °C, so a host's own table can set its own.
+
+```toml
+[alerts.temps]
+warning = 90
+critical = 95
+sustain_minutes = 3           # every reading for this long; 0: at once
+[alerts.temps.peterslabworkstation]
+warning = 85
+critical = 89                 # its Ryzen 9 7900X3D's limit: it throttles there
+```
+
+Sent from where the collector runs, through its [alerts] backends (the hub's
+mail, for workstations the hub reads). `nomad temps --check --warning 70
+--send` sends a test now, through the same path.
+
 ## Backends
 
 ### Email

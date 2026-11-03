@@ -67,6 +67,9 @@ SPECS: tuple[Spec, ...] = (
          ("scontrol",), (), ("node_state", "partition_settings", "partition_changes")),
     Spec("node_disks", "node_disks", "NodeDisksCollector", False,
          "Slurm head node reaching its nodes over SSH", ("ssh", "sinfo"), (), ("node_disks",)),
+    Spec("temps", "temps", "TempsCollector", False,
+         "any host with temperature sensors, or one reaching workstations over SSH", ("sh",), (),
+         ("hw_temps", "hw_temps_hourly")),
     Spec("gpu", "gpu", "GPUCollector", True, "hosts with NVIDIA GPUs, or a head node "
          "reaching GPU nodes over SSH", ("nvidia-smi|ssh",), (), ("gpu_stats", "gpu_health")),
     Spec("nfs", "nfs", "NFSCollector", True, "hosts that mount NFS (client side)",
@@ -172,6 +175,20 @@ def plan(config: dict) -> list[Planned]:
                             f"[[collectors.{spec.name}.{key}]]")
         if spec.name == "node_state" and "cluster_name" not in cfg:
             cfg["cluster_name"] = resolve_cluster_name(config)
+        if spec.name == "node_state":
+            # [alerts.node_state] and [alerts.node_jobs] are in [alerts], where the docs put them; the
+            # collector read them from its own table, so they never applied (1.25.6)
+            mine = cfg.get("alerts") if isinstance(cfg.get("alerts"), dict) else {}
+            top = config.get("alerts") if isinstance(config.get("alerts"), dict) else {}
+            cfg["alerts"] = {**{k: top[k] for k in ("node_state", "node_jobs") if isinstance(top.get(k), dict)},
+                             **mine}
+        if spec.name == "temps":
+            cfg.setdefault("alert_rules", (config.get("alerts") or {}).get("temps") or {})
+            # workstations = true: the workstation collector's own list (its table's, or the top level's)
+            ws = (config.get("collectors", {}) or {}).get("workstation", {}) or {}
+            listed = ws.get("workstations") or config.get("workstations") or []
+            cfg.setdefault("workstation_hosts", [w.get("hostname") for w in listed
+                                                 if isinstance(w, dict) and w.get("hostname")])
         if spec.name == "groups":
             cfg["clusters"] = config.get("clusters", {})
             cfg.setdefault("local_name", resolve_cluster_name(config))

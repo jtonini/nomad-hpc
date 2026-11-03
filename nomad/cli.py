@@ -419,6 +419,126 @@ def collectors_cmd(ctx: click.Context, db: str, days: int) -> None:
             click.echo(f"  - {item}")
 
 
+@cli.command('temps')
+@click.option('--host', 'hosts', multiple=True, help='Only this host (more than once for several).')
+@click.option('--hours', default=24, show_default=True, type=click.IntRange(0, 24 * 400),
+              help='How far back the hourly history goes (0: none).')
+@click.option('--all-sensors', is_flag=True, help="Every sensor (each core's too), and every sensor's history.")
+@click.option('--brief', is_flag=True, help='One line a host: its CPU now, and its hottest other sensor.')
+@click.option('--check', is_flag=True, help='Check the CPU readings against [alerts.temps] now, and say '
+              'what would be raised.')
+@click.option('--warning', type=float, help='With --check: this warning limit (°C) instead.')
+@click.option('--critical', type=float, help='With --check: this critical limit (°C) instead.')
+@click.option('--sustain', type=float, help='With --check: this many minutes instead.')
+@click.option('--send', is_flag=True, help='With --check: send what it finds, through [alerts] (a test).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: this host's).")
+@click.pass_context
+def temps_cmd(ctx, hosts, hours, all_sensors, brief, check, warning, critical, sustain, send, db):
+    """Hardware temperatures the temps collector read (1.25.6).
+
+    \b
+    nomad temps                              each host's sensors now, and the CPU's last 24 hours
+    nomad temps --host H --hours 168         a week, hour by hour, day and night
+    nomad temps --brief                      one line a host (a cluster's nodes)
+    nomad temps --check --warning 70 --send  test the alert: what it would raise, sent
+
+    The CPU is its package's own sensor (k10temp Tctl, coretemp Package id).
+    Each hour: the lowest, mean and highest reading."""
+    from nomad.collectors import temps as T
+    config = ctx.obj['config']
+    path = Path(db).expanduser() if db else get_db_path(config)
+    if not path.exists():
+        raise click.ClickException(f"no database at {path}")
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        now_rows = T.latest(conn)
+        if hosts:
+            now_rows = [r for r in now_rows if r[0] in hosts or r[0].split(".")[0] in hosts]
+        if not now_rows:
+            raise click.ClickException(
+                "no temperatures here yet" + (f" for {', '.join(hosts)}" if hosts else "") +
+                f" ({path}): [collectors.temps] enabled, with hosts, and nomad collect -C temps")
+        by_node: dict = {}
+        for r in now_rows:
+            by_node.setdefault(r[0], []).append(r)
+        alerts = (config.get("alerts") or {}).get("temps") or {}
+        now = datetime.now()
+        for node, rs in by_node.items():
+            rows = [{"node": n, "chip": c, "sensor": se, "label": la, "temp_c": t, "timestamp": ts}
+                    for n, c, se, la, t, ts in rs]
+            cpus = T.cpu_sensor(rows)
+            rule = T.rules(alerts, node)
+            last = max(r["timestamp"] for r in rows)
+            if brief:
+                cpu = max(cpus, key=lambda r: r["temp_c"]) if cpus else None
+                rest = [r for r in rows if r not in cpus and not (r["label"] or "").startswith("Core ")]
+                hot = max(rest, key=lambda r: r["temp_c"]) if rest else None
+                cpu_text = f"CPU {cpu['temp_c']:5.1f} °C" if cpu else "CPU     ?   "
+                click.echo(f"{node:<24} {cpu_text}   " + (f"hottest other: {hot['chip']} "
+                           f"{hot['label'] or hot['sensor']} {hot['temp_c']:g} °C" if hot else "") +
+                           f"   (read {last[11:16]})")
+                if not check:
+                    continue
+            try:
+                ago = int((now - datetime.fromisoformat(last)).total_seconds())
+                ago_text = f"{ago} s ago" if ago < 120 else f"{ago // 60} min ago"
+            except ValueError:
+                ago_text = "?"
+            if not brief:
+                click.echo(click.style(node, bold=True) + f"  (read {last[11:19]}, {ago_text})")
+            for r in sorted(rows, key=lambda r: (r not in cpus, r["chip"], r["sensor"])):
+                if brief or (not all_sensors and r not in cpus and (r["label"] or "").startswith("Core ")):
+                    continue                                   # each core's: --all-sensors
+                tag = "CPU" if r in cpus else "   "
+                limits = (f"   alerts: warning {rule['warning']:g}, critical {rule['critical']:g} °C, for "
+                          f"{rule['sustain_minutes']:g} min" + ("" if rule["enabled"] else " (off)")) \
+                    if r in cpus else ""
+                click.echo(f"  {tag}  {r['chip'] + ' ' + (r['label'] or r['sensor']):<28} {r['temp_c']:6.1f} °C"
+                           + limits)
+            for r in ([] if brief or hours == 0 else rows if all_sensors else cpus):
+                hist = T.hourly(conn, node, r["chip"], r["sensor"], now - timedelta(hours=hours))
+                if not hist:
+                    continue
+                name = f"{r['chip']} {r['label'] or r['sensor']}"
+                click.echo(f"  Last {hours} hours, {name} (each hour: lowest, mean, highest °C):")
+                for hour, lo, avg, hi, n in hist:
+                    t = datetime.fromisoformat(hour)
+                    click.echo(f"    {t:%a %d %b %H:00}   {lo:5.1f}  {avg:5.1f}  {hi:5.1f}   ({n} readings)")
+                day = [h for h in hist if 8 <= datetime.fromisoformat(h[0]).hour < 20]
+                night = [h for h in hist if not 8 <= datetime.fromisoformat(h[0]).hour < 20]
+                for word, part in (("day (08-20)", day), ("night (20-08)", night)):
+                    if part:
+                        n = sum(h[4] for h in part)
+                        mean = sum(h[2] * h[4] for h in part) / n if n else 0
+                        click.echo(f"    {word}: {min(h[1] for h in part):.1f}-{max(h[3] for h in part):.1f} °C, "
+                                   f"mean {mean:.1f}")
+            if check:
+                over = dict(rule)
+                for key, v in (("warning", warning), ("critical", critical), ("sustain_minutes", sustain)):
+                    if v is not None:
+                        over[key] = float(v)
+                found = [f for f in (T.check_cpu(path, node, c, over, rows, now) for c in cpus) if f]
+                if not cpus:
+                    click.echo("  check: no CPU package sensor read here")
+                for f in found:
+                    click.echo(f"  check: {f['severity']}: {f['message']}")
+                    if send:
+                        from nomad.alerts import init_dispatcher, send_alert
+                        init_dispatcher(config).db_path = str(path)
+                        sent = send_alert(severity=f["severity"], source="temps", host=node,
+                                          subject="CPU temperature (a test: nomad temps --check --send)",
+                                          message="(A test, from nomad temps --check --send.) " + f["message"],
+                                          details=f["details"])
+                        said = ", ".join(f"{k} {'sent' if v else 'FAILED'}" for k, v in (sent or {}).items())
+                        click.echo(f"  sent: {said}" if said else
+                                   "  not sent: no alert backends here, or already raised lately (the same test)")
+                if cpus and not found:
+                    click.echo(f"  check: nothing to raise (warning {over['warning']:g}, critical "
+                               f"{over['critical']:g} °C, for {over['sustain_minutes']:g} min)")
+    finally:
+        conn.close()
+
+
 def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
     """nomad partitions --site S --sorted: nomad.submit.where's sort, as
     the Console would make it for someone in no lab (whose condo is whose
@@ -459,6 +579,11 @@ def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
                      "isn't one of Slurm's now): only the default partition is suggested until they are")
     if unconfirmed:
         notes.append(f"not confirmed yet (a condo's nodes, no one's own until then): {', '.join(unconfirmed)}")
+    no_members = where.unlisted_members(report, site) if listed else []
+    if no_members:
+        notes.append(f"no members in report.toml (only the owners see them as their own; the others as "
+                     f"guests): {', '.join(no_members)} -- members = [\"netid\", ...], \"group:NAME\" or "
+                     "\"account:NAME\"")
     unlisted = sorted(p.name for p in sorted_parts if p.kind == "condo" and not p.condos)
     if unlisted:
         notes.append(f"condo nodes report.toml lists no condo for (offered to guests, no one's own): "

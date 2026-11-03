@@ -272,6 +272,24 @@ nvidia_smi_path = "/usr/bin/nvidia-smi"
 
 
 # ============================================
+# TEMPERATURES (1.25.6)
+# ============================================
+# What the kernel's sensors read (/sys/class/hwmon: CPU, drives, ...), here
+# or over ssh, each reading kept keep_days and each hour's low/mean/high for
+# good; alerts in [alerts.temps]. Run it every minute on its own timer
+# (nomad collect -C temps --once) for a sustain of minutes.
+[collectors.temps]
+enabled = false
+# hosts = ["localhost"]              # this host; others over ssh
+# workstations = true                # and the workstations the workstation collector reads
+# slurm_nodes = true                 # and every node Slurm lists that answers (a head node)
+# parallel = 8
+# max_seconds = 50
+# ssh_user = "..."                   # default: as ssh logs in
+# timeout = 15
+# keep_days = 30
+
+# ============================================
 # WORKSTATION COLLECTOR
 # ============================================
 [collectors.workstation]
@@ -847,14 +865,27 @@ ignore_states   = []
 # [alerts.node_jobs] — A node that fails every job at start (1.25.4): among the
 # jobs that started on a node in the last window_minutes, at least min_jobs
 # failed within fail_fast_seconds and they are at least `share` of them, while
-# the same people's jobs ran on other nodes. A node already drained or down is
-# left out. Raised by the node_state collector (source node_jobs).
+# the very same work (the array's other tasks, the person's jobs of the same
+# name) ran on other nodes. A node already drained or down is left out. Raised
+# by the node_state collector (source node_jobs).
 [alerts.node_jobs]
 enabled = true
 window_minutes = 60
 fail_fast_seconds = 60
 min_jobs = 5
 share = 0.8
+
+# [alerts.temps] — CPU temperatures (1.25.6, the temps collector): the CPU
+# package's own sensor (k10temp Tctl, coretemp Package id N) at or above
+# warning / critical for sustain_minutes (every reading for that long). A
+# host's own limits go in its own table (a CPU whose limit is lower).
+# [alerts.temps]
+# warning = 90
+# critical = 95
+# sustain_minutes = 3
+# [alerts.temps.peterslabworkstation]
+# warning = 85
+# critical = 89
 
 # [submit.where] — Where a job starts soonest, on the Console's Submit page
 # (1.25.4; the hub's nomad.toml). [submit.where.SITE] for one site.

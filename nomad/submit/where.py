@@ -393,11 +393,14 @@ def _nodes_of(c, by_part: dict) -> list:
 def my_condos(report, site: str, user: str, rows: list, people_of) -> list:
     """[(condo, nodes, mine)] for ``site``'s condos in report.toml
     (``report``: nomad.condo.config Settings): its nodes, else its
-    partition's; mine: the condo is confirmed and the person is among its
-    people (``people_of(condo)``: the condo reports' own reading of
-    ``members`` -- a list, "group:NAME", "account:NAME", else the owners'
-    lab groups -- and its owners). One not yet confirmed is still a condo's
-    nodes, never anyone's own: nomad doesn't offer them as shared."""
+    partition's; mine: the condo is confirmed and the person is an owner,
+    or among the people its ``members`` names (``people_of(condo)``: the
+    condo reports' own reading -- a list, "group:NAME", "account:NAME").
+    Without ``members``, only its owners (1.25.6): the reports fall back on
+    the owners' lab groups, but such a group can be far more than the lab
+    (spydur's myang$: some 170 people), and "yours" takes away the guest
+    limit. One not yet confirmed is still a condo's nodes, never anyone's
+    own: nomad doesn't offer them as shared."""
     by_part = {r["partition"]: r for r in rows}
     out = []
     for c in report.cluster(site).condos.values():
@@ -406,10 +409,18 @@ def my_condos(report, site: str, user: str, rows: list, people_of) -> list:
             continue
         mine = False
         if c.confirmed:
-            people = {str(p).lower() for p in (people_of(c) or ())} | {o.lower() for o in c.owners}
+            people = {o.lower() for o in c.owners}
+            if c.members:
+                people |= {str(p).lower() for p in (people_of(c) or ())}
             mine = user.lower() in people
         out.append((c.name, nodes, mine))
     return out
+
+
+def unlisted_members(report, site: str) -> list:
+    """The condos with no ``members`` in report.toml: only their owners see
+    them as their own on the Submit page."""
+    return sorted(c.name for c in report.cluster(site).condos.values() if not c.members)
 
 
 def unplaced_condos(report, site: str, rows: list) -> list:
@@ -516,5 +527,5 @@ def advise(conn: sqlite3.Connection, site: str, user: str, job: Job, *, config: 
 
 
 __all__ = ["Settings", "settings", "Part", "partitions", "node_specs", "typical_waits", "Job", "candidates",
-           "rank", "SOON_MINUTES", "LATER_DAYS", "MAX_ASKED", "my_condos", "unplaced_condos", "people_lookup",
+           "rank", "SOON_MINUTES", "LATER_DAYS", "MAX_ASKED", "my_condos", "unlisted_members", "unplaced_condos", "people_lookup",
            "advise", "job_from"]

@@ -438,8 +438,9 @@ def test_whose_condo(tmp_path):
         "draft": {"owner": "x", "partition": "dias", "confirmed": False}}}}}})
     people = {"parish": {"amy", "cparish"}, "yangnolin": {"bo", "myang", "knolin"}, "draft": {"x"}}
     got = where.my_condos(report, "spydur", "amy", _rows(), lambda c: people[c.name])
-    # one not confirmed yet: still a condo's nodes (never shared), never anyone's own
-    assert [(c, len(n), m) for c, n, m in got] == [("parish", 4, True), ("yangnolin", 1, False), ("draft", 2, False)]
+    # one not confirmed yet: still a condo's nodes (never shared), never anyone's own;
+    # parish lists no members: only its owner's own (1.25.6), whatever its owner's lab group holds
+    assert [(c, len(n), m) for c, n, m in got] == [("parish", 4, False), ("yangnolin", 1, False), ("draft", 2, False)]
     got = where.my_condos(report, "spydur", "BO", _rows(), lambda c: people[c.name])
     assert [m for _c, _n, m in got] == [False, True, False]
     assert where.my_condos(report, "spydur", "x", _rows(), lambda c: people[c.name])[2][2] is False

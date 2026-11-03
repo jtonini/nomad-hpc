@@ -477,6 +477,49 @@ marker before each command and reads only what follows it, so such a banner
 is never read as the machine's figures. To keep the banner off
 non-interactive logins anyway, wrap it in `if [[ $- == *i* ]]; then ... fi`.
 
+## Temperatures (temps, 1.25.6)
+
+What the kernel's own sensors read (`/sys/class/hwmon`): the CPU (k10temp's
+Tctl and each CCD's, coretemp's packages and cores), NVMe drives, an
+integrated GPU, the board. `temps` reads them on this host, or over ssh (one
+ssh call each, a line of POSIX sh: any login shell runs it; no root, nothing
+installed there), 8 hosts at once, for at most 50 s in all: the hosts listed,
+the workstations the workstation collector reads here (`workstations =
+true`), and on a Slurm head node every node Slurm lists that isn't down, off
+or not responding (`slurm_nodes = true`, by its NodeHostname). NVIDIA GPUs'
+own temperatures and power are the `gpu` collector's (its `gpu_nodes`, over
+ssh too).
+
+```toml
+[collectors.temps]
+enabled = true
+hosts = ["localhost"]              # this host; others over ssh
+workstations = true                # a hub, or a lab's head node
+# slurm_nodes = true               # a cluster's head node
+# ssh_user = "..."                 # default: as ssh logs in (its config)
+# parallel = 8
+# max_seconds = 50
+# timeout = 15
+# keep_days = 30                   # each reading; each hour's for good
+```
+
+Each reading is kept `keep_days`; each hour's lowest, mean and highest
+(`hw_temps_hourly`) for good, so day and night can be told apart over
+months. A run within 45 s of the last reads nothing (two timers asking at
+once). For alerts that mean minutes, run it every minute on its own timer
+(`nomad collect -C temps --once`); alerts: [Alerts](alerts.md), "CPU
+temperatures".
+
+```
+nomad temps                              each host's sensors now, and the CPU's last 24 hours
+nomad temps --host H --hours 168         a week, hour by hour, day and night
+nomad temps --check --warning 70 --send  test the alert: what it would raise, sent
+```
+
+A fan's speed is read only where the board's sensor chip has a driver (an
+MSI board's Nuvoton NCT6687 has none in EL9's kernel): temperature is what
+there always is.
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and
