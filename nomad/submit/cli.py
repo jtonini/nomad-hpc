@@ -928,7 +928,9 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
 # start at 2026-11-02T13:55:12 using 1 processors on nodes spdr01 in
 # partition basic". Where no job has a time limit Slurm can't tell when a
 # node frees: then it is only "now" or "later".
-_TEST_ONLY = re.compile(r"to start at (\S+) using (\d+) processors? on nodes? (\S+) in partition (\S+)")
+# Slurm says more between the time and "using" in some versions (spydur's 25.11: "...T09:49:39 a using 1
+# processors ..."): whatever is there, on the same line.
+_TEST_ONLY = re.compile(r"to start at (\S+)[^\n]*? using (\d+) processors? on nodes? (\S+) in partition (\S+)")
 MAX_STARTS = 12
 STARTS_AT_ONCE = 4          # sbatch --test-only calls at a time (each asks slurmctld)
 STARTS_TIMEOUT = 60         # one call: a busy slurmctld answers in seconds, or not at all

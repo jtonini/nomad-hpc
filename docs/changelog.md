@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.25.5 (November 2026)
+
+### Fixes
+- **Where a job starts soonest showed no estimate on spydur**: its sbatch
+  (Slurm 25.11) says a word between the start time and "using" ("to start
+  at 2026-11-03T09:49:39 a using 1 processors ..."), which nomad didn't
+  expect, so every partition's row came back as an error with Slurm's line
+  in it. nomad now reads whatever Slurm puts there.
+
 ## v1.25.4 (November 2026)
 
 ### Features
