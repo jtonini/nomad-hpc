@@ -547,6 +547,173 @@ def temps_cmd(ctx, hosts, hours, all_sensors, brief, check, warning, critical, s
         conn.close()
 
 
+@cli.command('power')
+@click.option('--host', 'hosts', multiple=True, help='Only this host (more than once for several).')
+@click.option('--all', 'all_sensors', is_flag=True, help='Every sensor read, not only what is wrong and the supplies.')
+@click.option('--events', default=10, show_default=True, type=click.IntRange(0, 10000),
+              help="The boards' last log entries shown (0: none).")
+@click.option('--hub', 'on_hub', is_flag=True, help="The hub's combined database (every site's), as nomad sync writes it.")
+@click.option('--site', help="With --hub: only this site's hosts.")
+@click.option('--check', is_flag=True, help='Say what would be alerted now, as [alerts.power] has it.')
+@click.option('--send', is_flag=True, help='With --check: send it, through [alerts] (a test).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: this host's).")
+@click.pass_context
+def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
+    """Power supplies, voltages and fans, as the boards read them (1.25.8).
+
+    \b
+    nomad power                       each host: what is wrong, its supplies, its log
+    nomad power --host gpu09 --all    every sensor of one host
+    nomad power --check --send        what would be alerted now, sent as a test
+    nomad power --hub --site vadur    a site's, on the hub
+
+    The power collector reads them from the root helper's file
+    (scripts/power_root_probe.py, run by root's cron)."""
+    import json as _json
+    from nomad.collectors import power as P
+    config = ctx.obj['config']
+    if db:
+        path = Path(db).expanduser()
+    elif on_hub:
+        from nomad.config import combined_db_path
+        path = combined_db_path(((config.get("hub") or {}) if isinstance(config.get("hub"), dict) else {})
+                                .get("output_db"))
+    else:
+        path = get_db_path(config)
+    if not path.exists():
+        raise click.ClickException(f"no database at {path}")
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    rules = (config.get("alerts") or {}).get("power") or {}
+    rules = rules if isinstance(rules, dict) else {}
+    try:
+        try:
+            rows = P.hosts_now(conn, site=site)
+        except sqlite3.Error:
+            rows = []
+        if hosts:
+            rows = [r for r in rows if r[0] in hosts or r[0].split(".")[0] in hosts]
+        if not rows:
+            raise click.ClickException(
+                "no power readings here yet" + (f" for {', '.join(hosts)}" if hosts else "")
+                + f" ({path}): the root helper's cron, [collectors.power] files, and nomad collect -C power")
+        scols = {r[1] for r in conn.execute("PRAGMA table_info(power_sensors)")}
+        by_site = "source_site" in scols
+        now = datetime.now()
+        found_all = []
+        for r in rows:
+            node, read_at, error, n_sensors, n_problems, severity, sel_entries, notes = r[:8]
+            where = f" at {r[8]}" if len(r) > 8 and r[8] and not site else ""
+            try:
+                ago = int((now - datetime.fromisoformat(read_at)).total_seconds() // 60)
+                ago_text = f"{read_at[11:16]}, {ago} min ago" if ago < 180 else f"{read_at[:16].replace('T', ' ')}"
+            except (TypeError, ValueError):
+                ago_text = "?"
+            row_site = r[8] if len(r) > 8 else None
+            args = (node, row_site) if by_site else (node,)
+            if error:
+                click.echo(f"{node + where:<22} not read ({ago_text}): {error}")
+            else:
+                label = {"critical": click.style("CRITICAL", fg="red", bold=True),
+                         "warning": click.style("WARNING ", fg="yellow", bold=True)}.get(severity, "ok      ")
+                click.echo(f"{node + where:<22} {label} read {ago_text}")
+            sensors = conn.execute(
+                "SELECT sensor, type, kind, status, reading, unit, state, severity, problem, subject FROM power_sensors "
+                "WHERE node = ?" + (" AND source_site = ?" if by_site else "")
+                + " ORDER BY CASE type WHEN 'Power Supply' THEN 0 WHEN 'Power Unit' THEN 1 WHEN 'Voltage' THEN 2 "
+                "WHEN 'Current' THEN 3 ELSE 4 END, state IS NULL, sensor",
+                args).fetchall()
+            loose = []
+            try:
+                hp = conn.execute("SELECT host_problems FROM power_hosts WHERE node = ?"
+                                  + (" AND source_site = ?" if by_site else ""), args).fetchone()
+                loose = [p for p in _json.loads((hp or [None])[0] or "[]") if isinstance(p, dict)]
+            except (sqlite3.Error, ValueError):
+                pass
+            mine = [{"sensor": s[0], "subject": s[9], "severity": s[7], "problem": s[8]}
+                    for s in sensors if s[7] and not P.ignored(rules, node, s[0])
+                    and not (s[9] == "fans" and rules.get("fans") is False)]
+            mine += [dict(p, sensor=None) for p in loose
+                     if not any(P.ignored(rules, node, x) for x in (p.get("sensors") or ()))]
+            for subject in P.SUBJECTS:
+                said = [p["problem"] for p in mine if p["subject"] == subject]
+                if said:
+                    click.echo(f"  {subject}{' (when last read)' if error else ''}: " + "; ".join(said))
+            if error:
+                continue
+            watts = [(s[0], s[4]) for s in sensors if s[2] == "power_supply"
+                     and ((s[5] or "").lower() == "watts" or s[4] is None and s[6] is None)]
+            if watts and all(v is None for _n, v in watts):
+                click.echo(f"  supplies: {', '.join(n for n, _v in watts)}: no reading (the board gets no "
+                           "figure from them: supplies that don't report their power, or that are off)")
+            elif watts:
+                click.echo("  supplies: " + ", ".join(f"{n} {v:g} W" if v is not None else f"{n} no reading"
+                                                      for n, v in watts))
+            if all_sensors:
+                for s in sensors:
+                    value = s[6] if s[6] is not None else (f"{s[4]:g} {s[5] or ''}".strip()
+                                                           if s[4] is not None else "no reading")
+                    click.echo(f"    {s[1] or '':<13} {s[0]:<18} {s[3] or '':<4} {value}"
+                               + (f"   <- {s[7]}" if s[7] else ""))
+            if sel_entries is not None:
+                full = conn.execute("SELECT sel_overflow, sel_used_pct FROM power_hosts WHERE node = ?"
+                                    + (" AND source_site = ?" if by_site else ""), args).fetchone() or (0, None)
+                click.echo(f"  board log: {sel_entries} entr{'y' if sel_entries == 1 else 'ies'}"
+                           + (" (FULL: the board logs nothing new until it is cleared: ipmitool sel clear, "
+                              "after nomad has read it)" if full[0] else
+                              f" ({full[1]}% full)" if full[1] and full[1] >= 75 else ""))
+            if notes:
+                click.echo(f"  notes: {notes}")
+            found_all += [(node, mine)]
+        if events:
+            ecols = {r[1] for r in conn.execute("PRAGMA table_info(power_events)")}
+            if ecols:
+                where, args = [], []
+                if hosts:
+                    where.append(f"node IN ({','.join('?' * len(hosts))})")
+                    args += list(hosts)
+                if site and "source_site" in ecols:
+                    where.append("source_site = ?")
+                    args.append(site)
+                got = conn.execute(
+                    "SELECT node, logged, sensor, event, direction, detail, severity, history FROM power_events"
+                    + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY first_seen DESC, id DESC LIMIT ?",
+                    args + [events]).fetchall()
+                if got:
+                    click.echo(f"\nThe boards' last log entries ({len(got)}, newest first; * = alerted kind, "
+                               "h = already in the log at the first read):")
+                    for node, logged, sensor, event, direction, detail, sev, hist in got:
+                        click.echo(f"  {'*' if sev else ' '}{'h' if hist else ' '} {node:<10} {logged or '':<20} "
+                                   f"{sensor or '':<28} {event or ''}" + (f" ({direction})" if direction else "")
+                                   + (f" {detail}" if detail else ""))
+        if check and rules.get("enabled") is False:
+            click.echo("\ncheck: [alerts.power] enabled = false: nothing is alerted")
+        elif check:
+            items = [it for node, mine in found_all for it in P.alert_items(node, mine)]
+            click.echo("")
+            if not items:
+                click.echo("check: nothing to alert now")
+            for it in items:
+                click.echo(f"check: {it['severity']}: {it['subject']}: {it['message']}")
+                if send:
+                    from nomad.alerts import init_dispatcher, send_alert
+                    d = init_dispatcher(config)
+                    d.db_path = str(path)
+                    order = {"info": 0, "warning": 1, "critical": 2}
+                    if not getattr(d, "backends", None):
+                        click.echo("  not sent: no alert backends here: nomad test-alerts --email says more")
+                    elif order.get(it["severity"], 0) < order.get(getattr(d, "min_severity", "warning"), 1):
+                        click.echo(f"  not sent: {it['severity']} is below [alerts] min_severity ({d.min_severity})")
+                    else:
+                        sent = send_alert(severity=it["severity"], source="power", host=it["host"], test=True,
+                                          subject=f"{it['subject']} (a test: nomad power --check --send)",
+                                          message="(A test, from nomad power --check --send.) " + it["message"],
+                                          details=it["details"])
+                        said = ", ".join(f"{k} {'sent' if v else 'FAILED'}" for k, v in (sent or {}).items())
+                        click.echo(f"  sent: {said}" if said else "  not sent (see the log above)")
+    finally:
+        conn.close()
+
+
 def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
     """nomad partitions --site S --sorted: nomad.submit.where's sort, as
     the Console would make it for someone in no lab (whose condo is whose
@@ -5801,6 +5968,13 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
                             failing=_failing, hub_sites=hub_cfg.get('sites'))
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"node alert not sent: {_alert_err}")
+        # Power alerts for the same sites (1.25.8).
+        try:
+            from nomad.alerts.hub_power import hub_power_alerts
+            hub_power_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                             failing=_failing, hub_sites=hub_cfg.get('sites'))
+        except Exception as _alert_err:      # never let an alert stop a sync
+            logging.getLogger("nomad.sync").warning(f"power alert not sent: {_alert_err}")
 
 
 # Asking a site for its changes failing this many times in a row: it is copied
@@ -6174,6 +6348,13 @@ def _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=Fa
                             failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
         except Exception as e:               # never let an alert stop a sync
             log.warning(f"node alert not sent: {e}")
+        # Power alerts for the same sites (1.25.8).
+        try:
+            from nomad.alerts.hub_power import hub_power_alerts
+            hub_power_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                             failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
+        except Exception as e:               # never let an alert stop a sync
+            log.warning(f"power alert not sent: {e}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,

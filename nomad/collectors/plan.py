@@ -70,6 +70,10 @@ SPECS: tuple[Spec, ...] = (
     Spec("temps", "temps", "TempsCollector", False,
          "any host with temperature sensors, or one reaching workstations over SSH", ("sh",), (),
          ("hw_temps", "hw_temps_hourly")),
+    # Power supplies, voltages and fans (1.25.8): the root helper's files (scripts/power_root_probe.py).
+    Spec("power", "power", "PowerCollector", False,
+         "a host whose root runs the power helper (scripts/power_root_probe.py)", (), (),
+         ("power_hosts", "power_sensors", "power_events")),
     Spec("gpu", "gpu", "GPUCollector", True, "hosts with NVIDIA GPUs, or a head node "
          "reaching GPU nodes over SSH", ("nvidia-smi|ssh",), (), ("gpu_stats", "gpu_health")),
     Spec("nfs", "nfs", "NFSCollector", True, "hosts that mount NFS (client side)",
@@ -182,6 +186,8 @@ def plan(config: dict) -> list[Planned]:
             top = config.get("alerts") if isinstance(config.get("alerts"), dict) else {}
             cfg["alerts"] = {**{k: top[k] for k in ("node_state", "node_jobs") if isinstance(top.get(k), dict)},
                              **mine}
+        if spec.name == "power":
+            cfg.setdefault("alert_rules", (config.get("alerts") or {}).get("power") or {})
         if spec.name == "temps":
             cfg.setdefault("alert_rules", (config.get("alerts") or {}).get("temps") or {})
             # workstations = true: the workstation collector's own list (its table's, or the top level's)

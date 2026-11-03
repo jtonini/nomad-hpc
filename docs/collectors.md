@@ -521,6 +521,70 @@ A fan's speed is read only where the board's sensor chip has a driver (an
 MSI board's Nuvoton NCT6687 has none in EL9's kernel): temperature is what
 there always is.
 
+## Power supplies, voltages and fans (power, 1.25.8)
+
+What a server's own board controller (its BMC) knows about power: each
+supply's state ("Presence detected", "Power Supply AC lost", "Failure
+detected", redundancy), the power each gives, the board's voltages, the
+fans, and the board's event log. vadur's gpu09 ran on one of its two
+supplies from February to November 2026, the other with no input power, and
+nothing said so: its board knew.
+
+Reading the board takes root (`ipmitool` opens `/dev/ipmi0`), and nomad never
+runs as root. A small helper does, by root's cron, and only reads:
+`scripts/power_root_probe.py` (standard library, Python 3.6 or later; it runs
+`ipmitool sdr type`, `sensor get`, `sel info` and `sel elist`, nothing that
+sets or powers anything). It writes one JSON file, world-readable, that the
+`power` collector reads as nomad's own account. On a cluster's head node it
+reads itself and every node Slurm lists, over root's ssh, 8 at once:
+
+```sh
+install -d -m 755 -o root -g root /usr/local/libexec/nomad /var/lib/nomad-power
+install -m 755 -o root -g root power_root_probe.py /usr/local/libexec/nomad/
+/usr/bin/python3 -I /usr/local/libexec/nomad/power_root_probe.py --out /var/lib/nomad-power/power.json --nodes slurm --self
+```
+
+and in root's crontab:
+
+```
+*/5 * * * * /usr/bin/python3 -I /usr/local/libexec/nomad/power_root_probe.py --out /var/lib/nomad-power/power.json --nodes slurm --self
+```
+
+(`--nodes a,b,c` for named hosts; without `--nodes`, only the host it runs
+on; `--sinfo PATH` where Slurm's sinfo isn't in /usr/bin or /usr/local/bin.
+Each ipmitool command has 30 s; a board that doesn't answer is noted, and
+what was known of it is kept.) Its folder must be root's and not writable by others: the file is
+replaced there as root. A state file beside it (root's only) keeps which log
+entries were seen, so each run sends only new ones; a host's first read sends
+what its log holds, kept as history (not alerted). A run still going makes
+the next one stop at once.
+
+```toml
+[collectors.power]
+enabled = true
+files = ["/var/lib/nomad-power/power.json"]   # the helper's --out (shell patterns too)
+# max_age_minutes = 20                         # an older file is said: is the helper's cron running?
+```
+
+The collector judges what is wrong, not the helper: a supply with no input
+power, failed, predicted to fail or misconfigured; redundancy lost; a voltage
+past its board's thresholds; a fan stopped (a supply's own fan counts as the
+supply's); one supply giving 0 W while another carries the node. A threshold
+of 0 is no threshold: a supply that doesn't report its power to the board
+reads 0 W "below" it whenever the board starts reading (all of vadur's CPU
+nodes: node03's log holds 33 such entries since 2017), and that is shown, not
+alerted. Tables: `power_hosts` (each host's last read), `power_sensors` (each
+sensor now: rewritten when its state changes, its reading at most hourly),
+`power_events` (each board log entry, once). Alerts: [Alerts](alerts.md),
+"Power".
+
+```
+nomad power                       each host: what is wrong, its supplies, its log
+nomad power --host gpu09 --all    every sensor of one host
+nomad power --check --send        what would be alerted now, sent as a test
+nomad power --hub --site vadur    a site's, on the hub
+```
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

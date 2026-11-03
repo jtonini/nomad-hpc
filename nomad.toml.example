@@ -289,6 +289,17 @@ enabled = false
 # timeout = 15
 # keep_days = 30
 
+# Power supplies, voltages and fans (1.25.8): the root helper's file
+# (scripts/power_root_probe.py, by root's cron: docs/collectors.md, "Power")
+[collectors.power]
+enabled = false
+# files = ["/var/lib/nomad-power/power.json"]
+# max_age_minutes = 20
+
+# [alerts.power]
+# fans = true
+# ignore = ["node03:PMBPower"]
+
 # ============================================
 # WORKSTATION COLLECTOR
 # ============================================

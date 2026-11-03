@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.25.8 (November 2026)
+
+### Features
+- **Power supplies, voltages and fans** (the `power` collector,
+  `[alerts.power]`, `nomad power`): what each server's board controller
+  knows, through `ipmitool`: each supply's state and power, the voltages, the
+  fans, the board's event log. vadur's gpu09 ran on one supply from February
+  to November with nothing saying so. Root reads the boards (a small
+  read-only helper, `scripts/power_root_probe.py`, by root's cron: on a head
+  node, itself and every Slurm node over root's ssh); nomad reads its file.
+  Alerts for a supply with no input power, failed or failing, redundancy
+  lost, one supply carrying the node, a voltage past its thresholds, a fan
+  stopped, and new problem entries in a board's log; a threshold of 0 isn't
+  one (vadur's CPU nodes log "0 W below 0 W" at every start). Sites whose
+  alerts the hub sends (`alerts = "hub"`) get them from the hub.
+
 ## v1.25.7 (November 2026)
 
 ### Fixes

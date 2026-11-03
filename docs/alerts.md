@@ -248,6 +248,36 @@ Sent from where the collector runs, through its [alerts] backends (the hub's
 mail, for workstations the hub reads). `nomad temps --check --warning 70
 --send` sends a test now, through the same path.
 
+### Power (1.25.8)
+
+The `power` collector ([Collectors](collectors.md), "Power supplies, voltages
+and fans") raises, for each host, one alert for each of `power supply`
+(no input power, failed, failing, misconfigured, redundancy lost, a supply's
+fan stopped, one supply carrying the node), `voltage` (past its board's
+thresholds: critical past the critical one) and `fans` (stopped or slow),
+while the problem lasts: once, again when worse, then every reminder. A new
+problem entry in a board's log (an AC loss that came back before the next
+read, say) is a `power events` alert, each batch once; what the log held at
+its first read is history. Source `power`, the host as host. A threshold of 0
+is never an alert.
+
+```toml
+[alerts.power]
+# enabled = true
+# fans = true                      # false: no fan alerts
+# ignore = ["node03:PMBPower"]     # host:sensor (shell patterns): never alerted
+```
+
+Two sensors of one name on a host (older Dells name both supplies' "Status")
+are told apart by their sensor number: "Status #60h", "Status #61h"; ignore
+them with a pattern ("r720:Status*").
+
+A site whose alerts the hub sends (`alerts = "hub"` in its [[hub.sites]]:
+vadur) gets these from the hub after each sync, through the hub's [alerts],
+as its node alerts ("Node alerts sent by the hub"); the hub's own
+`[alerts.power]` applies. A host not read, or read more than 2 hours ago,
+is held as it was. `nomad power --check --send` sends a test.
+
 ## Backends
 
 ### Email
