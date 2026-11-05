@@ -258,9 +258,79 @@ time = "1-00:00:00"
 
 In a template's lines: `{input}` (the input's name, quoted for the shell),
 `{stem}` (its name without the ending), `{folder}` (where the job runs),
-`{cpus}`, `{mem_mb}` (the job's memory, MB), `{mem_mb_each}` (each process's
+`{cpus}`, `{tasks}` and `{threads}` (1.29.0: the processes and each one's
+threads), `{mem_mb}` (the job's memory, MB), `{mem_mb_each}` (each process's
 share of nine tenths of it: Columbus's `runc -m`), `{gpus}`, `{module}`,
 `{scratch}`; anything else in braces stays as it is (`${SLURM_CPUS_PER_TASK}`).
+
+### A template's options (1.29.0)
+
+A template may offer a few choices, shown on the page beside the version: how
+it runs in parallel, which program of a suite, what it does when it is put
+back in the queue. At most four options, each of two to six choices; the
+first is chosen unless the person picks another, so a template's usual way
+needs no choosing. A choice changes only what it names:
+
+```toml
+[[submit.templates]]
+program = "CP2K"
+modules = ["cp2k/*"]
+inputs = [".inp"]
+parallel = "mpi"
+cpus = 16
+run = "srun cp2k.psmp -i {input} -o {stem}.out"
+outputs = ["{stem}.out"]
+
+[[submit.templates.options]]
+name = "parallel"                      # a short key (--choose parallel=2)
+label = "Runs as"
+[[submit.templates.options.choices]]
+label = "MPI processes, one a core"
+omp = true                             # export OMP_NUM_THREADS={threads} (1 here)
+[[submit.templates.options.choices]]
+label = "MPI processes of 4 threads each"
+parallel = "hybrid"                    # --ntasks = cpus / 4, --cpus-per-task = 4
+threads_per_task = 4
+omp = true
+
+[[submit.templates.options]]
+name = "restart"
+label = "If it is put back in the queue"
+[[submit.templates.options.choices]]
+label = "Goes on from its restart file"
+setup = ['[ "${SLURM_RESTART_COUNT:-0}" -gt 0 ] && echo "requeued: the input reads {stem}-1.restart"']
+[[submit.templates.options.choices]]
+label = "Starts over"
+```
+
+What a choice may set: `run` (in place of the template's), `setup` and
+`after` (lines added to the template's: its own clean-up stays last),
+`outputs`, `sbatch` (options of nomad's own: `--constraint=a100`; not those
+nomad writes itself), `parallel`, `threads_per_task`, `omp`, `cpus`, `mem`,
+`time`, `gpus`, `partition`. Only one option may set the run line, and only
+one how it runs in parallel. `parallel` is `"threads"` (one process,
+`--cpus-per-task`), `"mpi"` (one process a CPU, `--ntasks`, on one node) or
+`"hybrid"` (processes of `threads_per_task` threads each, on one node). A
+choice's sizes are what the script asks for unless the person says otherwise.
+
+Every made script also:
+
+- writes Slurm's output file with `--open-mode=append`, so a job Slurm
+  puts back in the queue (a condo's owners took its node) keeps what it
+  printed before;
+- names each choice in its heading (`# Runs as: MPI processes of 4 threads each`);
+- reads the counts as the job has them when it runs: `{tasks}` is `${SLURM_NTASKS:-16}`, `{threads}`
+  `${SLURM_CPUS_PER_TASK:-4}` (and `{cpus}` the one that fits), so a job resized when it is sent
+  (nomad size, the Console's sizing) runs as many processes as it has, not the number first written;
+  `{mem_mb_each}` is each process's share (all of it for one process of threads);
+- with threads and `srun` in its lines, exports `SRUN_CPUS_PER_TASK`: since
+  Slurm 22.05 a step doesn't take the job's `--cpus-per-task` by itself, and
+  would run on one CPU.
+
+```
+nomad templates --site spydur --hub          each template's options, numbered
+nomad templates --site spydur --hub --make CP2K --input /home/amy/h2o.inp --choose parallel=2
+```
 A script that uses `{scratch}` stops at once when it isn't run by Slurm
 (`bash water.sh`, or sourced: its `rm -rf {scratch}` would otherwise take
 the person's whole scratch folder), and a site's `scratch` must name the

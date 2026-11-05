@@ -100,7 +100,7 @@ def test_a_folder_of_inputs_and_mpi():
                     site={"module_paths": ["/usr/local/sw/modulefiles"]})
     assert "#SBATCH --ntasks=4" in text and "#SBATCH --nodes=1" in text
     assert "cd /scratch/ab/ethylene || exit 1" in text
-    assert "$COLUMBUS/runc -m 16384 -nproc 4 > runls 2>&1" in text
+    assert "$COLUMBUS/runc -m 16384 -nproc ${SLURM_NTASKS:-4} > runls 2>&1" in text
     assert T.script_name(c, "/scratch/ab/ethylene") == "/scratch/ab/ethylene/run.sh"
 
 

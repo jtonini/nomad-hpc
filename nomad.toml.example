@@ -944,6 +944,18 @@ share = 0.8
 # cpus = 8
 # mem = "16G"
 # time = "1-00:00:00"
+# A template's options (1.29.0): a few choices, the first chosen unless the person picks another.
+# [[submit.templates.options]]
+# name = "parallel"
+# label = "Runs as"
+# [[submit.templates.options.choices]]
+# label = "MPI processes, one a core"
+# parallel = "mpi"
+# [[submit.templates.options.choices]]
+# label = "MPI processes of 4 threads each"
+# parallel = "hybrid"
+# threads_per_task = 4
+# omp = true                   # export OMP_NUM_THREADS={threads}
 
 # [submit.preemption] — Guests on condos, and the owners' first claim (1.28.0;
 # the hub's nomad.toml; docs/submit.md). Slurm's configuration is the switch;

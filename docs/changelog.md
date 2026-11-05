@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.29.0 (November 2026)
+
+### Features
+- **A template's options.** A job-script template may offer a few choices
+  (`[[submit.templates.options]]`: at most four, two to six choices each, the
+  first chosen unless the person picks another): how it runs in parallel
+  (threads, MPI, or MPI processes of several threads: `parallel = "hybrid"`
+  with `threads_per_task`), which program of a suite, what it does when it
+  is put back in the queue. A choice changes only what it names (the run
+  line, setup and after lines, outputs, sizes, #SBATCH options). `{tasks}` and
+  `{threads}` in a template's lines; `omp = true` exports `OMP_NUM_THREADS`.
+  `nomad templates --site S` lists them; `--make ... --choose NAME=N`.
+- **Made scripts keep what they printed when requeued** (`--open-mode=append`),
+  name the choices made in their heading, read their counts as the job has
+  them (`{tasks}` is `${SLURM_NTASKS:-N}`: a job resized when sent runs as many
+  processes as it has), and export `SRUN_CPUS_PER_TASK` where threads and
+  `srun` meet (a step would otherwise get one CPU). `{mem_mb_each}` is each
+  process's share: all of it for one process of threads.
+- **`nomad templates --site S --hub --check`**: every script each template can
+  make, made; a template that can't be read fails it. One program may have
+  one template a site (CP2K: `mpirun` at one cluster, `srun` at another).
+
 ## v1.28.1 (November 2026)
 
 ### Features

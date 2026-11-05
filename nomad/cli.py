@@ -553,15 +553,23 @@ def temps_cmd(ctx, hosts, hours, all_sensors, brief, check, warning, critical, s
 @click.option('--make', 'program', help='Write the script for this program (with --input).')
 @click.option('--input', 'input_path', help='With --make: the input file (or folder of inputs), a full path.')
 @click.option('--module', help='With --make: this version (default: the one chosen first).')
+@click.option('--choose', 'choices', multiple=True, metavar='OPTION=N',
+              help="With --make: this choice of an option (its number, from 1, or its label; more than once).")
+@click.option('--check', is_flag=True,
+              help="Make every program's script, every way its options can be chosen (nothing saved); fail if one "
+                   "can't be made.")
 @click.option('--db', type=click.Path(dir_okay=False), help="Database the module list is in (default: this host's).")
 @click.pass_context
-def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
+def templates_cmd(ctx, site, on_hub, program, input_path, module, choices, check, db):
     """The job script templates a site offers (1.26.0): [[submit.templates]].
 
     \b
-    nomad templates --site spydur --hub          each program, its versions there, the one chosen first
+    nomad templates --site spydur --hub          each program, its versions there, the one chosen first,
+                                                 its options (1.29.0) and their choices
     nomad templates --site spydur --hub --make Gaussian --input /home/me/water.gjf
                                                  the script it would write (nothing is saved)
+    nomad templates --site spydur --hub --make CP2K --input /home/me/h2o.inp --choose parallel=2
+    nomad templates --site spydur --hub --check  every script each template can make, made (for its staff)
 
     The versions are the cluster's own modules ([collectors.modules] there)."""
     from nomad.collectors.modules import available
@@ -583,6 +591,18 @@ def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
         finally:
             conn.close()
     got = TT.offer(config, site, mods)
+    if check:
+        made, failed = TT.check_all(config, site, mods)
+        for problem in got["problems"]:
+            if problem not in failed:
+                click.echo(f"  ! {problem}")
+        for f in failed:
+            click.echo(f"  ! {f}")
+        click.echo(f"{site}: {made} script(s) made from {len(got['programs'])} template(s); "
+                   + (f"{len(failed)} couldn't be" if failed else "every one could be"))
+        if failed:
+            raise SystemExit(1)
+        return
     if program:
         if not input_path:
             raise click.ClickException("--make needs --input (a full path)")
@@ -590,9 +610,15 @@ def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
         if prog is None:
             raise click.ClickException(f"{site} offers no {program} template"
                                        + (f": {'; '.join(got['problems'])}" if got["problems"] else ""))
+        choose = {}
+        for c in choices:
+            k, eq, v = c.partition("=")
+            if not eq or not k.strip() or not v.strip():
+                raise click.ClickException(f"--choose {c!r}: OPTION=N (its number, from 1, or its label)")
+            choose[k.strip()] = v.strip()
         try:
             made = TT.make(config, site, prog["program"], module=module or prog["choose"], input_path=input_path,
-                           available=mods)
+                           available=mods, choose=choose)
         except TT.TemplateError as e:
             raise click.ClickException(str(e)) from None
         click.echo(f"# would be saved as {made['path']}" + (f"; writes {', '.join(made['outputs'])}"
@@ -607,6 +633,9 @@ def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
         click.echo(f"  {p['program']:<12} {what}; {p['cpus']} CPUs, {p['mem']}, {p['time']}"
                    + (f", {p['gpus']} GPU(s)" if p["gpus"] else "") + (f", {p['partition']}" if p["partition"] else ""))
         click.echo(f"    versions: {', '.join(p['versions'])}  (first: {p['choose']})")
+        for o in p.get("options") or []:
+            click.echo(f"    {o['label']} (--choose {o['name']}=N): "
+                       + "; ".join(f"{i}. {c['label']}" for i, c in enumerate(o["choices"], 1)))
     for problem in got["problems"]:
         click.echo(f"  ! {problem}")
 
