@@ -22,7 +22,10 @@ rules, the same as `nomad console roles` and the Console's My Lab:
 
 A member's jobs count wholly toward the lab, whatever they ran them for, and
 someone in two labs counts in both: group membership is all nomad has to go
-on (Slurm accounts, where a site keeps them per lab, would say more).
+on (Slurm accounts, where a site keeps them per lab, would say more). Since
+1.30.0, from the day the groups collector first saw them in the group (its
+first_seen; a membership seen before nomad 1.11: always): a new student's
+earlier jobs are not the lab's, as in nomad.facts.share.
 """
 from __future__ import annotations
 
@@ -210,6 +213,14 @@ def labs(conn: sqlite3.Connection | None, config: dict | None, netid: str | None
         if conn is not None:
             counts = membership_counts(conn, g)
             rows = jobfacts.finished_rows(conn, since, until, users=sorted(people))
+            # A member's jobs from the day they joined (1.30.0): what they ran before was someone
+            # else's business, and is counted as such in the lab's share of the clusters.
+            from nomad.facts._common import parse_time
+            from nomad.facts.share import _member_at, _member_spans
+            spans = _member_spans(conn, g, people, acc.leaders(g) if g in assisted else ())
+            if rows:
+                rows = [r for r in rows if _member_at(spans, r.get("user_name"),
+                                                      parse_time(r.get("start_time") or r.get("submit_time")))]
             stats = jobfacts.summarize(rows, ceilings)
             ran = {r.get("user_name") for r in rows or () if r.get("user_name")}
             me = {(netid or "").strip().lower()}

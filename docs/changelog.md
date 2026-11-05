@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.30.0 (November 2026)
+
+### Features
+- **A lab's share of each cluster** (`nomad facts share NETID`, the Console's
+  My Lab > Clusters): over the last days, the lab's core-hours and GPU-hours
+  on its own condo, the shared nodes and other labs' condos, against
+  everyone else's and what the nodes could have run (their hours in
+  service), and what was left idle; how full it kept its own condo; on a
+  condo two labs share, the partner lab's part. Who waited for room while
+  the lab's jobs ran on the nodes they could use (off its own condo), and the
+  share of the busy cores the lab held then; the lab's own waits, and what
+  others held then. A trend by day, week or four weeks, against its own
+  condo's capacity when it has one. With `--min-others`, every figure about
+  people outside the lab is a sum of days, a day resting on fewer of them is
+  left out (and counted), and the window ends at the last midnight.
+- **My Lab counts a member's jobs from the day they joined** (`nomad facts
+  lab`, the Console's Members): the groups collector's first sight of them in
+  the group (first_seen, since 1.11); a new student's earlier jobs are not the
+  lab's, here as in its share of the clusters.
+- **Node hours over any days** (`nomad.condo.figures.node_hours`): what the
+  condo reports count by month, by spans of whole days (node_months is it
+  by month, the same figures as before).
+
 ## v1.29.0 (November 2026)
 
 ### Features

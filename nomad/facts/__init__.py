@@ -3,6 +3,7 @@
     sites(conn, days)                     every site, now, and its jobs over days
     person(conn, username, days, ...)     one person's work
     labs(conn, config, netid, days, ...)  the labs a person leads
+    share(conn, config, netid, days, ...) those labs' share of each cluster
     courses(conn, config, netid, ...)     the courses a person teaches, this term
     questions(conn, config, netid, ...)   the courses to ask a faculty member about
     teaches(conn, config, netid, ...)     which courses a person teaches (no figures)
@@ -26,4 +27,5 @@ from nomad.facts.courses import (courses, every_course, may_answer, questions,  
                                  teaches)
 from nomad.facts.labs import labs  # noqa: F401
 from nomad.facts.person import person  # noqa: F401
+from nomad.facts.share import share  # noqa: F401
 from nomad.facts.sites import sites  # noqa: F401

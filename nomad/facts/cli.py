@@ -149,6 +149,7 @@ def facts_group():
     nomad facts sites               every site now, and its jobs (last 30 days)
     nomad facts me NETID            one person's work
     nomad facts lab NETID           the labs that person leads, taken together
+    nomad facts share NETID         those labs' share of each cluster
     nomad facts busy                when each machine is busiest (last 30 days)
     Add --json for the data itself, --mask before sharing the output.
     Reads the hub's combined.db when there is one, else this host's database.
@@ -379,6 +380,158 @@ def lab_cmd(ctx, netid, days, db, as_json, mask, each):
                        + (f" [as of {_when(c['as_of'])}: not reporting]" if c["stale"] else ""))
     if data.get("condos_problem") and not mask:
         click.echo(f"(the labs' condos aren't shown: {data['condos_problem']})")
+
+
+_WHERE = {"own_condo": "own condo", "shared": "shared nodes", "other_condos": "other labs' condos"}
+
+
+def _ch(v) -> str:
+    return "-" if v is None else f"{v:,.0f}"
+
+
+def _span(m) -> str:
+    if m is None:
+        return "-"
+    return f"{m:.0f} min" if m < 90 else f"{m / 60:.1f} h" if m < 2880 else f"{m / 1440:.1f} days"
+
+
+def _n(k, one: str, many: str | None = None) -> str:
+    return f"{k} {one if k == 1 else (many or one + 's')}"
+
+
+def _mask_share(data: dict) -> None:
+    """Lab names and groups, condo names and the labs a condo is shared with: numbered."""
+    for i, lab in enumerate(data["labs"], 1):
+        lab["group"] = lab["name"] = f"lab #{i}"
+        for c in lab["clusters"]:
+            for j, o in enumerate(c["own_condos"], 1):
+                o["condo"] = o["label"] = o["partition"] = f"condo #{j}"
+                if o.get("shared_with"):
+                    o["shared_with"] = [f"another lab #{k}" for k in range(1, len(o["shared_with"]) + 1)]
+
+
+@facts_group.command("share")
+@click.argument("netid", required=False)
+@click.option("--group", "group", help="A lab by its group instead (staff).")
+@click.option("--days", default=30, show_default=True, type=click.IntRange(1, 365))
+@click.option("--min-others", default=0, show_default=True, type=click.IntRange(0, 100),
+              help="Leave out figures about people outside the lab resting on fewer of them, "
+                   "and end the window at the last midnight (the Console: 3, for anyone but staff).")
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.option("--report", "report", type=click.Path(), help="report.toml (default: nomad's own).")
+@click.option("--now", "now", hidden=True, help="As if it were this time (ISO).")
+@click.option("--json", "as_json", is_flag=True, help="The answer as JSON.")
+@click.option("--mask", is_flag=True,
+              help="Leave out the NetID, lab names and groups, condo names and the database's path.")
+@click.pass_context
+def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mask):
+    """The share of each cluster of the labs NETID leads, or is a research
+    assistant of (or of --group): its jobs' core-hours on its own condo, the
+    shared nodes and other labs' condos, against everyone else's and the
+    nodes' capacity; who waited for room while the lab's jobs ran there, and
+    the lab's own waits. Nodes as each cluster's latest reading has them."""
+    from datetime import datetime
+    from nomad.condo import config as ccfg
+    from nomad.facts.share import share
+    if bool(netid) == bool(group):
+        raise click.UsageError("give a NETID or --group, one of them")
+    try:
+        condos = ccfg.load(Path(report) if report else None, (ctx.obj or {}).get("config_target"))
+        problem = None
+    except ccfg.CondoConfigError as e:
+        condos, problem = None, str(e)
+    when = None
+    if now:
+        try:
+            when = datetime.fromisoformat(now)
+        except ValueError:
+            raise click.BadParameter("an ISO time, as 2026-11-05T16:00", param_hint="--now") from None
+    path, conn = _open(ctx, db)
+    try:
+        data = share(conn, ctx.obj.get("config", {}) or {}, netid.strip().lower() if netid else None,
+                     groups=[group] if group else None, days=days, now=when, condos=condos,
+                     min_others=min_others)
+    finally:
+        conn.close()
+    if problem:
+        data["condos_problem"] = "report.toml doesn't read" if mask else problem
+    if mask:
+        _mask_share(data)
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+    who = "this person" if mask else (netid or group)
+    if not data["labs"]:
+        click.echo(f"{who} leads no lab by nomad.toml's rules")
+        return
+    w = data["window"]
+
+    def left(n, what="day"):
+        return f", {_n(n, what)} left out" if n else ""
+    for lab in data["labs"]:
+        helper = " (as its research assistant)" if lab.get("as") == "assistant" else ""
+        upto = " to last midnight" if w.get("whole_days") else ""
+        click.echo(f"{lab['name']}{helper}, last {w['days']} days (since {w['since'][:10]}){upto}, "
+                   f"{lab['members']} members{_where(path, mask)}")
+        if not lab["clusters"]:
+            click.echo("  no cluster's nodes were read in the window")
+        for c in lab["clusters"]:
+            tot = c["total"]
+            of_used = "" if tot.get("lab_of_used_pct") is None else (
+                f", {tot['lab_of_used_pct']:g}% of everyone's" if not tot.get("others_left_out_days") else
+                f", at most {tot['lab_of_used_pct']:g}% of everyone's (others' left-out days aside)")
+            busy = "" if c.get("own_condo_pct") is None else f"; it kept its own condo {c['own_condo_pct']:g}% busy"
+            gpu = f", {_ch(tot['lab_gpu_hours'])} GPU-hours" if tot.get("gpus") else ""
+            behind = f" [to {c['until'][:10]}: its readings are behind]" if c.get("until") else ""
+            click.echo(f"  {c['label']}: the lab {_ch(tot['lab_core_hours'])} core-hours{gpu}"
+                       f"{of_used}{busy}" + (" [not reporting lately]" if c["stale"] else "") + behind)
+            for o in c["own_condos"]:
+                partner = f", shared with {', '.join(o['shared_with'])}" if o.get("shared_with") else ""
+                click.echo(f"    its condo {o['label']} ({o['partition']}): {o['nodes']} nodes, "
+                           f"{o['cores']} cores{partner}")
+            for r in c["rows"]:
+                idle = "-" if r["idle_pct"] is None else f"{r['idle_pct']:g}%"
+                rest = (f"others {_ch(r['others_core_hours'])} ({_p(r['others_pct'])}, "
+                        f"{_n(r['others_people'], 'person', 'people')}{left(r['others_left_out_days'])}), "
+                        f"idle {idle}")
+                if r.get("partners_core_hours") is not None:
+                    rest += (f"; of the others', the partner lab {_ch(r['partners_core_hours'])}, "
+                             f"guests {_ch(r['guests_core_hours'])}")
+                click.echo(f"    {_WHERE[r['where']]:<19} {r['nodes']:>3} nodes {r['cores']:>5} cores  "
+                           f"lab {_ch(r['lab_core_hours'])} ({_p(r['lab_pct'])})  {rest}")
+            wt = c["waits"]
+            o, b, mine = wt["others"], wt["behind_lab"], wt["lab"]
+            line = f"    waited for room ({wt['wait_minutes']} min or more, counted the day it ended): "
+            if not o["jobs"]:
+                line += "no one else's job" + left(o["left_out_days"])
+            else:
+                line += (f"others {_n(o['jobs'], 'job')} from {_n(o['people'], 'person', 'people')} "
+                         f"(on average {_span(o['mean_minutes'])}{left(o['left_out_days'])})")
+                if b["jobs"]:
+                    held = (f", {_p(b['lab_of_busy_pct'])} of those in use" if b["lab_of_busy_pct"] is not None
+                            else "") + (f" (what others held: {_n(b['busy_left_out_days'], 'day')} left out)"
+                                        if b["busy_left_out_days"] else "")
+                    line += (f"; {b['jobs']} of them ({_n(b['people'], 'person', 'people')}) while the lab's "
+                             f"jobs ran on their nodes ({_ch(b['hours'])} hours of waiting, added up), the lab "
+                             f"holding on average {b['lab_cores_avg']:g} of the {b['cores_there_avg']:g} cores "
+                             f"there off its condo{held}")
+                else:
+                    line += "; none while the lab's jobs ran on their nodes"
+            click.echo(line)
+            if mine["jobs"]:
+                held = "" if mine["others_of_busy_pct"] is None else \
+                    f"; others held {_p(mine['others_of_busy_pct'])} of the cores in use then"
+                if mine["busy_left_out_days"]:
+                    held += f" (what others held: {_n(mine['busy_left_out_days'], 'day')} left out)"
+                click.echo(f"    the lab's own: {_n(mine['jobs'], 'job')} waited (median "
+                           f"{_span(mine['median_minutes'])}){held}")
+            for note in c["coverage"]:
+                click.echo(f"    ({note})")
+    if data.get("min_others"):
+        for note in data["notes"]:
+            click.echo(f"  - {note}")
+    if data.get("condos_problem") and not mask:
+        click.echo(f"(condos are as the nodes say: {data['condos_problem']})")
 
 
 _BARS = " ▁▂▃▄▅▆▇█"

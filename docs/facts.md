@@ -7,6 +7,7 @@ Three questions every front to nomad asks, answered once, as data:
 | **sites** | every site now (freshness, nodes, CPU, memory and GPUs in use, jobs running and waiting, storage, alerts, workstations) and its jobs over a window | anyone signed in: aggregates only |
 | **me** | one person's work: their jobs over a window, running and waiting now, score and advice | that person |
 | **lab** | the labs a person leads: members, their jobs taken together, the lab's workstations, storage and condo nodes | the lab's PI; staff for any lab |
+| **share** | the share of each cluster of the labs a person leads: core-hours on the lab's own condo, the shared nodes and other labs' condos, against everyone else's and what the nodes could run; how full it kept its own condo; who waited for room while the lab ran there (1.30.0) | the lab's PI and its research assistants (others' figures resting on fewer than 3 people left out, the window to the last midnight); staff for any lab |
 | **course** | the courses a person teaches, this term: the class together, each student as a row, when the class works | the course's instructors; staff for any course |
 | **busy** | when each cluster, interactive server and group of workstations is busiest: the most in use at once and when, a typical week, the busiest and quietest hours (1.14.7) | anyone signed in; each workstation by name for staff only |
 
@@ -22,6 +23,8 @@ nomad facts lab NETID             # the labs NETID leads
 nomad facts lab NETID --each      # each member too, by NetID, and what needs attention
 nomad facts sites --json          # the data itself
 nomad facts lab NETID --mask      # no NetID, lab, machine or storage names, for sharing
+nomad facts share NETID --days 90 # those labs' share of each cluster
+nomad facts share --group G       # one lab by its group (staff)
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
 nomad facts course GROUP              # one course
 nomad facts busy --days 90 --each     # when each machine is busiest, each workstation too
@@ -127,7 +130,9 @@ Console's My Lab):
 * `members`: current members (seen in the groups collector's latest run,
   with an account), how many ran jobs in the window, how many the group
   lists without an account or no longer lists.
-* `jobs` and `now`: the members' jobs taken together.
+* `jobs` and `now`: the members' jobs taken together (since 1.30.0, each
+  member's from the day the groups collector first saw them in the group; a
+  membership seen before nomad 1.11: all of them).
 * `workstations`: the lab's machines, online or not, last seen, when they
   last answered (`last_online`), and what each is (`note`, from
   `[console.machines]`, 1.17.7).
@@ -189,6 +194,91 @@ to staff and to the lab's own PI, for that lab. Without names, no row is
 about one member. A member's jobs count wholly toward the lab, and
 someone in two labs counts in both: group membership is all there is to go
 on.
+
+## share
+
+For each lab the person leads (or is a research assistant of; `--group` for
+one lab by its group), each cluster with node readings in the window (1.30.0):
+
+* `rows`: where the lab ran, `own_condo` (its own condos: the confirmed ones
+  `lab` gives it), `shared` (nodes in no condo) and `other_condos`: the
+  nodes, cores and GPUs there (a node no longer read: as it last said); their
+  capacity (cores and GPUs times the hours in service, as the condo reports
+  count them: down, drained with no job left and in maintenance are out,
+  hours not read count as in service); the lab's core-hours and GPU-hours,
+  its jobs and the people who ran them; everyone else's, and how many
+  people; each a share of the capacity, and what was left idle. On a condo
+  two labs share, the other lab's part there (`partners_core_hours`) and the
+  guests' (`guests_core_hours`), to the lab's PI.
+* `own_condo_pct`: how busy the lab kept its own condo: its core-hours there,
+  of what the condo could run.
+* `total`: the same over every node, and the lab's share of everyone's use
+  (`lab_of_used_pct`, and of GPU-hours).
+* `waits`: jobs that waited 15 minutes or more for room on the cluster
+  (Slurm's reason Resources or Priority, or none recorded; not the job's own
+  limits, a dependency, a hold, nodes down) and stopped waiting (started, or
+  were cancelled) in the window: each counts on the day it stopped, and its
+  wait is measured the same in every window (its last 30 days at most); a job
+  still waiting counts the day it stops. `others`: other people's, how many
+  and the average wait. `behind_lab`: those that waited while the lab's jobs
+  ran on the nodes they could use, off the lab's own condo (its own nodes are
+  its own): how many, their hours of waiting while the lab ran there (added
+  up over the jobs), the cores the lab held there then on average, of how
+  many (off its condo), and its share of the cores in use there. `lab`: the
+  lab's own jobs that waited, the share of the cores in use others held then,
+  and for how much of the waiting others held any. Times and cores are
+  counted exactly, from the jobs' starts and ends. At the same time is not
+  because of: Slurm's priorities and the jobs' sizes decide who starts when.
+* `trend`: a day at a time up to 31 days, a week up to 120, four weeks
+  beyond (`days`: the step's length; the last one may be shorter): the
+  cluster's capacity, the lab's core-hours and everyone else's; with a condo
+  of its own, its condo's capacity and the lab's core-hours there too. Above
+  the condo's capacity, the lab ran more than its condo could hold.
+* `own_condos`, `stale` (the cluster hasn't reported for 2 hours), and
+  `coverage`: what the figures couldn't count.
+
+Nodes are as each cluster's latest reading has them (a partition that moved
+during the window counts as it is now). The window starts at the midnight
+`days` before its end. The lab's jobs are those of whoever was a member the
+day the job ran (the groups collector's first sight of them in the group to
+its last, or on while their cluster's latest groups run lists them; a
+membership seen before nomad 1.11, always), so a student joining or leaving
+moves no day already given (the `lab` answer counts members' jobs from the day
+they joined too, since 1.30.0); and, on its own condo,
+those in the condo's partition or under its Slurm account too (a job not
+started yet: in its condo's partitions), as the condo reports count them.
+
+With `min_others` (the Console: 3 for anyone but staff), every figure about
+people outside the lab is a sum of days, and a day resting on some but fewer
+than that many of them is left out of it and counted (`others_left_out_days`,
+`others_gpu_left_out_days`, `left_out_days`, `busy_left_out_days`): their
+core-hours on each kind of node, their GPU-hours (among those who used GPUs),
+the waits that ended that day (the people who waited, those behind the lab and
+those not), and the share of the cores others held while the lab's jobs
+waited or ran (the people who held them). The people counted are those who
+used cores, whom no lab in the answer claims, and who were never one of its
+labs' people (a lab's people are named in its `lab` answer); counted on pieces
+of the nodes every lab in the answer has in common, and the waits by which of
+its labs they waited behind, so two labs' figures can't be subtracted either.
+Idle is given only where no day is
+left out (it would give the days left out away), and the lab's share of
+everyone's use, with days left out, is at most what it says. A sum of days each
+resting on none or at least `min_others` people rests on none or at least that
+many however answers are combined: two windows, two days, a row and the trend,
+two labs. (Counts of people are not sums: two windows' can differ by one, which
+says someone ran in one and not the other, never what they ran.)
+Guests and a partner lab on the lab's own condo are as its condo report gives
+them to its owners, every day; to a research assistant, who sees the lab
+without its PI's own jobs, they are like any other, and no partner and guest
+split is given. The window then ends at the last midnight 2 hours have passed
+since (by then the day's last jobs and readings have reached the hub; a
+cluster whose readings are behind ends at the last midnight they settled,
+`until`): an answer is the same all day. What this can't stop: job records
+that reach the hub long after their day while its node readings don't (an
+import of old jobs), and a membership seen again after a gap, which starts
+anew. `nomad facts share` gives every figure up to now; `--min-others
+3` gives the Console's. A year on a cluster of 30 nodes takes some seconds
+(its node readings of the year are read).
 
 ## course
 

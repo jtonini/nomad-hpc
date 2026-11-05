@@ -354,57 +354,88 @@ class NodeMonth:
 
 def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | None = None,
                 until: datetime | None = None) -> dict[tuple[str, str], NodeMonth]:
-    """(node, month) -> NodeMonth over ``months`` (consecutive), from node_state.
+    """(node, month) -> NodeMonth over ``months`` (consecutive), from node_state
+    (node_hours with a span a month)."""
+    return node_hours(conn, site, nodes, [(m, *month_bounds(m)) for m in months], gpus, until)
+
+
+def node_hours(conn, site: str | None, nodes, spans: list[tuple[str, datetime, datetime]],
+               gpus: dict | None = None, until: datetime | None = None,
+               from_first_day: bool = False) -> dict[tuple[str, str], NodeMonth]:
+    """(node, key) -> NodeMonth for each span (key, t0, t1): consecutive, each
+    beginning at midnight (a month, a day, seven days), from node_state.
 
     Each reading stands for the time until the node's next one, up to twice
-    the node's usual interval that month, and never less than twice
-    DEFAULT_SAMPLE; the rest is "not read". The interval is the month's:
+    the node's usual interval in that span, and never less than twice
+    DEFAULT_SAMPLE; the rest is "not read". The interval is the span's:
     a site that once read its nodes every minute and now every five has
     each of today's readings stand for five minutes, not two. A node is counted
     from its first reading only when the site's other nodes were reporting
     before it (a new node), and until its last only when they went on
     reporting after it (a node retired); a collector that stopped for the
-    whole site leaves hours not read."""
+    whole site leaves hours not read. Readings at or after ``until`` are not
+    read. Before the site's first reading there is nothing to go by: the span
+    it began in counts whole (as a month's jobs do), or, ``from_first_day``,
+    from the midnight of that day."""
     nodes = sorted(set(nodes))
     cols = columns(conn, "node_state")
-    if not nodes or not months or not {"node_name", "timestamp"} <= cols:
+    if not nodes or not spans or not {"node_name", "timestamp"} <= cols:
         return {}
-    lo, hi = month_bounds(months[0])[0], month_bounds(months[-1])[1]
+    for _key, a, b in spans:
+        if a.time() != datetime.min.time() or b.time() != datetime.min.time():
+            raise ValueError("node_hours: each span begins and ends at midnight")
+    lo, hi = spans[0][1], spans[-1][2]
+    starts = [a for _key, a, _b in spans]
+
+    def key_at(t: datetime):
+        """The span holding ``t`` (None outside them all)."""
+        i = bisect.bisect_right(starts, t) - 1
+        return spans[i][0] if 0 <= i and t < spans[i][2] else None
     has_state = "state" in cols
     state = "state" if has_state else "NULL"
     idle = "(COALESCE(cpus_alloc, 0) = 0)" if "cpus_alloc" in cols else "1"
     cores = "cpus_total" if "cpus_total" in cols else "0"
     site_sql = " AND source_site = ?" if site is not None and "source_site" in cols else ""
-    rng = [lo.isoformat(), hi.isoformat()] + ([site] if site_sql else [])
+    top = min(hi, until) if until is not None else hi
+    rng = [lo.isoformat(), top.isoformat()] + ([site] if site_sql else [])
     span = conn.execute(f"SELECT MIN(timestamp), MAX(timestamp) FROM node_state "
                         f"WHERE timestamp >= ? AND timestamp < ?{site_sql}", rng).fetchone()
     site_first, site_last = (parse_time(span[0]), parse_time(span[1])) if span else (None, None)
     rows = []
     for part in chunks(nodes, 400):
-        # Each reading's gap to the node's next, in half-minutes, counted.
+        # Each reading's gap to the node's next, in half-minutes, counted by day
+        # (the spans are made of whole days).
         rows += conn.execute(
-            f"SELECT node_name, m, st, idle, CAST(ROUND(gap / 30.0) AS INTEGER), COUNT(*), MAX(c), "
+            f"SELECT node_name, d, st, idle, CAST(ROUND(gap / 30.0) AS INTEGER), COUNT(*), MAX(c), "
             f"MIN(timestamp), MAX(timestamp) FROM ("
-            f"SELECT node_name, timestamp, substr(timestamp, 1, 7) AS m, {state} AS st, {idle} AS idle, "
+            f"SELECT node_name, timestamp, substr(timestamp, 1, 10) AS d, {state} AS st, {idle} AS idle, "
             f"{cores} AS c, (julianday(replace(LEAD(timestamp) OVER (PARTITION BY node_name ORDER BY timestamp), "
             f"'T', ' ')) - julianday(replace(timestamp, 'T', ' '))) * 86400.0 AS gap "
             f"FROM node_state WHERE timestamp >= ? AND timestamp < ?{site_sql} "
             f"AND node_name IN ({','.join('?' * len(part))})) GROUP BY 1, 2, 3, 4, 5",
             rng + part).fetchall()
+    days: dict = {}
+
+    def key_of_day(d):
+        if d not in days:
+            t = parse_time(d)
+            days[d] = key_at(t) if t is not None else None
+        return days[d]
     first: dict = {}
     last: dict = {}
     core: dict = {}
-    gaps: dict = defaultdict(Counter)        # (node, month) -> half-minutes -> readings
-    for node, month, _, _, b, n, c, a, z in rows:
+    gaps: dict = defaultdict(Counter)        # (node, key) -> half-minutes -> readings
+    for node, d, _, _, b, n, c, a, z in rows:
         a, z = parse_time(a), parse_time(z)
         if a and (node not in first or a < first[node]):
             first[node] = a
         if z and (node not in last or z > last[node]):
             last[node] = z
         core[node] = max(core.get(node, 0), _int(c))
-        if b is not None:
-            gaps[(node, month)][int(b)] += n
-    # The most a reading may stand for, by node and month: twice the month's
+        k = key_of_day(d)
+        if b is not None and k is not None:
+            gaps[(node, k)][int(b)] += n
+    # The most a reading may stand for, by node and span: twice the span's
     # usual interval (the median gap), at least twice DEFAULT_SAMPLE (a
     # collector's usual run), so that a site whose interval changed over the
     # year isn't measured by the interval it had before.
@@ -421,13 +452,27 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
                 break
         cap[key] = max(2 * usual * 30.0, floor)
 
-    def cap_of(node, month):
-        return cap.get((node, month), floor)
+    def cap_of(node, key):
+        return cap.get((node, key), floor)
+    # The days' counts added up by span first, and taken in the order SQLite groups them (None
+    # first, then numbers, then text), so each span's hours are summed as one grouping by span
+    # would sum them: node_months gives the months' figures it always gave, to the last digit.
+    counts: Counter = Counter()
+    for node, d, st, is_idle, b, n, *_ in rows:
+        key = key_of_day(d)
+        if key is not None:
+            counts[(node, key, st, is_idle, b)] += n
+    order = {key: i for i, (key, _a, _b) in enumerate(spans)}
+
+    def sqlite_order(v):
+        return (0, 0) if v is None else (1, v) if isinstance(v, (int, float)) else (2, str(v))
     out: dict = {}
-    for node, month, st, is_idle, b, n, *_ in rows:
-        nm = out.setdefault((node, month), NodeMonth(cores=core.get(node, 0),
-                                                       gpus=(gpus or {}).get(node, 0)))
-        limit = cap_of(node, month)
+    for (node, key, st, is_idle, b), n in sorted(
+            counts.items(), key=lambda kv: (kv[0][0], order[kv[0][1]], sqlite_order(kv[0][2]),
+                                            sqlite_order(kv[0][3]), sqlite_order(kv[0][4]))):
+        nm = out.setdefault((node, key), NodeMonth(cores=core.get(node, 0),
+                                                     gpus=(gpus or {}).get(node, 0)))
+        limit = cap_of(node, key)
         secs = limit / 2.0 if b is None else min(b * 30.0, limit)
         h = n * secs / 3600.0
         cls = node_class(st, bool(is_idle)) if has_state else "in_service"
@@ -438,21 +483,27 @@ def node_months(conn, site: str | None, nodes, months: list[str], gpus: dict | N
         new = site_first is not None and first[node] > max(lo, site_first) + day
         gone = site_last is not None and last[node] < min(hi, site_last) - day
         # Before the site's first reading there is nothing to go by: its
-        # months have no readings (the month it began counts whole, as its
+        # spans have no readings (the span it began in counts whole, as its
         # jobs do).
-        begin = first[node] if new else max(lo, datetime(site_first.year, site_first.month, 1)
-                                            if site_first else lo)
-        stop = last[node] + timedelta(seconds=cap_of(node, last[node].strftime("%Y-%m"))) if gone else hi
+        if new:
+            begin = first[node]
+        elif site_first is not None and from_first_day:
+            begin = max(lo, datetime.combine(site_first.date(), datetime.min.time()))
+        elif site_first is not None:
+            i = bisect.bisect_right(starts, site_first) - 1
+            begin = max(lo, starts[i] if i >= 0 else lo)
+        else:
+            begin = lo
+        stop = last[node] + timedelta(seconds=cap_of(node, key_at(last[node]))) if gone else hi
         if until is not None:
             stop = min(stop, max(until, begin))
-        for month in months:
-            t0, t1 = month_bounds(month)
+        for key, t0, t1 in spans:
             h = _overlap(begin, stop, t0, t1)
-            nm = out.get((node, month))
+            nm = out.get((node, key))
             if h <= 0 and nm is None:
                 continue
             if nm is None:
-                nm = out[(node, month)] = NodeMonth(cores=core.get(node, 0), gpus=(gpus or {}).get(node, 0))
+                nm = out[(node, key)] = NodeMonth(cores=core.get(node, 0), gpus=(gpus or {}).get(node, 0))
             nm.hours = h
             if nm.read > h > 0:
                 k = h / nm.read
