@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.28.1 (November 2026)
+
+### Features
+- **A condo two labs share** (or whose lab is in two groups): report.toml's
+  `members` names several groups, `members = "group:myang$,knolin$"`, anyone
+  in any of them its lab's. `nomad partitions --condos` proposes
+  `AllowGroups=myang$,knolin$` (Slurm admits anyone in either), the condo
+  reports count both groups' members as the lab's, and the condo is on each
+  group's My lab page. A group named twice, or an empty name, is refused.
+  Before, a second group could only be added in the directory, which also
+  gives its people the first lab's files.
+
 ## v1.28.0 (November 2026)
 
 ### Features

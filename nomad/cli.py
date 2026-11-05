@@ -952,7 +952,7 @@ def _partitions_condos(ctx, db_path, site: str, as_json: bool) -> None:
         p = c.partition or {}
         state = "OK: the owners first, only their lab, guests preempted" if not c.problems else "not yet"
         click.echo(f"\n  {c.name:<12} {len(c.nodes)} node(s)  owners {', '.join(c.owners) or '?'}"
-                   + (f"  members {', '.join('group:' + g for g in c.groups)}" if c.groups else "") + f"  -- {state}")
+                   + (f"  members group:{','.join(c.groups)}" if c.groups else "") + f"  -- {state}")
         if p:
             click.echo(f"    {p['partition']}: PriorityTier {p.get('priority_tier') or 0}, PreemptMode "
                        f"{p.get('preempt_mode') or 'OFF'}, AllowGroups {p.get('allow_groups') or 'ALL'}")

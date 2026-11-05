@@ -584,9 +584,11 @@ def resolve_members(conn, condo: Condo, acc, members_of, exists, site: str | Non
     if isinstance(spec, list):
         people, how = set(spec), "listed in report.toml"
     elif isinstance(spec, str) and spec.startswith("group:"):
-        g = spec[len("group:"):]
-        people = set(members_of(g)) if members_of else set()
-        how = f"group {g}"
+        from nomad.condo.config import member_groups
+        groups = member_groups(spec)
+        for g in groups:
+            people |= set(members_of(g)) if members_of else set()
+        how = ("groups " if len(groups) > 1 else "group ") + ", ".join(groups)
     elif isinstance(spec, str) and spec.startswith("account:"):
         a = spec[len("account:"):]
         cols = columns(conn, "jobs")

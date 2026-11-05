@@ -298,7 +298,9 @@ follows what Slurm does:
 - **`nomad partitions --site S --condos`** (on the hub) checks each
   confirmed condo of report.toml against Slurm: the owners first on their
   nodes, only their lab in their partition (report.toml's `members =
-  "group:cparish$"` against the partition's `AllowGroups`, or `"account:NAME"`
+  "group:cparish$"` against the partition's `AllowGroups`; a condo two labs
+  share names both, `"group:myang$,knolin$"`, and Slurm admits anyone in
+  either; or `"account:NAME"`
   (else the condo's own `account`) against `AllowAccounts`, which keeps
   others out only where Slurm enforces associations,
   `AccountingStorageEnforce`; a condo whose members name neither isn't

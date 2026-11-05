@@ -3,7 +3,8 @@ as report.toml's condo reports name them, and how they are now.
 
 Whose a condo is: only a confirmed one ([report.clusters.C.condos.NAME]
 confirmed, the default); a draft is nobody's yet. When its ``members`` name
-groups ("group:NAME"), it is those groups' labs' and no one else's.
+groups ("group:NAME", or several: "group:NAME,NAME"), it is those groups'
+labs' and no one else's.
 Otherwise it is its owners': the lab group_pattern names for an owner
 (``{netid}$``), or, for an owner who leads one lab only, that lab. An owner
 who leads several labs, none of them named for them, gives none of them the
@@ -39,7 +40,8 @@ def owns(condo, group: str, leaders: set, pattern: str | None = None, labs_of=No
         return False
     members = condo.members
     listed = members if isinstance(members, list) else [members] if members else []
-    groups = [str(m).strip()[len("group:"):] for m in listed if str(m).strip().startswith("group:")]
+    from nomad.condo.config import member_groups
+    groups = [g for m in listed for g in member_groups(str(m).strip())]
     if groups:
         return group in groups
     owners = {str(o).strip().lower() for o in (condo.owners or ())}

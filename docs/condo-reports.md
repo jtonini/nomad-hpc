@@ -136,8 +136,9 @@ doesn't list, condos whose partition is gone, and owners not confirmed.
 - **Preempted guest jobs** are those that ended PREEMPTED. A guest job that
   was requeued keeps its job number and only its last run is kept, so the
   count is a lower bound.
-- **Members:** `members` in report.toml (a Unix group, a Slurm account, or a
-  list); else each owner's labs by `[console.labs]` in nomad.toml (the group
+- **Members:** `members` in report.toml (a Unix group, or several:
+  `"group:smith$,jones$"`, anyone in any of them; a Slurm account; or a
+  list of NetIDs); else each owner's labs by `[console.labs]` in nomad.toml (the group
   named for them by `group_pattern`, and the groups they `lead`), and the
   owners.
 
@@ -341,7 +342,8 @@ guest_partitions = ["condos"]          # default: partitions named like "condo"
 owner = "jsmith"                       # or several: ["jsmith", "rjones"]
 partition = "smith"                    # default: the table's name
 nodes = "c[01-04]"                     # default: the partition's nodes
-members = "group:smith$"               # or "account:smith", or a list of NetIDs
+members = "group:smith$"               # or several groups, "group:smith$,jones$";
+                                       # or "account:smith", or a list of NetIDs
 account = "smith"                      # the lab's Slurm account, if it has one
 email = "jsmith@example.edu"           # or a list; default: each owner@mail_domain
 cc = ["manager@example.edu"]

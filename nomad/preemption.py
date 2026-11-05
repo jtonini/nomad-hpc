@@ -136,10 +136,12 @@ def settings(config: dict | None) -> Settings:
 
 
 def member_groups(c) -> list[str]:
-    """The group report.toml's ``members`` names: the string form,
-    "group:cparish$" (a list is NetIDs, as the condo reports read it)."""
-    m = c.members
-    return [m[6:]] if isinstance(m, str) and m.startswith("group:") and len(m) > 6 else []
+    """The groups report.toml's ``members`` names: the string form,
+    "group:cparish$", or several, "group:myang$,knolin$" (Slurm's AllowGroups
+    admits anyone in any of them; a list is NetIDs, as the condo reports read
+    it)."""
+    from nomad.condo.config import member_groups as groups
+    return groups(c.members)
 
 
 def member_account(c) -> str | None:
@@ -390,7 +392,7 @@ def plan_text(result: dict, s: Settings, site: str) -> list[str]:
             off.append(f"PartitionName={g['partition']} ...  as now")
         elif not g.get("exists") and sets:
             on.append(f"add PartitionName={g['partition']} {sets} ..."
-                      + (f"   (the rest as {', '.join(g['now'])}'s line)" if g.get("now") else ""))
+                      + (f"   (the rest as on the {', '.join(g['now'])} line)" if g.get("now") else ""))
             off.append(f"PartitionName={g['partition']} ...  State=DRAIN; remove the line once squeue -p "
                        f"{g['partition']} is empty")
         for old in g.get("now") or []:

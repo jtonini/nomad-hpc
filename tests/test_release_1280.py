@@ -104,7 +104,7 @@ def test_spydur_today_the_owners_have_no_first_claim(tmp_path):
     assert "  PartitionName=parish ...  AllowGroups=cparish$ PriorityTier=2 PreemptMode=OFF" in plan
     assert "  PartitionName=all ...  PreemptMode=OFF" in plan
     assert ("  add PartitionName=condo_overflow Nodes=spdr[50-61] AllowGroups=ALL PriorityTier=1 PreemptMode=REQUEUE "
-            "GraceTime=1800 ...   (the rest as condos's line)") in plan
+            "GraceTime=1800 ...   (the rest as on the condos line)") in plan
     assert any(x.startswith("  PartitionName=condos ...  State=DRAIN PreemptMode=REQUEUE GraceTime=1800") for x in plan)
     off = plan[plan.index("To turn it back off (as scontrol shows them now; a setting the line didn't have: remove it):"):]
     assert "  PartitionName=parish ...  AllowGroups=ALL PriorityTier=1 PreemptMode=OFF   (as now)" in off

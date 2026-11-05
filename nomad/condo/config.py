@@ -34,7 +34,8 @@ might do differently from another.
     owner = "jsmith"                       # or two: ["jsmith", "rjones"]
     partition = "smith"                    # default: the table's name
     nodes = "c[01-04]"                     # default: the partition's nodes
-    members = "group:smith$"               # or "account:smith", or a list
+    members = "group:smith$"               # or several, "group:smith$,jones$"; or
+                                           # "account:smith"; or a list of NetIDs
     email = "jsmith@example.edu"           # or a list; default: each owner@mail_domain
     cc = ["manager@example.edu"]
     confirmed = true                       # init writes false: reports wait for it
@@ -316,9 +317,24 @@ def _members(value, what: str):
     if isinstance(value, str):
         kind, _, name = value.partition(":")
         if kind not in ("group", "account") or not name.strip():
-            raise CondoConfigError(f"{what}: \"group:NAME\", \"account:NAME\" or a list of NetIDs")
+            raise CondoConfigError(f"{what}: \"group:NAME\" (or \"group:NAME,NAME\"), \"account:NAME\" or a "
+                                   "list of NetIDs")
+        if kind == "group":
+            names = [g.strip() for g in name.split(",")]
+            if not all(names) or len(set(names)) != len(names):
+                raise CondoConfigError(f"{what}: \"group:NAME\" or several, \"group:NAME,NAME\" (each once, "
+                                       "none empty)")
+            return "group:" + ",".join(names)
         return f"{kind}:{name.strip()}"
     return _str_list(value, what)
+
+
+def member_groups(members) -> list[str]:
+    """The groups a condo's ``members`` names (1.28.1: one or several):
+    "group:myang$,knolin$" -> ["myang$", "knolin$"]; anything else -> []."""
+    if isinstance(members, str) and members.startswith("group:"):
+        return [g.strip() for g in members[len("group:"):].split(",") if g.strip()]
+    return []
 
 
 def _condo(cluster: str, name: str, d: dict) -> Condo:
