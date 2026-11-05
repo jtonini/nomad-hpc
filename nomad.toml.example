@@ -300,6 +300,21 @@ enabled = false
 # fans = true
 # ignore = ["node03:PMBPower"]
 
+# How fast each CPU really runs when busy (1.27.0): a CPU braked by its board
+# (a power supply lost: PROCHOT) is found the day it starts. No root.
+[collectors.clock]
+enabled = false
+# hosts = ["localhost"]
+# slurm_nodes = true                 # a head node: every node Slurm lists that answers
+# workstations = true                # and the workstation collector's
+# every_minutes = 15
+# seconds = 0.5
+
+# [alerts.clock]
+# min_fraction = 0.5                 # low below this share of what it should give
+# sustain = 2                        # readings in a row
+# ignore = ["gpu0*"]
+
 # The environment modules the cluster has (1.26.0), read daily, for the job
 # scripts nomad makes ([[submit.templates]] on the hub)
 [collectors.modules]

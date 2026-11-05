@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.27.0 (November 2026)
+
+### Features
+- **How fast each CPU really runs when busy** (the `clock` collector,
+  `[alerts.clock]`, `nomad clock`). arachne's node01-03 lost a power
+  supply's input on 4 October 2026 and their boards braked the CPUs to about
+  400 MHz instead of 3,700: no failure, healthy in Slurm, every job ten times
+  slower for a month. Each host runs a short busy loop and reads its CPU's
+  cycle counter (no root: perf for that process only; its sha256 rate where
+  there is no counter); a reading below half of what it should give (its
+  usual clock, hosts with the same CPU, the CPU's top clock), twice in a row,
+  is alerted: critical when its power readings show a supply problem too.
+  On arachne, 5 Nov: node02 396 MHz, node51 3,730.
+- **Where a job starts soonest** leaves out partitions whose nodes are all
+  throttled, says which nodes run slow in the others, and never picks one
+  with slow nodes while another has none.
+- **A board that can't be read in-band** (no /dev/ipmi0) is NOT WATCHED in
+  `nomad power`, not shown as if healthy; the clock alert says its supplies
+  can't be seen. Sites whose alerts the hub sends get the clock alerts from
+  the hub.
+
 ## v1.26.0 (November 2026)
 
 ### Features

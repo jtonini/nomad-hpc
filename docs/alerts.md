@@ -278,6 +278,35 @@ as its node alerts ("Node alerts sent by the hub"); the hub's own
 `[alerts.power]` applies. A host not read, or read more than 2 hours ago,
 is held as it was. `nomad power --check --send` sends a test.
 
+### CPU clock (1.27.0)
+
+The `clock` collector ([Collectors](collectors.md), "CPU clocks") raises one
+alert a host whose CPU runs far below what it should give when busy (a power
+brake: arachne's node01-03 ran at 400 MHz instead of 3,700 for a month after
+a supply lost its input), after `sustain` low readings in a row, while it
+lasts: once, again when worse, then every reminder. Source `clock`, subject
+`cpu clock`, the host as host; **critical** when the host's power readings
+(the `power` collector, same site) show a supply problem too, else warning.
+The message says what it runs at, what it should, how much slower jobs run,
+its supplies' state (or that its board can't be read in-band), and what to
+do: drain it, restore the supply, reset the board controller if the brake
+stays on.
+
+```toml
+[alerts.clock]
+# enabled = true
+# min_fraction = 0.5               # low below this share of what it should give
+# sha_min_fraction = 0.25          # judged by the sha256 rate alone (no cycle counter)
+# sustain = 2                      # readings in a row (every_minutes apart)
+# ignore = ["gpu0*"]               # hosts never alerted (shell patterns)
+# [alerts.clock.node07]
+# min_fraction = 0.3               # one host's own
+```
+
+A site whose alerts the hub sends (`alerts = "hub"`) gets these from the hub
+after each sync; a host read more than 2 hours ago is held as it was. `nomad
+clock --check --send` sends a test.
+
 ## Backends
 
 ### Email

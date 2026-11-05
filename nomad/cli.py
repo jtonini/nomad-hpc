@@ -611,6 +611,126 @@ def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
         click.echo(f"  ! {problem}")
 
 
+@cli.command('clock')
+@click.option('--host', 'hosts', multiple=True, help='Only this host (more than once for several).')
+@click.option('--history', default=0, show_default=True, type=click.IntRange(0, 1000),
+              help="Each host's last readings too (this many).")
+@click.option('--hub', 'on_hub', is_flag=True, help="The hub's combined database (every site's), as nomad sync writes it.")
+@click.option('--site', help="With --hub: only this site's hosts.")
+@click.option('--check', is_flag=True, help='Say what would be alerted now, as [alerts.clock] has it.')
+@click.option('--send', is_flag=True, help='With --check: send it, through [alerts] (a test).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database (default: this host's).")
+@click.pass_context
+def clock_cmd(ctx, hosts, history, on_hub, site, check, send, db):
+    """How fast each CPU really runs when busy (1.27.0): a CPU braked far
+    below its clock (a power supply lost, PROCHOT) is said here.
+
+    \b
+    nomad clock                        each host: its clock busy, what it should give, throttled since
+    nomad clock --host node02 --history 10
+    nomad clock --check --send         what would be alerted now, sent as a test
+    nomad clock --hub --site arachne   a site's, on the hub
+
+    The clock collector reads each host's CPU cycle counter over a short busy
+    loop ([collectors.clock])."""
+    from nomad.collectors import clock as C
+    config = ctx.obj['config']
+    if db:
+        path = Path(db).expanduser()
+    elif on_hub:
+        from nomad.config import combined_db_path
+        path = combined_db_path(((config.get("hub") or {}) if isinstance(config.get("hub"), dict) else {})
+                                .get("output_db"))
+    else:
+        path = get_db_path(config)
+    if not path.exists():
+        raise click.ClickException(f"no database at {path}")
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    rules = (config.get("alerts") or {}).get("clock") or {}
+    rules = rules if isinstance(rules, dict) else {}
+    try:
+        try:
+            rows = C.hosts_now(conn, site=site if on_hub or db else None)
+        except sqlite3.Error:
+            rows = []
+        if hosts:
+            rows = [r for r in rows if r["node"] in hosts or r["node"].split(".")[0] in hosts]
+        if not rows:
+            raise click.ClickException("no clock readings here yet" + (f" for {', '.join(hosts)}" if hosts else "")
+                                       + f" ({path}): [collectors.clock] and nomad collect -C clock --once")
+        now = datetime.now()
+        items = []
+        for r in rows:
+            where = f" at {r['source_site']}" if r.get("source_site") and not site else ""
+            try:
+                ago = int((now - datetime.fromisoformat(r["read_at"])).total_seconds() // 60)
+                ago_text = f"{ago} min ago" if ago < 180 else r["read_at"][:16].replace("T", " ")
+            except (TypeError, ValueError):
+                ago_text = "?"
+            if r.get("measure") == "mhz" and r.get("mhz"):
+                now_text = f"{r['mhz']} MHz busy"
+            elif r.get("sha_mbps"):
+                now_text = f"{r['sha_mbps']:g} MB/s sha256 (no cycle counter)"
+            else:
+                now_text = "no reading"
+            ref = (f", {r['ratio']:.0%} of {r['reference']:g} ({r['basis']})" if r.get("ratio") is not None
+                   and r.get("reference") else ", nothing yet to compare it with")
+            if r.get("throttled"):
+                label = click.style("THROTTLED", fg="red" if r.get("severity") == "critical" else "yellow", bold=True)
+            elif r.get("low_since"):
+                label = click.style("low      ", fg="yellow")
+            else:
+                label = "ok       "
+            click.echo(f"{r['node'] + where:<22} {label} {now_text}{ref}; read {ago_text}")
+            if r.get("low_since"):
+                click.echo(f"  low since {r['low_since'][:16].replace('T', ' ')}: {r.get('problem') or ''}")
+            supplies, unread = C.power_of(conn, r["node"], r.get("source_site"))
+            if supplies:
+                click.echo("  its power: " + "; ".join(supplies))
+            elif unread and r.get("low_since"):
+                click.echo(f"  its power: {unread}")
+            if r.get("model"):
+                click.echo(f"  {r['model']}" + (f", governor {r['governor']}" if r.get("governor") else ""))
+            if history:
+                cols = {x[1] for x in conn.execute("PRAGMA table_info(cpu_clock)")}
+                by = " AND source_site = ?" if "source_site" in cols and r.get("source_site") else ""
+                args = (r["node"], r["source_site"]) if by else (r["node"],)
+                for t, mhz, sha, low in conn.execute(
+                        f"SELECT timestamp, mhz, sha_mbps, low FROM cpu_clock WHERE node = ?{by} "
+                        "ORDER BY timestamp DESC LIMIT ?", (*args, history)):
+                    click.echo(f"    {t[:16].replace('T', ' ')}  " + (f"{mhz} MHz" if mhz else f"{sha:g} MB/s")
+                               + ("  low" if low else ""))
+            rule = C.rules(rules, r["node"])
+            if r.get("throttled") and rule["enabled"]:
+                items.append(C.alert_item(r["node"], r, supplies, unread, where))
+        if check and rules.get("enabled") is False:
+            click.echo("\ncheck: [alerts.clock] enabled = false: nothing is alerted")
+        elif check:
+            click.echo("")
+            if not items:
+                click.echo("check: nothing to alert now")
+            for it in items:
+                click.echo(f"check: {it['severity']}: {it['subject']}: {it['message']}")
+                if send:
+                    from nomad.alerts import init_dispatcher, send_alert
+                    d = init_dispatcher(config)
+                    d.db_path = str(path)
+                    order = {"info": 0, "warning": 1, "critical": 2}
+                    if not getattr(d, "backends", None):
+                        click.echo("  not sent: no alert backends here: nomad test-alerts --email says more")
+                    elif order.get(it["severity"], 0) < order.get(getattr(d, "min_severity", "warning"), 1):
+                        click.echo(f"  not sent: {it['severity']} is below [alerts] min_severity ({d.min_severity})")
+                    else:
+                        sent = send_alert(severity=it["severity"], source="clock", host=it["host"], test=True,
+                                          subject=f"{it['subject']} (a test: nomad clock --check --send)",
+                                          message="(A test, from nomad clock --check --send.) " + it["message"],
+                                          details=it["details"])
+                        said = ", ".join(f"{k} {'sent' if v else 'FAILED'}" for k, v in (sent or {}).items())
+                        click.echo(f"  sent: {said}" if said else "  not sent (see the log above)")
+    finally:
+        conn.close()
+
+
 @cli.command('power')
 @click.option('--host', 'hosts', multiple=True, help='Only this host (more than once for several).')
 @click.option('--all', 'all_sensors', is_flag=True, help='Every sensor read, not only what is wrong and the supplies.')
@@ -692,7 +812,12 @@ def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
                     and not (s[9] == "fans" and rules.get("fans") is False)]
             mine += [dict(p, sensor=None) for p in loose
                      if not any(P.ignored(rules, node, x) for x in (p.get("sensors") or ()))]
-            if error:
+            if error and ("/dev/ipmi" in str(error) or "could not open device" in str(error).lower()):
+                # 1.27.0: no board controller reachable in-band is not a healthy board: its supplies aren't seen
+                click.echo(f"{node + where:<22} {click.style('NOT WATCHED', fg='yellow', bold=True)} its board "
+                           f"can't be read in-band ({ago_text}: {error}): its supplies aren't seen from here "
+                           "(the clock collector still sees a CPU braked for lack of power)")
+            elif error:
                 click.echo(f"{node + where:<22} not read ({ago_text}): {error}")
             else:
                 # as the rules here judge it ([alerts.power] ignore, fans), not as the site stored it
@@ -6041,6 +6166,13 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
                              failing=_failing, hub_sites=hub_cfg.get('sites'))
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"power alert not sent: {_alert_err}")
+        # CPU clock alerts for the same sites (1.27.0).
+        try:
+            from nomad.alerts.hub_clock import hub_clock_alerts
+            hub_clock_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                             failing=_failing, hub_sites=hub_cfg.get('sites'))
+        except Exception as _alert_err:      # never let an alert stop a sync
+            logging.getLogger("nomad.sync").warning(f"clock alert not sent: {_alert_err}")
 
 
 # Asking a site for its changes failing this many times in a row: it is copied
@@ -6421,6 +6553,13 @@ def _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=Fa
                              failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
         except Exception as e:               # never let an alert stop a sync
             log.warning(f"power alert not sent: {e}")
+        # CPU clock alerts for the same sites (1.27.0).
+        try:
+            from nomad.alerts.hub_clock import hub_clock_alerts
+            hub_clock_alerts(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                             failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
+        except Exception as e:               # never let an alert stop a sync
+            log.warning(f"clock alert not sent: {e}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,

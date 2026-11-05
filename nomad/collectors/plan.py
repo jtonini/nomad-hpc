@@ -70,6 +70,10 @@ SPECS: tuple[Spec, ...] = (
     Spec("temps", "temps", "TempsCollector", False,
          "any host with temperature sensors, or one reaching workstations over SSH", ("sh",), (),
          ("hw_temps", "hw_temps_hourly")),
+    # How fast each CPU really runs when busy (1.27.0): a power brake (PROCHOT) found the day it starts.
+    Spec("clock", "clock", "ClockCollector", False,
+         "a head node reaching its nodes over SSH, or any host (python3 there)", ("sh",), (),
+         ("cpu_clock", "cpu_clock_hosts")),
     # The environment modules a cluster has (1.26.0), for the job scripts nomad makes.
     Spec("modules", "modules", "ModulesCollector", False,
          "a cluster's login or head node with environment modules (Lmod)", ("bash",), (),
@@ -192,8 +196,8 @@ def plan(config: dict) -> list[Planned]:
                              **mine}
         if spec.name == "power":
             cfg.setdefault("alert_rules", (config.get("alerts") or {}).get("power") or {})
-        if spec.name == "temps":
-            cfg.setdefault("alert_rules", (config.get("alerts") or {}).get("temps") or {})
+        if spec.name in ("temps", "clock"):
+            cfg.setdefault("alert_rules", (config.get("alerts") or {}).get(spec.name) or {})
             # workstations = true: the workstation collector's own list (its table's, or the top level's)
             ws = (config.get("collectors", {}) or {}).get("workstation", {}) or {}
             listed = ws.get("workstations") or config.get("workstations") or []

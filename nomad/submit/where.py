@@ -322,7 +322,14 @@ def _at(text) -> datetime | None:
         return None
 
 
-def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | None = None) -> dict:
+def _slow_text(slow: list) -> str:
+    shown = ", ".join(f"{n} at {h['mhz']} MHz" if h.get("mhz") else
+                      f"{n} at {h['ratio']:.0%} of its speed" if h.get("ratio") else n for n, h in slow[:3])
+    return shown + (f" and {len(slow) - 3} more" if len(slow) > 3 else "")
+
+
+def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | None = None,
+         slow: dict | None = None, serving: dict | None = None) -> dict:
     """``cands`` with Slurm's estimates (``starts``: nomad-gate starts) and
     the usual waits: each row's start, whether it starts within
     SOON_MINUTES, whether Slurm only puts it LATER_DAYS or more away
@@ -332,7 +339,13 @@ def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | No
     else the earliest start Slurm could tell, else the shortest usual wait,
     else the first in the site's order. "Fastest start" takes the same but
     only on something known (else none), and never a guest condo unless
-    ``fastest_guests``."""
+    ``fastest_guests``. slow: {partition: [(node, its clock row)]}, the nodes
+    the clock collector finds throttled (1.27.0) that Slurm still gives jobs;
+    serving: {partition: how many of its nodes Slurm gives jobs}. A partition
+    all of whose serving nodes are throttled is not suggested; one with some
+    is said, and between partitions of the same kind equal on what Slurm and
+    the usual waits say, nomad's pick is one without any (never another kind,
+    a guest condo or big-memory nodes, for that)."""
     by = {s.get("partition"): s for s in (starts or {}).get("starts") or []}
     states = (starts or {}).get("nodes") if isinstance((starts or {}).get("nodes"), dict) else {}
     now = _at((starts or {}).get("now"))
@@ -359,19 +372,39 @@ def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | No
         if row["error"] and row["allowed"]:
             row["allowed"] = False
             row["why"] = f"Slurm: {row['error']}"
+        mine = (slow or {}).get(c["partition"]) or []
+        row["slow_nodes"] = [n for n, _h in mine]
+        if mine:
+            total = (serving or {}).get(c["partition"], c.get("nodes") or 0)
+            worst = min((h.get("ratio") or 1 for _n, h in mine), default=1)
+            slower = f": a job there runs about {round(1 / worst)}x slower" if 0 < worst < 0.5 else ""
+            if total and len(mine) >= total and row["allowed"]:
+                row["allowed"] = False
+                row["why"] = (f"{'its node runs' if total == 1 else f'all {total} of its nodes run'} far below "
+                              f"its clock, throttled ({_slow_text(mine)}){slower}")
+            elif row["allowed"] and not row["why"]:
+                row["why"] = (f"{len(mine)} of its {total} nodes run{'s' if len(mine) == 1 else ''} throttled "
+                              f"({_slow_text(mine)}){slower}, if the job lands there")
         rows.append(row)
 
     def best(pool: list, guess: bool) -> str | None:
+        # what is known first, as before; among the ones equal on it, of the kind the site's order
+        # puts first, one with no slow node
+        def first(rows_):
+            return next((r for r in rows_ if not r["slow_nodes"] and r["role"] == rows_[0]["role"]),
+                        rows_[0])["partition"]
         soon = [r for r in pool if r["soon"]]
         if soon:
-            return soon[0]["partition"]
+            return first(soon)
         known = [r for r in pool if _at(r["start"]) and not r["later"]]
         if known:
-            return min(known, key=lambda r: _at(r["start"]))["partition"]
+            m = min(_at(r["start"]) for r in known)
+            return first([r for r in known if _at(r["start"]) == m])
         waited = [r for r in pool if r["usual_wait_s"] is not None]
         if waited:
-            return min(waited, key=lambda r: r["usual_wait_s"])["partition"]
-        return pool[0]["partition"] if pool and guess else None
+            m = min(r["usual_wait_s"] for r in waited)
+            return first([r for r in waited if r["usual_wait_s"] == m])
+        return first(pool) if pool and guess else None
 
     ok = [r for r in rows if r["allowed"]]
     rec = best(ok, True)
@@ -382,6 +415,24 @@ def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | No
             "settings": {"guests": cfg.guests, "guest_max_days": cfg.guest_max_days,
                          "overflow_max_hours": cfg.overflow_max_hours, "reserve_nodes": cfg.reserve_nodes,
                          "fastest_guests": cfg.fastest_guests, "later_days": LATER_DAYS}}
+
+
+def _out_of_service(conn: sqlite3.Connection, site: str | None, node: str) -> bool:
+    """Whether Slurm's last state for the node (node_state) takes no jobs:
+    drained, draining, down, powered off, failing."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(node_state)")}
+        if "node_name" not in cols or "state" not in cols:
+            return False
+        by = " AND source_site = ?" if site is not None and "source_site" in cols else ""
+        row = conn.execute(f"SELECT state FROM node_state WHERE node_name = ?{by} ORDER BY timestamp DESC LIMIT 1",
+                           (node, site) if by else (node,)).fetchone()
+    except sqlite3.Error:
+        return False
+    if not row or not row[0]:
+        return False
+    from nomad.collectors.node_state import node_is_available
+    return not node_is_available(str(row[0]))
 
 
 def _nodes_of(c, by_part: dict) -> list:
@@ -515,7 +566,18 @@ def advise(conn: sqlite3.Connection, site: str, user: str, job: Job, *, config: 
         job = Job(mem_mb=sent.get("mem_mb") or job.mem_mb, time_s=sent.get("time_s"),
                   gpus=int(sent.get("gpus") or 0))
     cands = [c for c in candidates(parts, job, cfg) if c["partition"] in names]
-    out = rank(cands, starts if starts.get("ok") else None, cfg, typical_waits(conn, site, names, now))
+    from nomad.collectors.clock import throttled_nodes
+    clock_rules = ((config or {}).get("alerts") or {}).get("clock") if isinstance(config, dict) else None
+    braked = throttled_nodes(conn, site, alerts_clock=clock_rules if isinstance(clock_rules, dict) else None)
+    # a braked node Slurm won't give jobs to (drained, down) slows none; a partition's share is of
+    # the nodes Slurm still gives jobs
+    slow, serving = {}, {}
+    if braked:
+        out_of = {n for p in parts for n in p.nodes if _out_of_service(conn, site, n)}
+        slow = {p.name: sorted((n, braked[n]) for n in p.nodes if n in braked and n not in out_of) for p in parts}
+        serving = {p.name: len([n for n in p.nodes if n not in out_of]) for p in parts}
+    out = rank(cands, starts if starts.get("ok") else None, cfg, typical_waits(conn, site, names, now), slow,
+               serving)
     out["ok"] = True
     if not starts.get("ok"):
         out["error"] = starts.get("error") or "the cluster didn't say when it would start"

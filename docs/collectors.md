@@ -616,6 +616,72 @@ default, when nomad first saw it; rewritten only when the list changes) and
 table. `nomad templates --site spydur` shows them, with the versions each
 template offers there.
 
+## CPU clocks (clock, 1.27.0)
+
+How fast each CPU really runs when busy. arachne's node01-03 lost one power
+supply's input on 4 October 2026 and kept running on the other; their boards
+answered by braking the CPUs (PROCHOT) to their lowest clock, about 400 MHz
+instead of 3,700. Nothing failed, no job crashed and Slurm saw healthy nodes:
+every job there ran ten times slower for a month. The clock the OS reports
+(`/proc/cpuinfo`, `scaling_cur_freq`, `cpupower`) is the one it asked for and
+can say 3,100 MHz meanwhile; the CPU's own cycle counter says what it gets.
+
+Each read, every host runs a short busy loop in its own `python3` (3.6 or
+later, standard library; EL8's platform-python where there is no python3),
+over the same kind of ssh call as the temperatures, no root: the CPU's cycles
+in user mode, counted for that process only (`perf_event_open`, allowed at
+the kernel's default `perf_event_paranoid` of 2), over 0.5 s of CPU time,
+is the clock it runs at. An idle node is measured busy too: a braked one
+looks like any other until it works. Where the counter can't be read (a
+virtual machine, a paranoid setting of 3), its sha256 rate per CPU-second is
+judged instead, against its own past and hosts like it.
+
+Every socket is measured (a brake is per package: one socket braked slows
+every job that spans it) and the lowest counts. A reading is low below
+`min_fraction` (0.5) of the most the host should give, the highest of: its
+usual clock (the 90th percentile of its last 30 days' readings that weren't
+low: a month braked isn't its usual), the most a host alike gives now (the
+same CPU, both real machines; braked ones among them don't lower it: node02
+against node51-53), and its CPU's top clock (cpufreq's maximum, or an Intel
+model's rated clock). A low clock counts only when its sha256 rate agrees,
+where it has one to compare with (a brake lowers both; a count another tool
+disturbed lowers only one); judged by the sha256 rate alone, low is below
+`sha_min_fraction` (0.25). After `sustain` (2) low readings in a row it is throttled:
+alerted ([Alerts](alerts.md), "CPU clock"), critical when the power collector
+shows a supply problem on it. Measured on arachne, 5 Nov 2026: node02 396 MHz
+(11% of 3,764; sha256 115 MB/s), node51 3,730 MHz (sha256 1,826 MB/s).
+
+```toml
+[collectors.clock]
+enabled = true
+hosts = ["localhost"]
+slurm_nodes = true             # a head node: every node Slurm lists that answers (drained ones too)
+# workstations = true          # a lab's head node: the workstation collector's
+# every_minutes = 15           # with the collectors every 5 minutes: every third run
+# seconds = 0.5                # CPU time of each busy loop (one core)
+# parallel = 8
+# max_seconds = 60
+# timeout = 20
+# keep_days = 90
+```
+
+Submit a job's "Where would it start soonest?" knows them too: a partition
+whose nodes are all throttled isn't suggested, one with some says which, and
+nomad's pick is one without any where there is one ([Submit](submit.md)).
+Tables: `cpu_clock` (each reading), `cpu_clock_hosts` (each host now).
+
+```
+nomad clock                         each host: its clock busy, what it should give, low since
+nomad clock --host node02 --history 10
+nomad clock --check --send          what would be alerted now, sent as a test
+nomad clock --hub --site arachne    a site's, on the hub
+```
+
+A host whose board can't be read in-band (no `/dev/ipmi0`: arachne's node01
+and node03) is shown by `nomad power` as NOT WATCHED, not as healthy: its
+supplies aren't seen, and this check is what still finds a CPU braked for
+lack of power.
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

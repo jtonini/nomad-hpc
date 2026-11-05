@@ -330,7 +330,7 @@ def test_nomad_power_says_it(tmp_path, boards, monkeypatch):
     assert "gpu09" in out and "WARNING" in out and "PSU1 AC Lost says" in out
     assert "supplies: PMBPower 0 W, PMBPower2 200 W" in out
     assert "node03" in out and "supplies: PMBPower: no reading (the board gets no figure from them" in out
-    assert "nobmc" in out and "not read" in out
+    assert "nobmc" in out and "NOT WATCHED its board can't be read in-band" in out      # 1.27.0
     assert "check: warning: power supply: gpu09:" in out
     assert "h gpu09" in out                                         # its log's history, marked
     r = CliRunner().invoke(cli, ["-c", str(toml), "power", "--db", str(tmp_path / "site.db"), "--host", "node03",
