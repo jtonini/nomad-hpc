@@ -573,7 +573,10 @@ supply's); one supply giving 0 W while another carries the node. A threshold
 of 0 is no threshold: a supply that doesn't report its power to the board
 reads 0 W "below" it whenever the board starts reading (all of vadur's CPU
 nodes: node03's log holds 33 such entries since 2017), and that is shown, not
-alerted. Tables: `power_hosts` (each host's last read), `power_sensors` (each
+alerted. A fan nomad has never seen turning is a header with no fan on it
+(vadur's CPU nodes have four, at 0 RPM on every board): said in the host's
+notes, not alerted; a fan that turned and stops is (1.26.0). Tables:
+`power_hosts` (each host's last read), `power_sensors` (each
 sensor now: rewritten when its state changes, its reading at most hourly),
 `power_events` (each board log entry, once). Alerts: [Alerts](alerts.md),
 "Power".
@@ -584,6 +587,34 @@ nomad power --host gpu09 --all    every sensor of one host
 nomad power --check --send        what would be alerted now, sent as a test
 nomad power --hub --site vadur    a site's, on the hub
 ```
+
+## Environment modules (modules, 1.26.0)
+
+The modules a cluster has, as `module -t avail` lists them, read once a day,
+so the job scripts nomad makes (the Console's "No script yet? Make one",
+`nomad templates`: [Submit](submit.md), "Making a script") offer the versions
+the cluster really has. It runs in a login shell of the account collecting
+(`bash -lc`: Lmod and Environment Modules set `module` up at login), after
+`module use` for each of `module_paths`, the folders of modules a login
+doesn't add on its own (spydur's `/usr/local/sw/modulefiles`). On the
+cluster's own nomad.toml:
+
+```toml
+[collectors.modules]
+enabled = true
+module_paths = ["/usr/local/sw/modulefiles"]
+# min_hours = 20               # read at most this often
+```
+
+A read that fails (a folder of `module_paths` not there just then, `module
+use` or `module -t avail` failing, a folder that gave no modules) is said and
+the list read before is kept: never taken for "those modules are gone".
+What a login prints is not taken for modules. Tables: `modules_available`
+(each module, whether the cluster marks it its
+default, when nomad first saw it; rewritten only when the list changes) and
+`modules_status` (when it was last read, how many). Synced to the hub as any
+table. `nomad templates --site spydur` shows them, with the versions each
+template offers there.
 
 ## Workstation mounts
 

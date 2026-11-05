@@ -246,7 +246,8 @@ def test_the_collector_keeps_and_alerts(tmp_path, boards, monkeypatch):
     assert {d["node"] for d in data} == {"gpu09", "node03", "nobmc"}      # no --self: not the head itself
     db = sqlite3.connect(tmp_path / "site.db")
     hosts = {r[0]: r[1:] for r in db.execute("SELECT node, severity, problems, error FROM power_hosts")}
-    assert hosts["gpu09"][:2] == ("warning", 4) and hosts["node03"][:2] == (None, 0)
+    # AC lost, and one supply carrying the node; its fans at 0 RPM since the first read aren't counted (1.26.0)
+    assert hosts["gpu09"][:2] == ("warning", 2) and hosts["node03"][:2] == (None, 0)
     assert hosts["nobmc"][2].startswith("Could not open")
     assert db.execute("SELECT reading, unit FROM power_sensors WHERE node = 'node03' AND sensor = '+12V'"
                       ).fetchone() == (11.9, "Volts")
@@ -569,3 +570,81 @@ def test_the_hub_sends_a_batch_that_arrives_late(tmp_path, boards, monkeypatch):
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg, now=datetime.now() + timedelta(hours=1))
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg, now=datetime.now() + timedelta(hours=13))
     assert sent.count("vadur/gpu09 power events") == 1           # once
+
+
+
+# ── 1.26.0: a fan never seen turning is a header with no fan ─────────────────
+
+def test_a_fan_is_alerted_when_it_stops_not_when_it_never_turned(tmp_path, boards, monkeypatch):
+    """vadur's CPU nodes: SYS_FAN1-4 at 0 RPM on every board (headers with no fan), 4 Nov 2026."""
+    fans = "SYS_FAN1         | 41h | lnr | 29.1 | 0 RPM\nFRNT_FAN1        | 44h | ok  | 29.4 | 4200 RPM"
+    SDR["node03"]["Fan"], before = fans, SDR["node03"]["Fan"]
+    GET["SYS_FAN1"] = (600.0, 600.0, 700.0)
+    GET["FRNT_FAN1"] = (600.0, 600.0, 700.0)
+    try:
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        sent = []
+        _collect(tmp_path, monkeypatch, sent)
+        db = sqlite3.connect(tmp_path / "site.db")
+        assert sent == []
+        assert "SYS_FAN1 at 0 RPM since nomad first read it (no fan on the header?)" in \
+            db.execute("SELECT notes FROM power_hosts WHERE node = 'node03'").fetchone()[0]
+        assert db.execute("SELECT sensor, spun FROM power_sensors WHERE node = 'node03' AND unit = 'RPM' "
+                          "ORDER BY sensor").fetchall() == [("FRNT_FAN1", 1), ("SYS_FAN1", 0)]
+        # the fan that turned stops: alerted
+        SDR["node03"]["Fan"] = fans.replace("| ok  | 29.4 | 4200 RPM", "| lnr | 29.4 | 0 RPM")
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        _later(doc, out)
+        _collect(tmp_path, monkeypatch, sent)
+        assert [(k["host"], k["subject"]) for k in sent] == [("node03", "fans")]
+        assert "FRNT_FAN1 0 RPM, below its non-recoverable 600" in sent[0]["message"]
+        assert "SYS_FAN1" not in sent[0]["message"]
+    finally:
+        SDR["node03"]["Fan"] = before
+        del GET["SYS_FAN1"], GET["FRNT_FAN1"]
+
+
+def test_a_1258_table_gets_the_new_column(tmp_path, boards, monkeypatch):
+    db = sqlite3.connect(tmp_path / "site.db")
+    db.executescript(P.PowerCollector.SCHEMA.replace(", spun INTEGER", ""))
+    db.commit()
+    _run(tmp_path, "--nodes", "gpu09")
+    _collect(tmp_path, monkeypatch, [])
+    assert "spun" in {r[1] for r in db.execute("PRAGMA table_info(power_sensors)")}
+
+
+def test_a_fan_keeps_its_history_through_no_reading_and_the_upgrade(tmp_path, boards, monkeypatch):
+    """Review of 1.26.0: a read with no RPM ("No Reading") keeps what was known; rows 1.25.8 kept
+    (spun unknown) are judged by their own history, not taken for empty headers."""
+    fans = "SYS_FAN1         | 41h | lnr | 29.1 | 0 RPM\nFRNT_FAN1        | 44h | ok  | 29.4 | 4200 RPM"
+    SDR["node03"]["Fan"], before = fans, SDR["node03"]["Fan"]
+    GET["SYS_FAN1"] = (600.0, 600.0, 700.0)
+    GET["FRNT_FAN1"] = (600.0, 600.0, 700.0)
+    db = sqlite3.connect(tmp_path / "site.db")
+    spun = "SELECT sensor, spun, severity FROM power_sensors WHERE node = 'node03' AND sensor LIKE '%FAN1' ORDER BY sensor"
+    try:
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        _collect(tmp_path, monkeypatch, [])
+        # the board can't read it for a while
+        SDR["node03"]["Fan"] = fans.replace("| ok  | 29.4 | 4200 RPM", "| ns  | 29.4 | No Reading")
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        _later(doc, out)
+        _collect(tmp_path, monkeypatch, [])
+        assert db.execute(spun).fetchall() == [("FRNT_FAN1", 1, None), ("SYS_FAN1", 0, None)]
+        # then it stops: alerted
+        SDR["node03"]["Fan"] = fans.replace("| ok  | 29.4 | 4200 RPM", "| lnr | 29.4 | 0 RPM")
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        _later(doc, out, 10)
+        sent = []
+        _collect(tmp_path, monkeypatch, sent)
+        assert [(k["host"], k["subject"]) for k in sent] == [("node03", "fans")]
+        # as 1.25.8 kept them: nothing known of turning
+        db.execute("UPDATE power_sensors SET spun = NULL")
+        db.commit()
+        doc, out = _run(tmp_path, "--nodes", "node03")
+        _later(doc, out, 15)
+        _collect(tmp_path, monkeypatch, [])
+        assert db.execute(spun).fetchall() == [("FRNT_FAN1", 1, "warning"), ("SYS_FAN1", 0, None)]
+    finally:
+        SDR["node03"]["Fan"] = before
+        del GET["SYS_FAN1"], GET["FRNT_FAN1"]

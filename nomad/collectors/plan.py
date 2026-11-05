@@ -70,6 +70,10 @@ SPECS: tuple[Spec, ...] = (
     Spec("temps", "temps", "TempsCollector", False,
          "any host with temperature sensors, or one reaching workstations over SSH", ("sh",), (),
          ("hw_temps", "hw_temps_hourly")),
+    # The environment modules a cluster has (1.26.0), for the job scripts nomad makes.
+    Spec("modules", "modules", "ModulesCollector", False,
+         "a cluster's login or head node with environment modules (Lmod)", ("bash",), (),
+         ("modules_available", "modules_status")),
     # Power supplies, voltages and fans (1.25.8): the root helper's files (scripts/power_root_probe.py).
     Spec("power", "power", "PowerCollector", False,
          "a host whose root runs the power helper (scripts/power_root_probe.py)", (), (),

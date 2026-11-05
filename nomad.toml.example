@@ -300,6 +300,13 @@ enabled = false
 # fans = true
 # ignore = ["node03:PMBPower"]
 
+# The environment modules the cluster has (1.26.0), read daily, for the job
+# scripts nomad makes ([[submit.templates]] on the hub)
+[collectors.modules]
+enabled = false
+# module_paths = ["/usr/local/sw/modulefiles"]   # module use first: folders a login doesn't add
+# min_hours = 20
+
 # ============================================
 # WORKSTATION COLLECTOR
 # ============================================
@@ -897,6 +904,26 @@ share = 0.8
 # [alerts.temps.peterslabworkstation]
 # warning = 85
 # critical = 89
+
+# [[submit.templates]] — Job scripts nomad makes for people with none, on the
+# Console's Submit page ("No script yet? Make one"; 1.26.0, the hub's
+# nomad.toml; docs/submit.md, "Making a script"). The versions offered are
+# the modules the cluster has ([collectors.modules] on the cluster).
+# [submit.build.spydur]
+# module_paths = ["/usr/local/sw/modulefiles"]
+# scratch = "/scratch/$USER/$SLURM_JOB_ID"
+# [[submit.templates]]
+# program = "Gaussian"
+# modules = ["gaussian/*"]
+# default = "gaussian/latest"
+# inputs = [".gjf", ".com"]
+# setup = ["export GAUSS_SCRDIR={scratch}", "mkdir -p {scratch}"]
+# run = "g16 < {input} > {stem}.log"
+# after = ["rm -rf {scratch}"]
+# outputs = ["{stem}.log"]
+# cpus = 8
+# mem = "16G"
+# time = "1-00:00:00"
 
 # [submit.where] — Where a job starts soonest, on the Console's Submit page
 # (1.25.4; the hub's nomad.toml). [submit.where.SITE] for one site.

@@ -199,3 +199,77 @@ overflow_max_hours = 24        # a job that fits the small nodes, on big ones: a
 reserve_nodes = 1              # big-memory nodes kept idle for the jobs that need them
 fastest_guests = false         # Fastest start may pick another lab's condo by itself
 ```
+
+## Making a script (1.26.0)
+
+For someone with no job script yet, the Console's Submit page has **No script
+yet? Make one**: they pick the program, its version, and their input (a file,
+or a folder of inputs), and nomad writes the script. It is shown in full and
+can be changed, then saved beside the input as a new file, as them, through
+the gate's `save` (only where saving is on: [From the Console](#from-the-console-nomad-gate);
+elsewhere they copy it). From there it is sized, checked and sent as any
+other script.
+
+- **A template per program**, written once by the site's staff in the hub's
+  nomad.toml (`[[submit.templates]]`): how the site runs it, which modules
+  are its versions, what to ask when nothing better is known.
+- **The versions the cluster has**, from its `modules` collector
+  ([Collectors](collectors.md), "Environment modules"): the modules matching
+  the template's patterns, copies kept aside (`.bak`, `.old`, ...) left out.
+  Chosen first: the template's `default` when the cluster has it, else the
+  cluster's own default, else the highest version; the person can pick any.
+  A version that runs otherwise (Gaussian 09 and 16) gets its own line
+  (`run_for`).
+- **Text only.** Making a script runs nothing and reads no file: the path is
+  the person's choice in the file browser, and its name goes into the script
+  quoted for the shell. The script is named after the input (`water.gjf` →
+  `water.sh`; a folder of inputs → `run.sh` in it); the page offers
+  `water-2.sh` when `water.sh` is there already, and says when an output the
+  job writes (`water.log`) is there already.
+
+In the hub's nomad.toml:
+
+```toml
+[submit.build.spydur]                          # a site's own settings
+module_paths = ["/usr/local/sw/modulefiles"]   # module use, before module load
+scratch = "/scratch/$USER/$SLURM_JOB_ID"       # {scratch}: must name the job ($SLURM_JOB_ID)
+
+[[submit.templates]]
+program = "Gaussian"
+sites = ["spydur", "arachne"]          # where it is offered (default: every site)
+modules = ["gaussian/*"]               # its versions (shell patterns)
+default = "gaussian/latest"            # chosen first, when the cluster has it (or a list)
+inputs = [".gjf", ".com"]              # the input: a file with one of these endings ...
+# folder = "control.run"               # ... or a folder holding this file (run there)
+setup = ["export GAUSS_SCRDIR={scratch}", "mkdir -p {scratch}"]
+run = "g16 < {input} > {stem}.log"
+after = ["rm -rf {scratch}"]
+outputs = ["{stem}.log"]               # said if one is there already
+cpus = 8                               # what to ask when nothing better is known
+mem = "16G"
+time = "1-00:00:00"
+# gpus = 1
+# partition = "gpunodes"               # or one a site: { spydur = "gpunodes" }
+# parallel = "mpi"                     # cpus as --ntasks (MPI), not --cpus-per-task
+[submit.templates.run_for]
+"gaussian/g09*" = "g09 < {input} > {stem}.log"
+```
+
+In a template's lines: `{input}` (the input's name, quoted for the shell),
+`{stem}` (its name without the ending), `{folder}` (where the job runs),
+`{cpus}`, `{mem_mb}` (the job's memory, MB), `{mem_mb_each}` (each process's
+share of nine tenths of it: Columbus's `runc -m`), `{gpus}`, `{module}`,
+`{scratch}`; anything else in braces stays as it is (`${SLURM_CPUS_PER_TASK}`).
+A script that uses `{scratch}` stops at once when it isn't run by Slurm
+(`bash water.sh`, or sourced: its `rm -rf {scratch}` would otherwise take
+the person's whole scratch folder), and a site's `scratch` must name the
+job (`$SLURM_JOB_ID`; else `/tmp/$USER/$SLURM_JOB_ID`, and it is said).
+A template that can't be used (a bad pattern, an unknown place, a partition
+that isn't a name) is said, never guessed at: `nomad templates --site S`
+lists the problems, and the Console shows them to its admins.
+
+```
+nomad templates --site spydur --hub                                   the programs, each with its versions there
+nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf
+nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf --module gaussian/g16c02
+```

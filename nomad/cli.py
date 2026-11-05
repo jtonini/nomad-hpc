@@ -547,6 +547,70 @@ def temps_cmd(ctx, hosts, hours, all_sensors, brief, check, warning, critical, s
         conn.close()
 
 
+@cli.command('templates')
+@click.option('--site', required=True, help='The site whose templates and modules to show.')
+@click.option('--hub', 'on_hub', is_flag=True, help="Its modules from the hub's combined database (every site's).")
+@click.option('--make', 'program', help='Write the script for this program (with --input).')
+@click.option('--input', 'input_path', help='With --make: the input file (or folder of inputs), a full path.')
+@click.option('--module', help='With --make: this version (default: the one chosen first).')
+@click.option('--db', type=click.Path(dir_okay=False), help="Database the module list is in (default: this host's).")
+@click.pass_context
+def templates_cmd(ctx, site, on_hub, program, input_path, module, db):
+    """The job script templates a site offers (1.26.0): [[submit.templates]].
+
+    \b
+    nomad templates --site spydur --hub          each program, its versions there, the one chosen first
+    nomad templates --site spydur --hub --make Gaussian --input /home/me/water.gjf
+                                                 the script it would write (nothing is saved)
+
+    The versions are the cluster's own modules ([collectors.modules] there)."""
+    from nomad.collectors.modules import available
+    from nomad.submit import templates as TT
+    config = ctx.obj['config']
+    if db:
+        path = Path(db).expanduser()
+    elif on_hub:
+        from nomad.config import combined_db_path
+        path = combined_db_path(((config.get("hub") or {}) if isinstance(config.get("hub"), dict) else {})
+                                .get("output_db"))
+    else:
+        path = get_db_path(config)
+    mods = []
+    if path.exists():
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            mods = available(conn, site if on_hub else None)
+        finally:
+            conn.close()
+    got = TT.offer(config, site, mods)
+    if program:
+        if not input_path:
+            raise click.ClickException("--make needs --input (a full path)")
+        prog = next((p for p in got["programs"] if p["program"].lower() == program.lower()), None)
+        if prog is None:
+            raise click.ClickException(f"{site} offers no {program} template"
+                                       + (f": {'; '.join(got['problems'])}" if got["problems"] else ""))
+        try:
+            made = TT.make(config, site, prog["program"], module=module or prog["choose"], input_path=input_path,
+                           available=mods)
+        except TT.TemplateError as e:
+            raise click.ClickException(str(e)) from None
+        click.echo(f"# would be saved as {made['path']}" + (f"; writes {', '.join(made['outputs'])}"
+                                                             if made["outputs"] else ""))
+        click.echo(made["text"], nl=False)
+        return
+    settings = got["settings"]
+    click.echo(f"{site}: {len(got['programs'])} program(s); {len(mods)} module(s) known"
+               + (f"; module use {', '.join(settings['module_paths'])}" if settings["module_paths"] else ""))
+    for p in got["programs"]:
+        what = f"inputs {', '.join(p['inputs'])}" if p["inputs"] else f"a folder holding {p['folder']}"
+        click.echo(f"  {p['program']:<12} {what}; {p['cpus']} CPUs, {p['mem']}, {p['time']}"
+                   + (f", {p['gpus']} GPU(s)" if p["gpus"] else "") + (f", {p['partition']}" if p["partition"] else ""))
+        click.echo(f"    versions: {', '.join(p['versions'])}  (first: {p['choose']})")
+    for problem in got["problems"]:
+        click.echo(f"  ! {problem}")
+
+
 @cli.command('power')
 @click.option('--host', 'hosts', multiple=True, help='Only this host (more than once for several).')
 @click.option('--all', 'all_sensors', is_flag=True, help='Every sensor read, not only what is wrong and the supplies.')
@@ -610,12 +674,6 @@ def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
                 ago_text = "?"
             row_site = r[8] if len(r) > 8 else None
             args = (node, row_site) if by_site else (node,)
-            if error:
-                click.echo(f"{node + where:<22} not read ({ago_text}): {error}")
-            else:
-                label = {"critical": click.style("CRITICAL", fg="red", bold=True),
-                         "warning": click.style("WARNING ", fg="yellow", bold=True)}.get(severity, "ok      ")
-                click.echo(f"{node + where:<22} {label} read {ago_text}")
             sensors = conn.execute(
                 "SELECT sensor, type, kind, status, reading, unit, state, severity, problem, subject FROM power_sensors "
                 "WHERE node = ?" + (" AND source_site = ?" if by_site else "")
@@ -634,6 +692,14 @@ def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
                     and not (s[9] == "fans" and rules.get("fans") is False)]
             mine += [dict(p, sensor=None) for p in loose
                      if not any(P.ignored(rules, node, x) for x in (p.get("sensors") or ()))]
+            if error:
+                click.echo(f"{node + where:<22} not read ({ago_text}): {error}")
+            else:
+                # as the rules here judge it ([alerts.power] ignore, fans), not as the site stored it
+                worst = max((p["severity"] for p in mine), key=lambda x: P.RANK.get(x, 0), default=None)
+                label = {"critical": click.style("CRITICAL", fg="red", bold=True),
+                         "warning": click.style("WARNING ", fg="yellow", bold=True)}.get(worst, "ok      ")
+                click.echo(f"{node + where:<22} {label} read {ago_text}")
             for subject in P.SUBJECTS:
                 said = [p["problem"] for p in mine if p["subject"] == subject]
                 if said:

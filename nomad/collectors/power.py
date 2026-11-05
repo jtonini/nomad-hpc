@@ -152,6 +152,8 @@ def judge(sensor: dict) -> tuple[str | None, str | None]:
             return None, None    # 0 W under a threshold of 0: no threshold at all
         if limit is None and (value is None or value == 0) and unit.lower() in ("watts", "amps"):
             return None, None    # the same, where the threshold couldn't be read
+        if unit.upper() == "RPM" and (value or 0) == 0 and sensor.get("spun") is False:
+            return None, None    # never seen turning: a header with no fan on it (vadur's SYS_FAN1-4)
     if kind == "fan" or kind == "power_supply" and unit.upper() == "RPM":
         severity = "warning"
     elif kind == "voltage":
@@ -287,6 +289,16 @@ def logged_at(e: dict) -> str:
     return f"{d} {t}".strip()
 
 
+def _when(stamp) -> float:
+    """A stored time, to compare (with its UTC offset or without); one that
+    can't be read counts as the latest (so a fan is taken to have turned)."""
+    try:
+        t = datetime.fromisoformat(str(stamp))
+        return t.timestamp()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return float("inf")
+
+
 class PowerCollector(BaseCollector):
     """The boards' power sensors and event logs, from the root helper's files."""
 
@@ -384,7 +396,7 @@ class PowerCollector(BaseCollector):
         CREATE TABLE IF NOT EXISTS power_sensors (
             node TEXT NOT NULL, sensor TEXT NOT NULL, type TEXT, kind TEXT, status TEXT,
             reading REAL, unit TEXT, state TEXT, thresholds TEXT, subject TEXT, severity TEXT,
-            problem TEXT, read_at TEXT, changed_at TEXT, PRIMARY KEY (node, sensor));
+            problem TEXT, read_at TEXT, changed_at TEXT, spun INTEGER, PRIMARY KEY (node, sensor));
         CREATE TABLE IF NOT EXISTS power_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT NOT NULL, key TEXT NOT NULL,
             record_id TEXT, logged TEXT, sensor TEXT, type TEXT, event TEXT, direction TEXT,
@@ -398,6 +410,8 @@ class PowerCollector(BaseCollector):
         fresh = []
         try:
             conn.executescript(self.SCHEMA)
+            if "spun" not in {r[1] for r in conn.execute("PRAGMA table_info(power_sensors)")}:
+                conn.execute("ALTER TABLE power_sensors ADD COLUMN spun INTEGER")     # 1.25.8's table
             # a host its helper no longer reads (a node taken out of Slurm): gone from here too
             for path, listed in (getattr(self, "_listed", None) or {}).items():
                 for (node,) in conn.execute("SELECT node FROM power_hosts WHERE file = ?", (path,)).fetchall():
@@ -422,11 +436,31 @@ class PowerCollector(BaseCollector):
                 "error = excluded.error", (node, at, h.get("file"), str(h["error"])[:300]))
             return None
         sensors = named([s for s in (h.get("sensors") or []) if isinstance(s, dict) and s.get("name")])
+        # old[name]: status, state, severity, problem, read_at, type, spun, reading, unit, changed_at
+        old = {r[0]: r[1:] for r in conn.execute(
+            "SELECT sensor, status, state, severity, problem, read_at, type, spun, reading, unit, changed_at "
+            "FROM power_sensors WHERE node = ?", (node,))}
+        first = min((w[9] for w in old.values() if w[9]), key=_when, default=None)
+        # A fan nomad has seen turning is one that can stop; one at 0 RPM since its first read is a
+        # header with nothing on it (or a fan dead before nomad looked): shown, not alerted.
+        idle = []
+        for s in sensors:
+            value, unit = reading(s.get("value") or "")
+            was = old.get(str(s["name"])[:40])
+            before = None if was is None else was[6]
+            if before is None and was is not None and "RPM" in ((was[8] or "").upper(), unit.upper()):
+                # kept by 1.25.8, which didn't know: turning at its last read, or changed since the
+                # host's first read (it was something else before), is a fan that turned
+                t0 = _when(first) if first else float("inf")
+                before = 1 if (was[7] or 0) > 0 or t0 == float("inf") or _when(was[9]) > t0 else 0
+            if unit.upper() == "RPM":
+                s["spun"] = bool(before) or bool(value and value > 0)
+                if not s["spun"]:
+                    idle.append(str(s["name"]))
+            elif before is not None:
+                s["spun"] = bool(before)        # no reading now ("No Reading"): what was known stays
         found = problems(node, sensors, self.rules)
         by_sensor = {p["sensor"]: p for p in found if p["sensor"]}
-        old = {r[0]: r[1:] for r in conn.execute(
-            "SELECT sensor, status, state, severity, problem, read_at, type FROM power_sensors WHERE node = ?",
-            (node,))}
         unread = set(h.get("unread_types") or ())
         try:
             now = datetime.fromisoformat(at)
@@ -437,9 +471,10 @@ class PowerCollector(BaseCollector):
             value, unit, states = split_value(s.get("value") or "")
             state = states[:200] or None
             p = by_sensor.get(name) or {}
+            spun = None if s.get("spun") is None else int(bool(s["spun"]))
             row = (s.get("status"), state, p.get("severity"), p.get("problem"))
             prev = old.get(name)
-            if prev is not None and tuple(prev[:4]) == row:
+            if prev is not None and tuple(prev[:4]) == row and prev[6] == spun:
                 try:
                     if now - datetime.fromisoformat(prev[4]) < timedelta(minutes=REFRESH_MINUTES):
                         continue        # nothing changed, and its reading was kept within the hour
@@ -448,15 +483,16 @@ class PowerCollector(BaseCollector):
             changed = prev is None or tuple(prev[:4]) != row
             conn.execute(
                 "INSERT INTO power_sensors (node, sensor, type, kind, status, reading, unit, state, thresholds, "
-                "subject, severity, problem, read_at, changed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "subject, severity, problem, read_at, changed_at, spun) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(node, sensor) DO UPDATE SET type = excluded.type, kind = excluded.kind, "
                 "status = excluded.status, reading = excluded.reading, unit = excluded.unit, "
                 "state = excluded.state, thresholds = excluded.thresholds, subject = excluded.subject, "
                 "severity = excluded.severity, problem = excluded.problem, read_at = excluded.read_at, "
+                "spun = excluded.spun, "
                 "changed_at = CASE WHEN ? THEN excluded.changed_at ELSE power_sensors.changed_at END",
                 (node, name, s.get("type"), kind_of(s), s.get("status"), value, unit or None, state,
                  json.dumps(s["thresholds"]) if isinstance(s.get("thresholds"), dict) else None,
-                 subject_of(kind_of(s)), p.get("severity"), p.get("problem"), at, at, 1 if changed else 0))
+                 subject_of(kind_of(s)), p.get("severity"), p.get("problem"), at, at, spun, 1 if changed else 0))
         # a sensor no longer there goes (one of a type this read couldn't get stays as it was)
         gone = set(old) - {str(s["name"])[:40] for s in sensors}
         for name in gone:
@@ -474,7 +510,9 @@ class PowerCollector(BaseCollector):
             "sel_used_pct = excluded.sel_used_pct, sel_overflow = excluded.sel_overflow, notes = excluded.notes",
             (node, at, h.get("file"), len(sensors), len(found), worst, json.dumps(loose) if loose else None,
              sel.get("entries"), sel.get("used_pct"), 1 if sel.get("overflow") else 0,
-             "; ".join(str(n) for n in (h.get("notes") or []))[:500] or None))
+             "; ".join([str(n) for n in (h.get("notes") or [])]
+                       + ([f"{', '.join(idle)} at 0 RPM since nomad first read {'it' if len(idle) == 1 else 'them'} "
+                           "(no fan on the header?)"] if idle else []))[:500] or None))
         events = []
         history = bool(sel.get("baseline"))
         for e in sel.get("new") or []:

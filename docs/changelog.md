@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.26.0 (November 2026)
+
+### Features
+- **Job scripts for people with none** (`[[submit.templates]]`, the
+  `modules` collector, `nomad templates`; the Console's "No script yet? Make
+  one", Console fix 81). A template for each program, written once by a site's
+  staff in the hub's nomad.toml, says how the site runs it (its modules,
+  setup, run line, outputs; Gaussian, Q-Chem, ORCA, Columbus, GROMACS,
+  VASP...); the person picks the program, the version and their input (a
+  file, or a folder of inputs), and nomad writes the script: text only,
+  shown in full, saved as a new file beside the input as them. The versions
+  are the modules the cluster really has: the new `modules` collector reads
+  `module -t avail` once a day (after `module use` for folders a login
+  doesn't add: spydur's `/usr/local/sw/modulefiles`), copies kept aside
+  (`.bak`) left out; chosen first, the template's default, else the
+  cluster's, else the highest. A version that runs otherwise (g09, g16)
+  gets its own run line. A script with a scratch folder stops at once
+  outside Slurm (its `rm -rf` would take the whole scratch folder), and a
+  name with a control character, or one that looks like an option, never
+  reaches a command. `nomad templates --site S` lists what a site offers
+  and what is wrong in a template; `--make P --input PATH` writes one.
+
+### Fixes
+- **A fan header with no fan isn't a stopped fan.** vadur's CPU nodes have
+  four fan headers at 0 RPM on every board, and 1.25.8 alerted them (mingus
+  had them in `[alerts.power] ignore`). A fan nomad has never seen turning
+  is now said in the host's notes, not alerted; one that turned and stops
+  still is, also after a read with no reading and across the upgrade
+  (1.25.8's rows are judged by their own history). `nomad power`'s label
+  for a host is its worst problem after `ignore` and `fans`, not as stored.
+
 ## v1.25.8 (November 2026)
 
 ### Features
