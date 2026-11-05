@@ -682,6 +682,29 @@ and node03) is shown by `nomad power` as NOT WATCHED, not as healthy: its
 supplies aren't seen, and this check is what still finds a CPU braked for
 lack of power.
 
+## Preempted jobs (preemptions, 1.28.0)
+
+The job instances Slurm preempted in the last `hours` (2): a guest's job on
+a condo, stopped because the owners needed their nodes. A requeued job keeps
+its number, so each of its runs is its own record (`sacct -a -D -X -s PR`);
+each is kept once in `job_preemptions`, with whether the job came back
+(an instance of it that started later, or is pending: requeued) or not
+(cancelled); one that ended in the last 15 minutes with no other yet is
+"not known yet", and read again at the next run. The hub tells
+the person ([Submit](submit.md), "Guests on condos"). On a Slurm head node
+whose account sees every user's jobs:
+
+```toml
+[collectors.preemptions]
+enabled = true
+# hours = 2
+```
+
+The node_state collector also reads Slurm's own preemption settings with the
+partitions (`scontrol show config`: PreemptType, PreemptMode, JobRequeue,
+PreemptExemptTime; `slurm_settings`), so nomad knows whether Slurm preempts
+at all.
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

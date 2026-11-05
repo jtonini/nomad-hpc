@@ -300,6 +300,11 @@ enabled = false
 # fans = true
 # ignore = ["node03:PMBPower"]
 
+# The jobs Slurm preempted or requeued (1.28.0), for the hub to tell the person
+[collectors.preemptions]
+enabled = false
+# hours = 2
+
 # How fast each CPU really runs when busy (1.27.0): a CPU braked by its board
 # (a power supply lost: PROCHOT) is found the day it starts. No root.
 [collectors.clock]
@@ -939,6 +944,15 @@ share = 0.8
 # cpus = 8
 # mem = "16G"
 # time = "1-00:00:00"
+
+# [submit.preemption] — Guests on condos, and the owners' first claim (1.28.0;
+# the hub's nomad.toml; docs/submit.md). Slurm's configuration is the switch;
+# nomad partitions --site S --condos says what would change.
+# [submit.preemption]
+# guest_partition = "condo_overflow"
+# grace_minutes = 30
+# owner_tier = 2
+# notices = false              # email a person when a job of theirs is preempted
 
 # [submit.where] — Where a job starts soonest, on the Console's Submit page
 # (1.25.4; the hub's nomad.toml). [submit.where.SITE] for one site.

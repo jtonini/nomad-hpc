@@ -70,6 +70,9 @@ SPECS: tuple[Spec, ...] = (
     Spec("temps", "temps", "TempsCollector", False,
          "any host with temperature sensors, or one reaching workstations over SSH", ("sh",), (),
          ("hw_temps", "hw_temps_hourly")),
+    # The jobs Slurm preempted or requeued (1.28.0): a guest on a condo, for the hub to tell the person.
+    Spec("preemptions", "preemptions", "PreemptionsCollector", False,
+         "a Slurm head node whose account sees every user's jobs", ("sacct",), (), ("job_preemptions",)),
     # How fast each CPU really runs when busy (1.27.0): a power brake (PROCHOT) found the day it starts.
     Spec("clock", "clock", "ClockCollector", False,
          "a head node reaching its nodes over SSH, or any host (python3 there)", ("sh",), (),

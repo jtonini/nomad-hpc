@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.28.0 (November 2026)
+
+### Features
+- **Guests on condos, and the owners' first claim.** A condo's owners get
+  their nodes back from a guest's job through Slurm's own preemption (the
+  owners' partition at a higher PriorityTier admitting their lab; a guests'
+  partition, `condo_overflow`, with PreemptMode=REQUEUE and a GraceTime:
+  SIGTERM, the grace, then back in the queue). Slurm's configuration is the
+  switch; nomad follows it. `nomad partitions --site S --condos` checks each
+  condo of report.toml against Slurm (the owners' tier and group, every
+  other partition on their nodes) and prints the slurm.conf lines that turn
+  it on, and the same lines as they are now. Slurm's preemption settings are
+  read with the partitions (`slurm_settings`).
+- **Whether a job survives a requeue**: `nomad size --requeue job.sh`
+  (`--no-requeue`, a log written anew, a program that starts over instead of
+  resuming from its checkpoint, steps that fail the second time, files on the
+  node's own disk), each with what to change.
+- **Where it starts soonest** tells a guest what happens when the owners need
+  their nodes, where Slurm preempts.
+- **A message when it happens** (`[submit.preemption] notices = true`): the
+  `preemptions` collector keeps each preempted job instance and whether it
+  came back; the hub emails the person, one message a person a run, each job
+  once, only where Slurm preempts that partition.
+
 ## v1.27.0 (November 2026)
 
 ### Features

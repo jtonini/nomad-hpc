@@ -905,6 +905,77 @@ def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
         conn.close()
 
 
+def _partitions_condos(ctx, db_path, site: str, as_json: bool) -> None:
+    """nomad partitions --site S --condos: nomad.preemption's check of each
+    condo against Slurm, and the slurm.conf lines on and off."""
+    import json as _json
+    from nomad import partitions as parts
+    from nomad import preemption as pre
+    from nomad.condo import config as ccfg
+    try:
+        report = ccfg.load(None, ctx.obj.get('config_target'))
+    except ccfg.CondoConfigError as e:
+        raise click.ClickException(f"report.toml couldn't be read: {e}") from None
+    if not report.cluster(site).configured:
+        raise click.ClickException(f"report.toml has no [report.clusters.{site}.condos]: no condos to check")
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = parts.current(conn, site)
+        cfg = pre.config_of(conn, site)
+    finally:
+        conn.close()
+    if not rows:
+        raise click.ClickException(f"no partitions for site {site}")
+    s = pre.settings(ctx.obj.get('config') or {})
+    res = pre.check(rows, cfg, report.cluster(site), s,
+                    owner_start_minutes=getattr(getattr(report, "policy", None), "owner_start_minutes", None))
+    if as_json:
+        click.echo(_json.dumps({
+            "site": site, "on": res["on"], "config": res["config"], "notes": res["notes"], "guest": {
+                k: v for k, v in (res["guest"] or {}).items() if k != "treated"},
+            "condos": [{"condo": c.name, "nodes": c.nodes, "owners": c.owners, "groups": c.groups,
+                        "partition": (c.partition or {}).get("partition"), "problems": c.problems,
+                        "changes": [list(x) for x in c.changes],
+                        "others": [{"partition": q["partition"], "preempted": bool(t), "words": w}
+                                   for q, t, w in c.others]} for c in res["condos"]],
+            "plan": pre.plan_text(res, s, site)}, indent=2))
+        return
+    cfg = res["config"]
+    if not cfg:
+        click.echo(f"{site}: Slurm's preemption settings aren't read yet (nomad 1.28.0's node_state collector "
+                   "reads them; on the hub, after the next sync)")
+    else:
+        click.echo(f"{site}: Slurm {'PREEMPTS' if res['on'] else 'preempts nothing'} "
+                   f"(PreemptType {cfg.get('PreemptType') or '?'}, PreemptMode {cfg.get('PreemptMode') or '?'}, "
+                   f"JobRequeue {cfg.get('JobRequeue') or '?'})")
+    for c in res["condos"]:
+        p = c.partition or {}
+        state = "OK: the owners first, only their lab, guests preempted" if not c.problems else "not yet"
+        click.echo(f"\n  {c.name:<12} {len(c.nodes)} node(s)  owners {', '.join(c.owners) or '?'}"
+                   + (f"  members {', '.join('group:' + g for g in c.groups)}" if c.groups else "") + f"  -- {state}")
+        if p:
+            click.echo(f"    {p['partition']}: PriorityTier {p.get('priority_tier') or 0}, PreemptMode "
+                       f"{p.get('preempt_mode') or 'OFF'}, AllowGroups {p.get('allow_groups') or 'ALL'}")
+        for q, _t, words in c.others:
+            click.echo(f"    {q['partition']} on its nodes: {words}")
+        for prob in c.problems:
+            click.echo(f"    ! {prob}")
+    g = res["guest"] or {}
+    if g:
+        if g.get("exists"):
+            t = g.get("treated")
+            click.echo(f"\n  {g['partition']}: " + (f"guests preempted ({t['mode'].lower()}, after "
+                                                      f"{t['grace_s'] // 60} min)" if t else "not preempted yet"))
+        else:
+            click.echo(f"\n  {g['partition']}: not one of Slurm's partitions yet"
+                       + (f" (today the guests' door is {', '.join(g['now'])})" if g.get("now") else ""))
+    for n in res["notes"]:
+        click.echo(f"  note: {n}")
+    click.echo("")
+    for line in pre.plan_text(res, s, site):
+        click.echo(line)
+
+
 def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
     """nomad partitions --site S --sorted: nomad.submit.where's sort, as
     the Console would make it for someone in no lab (whose condo is whose
@@ -996,8 +1067,11 @@ def _partitions_sorted(ctx, db_path, site: str, as_json: bool) -> None:
 @click.option('--sorted', 'sorted_', is_flag=True,
               help="With --site: how the Console's \"Where it starts soonest\" sorts them (1.25.4): condo, "
                    "small, big, GPU, or several kinds (not suggested), and why.")
+@click.option('--condos', 'condos_', is_flag=True,
+              help="With --site: each condo of report.toml against Slurm (1.28.0): the owners first on their nodes, "
+                   "only their lab in their partition, guests preempted; what slurm.conf would change, and back.")
 @click.pass_context
-def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask, sorted_):
+def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask, sorted_, condos_):
     """Each Slurm partition's limits, who may use it, and its preemption.
 
     \b
@@ -1011,6 +1085,12 @@ def partitions_cmd(ctx, site, show_changes, days, db, as_json, mask, sorted_):
     import json as _json
     from nomad import partitions as parts
     db_path = _usage_db(ctx, db)
+    if condos_:
+        if not site:
+            raise click.UsageError("--condos needs --site")
+        if mask:
+            raise click.UsageError("--condos names the condos' owners and groups: it has no --mask")
+        return _partitions_condos(ctx, db_path, site, as_json)
     if sorted_:
         if not site:
             raise click.UsageError("--sorted needs --site")
@@ -6173,6 +6253,13 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
                              failing=_failing, hub_sites=hub_cfg.get('sites'))
         except Exception as _alert_err:      # never let an alert stop a sync
             logging.getLogger("nomad.sync").warning(f"clock alert not sent: {_alert_err}")
+        # Telling people their job was preempted (1.28.0; [submit.preemption] notices).
+        try:
+            from nomad.alerts.hub_preemptions import hub_preemption_notices
+            hub_preemption_notices(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                                   config_target=ctx.obj.get('config_target'))
+        except Exception as _alert_err:      # never let a notice stop a sync
+            logging.getLogger("nomad.sync").warning(f"preemption notice not sent: {_alert_err}")
 
 
 # Asking a site for its changes failing this many times in a row: it is copied
@@ -6560,6 +6647,13 @@ def _sync_incremental(ctx, hub_cfg, sites, combined_path, cache_dir, copy_all=Fa
                              failing=dict(pull_errors), hub_sites=hub_cfg.get('sites'))
         except Exception as e:               # never let an alert stop a sync
             log.warning(f"clock alert not sent: {e}")
+        # Telling people their job was preempted (1.28.0; [submit.preemption] notices).
+        try:
+            from nomad.alerts.hub_preemptions import hub_preemption_notices
+            hub_preemption_notices(combined_path, cache_dir, config=ctx.obj.get('config') or None,
+                                   config_target=ctx.obj.get('config_target'))
+        except Exception as e:               # never let a notice stop a sync
+            log.warning(f"preemption notice not sent: {e}")
 
 
 def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=None,

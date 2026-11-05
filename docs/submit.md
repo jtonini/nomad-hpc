@@ -274,3 +274,79 @@ nomad templates --site spydur --hub                                   the progra
 nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf
 nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf --module gaussian/g16c02
 ```
+
+## Guests on condos, and the owners' first claim (1.28.0)
+
+A condo's owners paid for its nodes; others may run there while the nodes are
+free, as guests, and give them back when the owners need them. That is
+Slurm's to do: the owners' partition at a higher `PriorityTier`, admitting
+their lab; a guests' partition (`condo_overflow`) holding the condo nodes at
+the lower tier, with `PreemptMode=REQUEUE` and a `GraceTime`; and
+`PreemptType=preempt/partition_prio` (with `PreemptMode=REQUEUE`, which
+then applies to every partition that sets none: every other partition gets
+`PreemptMode=OFF` on its line). When an owner's job needs a node a guest
+holds, Slurm signals the guest job's steps (SIGTERM to programs started with
+`srun`; a program the script runs itself hears nothing until the end), waits
+up to the grace time, then stops the job and puts it back in the queue: the
+same job, run again from the top of its script, wherever nodes are free
+(cancelled instead if it asked `--no-requeue`, isn't a batch job, or the
+cluster has `JobRequeue=0` and it didn't ask `--requeue`).
+
+The switch is Slurm's configuration, applied by the site's staff; nomad
+follows what Slurm does:
+
+- **`nomad partitions --site S --condos`** (on the hub) checks each
+  confirmed condo of report.toml against Slurm: the owners first on their
+  nodes, only their lab in their partition (report.toml's `members =
+  "group:cparish$"` against the partition's `AllowGroups`, or `"account:NAME"`
+  (else the condo's own `account`) against `AllowAccounts`, which keeps
+  others out only where Slurm enforces associations,
+  `AccountingStorageEnforce`; a condo whose members name neither isn't
+  ranked first: anyone could then send jobs there and preempt the guests),
+  every other partition on those nodes a guests' one. It prints what
+  slurm.conf would change to turn it on, line by line, and the same settings
+  as scontrol shows them now, to turn it back off. The guests' partition is
+  added beside today's (`condos`), which is drained and removed once its
+  jobs are done (jobs in a partition that is gone fail); until then both are
+  guests' doors, and report.toml's `guest_partitions` lists both (the condo
+  reports find the guests through it). It also says when the grace is longer
+  than report.toml's `[report.policy] owner_start_minutes`: an owner's job
+  can wait the whole grace, and the reports would count it late.
+  Slurm's own preemption settings are read with the partitions (nomad
+  1.28.0's node_state collector, `scontrol show config`).
+- **Where it starts soonest** tells a guest, on the guests' partition's row,
+  what happens when the owners need their nodes, once Slurm preempts there.
+- **`nomad size --requeue job.sh`** says whether a script survives being
+  requeued, and what to change: `--no-requeue`, a log written anew
+  (`--open-mode=append`), a program that starts over instead of resuming
+  from its checkpoint (GROMACS `-cpi`, VASP's `CONTCAR`, CP2K's restart file,
+  Gaussian's `%chk`, ORCA's `.gbw`; `$SLURM_RESTART_COUNT`), steps that fail
+  the second time (`mkdir` without `-p` under `set -e`, `rm` or `mv` of
+  inputs), files kept on the node's own disk.
+- **A message when it happens** (`notices = true`): the `preemptions`
+  collector on the cluster keeps each job instance Slurm preempted (`sacct
+  -D -s PR`), and whether the job came back (requeued) or was cancelled;
+  after each sync the hub emails the person (their NetID at report.toml's
+  `mail_domain`), one message a person a run, each job once, only where
+  Slurm preempts that partition: where it ran, for how long, what Slurm did,
+  how to make it resume next time (in a message about many, the cancelled
+  first). A job that ended minutes ago and isn't known to be back in the
+  queue yet waits a sync. The first run after turning notices on (or after
+  two days with notices off) only notes what is there.
+
+In the hub's nomad.toml (these are the defaults):
+
+```toml
+[submit.preemption]
+guest_partition = "condo_overflow"   # the guests' partition the plan names
+grace_minutes = 30                   # GraceTime the plan proposes
+owner_tier = 2                       # the owners' PriorityTier the plan proposes
+notices = false                      # email a person when a job of theirs is preempted
+```
+
+On the cluster's (the head node's account, which sees every user's jobs):
+
+```toml
+[collectors.preemptions]
+enabled = true
+```

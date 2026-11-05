@@ -218,8 +218,17 @@ class NodeStateCollector(BaseCollector):
         rows = partitions.parse(result.stdout)
         if not rows:
             return None
+        # Slurm's own preemption settings (1.28.0): whether a guest's job is ever preempted
+        cfg = {}
+        try:
+            from nomad import preemption
+            got = subprocess.run(['scontrol', 'show', 'config'], capture_output=True, text=True, timeout=30)
+            if got.returncode == 0:
+                cfg = preemption.parse_config(got.stdout)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            logger.warning(f"node_state: scontrol show config: {e}")
         return {'type': 'partition_settings', 'cluster': self.cluster_name,
-                'timestamp': datetime.now().isoformat(), 'rows': rows}
+                'timestamp': datetime.now().isoformat(), 'rows': rows, 'config': cfg}
 
     def _classify_state(self, state: str) -> str | None:
         """'critical' | 'warning' | None for a state string (classify_state)."""
@@ -472,6 +481,10 @@ class NodeStateCollector(BaseCollector):
                     try:
                         partitions.store(conn, record.get('cluster') or 'default', record['rows'],
                                          datetime.fromisoformat(record['timestamp']))
+                        if record.get('config'):
+                            from nomad import preemption
+                            preemption.store_config(conn, record.get('cluster') or 'default', record['config'],
+                                                    datetime.fromisoformat(record['timestamp']))
                         conn.execute("RELEASE SAVEPOINT partitions")
                     except Exception as e:      # whatever it is, the nodes stay stored
                         conn.execute("ROLLBACK TO SAVEPOINT partitions")

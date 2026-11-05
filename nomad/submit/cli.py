@@ -432,7 +432,10 @@ def show(pl: Plan, hints: bool = True) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Print JSON.")
 @click.option("--via", type=click.Choice(["cli", "console"]), default="cli", hidden=True,
               help="Where it was asked from (console: nomad-gate, for the Console).")
-def size_cmd(script, job, days, db, user, as_json, via):
+@click.option("--requeue", is_flag=True,
+              help="Also: whether the script survives being preempted and put back in the queue (a guest on "
+                   "another lab's condo), and what to change (1.28.0).")
+def size_cmd(script, job, days, db, user, as_json, via, requeue):
     """What a job should ask for: CPUs, memory, time, GPUs and partition,
     each with where it comes from and why.
 
@@ -452,10 +455,27 @@ def size_cmd(script, job, days, db, user, as_json, via):
         raise click.UsageError("--job looks at your own jobs only")
     _programs(via, "Not run.")
     pl = plan(script, job=job, user=user, days=days, db=db)
+    found = None
+    if requeue:
+        from nomad.submit import requeue as rq
+        text = read_text(pl.script, 256 * 1024) if pl.script else None
+        found = rq.notes(text or "", pl.sizing.program.family) if text is not None else None
     if as_json:
-        click.echo(json.dumps(pl.to_dict(), default=str, indent=2))
+        d = pl.to_dict()
+        if requeue:
+            d["requeue"] = found
+        click.echo(json.dumps(d, default=str, indent=2))
         return
     show(pl)
+    if requeue:
+        if found is None:
+            click.echo("\n  If it is requeued: nomad couldn't read the script to say.")
+        else:
+            from nomad.submit import requeue as rq
+            click.echo(f"\n  If it is preempted and requeued (a guest on another lab's condo): {rq.summary(found)}")
+            for n in found:
+                mark = {"stops": "!", "loses": "-", "check": "?", "ok": "+"}.get(n["kind"], "-")
+                click.echo(f"    {mark} {n['text']}")
 
 
 # ── submitting ──────────────────────────────────────────────────────────────

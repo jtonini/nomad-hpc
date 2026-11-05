@@ -328,8 +328,17 @@ def _slow_text(slow: list) -> str:
     return shown + (f" and {len(slow) - 3} more" if len(slow) > 3 else "")
 
 
+def preempt_words(t: dict) -> str:
+    """What a guest is told where Slurm preempts (1.28.0)."""
+    grace = int(t.get("grace_s") or 0) // 60
+    then = "puts it back in the queue (it starts over unless it resumes from a checkpoint)" if t.get("requeue") \
+        else "cancels it"
+    return ("the owners can take its nodes back: Slurm then stops the job"
+            + (f" after up to {grace} min" if grace else "") + f" and {then}")
+
+
 def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | None = None,
-         slow: dict | None = None, serving: dict | None = None) -> dict:
+         slow: dict | None = None, serving: dict | None = None, preempted: dict | None = None) -> dict:
     """``cands`` with Slurm's estimates (``starts``: nomad-gate starts) and
     the usual waits: each row's start, whether it starts within
     SOON_MINUTES, whether Slurm only puts it LATER_DAYS or more away
@@ -372,6 +381,10 @@ def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | No
         if row["error"] and row["allowed"]:
             row["allowed"] = False
             row["why"] = f"Slurm: {row['error']}"
+        # where Slurm preempts (a guest's partition, 1.28.0): said, and kept for the page
+        row["preempt"] = (preempted or {}).get(c["partition"])
+        if row["preempt"] and row["allowed"] and not row["why"]:
+            row["why"] = preempt_words(row["preempt"])
         mine = (slow or {}).get(c["partition"]) or []
         row["slow_nodes"] = [n for n, _h in mine]
         if mine:
@@ -382,9 +395,10 @@ def rank(cands: list[dict], starts: dict | None, cfg: Settings, waits: dict | No
                 row["allowed"] = False
                 row["why"] = (f"{'its node runs' if total == 1 else f'all {total} of its nodes run'} far below "
                               f"its clock, throttled ({_slow_text(mine)}){slower}")
-            elif row["allowed"] and not row["why"]:
-                row["why"] = (f"{len(mine)} of its {total} nodes run{'s' if len(mine) == 1 else ''} throttled "
-                              f"({_slow_text(mine)}){slower}, if the job lands there")
+            elif row["allowed"]:
+                said = (f"{len(mine)} of its {total} nodes run{'s' if len(mine) == 1 else ''} throttled "
+                        f"({_slow_text(mine)}){slower}, if the job lands there")
+                row["why"] = f"{row['why']}; {said}" if row["why"] else said
         rows.append(row)
 
     def best(pool: list, guess: bool) -> str | None:
@@ -576,8 +590,11 @@ def advise(conn: sqlite3.Connection, site: str, user: str, job: Job, *, config: 
         out_of = {n for p in parts for n in p.nodes if _out_of_service(conn, site, n)}
         slow = {p.name: sorted((n, braked[n]) for n in p.nodes if n in braked and n not in out_of) for p in parts}
         serving = {p.name: len([n for n in p.nodes if n not in out_of]) for p in parts}
+    from nomad import preemption
+    pcfg = preemption.config_of(conn, site)
+    preempted = {r["partition"]: t for r in rows if (t := preemption.preempts(r, rows, pcfg))} if pcfg else {}
     out = rank(cands, starts if starts.get("ok") else None, cfg, typical_waits(conn, site, names, now), slow,
-               serving)
+               serving, preempted)
     out["ok"] = True
     if not starts.get("ok"):
         out["error"] = starts.get("error") or "the cluster didn't say when it would start"
@@ -589,5 +606,5 @@ def advise(conn: sqlite3.Connection, site: str, user: str, job: Job, *, config: 
 
 
 __all__ = ["Settings", "settings", "Part", "partitions", "node_specs", "typical_waits", "Job", "candidates",
-           "rank", "SOON_MINUTES", "LATER_DAYS", "MAX_ASKED", "my_condos", "unlisted_members", "unplaced_condos", "people_lookup",
+           "rank", "preempt_words", "SOON_MINUTES", "LATER_DAYS", "MAX_ASKED", "my_condos", "unlisted_members", "unplaced_condos", "people_lookup",
            "advise", "job_from"]
