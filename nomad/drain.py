@@ -240,10 +240,68 @@ def sudo_line(account: str, runs_as: str, scontrol: str) -> str:
 
 # --- the nomad running here -----------------------------------------------------------
 
-def _tree_open(top: str, owners: set, private: set) -> str | None:
+def _mode_open(p: str, st, private: set) -> str | None:
+    """Why ``p``'s mode lets others change it (a person's own group's writing is theirs)."""
+    from nomad.submit import gate
+    mine = st.st_gid in private and not (st.st_mode & 0o020 and gate._acl(p))
+    if st.st_mode & (0o002 if mine else 0o022):
+        return f"{p} can be changed by others (mode {stat.S_IMODE(st.st_mode):o})"
+    return None
+
+
+def _shuts(st, owners: set) -> bool:
+    """A folder no one but its owner (root or this account) can pass through
+    (no x for its group or others; with an access list, its mask): what is
+    below it is out of everyone else's reach by any name through it."""
+    return stat.S_ISDIR(st.st_mode) and st.st_uid in owners and not st.st_mode & 0o011
+
+
+def _route(q: str, owners: set, private: set) -> tuple[str | None, bool]:
+    """``q`` and each folder on the way to it from /: (why one of them could be
+    changed by someone else, else None; whether a folder on the way shuts
+    everyone else out). Each must belong to ``owners``; above such a folder
+    (and it) none may be writable by others, a sticky folder (as /tmp) aside;
+    below it, their modes reach no one else."""
+    from nomad.submit import gate
+    parts = [q]
+    while parts[-1] != "/":
+        parts.append(os.path.dirname(parts[-1]))
+    parts.reverse()
+    shut = False
+    for i, p in enumerate(parts):
+        try:
+            st = os.lstat(p)
+        except OSError as e:
+            return f"{p}: {e.strerror}", shut
+        if st.st_uid not in owners:
+            return f"{p} belongs to {gate._name_of(st.st_uid)}", shut
+        if not shut and not stat.S_ISLNK(st.st_mode):
+            sticky = i < len(parts) - 1 and stat.S_ISDIR(st.st_mode) and st.st_mode & stat.S_ISVTX
+            why = None if sticky else _mode_open(p, st, private)
+            if why:
+                return why, shut
+        shut = shut or _shuts(st, owners)
+    return None, shut
+
+
+def _unsafe(path: str, owners: set, private: set) -> tuple[str | None, bool]:
+    """gate.unsafe for the nomad running here: ``path`` as named and as it
+    really is, each route from / (_route); and whether the real one is shut
+    to everyone else."""
+    p = os.path.abspath(path)
+    shut = False
+    for q in dict.fromkeys((p, os.path.realpath(p))):
+        why, shut = _route(q, owners, private)
+        if why:
+            return why, shut
+    return None, shut
+
+
+def _tree_open(top: str, owners: set, private: set, shut: bool = False) -> str | None:
     """Why something in ``top`` could be changed by someone else, else None:
-    an entry another account owns, or others may write (a person's own
-    group's writing is theirs); where a link leads, checked up to /."""
+    an entry another account owns, or (unless a folder on the way to ``top``
+    shuts everyone else out) others may write; where a link leads, checked
+    from /."""
     from nomad.submit import gate
     seen = set()
     for d, dirs, files in os.walk(top):
@@ -259,13 +317,13 @@ def _tree_open(top: str, owners: set, private: set) -> str | None:
                 real = os.path.realpath(x)
                 if real not in seen:
                     seen.add(real)
-                    why = gate.unsafe(real, owners, private)
+                    why, _ = _unsafe(real, owners, private)
                     if why:
                         return f"{x} leads to {real}: {why}"
                 continue
-            mine = st.st_gid in private and not (st.st_mode & 0o020 and gate._acl(x))
-            if st.st_mode & (0o002 if mine else 0o022):
-                return f"{x} can be changed by others (mode {stat.S_IMODE(st.st_mode):o})"
+            why = None if shut else _mode_open(x, st, private)
+            if why:
+                return why
     return None
 
 
@@ -273,12 +331,13 @@ def install_problem() -> str | None:
     """Why someone else could change the nomad running here -- its Python,
     and every folder Python imports from (and the folders above them) --
     else None. That code would run scontrol as Slurm's account. Owners:
-    root and this account."""
+    root and this account. Below a folder only its owner can pass through
+    (~/.local at 700, say), modes don't matter: no one else reaches it."""
     from nomad.submit import gate
     import nomad
     owners = {0, os.getuid()}
     private = gate.private_groups(_account())
-    why = gate.unsafe(sys.executable, owners, private)
+    why, _ = _unsafe(sys.executable, owners, private)
     if why:
         return why
     here = os.path.realpath(os.getcwd())
@@ -290,13 +349,13 @@ def install_problem() -> str | None:
             parent = os.path.dirname(p)
             while parent != "/" and not os.path.lexists(parent):
                 parent = os.path.dirname(parent)
-            why = gate.unsafe(parent, owners, private)
+            why, _ = _unsafe(parent, owners, private)
         else:
-            why = gate.unsafe(p, owners, private)
+            why, shut = _unsafe(p, owners, private)
             # the working folder, as `python -m` puts it first: checked as a place, not walked
             if not why and os.path.isdir(p) and p not in ("/", here) \
                     and not any(p == w or p.startswith(w.rstrip("/") + "/") for w in walked):
-                why = _tree_open(p, owners, private)
+                why = _tree_open(p, owners, private, shut)
                 walked.append(p)
         if why:
             return why
@@ -512,6 +571,9 @@ def _change(node, what, *, reason, by, apply, config, config_path, cluster, run,
     elif code == 124:
         out["said"] = (f"not known yet: scontrol did not answer within {UPDATE_TIMEOUT} seconds (it may still "
                        f"do it), and {now}; look again in a minute")
+    elif code != 0 and "password is required" in msg and runs_as != "self":
+        out["said"] = (f"sudo wanted a password for it, so nothing ran (sudo -l can't tell beforehand); a "
+                       f"NOPASSWD line would do: {sudo_line(account, runs_as, scontrol)}; {now}")
     elif code != 0:
         out["said"] = f"scontrol did not do it (exit {code})" + (f": {msg}" if msg else "") + f"; {now}"
     elif after is None:

@@ -166,7 +166,7 @@ Without `--apply` nothing changes. The dry run shows:
 - the node's state as Slurm has it now, and its reason (who set it, when);
 - the jobs running there (`squeue`);
 - the one `scontrol update` command that would run;
-- whether sudo would let it run (`sudo -n -l`, which runs nothing).
+- whether a sudo rule lets it run (`sudo -n -l`, which runs nothing).
 
 With `--apply`, that command runs, and the node is read again to say what
 Slurm made of it. It is done only when Slurm shows the change.
@@ -198,8 +198,14 @@ two commands on one node, and nothing else.
 **What runs it is checked too.** Before anything is changed (and in the dry
 run), nomad checks that no one but root and this account could change the
 nomad running here: its Python, and every folder Python imports from, with
-the folders above them. That code would run scontrol as Slurm's account. A
-pass is taken as true for ten minutes (`~/.local/share/nomad/install.ok`).
+the folders above them. That code would run scontrol as Slurm's account.
+Below a folder only its owner can pass through (`~/.local` at 700, say),
+modes don't matter: no one else reaches it by any name. A pass is taken as
+true for ten minutes (`~/.local/share/nomad/install.ok`).
+
+**A password.** `sudo -n -l` says whether a rule lets the account run the
+command, not whether that rule wants a password. If it does, the change
+doesn't run, and the answer says so, with the NOPASSWD line that would do.
 
 **One environment.** sudo drops `SLURM_*` settings for the change, so every
 Slurm program here runs without them (`SLURM_CONF`, `SLURM_CLUSTERS`): what

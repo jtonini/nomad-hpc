@@ -347,7 +347,19 @@ def test_a_nomad_others_could_change_runs_nothing(home):
     assert not any("never asked" in p for p in r["problems"])
 
 
-def test_install_problem(tmp_path, monkeypatch):
+@pytest.fixture
+def open_tmp():
+    """A folder others can pass through (pytest's own is 700: it would shield all below, 1.31.1)."""
+    import shutil as sh
+    import tempfile
+    d = Path(tempfile.mkdtemp(dir="/tmp"))
+    d.chmod(0o755)
+    yield d
+    sh.rmtree(d, ignore_errors=True)
+
+
+def test_install_problem(open_tmp, monkeypatch):
+    tmp_path = open_tmp
     import nomad
     lib, pkg = tmp_path / "lib", tmp_path / "lib" / "nomad"
     pkg.mkdir(parents=True)
@@ -372,6 +384,49 @@ def test_install_problem(tmp_path, monkeypatch):
     (tmp_path / "missing").mkdir(mode=0o777)
     os.chmod(tmp_path / "missing", 0o777)                        # where an import path could be made
     assert "missing can be changed by others" in drain.install_problem()
+
+
+def test_a_folder_only_its_owner_passes_shields_what_is_below(open_tmp, monkeypatch):
+    """1.31.1: arachne's ~/.local (700) over ~/.local/lib (775, group localuser: zeus's primary group,
+    with five other members): no one else reaches it, whatever its mode."""
+    import nomad
+    tmp_path = open_tmp
+    other_gid = 4321                                             # a group with others in it
+    home = tmp_path / "home"
+    site = home / ".local" / "lib" / "python3.12" / "site-packages"
+    pkg = site / "nomad"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    for p in (home / ".local" / "lib", site, pkg, pkg / "__init__.py"):
+        os.chown(p, -1, other_gid)
+        p.chmod(0o775 if p.is_dir() else 0o664)
+    monkeypatch.setattr(nomad, "__file__", str(pkg / "__init__.py"))
+    monkeypatch.setattr(drain.sys, "path", [str(site)])
+    monkeypatch.chdir(tmp_path)
+    (home / ".local").chmod(0o755)
+    assert "lib can be changed by others (mode 775)" in drain.install_problem()
+    (home / ".local").chmod(0o700)
+    assert drain.install_problem() is None
+    (home / ".local").chmod(0o710)                               # its group may pass: no shield
+    assert "can be changed by others" in drain.install_problem()
+    (home / ".local").chmod(0o700)
+    home.chmod(0o777)                                            # the shield itself could be replaced
+    assert "home can be changed by others (mode 777)" in drain.install_problem()
+    home.chmod(0o755)
+    os.chown(pkg / "__init__.py", 4321, -1)                      # another account's file, shield or not
+    assert "__init__.py belongs to" in drain.install_problem()
+
+
+def test_sudo_wanting_a_password_is_said(home):
+    class Asks(Slurm):
+        def __call__(self, argv, timeout=20):
+            if argv[:4] == ["/usr/bin/sudo", "-n", "-u", "slurm"]:
+                self.calls.append(argv)
+                return 1, "", "sudo: a password is required\n"
+            return super().__call__(argv, timeout)
+    r = drain.change("node02", drain.DRAIN, reason="x", config=CFG, run=Asks(), finder=finder, apply=True)
+    assert not r["ok"] and r["said"].startswith("sudo wanted a password for it, so nothing ran")
+    assert "NOPASSWD: /usr/bin/scontrol update NodeName" in r["said"] and "node02 is mixed" in r["said"]
 
 
 def test_the_install_check_is_kept_a_while(tmp_path, monkeypatch):

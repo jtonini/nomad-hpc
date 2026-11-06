@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.31.1 (November 2026)
+
+### Fixes
+- `nomad node drain|resume`: the check of the nomad running here no longer
+  refuses what lies below a folder only its owner can pass through: arachne's
+  `~/.local` (700) over `~/.local/lib` (775, its group zeus's primary group
+  with others in it), as pip leaves it under umask 002. Such a folder must
+  itself be safe; files below it must still be root's or the account's.
+- When sudo wants a password for the change (`sudo -n -l` can't tell
+  beforehand), the answer says so, with the NOPASSWD line that would do.
+
 ## v1.31.0 (November 2026)
 
 ### Features
