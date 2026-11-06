@@ -523,9 +523,14 @@ def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mas
                 line += (f"others {_n(o['jobs'], 'job')} from {_n(o['people'], 'person', 'people')} "
                          f"(on average {_span(o['mean_minutes'])}{left(o['left_out_days'])})")
                 if b["jobs"]:
-                    held = (f", {_p(b['lab_of_busy_pct'])} of those in use" if b["lab_of_busy_pct"] is not None
-                            else "") + (f" (what others held: {_n(b['busy_left_out_days'], 'day')} left out)"
-                                        if b["busy_left_out_days"] else "")
+                    gone = b["busy_left_out_days"]
+                    if b["lab_of_busy_pct"] is None:
+                        held = f" (what others held: {_n(gone, 'day')} left out)" if gone else ""
+                    elif gone:
+                        held = (f", {_p(b['lab_of_busy_pct'])} of those in use on the days that can be "
+                                f"shown ({_n(gone, 'day')} left out)")
+                    else:
+                        held = f", {_p(b['lab_of_busy_pct'])} of those in use"
                     off = " off its condo" if c["own_condos"] else ""
                     line += (f"; {b['jobs']} of them ({_n(b['people'], 'person', 'people')}) while the lab's "
                              f"jobs ran on their nodes ({_ch(b['hours'])} hours of waiting, added up), the lab "
@@ -535,10 +540,14 @@ def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mas
                     line += "; none while the lab's jobs ran on their nodes"
             click.echo(line)
             if mine["jobs"]:
-                held = "" if mine["others_of_busy_pct"] is None else \
-                    f"; others held {_p(mine['others_of_busy_pct'])} of the cores in use then"
-                if mine["busy_left_out_days"]:
-                    held += f" (what others held: {_n(mine['busy_left_out_days'], 'day')} left out)"
+                gone = mine["busy_left_out_days"]
+                if mine["others_of_busy_pct"] is None:
+                    held = f" (what others held: {_n(gone, 'day')} left out)" if gone else ""
+                elif gone:
+                    held = (f"; on the days that can be shown, others held {_p(mine['others_of_busy_pct'])} "
+                            f"of the cores in use then ({_n(gone, 'day')} left out)")
+                else:
+                    held = f"; others held {_p(mine['others_of_busy_pct'])} of the cores in use then"
                 click.echo(f"    the lab's own: {_n(mine['jobs'], 'job')} waited (median "
                            f"{_span(mine['median_minutes'])}){held}")
             for note in c["coverage"]:

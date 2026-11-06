@@ -18,8 +18,11 @@ def actions_group():
     nomad actions run collectors --site c1      on a site, through its agent
     nomad actions run usage.report -p from=2025-10-01 -p to=2026-10-07 -p cluster=c1
     nomad actions key                           the hub's key, to install on each site
+    nomad actions run node.drain --site c1 -p node=n07 -p "reason=disk errors"   a dry run
+    nomad actions run node.drain --site c1 -p node=n07 -p "reason=disk errors" -p apply=true
 
-    Read-only for now. See docs/actions.md for how a site lets the hub in.
+    All read, but node.drain and node.resume (1.31), which change a node only
+    with apply=true. See docs/actions.md for how a site lets the hub in.
     """
 
 
@@ -43,7 +46,8 @@ def list_cmd(as_json):
             if p.get("min") is not None:
                 extra.append(f"{p['min']}–{p['max']}")
             if p.get("default") is not None:
-                extra.append(f"default {p['default']}")
+                d = p["default"]
+                extra.append(f"default {str(d).lower() if isinstance(d, bool) else d}")
             req = "required" if p["required"] else "optional"
             click.echo(f"{'':<18}-p {p['name']}=…  {p['help']} ({req}"
                        + (", " + ", ".join(extra) if extra else "") + ")")
@@ -59,6 +63,17 @@ def _params(pairs):
     return out
 
 
+def _who() -> str | None:
+    """Who typed it (through sudo too), as a NetID: an SSSD-style user@domain
+    without its domain; None when it isn't one (the site then says its own
+    account)."""
+    import getpass
+    import os
+    from nomad.actions.spec import _NAME
+    name = (os.environ.get("SUDO_USER") or getpass.getuser() or "").split("@")[0]
+    return name if _NAME.fullmatch(name) else None
+
+
 @actions_group.command("run")
 @click.argument("name")
 @click.option("--site", help="A site of the hub (default: the hub itself).")
@@ -70,8 +85,16 @@ def run_cmd(name, site, here, pairs, as_json):
     from nomad import actions
     if site and here:
         raise click.UsageError("--site and --here are two different places: choose one")
+    params = _params(pairs)
     try:
-        res = actions.run(name, _params(pairs), site=site, here=here)
+        from nomad.actions import spec
+        for p in spec.get(name).params:
+            if p.kind == "caller" and not params.get(p.name) and _who():
+                params[p.name] = _who()             # who asked: whoever typed this (through sudo too)
+    except actions.ActionError:
+        pass                                          # run() says what is wrong with the name
+    try:
+        res = actions.run(name, params, site=site, here=here)
     except actions.ActionError as exc:
         raise click.ClickException(str(exc)) from None
     if as_json:

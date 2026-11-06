@@ -671,9 +671,12 @@ def _cluster(w: _Where, lab: _Lab, claims: dict, outsider: dict, pieces, hours, 
              "others_pct": _pct(t["others"], cap_all), "others_gpu_hours": _r(t["others_gpu"]),
              "others_left_out_days": len(t["left_out"]), "others_gpu_left_out_days": len(t["gpu_left_out"]),
              "idle_pct": None if t["left_out"] else _pct(max(0.0, cap_all - t["lab"] - t["others"]), cap_all),
-             # of everyone's use: everyone else's without the days left out
-             "lab_of_used_pct": _pct(t["lab"], t["lab"] + t["others"]),
-             "lab_of_used_gpu_pct": _pct(t["lab_gpu"], t["lab_gpu"] + t["others_gpu"])}
+             # of everyone's use: everyone else's without the days left out (none, when every
+             # day others used it is left out: then the lab's share of it is not known at all)
+             "lab_of_used_pct": None if t["left_out"] and not t["others"] else
+             _pct(t["lab"], t["lab"] + t["others"]),
+             "lab_of_used_gpu_pct": None if t["gpu_left_out"] and not t["others_gpu"] else
+             _pct(t["lab_gpu"], t["lab_gpu"] + t["others_gpu"])}
 
     step = (spans[1][1] - spans[0][1]).days if len(spans) > 1 else max(1, (spans[0][2] - spans[0][1]).days)
     trend_out = []

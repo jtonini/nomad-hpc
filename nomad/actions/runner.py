@@ -42,11 +42,16 @@ def reports_dir() -> Path:
 def build_argv(action: Action, values: dict, *, hub_db: Path | None = None,
                out_dir: Path | None = None) -> list[str]:
     """The command line for an action: this interpreter's nomad, the action's
-    fixed words, its options, the hub's database when the action reads it,
-    then "--" and any positional values."""
+    fixed words, its options (a flag param only when true), the hub's
+    database when the action reads it, then "--" and any positional values."""
     argv = [sys.executable, "-m", "nomad.cli", *action.argv]
     for p in action.params:
-        if p.flag and values.get(p.name) is not None:
+        if p.kind == "flag":
+            if values.get(p.name) is True:
+                argv.append(p.flag)              # a flag takes no value: set or left out
+        elif p.flag and values.get(p.name) is not None and p.kind == "text":
+            argv.append(f"{p.flag}={values[p.name]}")     # one word: a note can't be read as an option
+        elif p.flag and values.get(p.name) is not None:
             argv += [p.flag, str(values[p.name])]
     if action.hub_db and hub_db is not None:
         argv += ["--db", str(hub_db)]

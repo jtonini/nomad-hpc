@@ -160,6 +160,10 @@ nomad actions run NAME [--site SITE | --here] [-p NAME=VALUE ...] [--json]
 # The hub's key for reaching sites, and on each site, letting it run the agent only
 nomad actions key
 nomad agent install-key 'ssh-ed25519 AAAA... nomad-actions@hub' [--from PATTERN] [--apply]
+
+# On a cluster: drain a node, or resume it (a dry run unless --apply; [actions] slurm_as)
+nomad node drain NODE --reason TEXT [--by NETID] [--apply] [--json]
+nomad node resume NODE [--reason TEXT] [--by NETID] [--apply] [--json]
 ```
 
 See [Actions](actions.md).

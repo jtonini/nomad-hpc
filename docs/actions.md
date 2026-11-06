@@ -16,9 +16,10 @@ nomad actions run syscheck --here               # on this host, as a site runs i
 
 ## The catalog
 
-For now they only read: none changes settings or collected data. Actions that
-change something will come as a dry run followed by an apply, the way
-`--apply` works on the command line.
+All of them read, but two (1.31): `node.drain` and `node.resume` change a
+node's state in Slurm, and only when their `apply` parameter is true;
+otherwise they are a dry run of it, the way `--apply` works on the command
+line. See [Draining and resuming a node](#draining-and-resuming-a-node).
 
 | Action | Runs on | What it is |
 |---|---|---|
@@ -35,6 +36,8 @@ change something will come as a dry run followed by an apply, the way
 | `storage.use` | hub, sites | `nomad storage use` (`server`, `path`, `over`, `top`, `days`) |
 | `sync.status` | hub | `nomad sync status` |
 | `usage.report` | hub | `nomad usage-report` (`from`, `to`, `cluster`, `min_cell`) |
+| `node.drain` | sites | `nomad node drain --json` (`node`, `reason`, `by`, `apply`) |
+| `node.resume` | sites | `nomad node resume --json` (`node`, `reason`, `by`, `apply`) |
 
 How parameters are checked:
 - **Numbers** must fall within their bounds.
@@ -43,6 +46,13 @@ How parameters are checked:
 - **Paths** are absolute (`/home`), of letters, digits and `. _ / + @ , : = -` only.
 - **Sizes** are written as `--over` takes them: `500G`, `1T`, `2TB`.
 - **Sites** must be among the hub's sites.
+- **Notes** (a node's reason) are one line of printable characters, at most
+  200, without `"` or `\`. They are passed as one word (`--reason=TEXT`), so
+  none can be read as an option.
+- **Who asked** (`by`) is a NetID. The Console fills it in with the
+  administrator signed in, whatever the page sent; `nomad actions run` fills
+  it in with whoever typed it (`SUDO_USER` through sudo).
+- **`apply`** is true or false. Only true adds `--apply`.
 - **Unknown parameters** are refused, not ignored.
 
 On the hub, actions that read data read the combined database. The usage
@@ -139,6 +149,92 @@ nomad actions run version --site SITE
 The sites are those `nomad sync` reads (nomad.toml `[hub]`, or sync.toml), and
 their host keys must already be known, as they are once sync has run.
 
+## Draining and resuming a node
+
+`node.drain` stops new jobs starting on a node; the jobs running there run to
+their end. `node.resume` lets a drained (or down) node take jobs again. They
+are `nomad node drain` and `nomad node resume` on the site, which an
+administrator there can also run by hand:
+
+```bash
+nomad node drain node07 --reason "disk errors"            # a dry run: what would happen
+nomad node drain node07 --reason "disk errors" --apply    # do it
+nomad node resume node07 --apply
+```
+
+Without `--apply` nothing changes. The dry run shows:
+- the node's state as Slurm has it now, and its reason (who set it, when);
+- the jobs running there (`squeue`);
+- the one `scontrol update` command that would run;
+- whether sudo would let it run (`sudo -n -l`, which runs nothing).
+
+With `--apply`, that command runs, and the node is read again to say what
+Slurm made of it. It is done only when Slurm shows the change.
+
+**Who runs scontrol.** Slurm lets only its administrators drain a node. Set in
+the nomad.toml of the account the site's agent runs as (installer, zeus or
+nomad, say):
+
+```toml
+[actions]
+slurm_as = "slurm"     # as Slurm's own account, through sudo
+# slurm_as = "self"    # as this account, when it is a Slurm administrator itself
+```
+
+Nothing changes until it is set. With `"slurm"`, that account needs one sudo
+line, which root adds (`visudo -f /etc/sudoers.d/nomad-node`). The dry run prints
+it with the account's name and scontrol's path:
+
+```
+zeus ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\=* State\=DRAIN Reason\=*, /usr/bin/scontrol update NodeName\=* State\=RESUME
+```
+
+It lets the account update nodes as Slurm's account, and run no other
+scontrol command (sudo's `*` also matches spaces, so other node settings
+could follow; jobs, partitions and the controller are out of reach). The
+agent holds the hub to the catalog: through it, the hub can ask for these
+two commands on one node, and nothing else.
+
+**What runs it is checked too.** Before anything is changed (and in the dry
+run), nomad checks that no one but root and this account could change the
+nomad running here: its Python, and every folder Python imports from, with
+the folders above them. That code would run scontrol as Slurm's account. A
+pass is taken as true for ten minutes (`~/.local/share/nomad/install.ok`).
+
+**One environment.** sudo drops `SLURM_*` settings for the change, so every
+Slurm program here runs without them (`SLURM_CONF`, `SLURM_CLUSTERS`): what
+is read is the cluster that is changed. A cluster whose slurm.conf is found
+only through `SLURM_CONF` can't be changed this way.
+
+**What Slurm keeps.** Slurm records the account that ran scontrol as the
+reason's author (`slurm`, through sudo from the Console; by hand in a
+terminal, the login name), so the reason itself says who asked:
+`disk errors (jtonini via nomad)`. Who asked is what the hub's request says
+(the Console's signed-in administrator): a site trusts the hub's key for it.
+Slurm drops a node's reason when it resumes, so a reason given to `resume`
+goes to the logs only.
+
+**What decides "done".** After the change, the node is read again. Drained:
+Slurm shows it drained, with this reason. Resumed: no longer drained, down
+or failing (not responding yet is how a node that was down comes back).
+When scontrol takes too long, Slurm's state still decides; if it doesn't
+show the change yet, the answer is "not known yet".
+
+**Logs.** Each change, and each refusal to make one, goes to syslog
+(authpriv, as `nomad-node`) and to `~/.local/share/nomad/nodes.log`. The
+agent's own log has every request too. In the Console, the audit log has who
+started it, before it runs.
+
+**How it is checked.**
+- The node is one name, as Slurm names it (no ranges or lists, not ALL).
+- Slurm must know it (`scontrol show node`).
+- A node that isn't drained, down or failing has nothing to resume.
+- scontrol and squeue are run by their full paths (found on PATH, then in
+  `/usr/bin`, `/usr/local/bin`, `/opt/slurm/bin`), never through a shell.
+  They don't run at all when someone else could have put them there (a
+  folder above them others may write, say).
+- sudo is looked for in the system's folders only.
+
 ## For the Console
 
 ```python
@@ -166,3 +262,10 @@ It raises `ActionError` when the request itself is refused.
   directory, so two reports at once would list each other's files.
 - **Opening a report file:** use `actions.open_report_file(name)`. It refuses
   a file that was replaced by a link after the check.
+- **Actions that change something** (`read_only: false`) name their apply
+  flag (`apply`). Run them first without it and show what the dry run says;
+  set it only after the administrator confirms. Fill each `caller`
+  parameter from the signed-in administrator yourself, never from the page.
+  `node.drain` and `node.resume` print JSON (`ok`, `problems`, `notes`,
+  `before`, `jobs`, `command`, `after`, `said`); a request refused before
+  anything ran prints `ok: false` and `error`.

@@ -9,9 +9,11 @@ There is no shell anywhere and no way to name a command the list doesn't
 have. Patterns match whole values (a trailing newline is refused too). A site runs only the actions marked for sites, checked again by the
 site itself (it never trusts the hub's checking).
 
-Version 1 holds read-only actions. Actions that change something will come
-as a dry run first and an apply after, as `--apply` works on the command
-line.
+Most actions only read. The two that change something (1.31: draining a
+node and resuming it) are a dry run unless their ``apply`` flag is set, as
+``--apply`` works on the command line; the Console shows the dry run, and
+asks, before it sets it. Who asked (a ``caller`` parameter) is filled in by
+the Console from the signed-in administrator, never by the page.
 """
 from __future__ import annotations
 
@@ -27,6 +29,26 @@ _LAB = re.compile(r"[A-Za-z0-9][A-Za-z0-9._$-]{0,63}")      # research groups en
 _DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _PATH = re.compile(r"/[A-Za-z0-9._/+@,:=-]{0,1023}")        # as `nomad storage cron` takes them
 _SIZE = re.compile(r"[0-9]{1,15}(?:\.[0-9]{1,6})?(?:[KMGTPkmgtp](?:i?[Bb])?|[Bb])?")
+TEXT_MAX = 200
+_TRUE, _FALSE = ("true", "yes", "1"), ("false", "no", "0")
+
+
+def text_problem(v: str, what: str = "the text") -> str | None:
+    """Why ``v`` can't be a note (a node's reason, say): one line of
+    printable characters, 1 to TEXT_MAX of them, without the quote or
+    backslash some programs read as their own. None when it can."""
+    if not isinstance(v, str):
+        return f"{what} must be text"
+    t = v.strip()
+    if not t:
+        return f"{what} is empty"
+    if len(t) > TEXT_MAX:
+        return f"{what} can be at most {TEXT_MAX} characters"
+    if not t.isprintable():
+        return f"{what} must be one line of printable characters"
+    if '"' in t or "\\" in t:
+        return f"{what} can't hold \" or \\"
+    return None
 
 
 class ActionError(ValueError):
@@ -36,7 +58,8 @@ class ActionError(ValueError):
 @dataclass(frozen=True)
 class Param:
     name: str
-    kind: str                         # int, choice, date, name, lab, site, path, size
+    kind: str                         # int, choice, date, name, lab, site, path, size, text,
+                                      # caller (who asked: the Console's), flag (true adds the flag)
     help: str
     flag: str | None = None           # "--days"; None: a positional argument
     required: bool = False
@@ -68,14 +91,26 @@ class Action:
     names: bool = False               # the output can name people or groups
     files: bool = False               # writes files into the reports directory
     notes: tuple[str, ...] = field(default_factory=tuple)
+    changes: bool = False             # changes something when its flag param ("apply") is set
 
     def schema(self) -> dict:
-        return {"name": self.name, "title": self.title, "help": self.help, "where": sorted(self.where),
-                "params": [p.schema() for p in self.params], "timeout": self.timeout,
-                "names": self.names, "files": self.files, "read_only": True}
+        out = {"name": self.name, "title": self.title, "help": self.help, "where": sorted(self.where),
+               "params": [p.schema() for p in self.params], "timeout": self.timeout,
+               "names": self.names, "files": self.files, "read_only": not self.changes,
+               "hub_db": self.hub_db}
+        if self.changes:
+            out["apply"] = next(p.name for p in self.params if p.kind == "flag")
+        if self.notes:
+            out["notes"] = list(self.notes)
+        return out
 
 
 _DAYS = Param("days", "int", "Window, in days", flag="--days", default=7, min=1, max=90)
+_NODE = Param("node", "name", "The node, as Slurm names it", required=True)
+_BY = Param("by", "caller", "Who asked (the Console fills it in: the administrator signed in)", flag="--by")
+_APPLY = Param("apply", "flag", "Make the change (otherwise a dry run: what would change)", flag="--apply",
+               default=False)
+_NODE_NOTES = ("Off on a site until its nomad.toml has [actions] slurm_as (see docs/actions.md).",)
 
 ACTIONS: tuple[Action, ...] = (
     Action("version", "nomad version", "The nomad version on that host.",
@@ -136,6 +171,20 @@ ACTIONS: tuple[Action, ...] = (
                   flag="--min-cell", min=2, max=50)),
            hub_db=True, timeout=1800, files=True,
            notes=("Takes a few minutes on a year of data.",)),
+    # The first actions that change something (1.31): a dry run unless apply.
+    Action("node.drain", "Drain a node",
+           "No new job starts on the node; the jobs running there run to their end. Slurm keeps the "
+           "reason, with who asked.",
+           frozenset({SITE}), ("node", "drain", "--json"),
+           (_NODE, Param("reason", "text", "Why: Slurm keeps it as the node's reason", flag="--reason",
+                         required=True), _BY, _APPLY),
+           timeout=180, names=True, changes=True, notes=_NODE_NOTES),
+    Action("node.resume", "Resume a node",
+           "A drained (or down) node takes jobs again.",
+           frozenset({SITE}), ("node", "resume", "--json"),
+           (_NODE, Param("reason", "text", "Why (kept in the logs: Slurm drops a node's reason when it "
+                         "resumes)", flag="--reason"), _BY, _APPLY),
+           timeout=180, names=True, changes=True, notes=_NODE_NOTES),
 )
 
 _BY_NAME = {a.name: a for a in ACTIONS}
@@ -163,8 +212,19 @@ def _check_one(p: Param, v: Any, sites: list[str] | None) -> Any:
         if (p.min is not None and n < p.min) or (p.max is not None and n > p.max):
             raise ActionError(f"{p.name} must be between {p.min} and {p.max}")
         return n
+    if p.kind == "flag":
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str) and v.lower() in _TRUE + _FALSE:
+            return v.lower() in _TRUE
+        raise ActionError(f"{p.name} must be true or false")
     if not isinstance(v, str):
         raise ActionError(f"{p.name} must be text")
+    if p.kind == "text":
+        why = text_problem(v, p.name)
+        if why:
+            raise ActionError(why)
+        return v.strip()
     if p.kind == "choice":
         if v not in p.choices:
             raise ActionError(f"{p.name} must be one of {', '.join(p.choices)}")
@@ -176,7 +236,7 @@ def _check_one(p: Param, v: Any, sites: list[str] | None) -> Any:
             return date.fromisoformat(v).isoformat()
         except ValueError:
             raise ActionError(f"{p.name} is not a real date") from None
-    if p.kind == "name":
+    if p.kind in ("name", "caller"):
         if not _NAME.fullmatch(v):
             raise ActionError(f"{p.name} may hold letters, digits, '.', '_' and '-' only, and not start with "
                               "'.', '_' or '-'")

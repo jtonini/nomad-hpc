@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.31.0 (November 2026)
+
+### Features
+- **Draining a node and resuming it** (`nomad node drain NODE --reason TEXT`,
+  `nomad node resume NODE`; the actions `node.drain` and `node.resume`, for
+  the Console's Nodes page): a dry run unless `--apply`, showing the node's
+  state as Slurm has it, the jobs running there, the scontrol command that
+  would run and whether sudo would let it. Applied, the node is read again:
+  Slurm's state decides whether it was done. scontrol runs as Slurm's own
+  account through sudo (`[actions] slurm_as = "slurm"` and one sudo line
+  that allows these two commands only) or as an account that is a Slurm
+  administrator (`"self"`); off until set. Nothing runs when someone else
+  could change the nomad that would run it. Slurm keeps the reason with who
+  asked ("TEXT (NETID via nomad)"); each change, and each refusal, goes to
+  syslog and `~/.local/share/nomad/nodes.log`.
+- **Actions that change something:** the catalog's first two. Each is a dry
+  run unless its `apply` flag is true (`read_only: false` and `apply` in the
+  catalog). New parameter kinds: `text` (a note, passed as one word),
+  `caller` (who asked, filled in by the Console or `nomad actions run`) and
+  `flag`. The catalog also says `hub_db` and `notes`.
+
+### Fixes
+- `nomad facts share`: when every day of other people's use is left out, the
+  lab's part of everyone's use is not given (it said "at most 100%"); what
+  others held while people waited is said "on the days that can be shown"
+  when some are left out.
+
 ## v1.30.1 (November 2026)
 
 ### Features
