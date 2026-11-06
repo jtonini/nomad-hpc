@@ -43,6 +43,10 @@ while the lab's jobs ran, and how the lab's own jobs waited.
   off its own condo (its own nodes are its own to use); the time and the
   cores counted exactly. At the same time is not because of: Slurm's
   priorities, the jobs' sizes and everyone's jobs decide who starts when.
+- **Its own condo, quiet:** ``condo_notes`` says where the lab kept its own
+  condo under CONDO_QUIET_PCT busy while its own jobs that could have run
+  there (no more cores than it has, no GPUs where it has none) waited a median
+  of CONDO_NOTE_MINUTES or more elsewhere: the lab's own figures.
 - **Others** (with ``min_others``): every figure about people outside the
   lab is a sum of days, and a day that rests on some but fewer than
   ``min_others`` of them is left out of it -- on that kind of node (their
@@ -91,6 +95,11 @@ SETTLE_HOURS = 2
 # A cluster whose groups runs stopped this long before the newest one's: its memberships end at their
 # last sight.
 MEMBERS_RUN_DAYS = 7
+# A lab's own condo under this busy, while its jobs that could have run there waited at least
+# CONDO_NOTE_MINUTES (median, CONDO_NOTE_JOBS of them or more) elsewhere: said (condo_notes).
+CONDO_QUIET_PCT = 25
+CONDO_NOTE_MINUTES = 60
+CONDO_NOTE_JOBS = 5
 STALE_AFTER_HOURS = 2
 WHERE = ("own_condo", "shared", "other_condos")
 _EPS = 1e-6
@@ -288,7 +297,7 @@ def share(conn: sqlite3.Connection | None, config: dict | None, netid: str | Non
     sites = discover.node_sites(conn, since=lo)
     local = discover.local_name(condos, config) if condos is not None else discover.LOCAL
     entries = {g: {"group": g, "name": acc.lab_names.get(g) or g, **({"as": how} if how else {}),
-                   "members": len(people), "clusters": []} for g, how, people in labs}
+                   "members": len(people), "clusters": [], "condo_notes": []} for g, how, people in labs}
     # Who was each lab's when: a job is the lab's if its owner was a member the day it ran, so a
     # student joining or leaving never moves days already given between the lab and the rest.
     member_spans = {g: _member_spans(conn, g, people, acc.leaders(g) if how == "assistant" else ())
@@ -296,6 +305,7 @@ def share(conn: sqlite3.Connection | None, config: dict | None, netid: str | Non
     # Anyone ever one of these labs' is no outsider to how many people a figure rests on: the one asking
     # sees them by name in the lab they are in (My Lab), so they can't make up the others' number.
     adjacent = set().union(*(set(x) for x in member_spans.values()))
+    lab_waits: dict = {}                        # (lab, cluster) -> its jobs' waits there
     owner_views = {g for g, how, _people in labs if how != "assistant"}
     for site in sites:
         cname = site if site is not None else local
@@ -392,6 +402,9 @@ def share(conn: sqlite3.Connection | None, config: dict | None, netid: str | Non
         for g, entry, finish in done:
             entry["waits"] = finish(bad_days)
             entries[g]["clusters"].append(entry)
+            lab_waits[(g, entry["cluster"])] = finish.lab_waits
+    for g, _how, _people in labs:
+        entries[g]["condo_notes"] = _condo_notes(entries[g]["clusters"], g, lab_waits)
     out["labs"] = [entries[g] for g, _how, _people in labs]
     return out
 
@@ -467,6 +480,37 @@ class _Cell:
     def __init__(self):
         self.lab = self.lab_gpu = self.others = self.others_gpu = self.partners = 0.0
         self.lab_jobs, self.lab_people, self.others_people = set(), set(), set()
+
+
+def _condo_notes(clusters, group, lab_waits) -> list:
+    """Where a lab kept its own condo quiet while its jobs that could have run there waited
+    elsewhere: [{cluster, label, own_condo_pct, partitions, cores, gpus, elsewhere: [{cluster,
+    label, jobs, median_minutes}]}], for each cluster where its condos were under
+    CONDO_QUIET_PCT busy and at least CONDO_NOTE_JOBS such jobs waited a median of
+    CONDO_NOTE_MINUTES or more on another cluster or another partition. Could have run there:
+    no more cores than the condo has, and no GPUs where it has none (no more than it has). The
+    lab's own figures: nothing about anyone else."""
+    out = []
+    for c in clusters:
+        pct, condos = c.get("own_condo_pct"), c.get("own_condos") or []
+        if not condos or pct is None or pct >= CONDO_QUIET_PCT:
+            continue
+        cores = sum(o["cores"] for o in condos)
+        gpus = sum(o["gpus"] for o in condos)
+        parts = {o["partition"] for o in condos}
+        elsewhere = []
+        for e in clusters:
+            fit = [m for m, cpus, g_, ps in lab_waits.get((group, e["cluster"]), ())
+                   if cpus <= cores and (g_ == 0 if not gpus else g_ <= gpus)
+                   and not (e is c and parts & set(ps))]
+            if len(fit) >= CONDO_NOTE_JOBS and statistics.median(fit) >= CONDO_NOTE_MINUTES:
+                elsewhere.append({"cluster": e["cluster"], "label": e["label"], "jobs": len(fit),
+                                  "median_minutes": round(statistics.median(fit))})
+        if elsewhere:
+            out.append({"cluster": c["cluster"], "label": c["label"], "own_condo_pct": pct,
+                        "partitions": sorted(parts), "cores": cores, "gpus": gpus,
+                        "elsewhere": sorted(elsewhere, key=lambda x: -x["jobs"])})
+    return out
 
 
 def _pieces(jobs, outsider, part_of, lo, hi) -> tuple:
@@ -830,7 +874,8 @@ def _waits(w: _Where, jobs, waits, is_mine, outsider, own_nodes, lo, hi, min_oth
     by_set: dict = defaultdict(list)
     for j, a, b, minutes, m, out in waits:
         r = {"job": id(j), "user": j.user, "day": (b - lo).days, "minutes": minutes, "mine": m,
-             "outsider": out, "set": None, "behind": False,
+             "outsider": out, "set": None, "behind": False, "cpus": j.cpus, "gpus": j.gpus,
+             "partitions": tuple(j.partitions),
              "a": (a - t0).total_seconds(), "b": (b - t0).total_seconds()}
         rows.append(r)
         ns = nodes_for(j)
@@ -874,6 +919,8 @@ def _waits(w: _Where, jobs, waits, is_mine, outsider, own_nodes, lo, hi, min_oth
         return _waits_out(rows, ok, bad_days, cores_off, median)
     finish.outsiders = {r["job"]: (r["day"], r["user"], r["behind"]) for r in rows
                         if not r["mine"] and r["outsider"]}
+    # the lab's own waits, for what its own condos could have run (condo_notes)
+    finish.lab_waits = [(r["minutes"], r["cpus"], r["gpus"], r["partitions"]) for r in rows if r["mine"]]
     return finish
 
 

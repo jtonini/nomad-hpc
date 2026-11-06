@@ -105,6 +105,8 @@ def _mask_labs(data: dict) -> None:
     person at them; storage entries, exports and server names for a lab."""
     for i, lab in enumerate(data["labs"], 1):
         lab["group"] = lab["name"] = f"lab #{i}"
+        for note in lab.get("condo_notes") or []:
+            note["partitions"] = [f"condo #{k}" for k in range(1, len(note["partitions"]) + 1)]
         lab.pop("each", None)                     # each member by NetID
         lab.pop("attention", None)                # who, which job, which machine (never built
                                                   # masked: --mask asks for no names)
@@ -403,6 +405,8 @@ def _mask_share(data: dict) -> None:
     """Lab names and groups, condo names and the labs a condo is shared with: numbered."""
     for i, lab in enumerate(data["labs"], 1):
         lab["group"] = lab["name"] = f"lab #{i}"
+        for note in lab.get("condo_notes") or []:
+            note["partitions"] = [f"condo #{k}" for k in range(1, len(note["partitions"]) + 1)]
         for c in lab["clusters"]:
             for j, o in enumerate(c["own_condos"], 1):
                 o["condo"] = o["label"] = o["partition"] = f"condo #{j}"
@@ -475,7 +479,18 @@ def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mas
                    f"{lab['members']} members{_where(path, mask)}")
         if not lab["clusters"]:
             click.echo("  no cluster's nodes were read in the window")
+        for note in lab.get("condo_notes") or []:
+            where = "; ".join(f"{_n(e['jobs'], 'job')} on {e['label']} (median {_span(e['median_minutes'])})"
+                              for e in note["elsewhere"])
+            gpus = f", {note['gpus']} GPUs" if note["gpus"] else ", no GPUs"
+            click.echo(f"  ! its own condo on {note['label']} ({', '.join(note['partitions'])}: {note['cores']} cores"
+                       f"{gpus}) was {note['own_condo_pct']:g}% busy, while its jobs that could have run there "
+                       f"waited: {where}; sent with -p {note['partitions'][0]} they would run on it")
+        idle_on = [c["label"] for c in lab["clusters"]
+                   if not c["total"].get("lab_core_hours") and not c["waits"]["lab"]["jobs"]]
         for c in lab["clusters"]:
+            if c["label"] in idle_on:
+                continue
             tot = c["total"]
             of_used = "" if tot.get("lab_of_used_pct") is None else (
                 f", {tot['lab_of_used_pct']:g}% of everyone's" if not tot.get("others_left_out_days") else
@@ -511,10 +526,11 @@ def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mas
                     held = (f", {_p(b['lab_of_busy_pct'])} of those in use" if b["lab_of_busy_pct"] is not None
                             else "") + (f" (what others held: {_n(b['busy_left_out_days'], 'day')} left out)"
                                         if b["busy_left_out_days"] else "")
+                    off = " off its condo" if c["own_condos"] else ""
                     line += (f"; {b['jobs']} of them ({_n(b['people'], 'person', 'people')}) while the lab's "
                              f"jobs ran on their nodes ({_ch(b['hours'])} hours of waiting, added up), the lab "
                              f"holding on average {b['lab_cores_avg']:g} of the {b['cores_there_avg']:g} cores "
-                             f"there off its condo{held}")
+                             f"there{off}{held}")
                 else:
                     line += "; none while the lab's jobs ran on their nodes"
             click.echo(line)
@@ -527,6 +543,8 @@ def share_cmd(ctx, netid, group, days, min_others, db, report, now, as_json, mas
                            f"{_span(mine['median_minutes'])}){held}")
             for note in c["coverage"]:
                 click.echo(f"    ({note})")
+        if idle_on:
+            click.echo(f"  didn't run on: {', '.join(idle_on)}")
     if data.get("min_others"):
         for note in data["notes"]:
             click.echo(f"  - {note}")

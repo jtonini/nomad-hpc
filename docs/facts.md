@@ -212,6 +212,11 @@ one lab by its group), each cluster with node readings in the window (1.30.0):
   guests' (`guests_core_hours`), to the lab's PI.
 * `own_condo_pct`: how busy the lab kept its own condo: its core-hours there,
   of what the condo could run.
+* `condo_notes` (on the lab, 1.30.1): where its own condo was under 25% busy
+  while 5 or more of its jobs that could have run there (no more cores than
+  the condo has, no GPUs where it has none) waited a median of an hour or more
+  on another cluster or partition: the condo, how busy, and where they waited.
+  The lab's own figures only.
 * `total`: the same over every node, and the lab's share of everyone's use
   (`lab_of_used_pct`, and of GPU-hours).
 * `waits`: jobs that waited 15 minutes or more for room on the cluster

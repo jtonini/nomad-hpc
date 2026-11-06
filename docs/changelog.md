@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.30.1 (November 2026)
+
+### Features
+- **A lab's quiet condo, said** (`condo_notes`; `nomad facts share`, the
+  Console's Cluster use): where a lab's own condo was under 25% busy while its
+  jobs that could have run there (no more cores than it has, no GPUs where it
+  has none) waited a median of an hour or more elsewhere: the condo, how busy,
+  where they waited, and the partition that would have run them.
+
+### Fixes
+- `nomad facts share`: "off its condo" only where the lab has one; a cluster
+  the lab didn't use is one line ("didn't run on: ...").
+
 ## v1.30.0 (November 2026)
 
 ### Features
