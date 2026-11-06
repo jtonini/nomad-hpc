@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.31.2 (November 2026)
+
+### Fixes
+- `nomad node drain|resume`: where sudo insists on a terminal (`Defaults
+  requiretty`, as on RHEL 7), the dry run says so, with the line that lets
+  the account's agent through (`Defaults:ACCOUNT !requiretty`); it said "sudo
+  would not let ACCOUNT run this ... without a password". Slurm's programs
+  and sudo now run without a terminal by hand too (a session of their own),
+  so a dry run in a terminal meets what the Console's agent meets.
+
 ## v1.31.1 (November 2026)
 
 ### Fixes

@@ -185,10 +185,12 @@ def _dropped() -> list[str]:
 
 
 def _run(argv: list[str], timeout: float = TIMEOUT) -> tuple[int, str, str]:
-    """A command line (a list: no shell), with no input, in C locale."""
+    """A command line (a list: no shell), with no input, in C locale, and in
+    a session of its own: no terminal, as the agent has none, so sudo's
+    answer by hand is its answer from the Console (`requiretty`, 1.31.2)."""
     try:
         p = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                           errors="replace", timeout=timeout, env=_env(), cwd="/")
+                           errors="replace", timeout=timeout, env=_env(), cwd="/", start_new_session=True)
     except subprocess.TimeoutExpired:
         return 124, "", f"{os.path.basename(argv[0])} did not answer within {timeout:.0f} seconds"
     except OSError as exc:
@@ -228,6 +230,15 @@ def slurm_as(config: dict | None) -> tuple[str | None, str | None]:
     if not isinstance(v, str) or not (v == "self" or _NAME.fullmatch(v)) or v.startswith("-"):
         return None, f"[actions] slurm_as = {str(v)[:40]!r} is neither an account's name nor \"self\""
     return v, None
+
+
+def needs_tty(text: str) -> bool:
+    """sudo's own words when it insists on a terminal (Defaults requiretty)."""
+    return "must have a tty" in text or "requiretty" in text
+
+
+def tty_line(account: str) -> str:
+    return f"Defaults:{account} !requiretty"
 
 
 def sudo_line(account: str, runs_as: str, scontrol: str) -> str:
@@ -534,7 +545,12 @@ def _change(node, what, *, reason, by, apply, config, config_path, cluster, run,
             out["command"] = full_argv(update, runs_as, sudo)
             if runs_as != "self":
                 code, text, err = run([sudo, "-n", "-l", "-u", runs_as, *update], SUDO_TIMEOUT)
-                if code != 0:
+                if code != 0 and needs_tty(err):
+                    problems.append(f"sudo here insists on a terminal (requiretty), and nomad runs it without one, "
+                                    f"as its agent does; root adds (visudo -f /etc/sudoers.d/nomad-node) "
+                                    f"{tty_line(account)} -- and, unless {account} may already run it as "
+                                    f"{runs_as} without a password: {sudo_line(account, runs_as, scontrol)}")
+                elif code != 0:
                     problems.append(f"sudo would not let {account} run this scontrol command as {runs_as} "
                                     f"without a password; a sudoers line would (visudo -f "
                                     f"/etc/sudoers.d/nomad-node): {sudo_line(account, runs_as, scontrol)}")
@@ -571,6 +587,9 @@ def _change(node, what, *, reason, by, apply, config, config_path, cluster, run,
     elif code == 124:
         out["said"] = (f"not known yet: scontrol did not answer within {UPDATE_TIMEOUT} seconds (it may still "
                        f"do it), and {now}; look again in a minute")
+    elif code != 0 and needs_tty(msg) and runs_as != "self":
+        out["said"] = (f"sudo insisted on a terminal, so nothing ran; root adds {tty_line(account)} "
+                       f"(visudo -f /etc/sudoers.d/nomad-node); {now}")
     elif code != 0 and "password is required" in msg and runs_as != "self":
         out["said"] = (f"sudo wanted a password for it, so nothing ran (sudo -l can't tell beforehand); a "
                        f"NOPASSWD line would do: {sudo_line(account, runs_as, scontrol)}; {now}")

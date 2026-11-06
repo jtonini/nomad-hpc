@@ -429,6 +429,41 @@ def test_sudo_wanting_a_password_is_said(home):
     assert "NOPASSWD: /usr/bin/scontrol update NodeName" in r["said"] and "node02 is mixed" in r["said"]
 
 
+def test_sudo_insisting_on_a_terminal_is_said(home):
+    """1.31.2: vadur (RHEL 7) has Defaults requiretty; its agent has no terminal."""
+    TTY = "sudo: sorry, you must have a tty to run sudo\n"
+
+    class NoTty(Slurm):
+        def __call__(self, argv, timeout=20):
+            if argv[0] == "/usr/bin/sudo":
+                self.calls.append(argv)
+                return 1, "", TTY
+            return super().__call__(argv, timeout)
+    s = NoTty()
+    r = drain.change("node02", drain.DRAIN, reason="x", config=CFG, run=s, finder=finder, apply=True)
+    who = drain._account()
+    assert not r["ok"] and not r["applied"] and "insists on a terminal (requiretty)" in r["problems"][0]
+    assert f"Defaults:{who} !requiretty" in r["problems"][0] and "NOPASSWD" in r["problems"][0]
+    assert not any(c[:4] == ["/usr/bin/sudo", "-n", "-u", "slurm"] for c in s.calls)
+    assert drain.needs_tty(TTY) and not drain.needs_tty("sudo: a password is required")
+
+    # sudo -l let it through (a rule that lists), the change itself met requiretty
+    class TtyOnRun(Slurm):
+        def __call__(self, argv, timeout=20):
+            if argv[:4] == ["/usr/bin/sudo", "-n", "-u", "slurm"]:
+                return 1, "", TTY
+            return super().__call__(argv, timeout)
+    r = drain.change("node02", drain.DRAIN, reason="x", config=CFG, run=TtyOnRun(), finder=finder, apply=True)
+    assert not r["ok"] and r["said"].startswith("sudo insisted on a terminal, so nothing ran")
+    assert f"Defaults:{who} !requiretty" in r["said"]
+
+
+def test_slurm_and_sudo_run_without_a_terminal():
+    """1.31.2: in a session of their own, so a dry run in a terminal meets what the agent meets."""
+    code, out, _ = drain._run([sys.executable, "-c", "import os; print(os.getsid(0) == os.getpid())"])
+    assert code == 0 and out.strip() == "True"
+
+
 def test_the_install_check_is_kept_a_while(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     walks = []

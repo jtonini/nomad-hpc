@@ -207,6 +207,12 @@ true for ten minutes (`~/.local/share/nomad/install.ok`).
 command, not whether that rule wants a password. If it does, the change
 doesn't run, and the answer says so, with the NOPASSWD line that would do.
 
+**A terminal.** Where sudo insists on one (`Defaults requiretty`, as RHEL 7
+sets it), the agent, which has none, can't use it. nomad runs sudo without
+a terminal by hand too (in a session of its own), so the dry run in a
+terminal says what the Console would meet: then root adds
+`Defaults:zeus !requiretty` beside the sudo line.
+
 **One environment.** sudo drops `SLURM_*` settings for the change, so every
 Slurm program here runs without them (`SLURM_CONF`, `SLURM_CLUSTERS`): what
 is read is the cluster that is changed. A cluster whose slurm.conf is found
