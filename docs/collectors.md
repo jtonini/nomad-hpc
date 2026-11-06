@@ -705,6 +705,49 @@ partitions (`scontrol show config`: PreemptType, PreemptMode, JobRequeue,
 PreemptExemptTime; `slurm_settings`), so nomad knows whether Slurm preempts
 at all.
 
+## What running jobs use now (job_live, 1.32.0)
+
+An ended job's analysis says how much of what it asked for it used (the
+cores it kept busy, the most memory it held, from Slurm's accounting once
+it ends). `job_live` says it while the job runs, from Slurm's accounting of
+running jobs (`sstat`). Each run lists the running jobs (`squeue -t RUNNING`),
+asks `sstat` for their steps (a hundred jobs per call), and keeps one row
+per running job in `job_live`. A job that has ended loses its row. Per job:
+
+- **cores busy now** (`busy_now`): the CPU time its steps added since the
+  last run, over the time between. It is given only when the same steps ran
+  then.
+- **cores busy on average** (`busy_avg`): its steps' CPU time over its time
+  running. It reads low for a job whose steps came and went (each `srun`
+  step is counted only while it runs).
+- **memory at its peak so far** (`peak_rss_mb`): the most one of its tasks has
+  held (MaxRSS), measured as an ended job's peak is.
+- **memory held now** (`rss_now_mb`): every task's, added up (AveRSS times
+  tasks), its extern step left out.
+
+The node's own figures can't say this. Slurm's "free memory" (and `free`'s
+"free") leaves out the file cache, which on spydur's spdr10 was 697 of its
+754 GB while the one job there held 31 GB.
+
+`sstat` shows someone else's job only to root and Slurm's own account, so on
+a Slurm head node it runs as Slurm's account through sudo: `sstat_as`, by
+default `[actions] slurm_as` (the account that drains nodes, 1.31). Set it to
+"self" for an account that is root or SlurmUser. It runs by its full path,
+without a terminal, and not at all when someone else could change the nomad
+running here (the check `nomad node drain` makes). An account whose sudo
+covers only drain and resume needs `sstat` too: root adds
+`ACCOUNT ALL=(slurm) NOPASSWD: /usr/bin/sstat` (it only reads).
+
+```toml
+[collectors.job_live]
+enabled = true
+# interval = 300
+# sstat_as = "slurm"        # default: [actions] slurm_as
+```
+
+The Console shows it beside what each running job asked for (staff, every
+job; a person, their own).
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

@@ -73,6 +73,10 @@ SPECS: tuple[Spec, ...] = (
     # The jobs Slurm preempted or requeued (1.28.0): a guest on a condo, for the hub to tell the person.
     Spec("preemptions", "preemptions", "PreemptionsCollector", False,
          "a Slurm head node whose account sees every user's jobs", ("sacct",), (), ("job_preemptions",)),
+    # What each running job uses now (1.32.0): cores busy and memory held, from sstat as Slurm's account.
+    Spec("job_live", "job_live", "JobLiveCollector", False,
+         "a Slurm head node whose account may run sstat as Slurm's (sudo)", ("squeue", "sstat"), (),
+         ("job_live",)),
     # How fast each CPU really runs when busy (1.27.0): a power brake (PROCHOT) found the day it starts.
     Spec("clock", "clock", "ClockCollector", False,
          "a head node reaching its nodes over SSH, or any host (python3 there)", ("sh",), (),
@@ -206,6 +210,10 @@ def plan(config: dict) -> list[Planned]:
             listed = ws.get("workstations") or config.get("workstations") or []
             cfg.setdefault("workstation_hosts", [w.get("hostname") for w in listed
                                                  if isinstance(w, dict) and w.get("hostname")])
+        if spec.name == "job_live":
+            # who runs sstat: its own sstat_as, else who runs scontrol for drain/resume (1.31)
+            acts = config.get("actions") if isinstance(config.get("actions"), dict) else {}
+            cfg.setdefault("sstat_as", acts.get("slurm_as"))
         if spec.name == "groups":
             cfg["clusters"] = config.get("clusters", {})
             cfg.setdefault("local_name", resolve_cluster_name(config))

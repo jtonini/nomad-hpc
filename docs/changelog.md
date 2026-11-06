@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.32.0 (November 2026)
+
+### Features
+- **What running jobs use now** (the `job_live` collector, off unless
+  enabled): per running job, the cores it keeps busy (now, since the last
+  run, and on average) and the memory it holds (now, and its peak so far),
+  from `sstat`, run as Slurm's account through sudo (`sstat_as`, by default
+  `[actions] slurm_as`). One row per running job (`job_live`), gone when the
+  job ends; synced to the hub like any table. For the Console's running jobs.
+  On spydur, bchen's 87790 asked for 350 GB and held 31 GB (`sstat`), while
+  Slurm's free memory for its node (the file cache counted as used) said
+  726 GB in use.
+
 ## v1.31.2 (November 2026)
 
 ### Fixes
