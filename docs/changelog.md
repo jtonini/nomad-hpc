@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.32.1 (November 2026)
+
+### Fixes
+- `job_live`: each step of a job counted once. Asked for an array's own id,
+  sstat also answers for its other running tasks, so a task asked for by
+  its own id as well came back twice: on vadur, 12266_48 and 12266_81 read
+  10.7 and 10.5 cores busy of the 6 asked, twice their 5.3.
+- `job_live`: when nothing runs, its table is emptied (a collector that
+  collects nothing isn't stored, so rows of jobs that had ended stayed), and
+  it is there from the first run.
+- `job_live`: the cores kept busy since the last run are no longer held to
+  the cores asked for: a cluster that doesn't keep jobs to them shows.
+- nomad.toml.example: `[actions]` (agent_key, allow_unrestricted, slurm_as,
+  with the sudo lines a site needs) and `[collectors.job_live]` (enabled,
+  interval, sstat_as); preemptions, clock, modules and job_live among the
+  collectors off unless turned on.
+
 ## v1.32.0 (November 2026)
 
 ### Features

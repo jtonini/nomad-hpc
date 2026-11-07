@@ -34,7 +34,7 @@ pid_file = "/var/run/nomade/nomade.pid"
 # On unless turned off: disk, slurm, job_metrics, iostat, mpstat, vmstat,
 #   node_state, gpu, nfs, groups
 # Off unless turned on: interactive, workstation, per_user, storage,
-#   network_perf, cloud.aws
+#   network_perf, cloud.aws, preemptions, clock, modules, job_live
 #
 # (An `enabled = [...]` list here is not read.) `nomad collectors` shows,
 # on any host, which ones run, why, and whether they collect anything.
@@ -320,6 +320,17 @@ enabled = false
 # sustain = 2                        # readings in a row
 # ignore = ["gpu0*"]
 
+# What each running job uses now (1.32.0): its cores kept busy and the memory
+# it holds, from Slurm's accounting of running jobs (sstat), for the
+# Console's "In use now". A Slurm head node. sstat shows someone else's job
+# only to root and Slurm's own account, so it runs as sstat_as through sudo
+# (by default [actions] slurm_as below); root adds, unless the account may
+# already (sudo -l): ACCOUNT ALL=(slurm) NOPASSWD: /usr/bin/sstat
+[collectors.job_live]
+enabled = false
+# interval = 300
+# sstat_as = "slurm"                 # "self": this account is root or SlurmUser
+
 # The environment modules the cluster has (1.26.0), read daily, for the job
 # scripts nomad makes ([[submit.templates]] on the hub)
 [collectors.modules]
@@ -443,6 +454,25 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # ============================================
 # These differ from one institution to the next. The CLI, the dashboard and
 # the NØMAÐ Console all read them from here.
+
+# ─── Actions ─────────────────────────────────────────────────────
+# A fixed catalog of commands the Console's admins run (nomad actions list),
+# on the hub or on a site through the site's `nomad agent` (the forced
+# command of the hub's key: nomad agent install-key). See docs/actions.md.
+[actions]
+# On the hub:
+# agent_key = "~/.config/nomad/agent/id_ed25519"   # the hub's key to the sites' agents
+# allow_unrestricted = false         # true: also a site key without the forced command
+#
+# On a site (a Slurm head node): who runs scontrol to drain and resume
+# nodes (1.31: nomad node drain|resume, the Console's Nodes page); off
+# until set. "slurm": as Slurm's own account through sudo, where root adds
+# (unless the account may already: sudo -l):
+#   ACCOUNT ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\=* State\=DRAIN Reason\=*, /usr/bin/scontrol update NodeName\=* State\=RESUME
+#   Defaults:ACCOUNT !requiretty     # where sudo insists on a terminal (RHEL 7)
+# "self": this account is a Slurm administrator. The job_live collector
+# runs sstat as the same account unless [collectors.job_live] sstat_as says.
+# slurm_as = "slurm"
 
 # ─── Mail ────────────────────────────────────────────────────────
 # How NØMAÐ hands mail to your institution's mail server: alert email,

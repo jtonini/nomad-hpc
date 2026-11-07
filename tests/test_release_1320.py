@@ -53,7 +53,8 @@ def test_busy_now():
     assert J.JobLiveCollector.busy_now({**prev, "steps": "0,batch"}, d) is None          # other steps then
     assert J.JobLiveCollector.busy_now({**prev, "start": "t"}, d) is None                # requeued: another run
     assert J.JobLiveCollector.busy_now({**prev, "cpu_s": 99999999.0}, d) is None         # less CPU time now
-    assert J.JobLiveCollector.busy_now(prev, {**d, "cpu_s": 1000.0 + 500 * 300}) == round(52 * 1.05, 2)
+    # 1.32.1: not held to the cores asked: a cluster that doesn't keep jobs to them shows
+    assert J.JobLiveCollector.busy_now(prev, {**d, "cpu_s": 1000.0 + 60 * 300}) == 60.0
 
 
 class Fake(J.JobLiveCollector):
@@ -139,3 +140,60 @@ def test_who_runs_sstat(tmp_path, monkeypatch):
     monkeypatch.setattr(J.shutil, "which", lambda n, path=None: "/usr/bin/sudo")
     assert c._argv() == ["/usr/bin/sudo", "-n", "-u", "slurm", "/usr/bin/sstat"]
     assert J.JobLiveCollector({"sstat_as": "self"}, tmp_path / "s.db")._argv() == ["/usr/bin/sstat"]
+
+
+# --- 1.32.1 ------------------------------------------------------------------------------
+
+def test_an_arrays_tasks_counted_once(tmp_path, tools):
+    """vadur, 6 Nov: asked for 12266 (array 12266's last task, its own id), sstat also
+    answered for the array's other running tasks, 12987 (12266_48) and 13020 (12266_81),
+    which were asked for by their own ids too: they came back twice and read 10.7 and
+    10.5 cores busy of the 6 asked, twice their 5.3."""
+    squeue = ("12987|12266_48|jgyasi|6|1|2026-11-04T10:00:00\n"
+              "13020|12266_81|jgyasi|6|1|2026-11-05T10:00:00\n"
+              "12266|12266_99|jgyasi|6|1|2026-11-06T10:00:00\n")
+    sstat = ("12987.batch|2905848K|2781828K|28-22:38:45|1\n"
+             "13020.batch|1462448K|1398628K|11-21:05:04|1\n"
+             "12266.batch|1373780K|1332612K|6-21:58:43|1\n"
+             "12987.batch|2905848K|2781828K|28-22:38:45|1\n"
+             "13020.batch|1462448K|1398628K|11-21:05:04|1\n")
+    assert [len(v) for v in J.parse_sstat(sstat).values()] == [1, 1, 1]
+    by = {r["job_id"]: r for r in Fake(tmp_path / "s.db", squeue=squeue, sstat=sstat).collect()}
+    assert by["12266_48"]["cpu_s"] == J.seconds("28-22:38:45")
+    assert by["12266_48"]["rss_now_mb"] == round(2781828 / 1024, 1)
+
+    class TwoCalls(Fake):                       # the same step in two calls: still once
+        def _run(self, argv):
+            if not argv[0].endswith("squeue"):
+                self.out["sstat"] = "12987.batch|2905848K|2781828K|28-22:38:45|1\n"
+            return super()._run(argv)
+    monkey = TwoCalls(tmp_path / "s.db", squeue=squeue)
+    J_BATCH, J.BATCH = J.BATCH, 1
+    try:
+        by = {r["job_id"]: r for r in monkey.collect()}
+    finally:
+        J.BATCH = J_BATCH
+    assert by["12266_48"]["cpu_s"] == J.seconds("28-22:38:45")
+
+
+def test_nothing_running_clears_the_table(tmp_path, tools):
+    db = tmp_path / "s.db"
+    c = Fake(db)
+    c.store(c.collect())
+    assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM job_live").fetchone()[0] == 2
+    assert Fake(db, squeue="").collect() == []             # collect itself clears: run() stores nothing
+    assert sqlite3.connect(db).execute("SELECT COUNT(*) FROM job_live").fetchone()[0] == 0
+    fresh = tmp_path / "fresh.db"                         # and the table is there from the first run
+    Fake(fresh, squeue="").collect()
+    assert sqlite3.connect(fresh).execute("SELECT COUNT(*) FROM job_live").fetchone()[0] == 0
+
+
+def test_the_example_toml_has_todays_settings():
+    import tomllib
+    from pathlib import Path
+    text = (Path(__file__).resolve().parent.parent / "nomad.toml.example").read_text()
+    d = tomllib.loads(text)
+    assert d["collectors"]["job_live"] == {"enabled": False} and "actions" in d
+    for key in ("# interval = 300", '# sstat_as = "slurm"', '# slurm_as = "slurm"', "# agent_key =",
+                "# allow_unrestricted = false", "Defaults:ACCOUNT !requiretty", "NOPASSWD: /usr/bin/sstat"):
+        assert key in text, key

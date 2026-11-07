@@ -716,7 +716,9 @@ per running job in `job_live`. A job that has ended loses its row. Per job:
 
 - **cores busy now** (`busy_now`): the CPU time its steps added since the
   last run, over the time between. It is given only when the same steps ran
-  then.
+  then, and it isn't held to the cores asked for: on a cluster that doesn't
+  keep jobs to them (cgroup.conf without `ConstrainCores=yes`), a job using
+  more shows it.
 - **cores busy on average** (`busy_avg`): its steps' CPU time over its time
   running. It reads low for a job whose steps came and went (each `srun`
   step is counted only while it runs).

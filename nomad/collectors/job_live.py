@@ -102,19 +102,22 @@ def parse_squeue(text: str) -> list[dict]:
 
 def parse_sstat(text: str) -> dict[str, list[dict]]:
     """sstat's lines by job (its id before the step: "87790" of
-    "87790.batch", "5005_7" of "5005_7.0")."""
-    out: dict[str, list[dict]] = {}
+    "87790.batch", "5005_7" of "5005_7.0"), each step once (1.32.1): asked
+    for an array's own id, sstat also answers for its running tasks (vadur:
+    -j 12266 gave 12987.batch and 13020.batch too), so a task asked for by
+    its own id as well came back twice, and counted twice."""
+    out: dict[str, dict[str, dict]] = {}
     for ln in (text or "").splitlines():
         f = ln.strip().split("|")
         if len(f) < 5:
             continue
         job, dot, step = f[0].rpartition(".")
-        if not dot or not _JOB.fullmatch(job):
+        if not dot or not _JOB.fullmatch(job) or not step:
             continue
-        out.setdefault(job, []).append({
+        out.setdefault(job, {})[step] = {
             "step": step, "max_rss_mb": size_mb(f[1]), "ave_rss_mb": size_mb(f[2]),
-            "ave_cpu_s": seconds(f[3]), "tasks": int(f[4]) if f[4].strip().isdigit() else None})
-    return out
+            "ave_cpu_s": seconds(f[3]), "tasks": int(f[4]) if f[4].strip().isdigit() else None}
+    return {job: list(steps.values()) for job, steps in out.items()}
 
 
 def summarise(steps: list[dict]) -> dict:
@@ -199,6 +202,9 @@ class JobLiveCollector(BaseCollector):
             raise CollectionError(f"squeue: {(r.stderr or '').strip()[-200:] or f'exit {r.returncode}'}")
         jobs = parse_squeue(r.stdout)
         if not jobs:
+            # Nothing runs: no row stays (a collector that collects nothing isn't
+            # stored, so this one clears its table itself, 1.32.1).
+            self.store([])
             return []
         argv = self._argv()
         found: dict[str, list[dict]] = {}
@@ -211,7 +217,9 @@ class JobLiveCollector(BaseCollector):
                 said.append(f"sstat: no answer in {TIMEOUT} s")
                 continue
             for k, v in parse_sstat(s.stdout).items():
-                found.setdefault(k, []).extend(v)
+                have = {x["step"]: x for x in found.get(k, [])}
+                have.update({x["step"]: x for x in v})           # each step once, across calls too
+                found[k] = list(have.values())
             err = (s.stderr or "").strip()
             if s.returncode != 0 and not s.stdout.strip():
                 said.append(err.splitlines()[-1][:200] if err else f"sstat: exit {s.returncode}")
@@ -237,7 +245,9 @@ class JobLiveCollector(BaseCollector):
     @staticmethod
     def busy_now(prev: dict | None, d: dict) -> float | None:
         """The cores kept busy between the last run and this one: the same
-        steps then and now, more CPU time now, some time between."""
+        steps then and now, more CPU time now, some time between. Not held
+        to the cores it asked for (1.32.1): a cluster that doesn't keep jobs
+        to them (no ConstrainCores) shows here."""
         if not prev or d.get("cpu_s") is None or prev.get("cpu_s") is None or prev.get("steps") != d.get("steps") \
                 or prev.get("start") != d.get("start"):
             return None
@@ -248,9 +258,7 @@ class JobLiveCollector(BaseCollector):
         used = d["cpu_s"] - prev["cpu_s"]
         if dt < 30 or used < 0:
             return None
-        busy = used / dt
-        cap = (d.get("cpus") or 0) * 1.05
-        return round(min(busy, cap) if cap else busy, 2)
+        return round(used / dt, 2)
 
     def store(self, data: list[dict[str, Any]]) -> None:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
