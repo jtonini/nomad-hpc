@@ -1,0 +1,2522 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Lightweight HPC monitoring, visualization, and predictive analytics">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/submit/">
+      
+      
+        <link rel="prev" href="../edu/">
+      
+      
+        <link rel="next" href="../alerts/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Sizing and Submitting - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#sizing-and-submitting-jobs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Sizing and Submitting
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../dashboard/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Technical
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../collectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it shows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#submitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Submitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Submitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-output-goes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the output goes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#through-local-scratch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Through local scratch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-it-for-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing it for users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from-the-console-nomad-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the Console: nomad-gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-it-starts-soonest-1254" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where it starts soonest (1.25.4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-a-script-1260" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making a script (1.26.0)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Making a script (1.26.0)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-templates-options-1290" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A template's options (1.29.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guests-on-condos-and-the-owners-first-claim-1280" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guests on condos, and the owners' first claim (1.28.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../condo-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Condo Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy_watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../facts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Facts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-shows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it shows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#submitting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Submitting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Submitting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-output-goes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the output goes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#through-local-scratch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Through local scratch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-it-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it reads
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installing-it-for-users" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installing it for users
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from-the-console-nomad-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the Console: nomad-gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-it-starts-soonest-1254" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where it starts soonest (1.25.4)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#making-a-script-1260" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Making a script (1.26.0)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Making a script (1.26.0)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-templates-options-1290" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A template's options (1.29.0)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guests-on-condos-and-the-owners-first-claim-1280" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guests on condos, and the owners' first claim (1.28.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="sizing-and-submitting-jobs">Sizing and submitting jobs<a class="headerlink" href="#sizing-and-submitting-jobs" title="Permanent link">&para;</a></h1>
+<p><code>nomad size</code> says what a job should ask for, and <code>nomad submit</code> sends it with that. People run them themselves, on a cluster's login node: nomad reads their script, the input file it names, their own past jobs from Slurm's accounting, and the cluster's partitions. Nothing is stored, and nothing needs changing in Slurm.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>nomad size job.sh                 what job.sh should ask for
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>nomad size --job 4815162          a job of yours that ran, to run it again
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>nomad submit job.sh [ARGS...]     size it, show the sbatch command, ask, submit
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>nomad submit --again 4815162      a job of yours, sent again (an array: 5005, or one task: 5005_7)
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>nomad submit --mem 12G job.sh     your own value for memory (and --cpus, --time, --gpus, --partition)
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>nomad submit --keep job.sh        the script's own values: nomad only checks and tags
+</code></pre></div>
+<p>Options for <code>nomad submit</code> go before the script, as with sbatch; what follows the script is its arguments (nomad warns, and won't submit without asking, when one of its own options comes after the script). <code>--dry-run</code> shows the command without running it, and <code>--yes</code> submits without asking.</p>
+<h2 id="what-it-shows">What it shows<a class="headerlink" href="#what-it-shows" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>job.sh: Gaussian (g16), input w.com
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  compared with your 5 runs of this script
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>             asked         nomad         why
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  CPUs       4             8*            the input sets 8 threads of one task (%nprocshared=8): 4 CPUs would make them share cores
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  memory     8G            20G*          what the input sets (%mem 16 GB, and a fifth more: Gaussian needs room beyond %mem); your 3 runs of this script peaked at 10.7G
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  time       04:00:00      02:30:00*     the longest of your 3 runs of this script took 01:30:00: a shorter limit starts sooner
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>  GPUs       -             -             none asked
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>  partition  basic         basic         it fits basic
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>  (* nomad would change it)
+</code></pre></div>
+<p>Memory is per node. Each value says where it comes from:</p>
+<ul>
+<li><strong>The input file or the command line</strong>, for programs that state their sizes there:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Program</th>
+<th>CPUs</th>
+<th>Memory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gaussian</td>
+<td><code>%nprocshared</code> (<code>%nproc</code>, <code>%cpu</code>): threads</td>
+<td><code>%mem</code>, and a fifth more</td>
+</tr>
+<tr>
+<td>ORCA</td>
+<td><code>%pal nprocs</code>, <code>! PALn</code>: processes</td>
+<td><code>%maxcore</code> × processes, and a quarter more</td>
+</tr>
+<tr>
+<td>Q-Chem</td>
+<td><code>qchem -nt</code> (threads) or <code>-np</code> (processes)</td>
+<td><code>MEM_TOTAL</code> in <code>$rem</code> (for each process), and a fifth more</td>
+</tr>
+<tr>
+<td>Columbus</td>
+<td><code>runc -nproc</code>: processes</td>
+<td><code>runc -m</code> (for each process), and a fifth more</td>
+</tr>
+<tr>
+<td>GROMACS</td>
+<td><code>mdrun -nt</code>, or <code>-ntmpi</code> × <code>-ntomp</code>: threads</td>
+<td>—</td>
+</tr>
+<tr>
+<td>NAMD</td>
+<td><code>+pN</code>: processes under charmrun or mpirun, else threads</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>Threads are asked as one task with that many CPUs (<code>--ntasks=1 --cpus-per-task=N</code>), processes as that many tasks of a CPU each (<code>--ntasks=N</code>): a job asking the other way is told so. A value given by a shell variable (<code>-nt $SLURM_CPUS_PER_TASK</code>) is left to the job's own request. The input file is read where the job will run: the folder sbatch is run in (or <code>--chdir</code>), after a literal <code>cd</code> in the script; nomad says when it is only found next to the script.
+- <strong>How the job ended</strong>, for one run again: out of memory, half as much memory again; out of time, half as long again; or what the input says, or your past runs of it needed, or what its script asks now, whichever is more. A job that stopped with an error is sized as usual, with a note that more resources won't fix it; one whose node failed or that was preempted runs as it was.
+- <strong>Your past runs like this one</strong>: the same script; else the same program in the very same folder; else the same job name; else the same program. An interpreter (python, R, Julia, MATLAB) or a program nomad doesn't know isn't "the same program": two python scripts can be anything. Memory is the highest peak × 1.5, time the longest run × 1.5 (the room nomad's scores ask for), rounded to values people type. History may <em>lower</em> a value only from at least three runs that completed, of the same script or of the same program in the same folder; the weaker matches (the same job name, the same program anywhere) may only <em>raise</em> one. A value the job doesn't ask for is weighed against the partition's default (its DefaultTime, else MaxTime; DefMemPerNode or DefMemPerCPU): where that isn't known, only runs close enough to lower a value set one. A run that failed never counts, nor a memory reading larger than its nodes have (Slurm can count memory processes share more than once). CPUs are lowered only as CPUs per task of a one-task job, never as tasks (an MPI launch counts on them), and only from runs that had at least as many CPUs as now asked. Where the runs of this script had other arguments, nomad says so.
+- <strong>The program</strong>: an executable built for GPUs (<code>pmemd.cuda</code>, <code>mdrun -nb gpu</code>) gets one when none is asked.
+- <strong>The partition</strong>: when the one asked (or the default) doesn't fit -- too long for its limit, no node with the CPUs, memory and GPUs one node needs <em>together</em> (a task's GPUs are on its node), too few GPUs in all, or one the job's account may not use (its AllowGroups, AllowAccounts; the job's <code>--account</code>, else the person's default account) -- nomad names one that fits, preferring ones the person may use, not preemptible, with the smallest nodes. A partition Slurm doesn't list is kept (Slurm checks it), and one whose nodes couldn't be read isn't offered. With a list (<code>-p a,b</code>), Slurm picks; nomad checks that one of them fits. A time or memory nomad works out that the partition can't give is asked at what it gives (its time limit, its biggest node), with a note.</p>
+<p>A job on several nodes (<code>--nodes</code> above 1) keeps its CPUs and memory; nomad checks its time and partition. Tasks Slurm places over as many nodes as it takes (<code>--ntasks</code> without <code>--nodes</code>), or on several, with memory per CPU or per GPU have no one node's figure: their memory is weighed a CPU (or GPU) at a time, and shown so (<code>2G/CPU</code>) -- the input's memory over the CPUs the job will have, or, when the job ran out, half as much again a CPU from Slurm's record (never below what the script asks now); past runs' readings (a node at a time) aren't weighed, a change of their CPUs keeps memory per CPU, and a partition fits them when its nodes hold them all, a task (its CPUs and their memory) at a time. <code>--ntasks-per-node</code> alone (no <code>--ntasks</code>, no <code>--nodes</code>) is that many tasks on one node; with <code>--ntasks</code>, it is the most a node takes. CPUs asked per GPU (<code>--cpus-per-gpu</code>) or through <code>--tres-per-task=cpu=N</code> are kept, and so is no time limit (<code>--time=UNLIMITED</code>, <code>0</code> or <code>-1</code>; nomad says when a partition has a limit).</p>
+<p>nomad never changes how a job asks: memory asked per CPU or per GPU stays so (rounded up to 64 MB, or down to whole megabytes when it is a node's memory: sbatch takes no fractions), GPUs stay <code>--gpus</code>, <code>--gpus-per-node</code>, <code>--gpus-per-task</code>, <code>--tres-per-task</code> or <code>--gres</code>, with their type and the job's other gres. Memory is decided per node: when CPUs or GPUs change (nomad's or yours), memory asked per CPU or per GPU is written again for them, so the node gets the memory the table shows. <code>#SBATCH</code> lines (and <code>#SLURM</code>, <code>#SBATCH--x</code>) are read as sbatch reads them: at the very start of a line (an indented one is a comment), before the first command.</p>
+<h2 id="submitting">Submitting<a class="headerlink" href="#submitting" title="Permanent link">&para;</a></h2>
+<p><code>nomad submit</code> shows the same table, then the exact sbatch command, and asks. Only the values that change are set on the command line (sbatch reads the rest from the script's <code>#SBATCH</code> lines), and what is sent is checked again: a value you give that no node can hold is said before you submit. sbatch runs in the folder you run nomad in, as it would by hand (a relative <code>--chdir</code> in the script is its own). <code>--cpus</code> sets CPUs the way the script asks them (CPUs per task for one task, else tasks; tasks of several CPUs each keep their CPUs per task: a multiple of them; tasks per node stay per node: a multiple of the nodes); <code>--gpus</code> too (per task or per node, <code>--gres</code> on several nodes included: a multiple of the tasks or nodes; <code>--gpus</code> on several nodes: at least one a node). nomad can't take an option away: <code>--gpus 0</code> on a script that asks for GPUs says to remove its line. <code>--mem</code> is per node (<code>0</code>: all of a node's memory), so it isn't taken for tasks Slurm places over its nodes with memory per CPU or per GPU: change that in the script. What the job doesn't ask (time, memory) is weighed against the defaults of the partition it goes to, yours included.</p>
+<p>A job sent again gets its own command line's other options and its folder (<code>--chdir</code>), and runs its script as it is on disk now (nomad says when it changed since). Slurm keeps the folder the job ran in, not the one sbatch ran in: a script that moves itself (<code>#SBATCH --chdir</code>) is found in the folder its <code>--chdir</code> leads from. Not sent again: its <code>--dependency</code> (on jobs long gone; <code>singleton</code> is kept), <code>--begin</code> and <code>--deadline</code> (times for its first run), <code>--wait</code>, and an array's other tasks (<code>--again 5005_7</code> runs task 7 alone, as <code>--array=7</code>; <code>--again 5005</code> runs the whole array again). A job nomad sent before gets a new tag, and values it keeps from that job's own command line keep the code they had. Slurm keeps the command line without the quotes it was typed with, so a job sent again with arguments, or whose script nomad had to find among the line's words (or found from a folder Slurm doesn't keep, or where two scripts could have been the one), is never submitted without asking.</p>
+<p>The job is tagged, in Slurm's <code>--extra</code> field, with who chose each value:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>--extra=nomad=1.18.0;via=cli;cpus=i;mem=i;time=h;gpus=d;part=s
+</code></pre></div>
+<p><code>s</code> the script's own, <code>u</code> the person on nomad's command line, <code>h</code> nomad from past runs, <code>i</code> the input file or command line, <code>o</code> how the job run again ended, <code>g</code> what the program needs, <code>p</code> a partition that fits, <code>d</code> left to Slurm's defaults; <code>again=N</code> for a job sent again; <code>stage=l</code> for one sent through local scratch. Slurm keeps it in its accounting where <code>AccountingStoreFlags</code> includes <code>job_extra</code>, so nomad can later tell the person's choices from its own. No tag where Slurm is older than 23.02 (no <code>--extra</code>; and should sbatch refuse it anyway, nomad sends the job once more untagged), where <code>SchedulerParameters</code> include <code>extra_constraints</code> (Slurm then reads <code>--extra</code> as node constraints) or nomad can't read them, or where the job sets <code>--extra</code> itself.</p>
+<h3 id="where-the-output-goes">Where the output goes<a class="headerlink" href="#where-the-output-goes" title="Permanent link">&para;</a></h3>
+<p>Each job's Slurm output (its <code>.out</code> file, with what it writes to stderr unless the job splits them) goes in a folder of its own, <code>/scratch/USER/jobs/JOBID-NAME/slurm-JOBID.out</code> (<code>slurm-JOBID_TASK.out</code> for each task of an array), so the folder the job runs in fills with its own results only. nomad says where, before and after submitting.</p>
+<p>Slurm never makes the folder an output file goes in (a job whose folder is missing fails with no output at all), and a job's number is known only once it is submitted. So nomad sends the job to start two minutes from now (<code>--begin=now+120</code>), reads back from Slurm where its output would go, makes its folder, and in one update (<code>scontrol update ... StdOut=... StartTime=now</code>) points its output there and lets it start at once. Should nomad be stopped in between (Ctrl-C, a dropped ssh session, a kill), or Slurm not take the folder, nothing is left waiting: the job starts on its own within the two minutes, its output where Slurm puts it. nomad never holds or releases a job, and a start time a site's <code>job_submit</code> plugin set is left as it is. What nomad then says is what Slurm holds (an update can report an error after it took effect: nomad reads the job back). The command nomad shows is the one to run by hand, without its <code>--begin</code>.</p>
+<p>The job's number and name are Slurm's own (<code>JobName</code>, after <code>-J</code>, <code>$SBATCH_JOB_NAME</code> or the script's name), kept to letters, digits and <code>. _ + -</code> in the folder's name; a folder already there (a job number Slurm used before) gets <code>.2</code>, <code>.3</code>, ... <code>jobs/</code> is made private (<code>0700</code>): change its mode to share it (folders you give with <code>--logs</code> follow your umask). Scratch may be purged after a while: so are the logs in it.</p>
+<p>Left where the job or Slurm says:</p>
+<ul>
+<li>a job that sets its own output: <code>#SBATCH --output</code> or <code>--error</code> (or <code>--out=</code>: sbatch takes any prefix that is only one option's), <code>#PBS -o</code> or <code>-e</code>, its command line's (a job sent again), <code>$SBATCH_OUTPUT</code> or <code>$SBATCH_ERROR</code>; and an output a site's <code>job_submit</code> plugin set: nomad changes it only when Slurm reports its own default (<code>slurm-JOBID.out</code> in the job's folder);</li>
+<li>a job that sets its own start time (<code>--begin</code>, <code>#PBS -a</code>) or a <code>--deadline</code> (a later start could miss it), one sbatch waits for (<code>--wait</code>, <code>$SBATCH_WAIT</code>), a <code>--test-only</code>, a heterogeneous job;</li>
+<li>the person who has no <code>/scratch/USER</code> (nomad never makes it), or whose <code>/scratch/USER</code> isn't on a filesystem compute nodes share (NFS, Lustre, GPFS, BeeGFS, Ceph, ...; a login node that serves <code>/scratch</code> itself sees its own disk: a site where it is shared anyway sets <code>NOMAD_LOGS</code>): the output goes beside the job, and nomad says so.</li>
+</ul>
+<p>A job that asks to be held (<code>#SBATCH --hold</code>) gets its folder and stays held, for the person to release. A job sent again doesn't get nomad's <code>--begin</code> (or <code>--quiet</code>) from its own command line.</p>
+<p>The choice, the first one given: <code>nomad submit --logs</code>, then <code>$NOMAD_LOGS</code>, then the default. Each is <code>here</code> (Slurm's own place, beside the job), a folder (each job's own folder goes in it: <code>--logs ~/runs</code> gives <code>~/runs/JOBID-NAME/</code>; a relative one is from the folder you run nomad in), or a pattern with <code>{user}</code>, <code>{jobid}</code> and <code>{name}</code> (<code>{jobid}</code> is required: each job its own folder). A site can set <code>NOMAD_LOGS</code> for everyone (<code>/etc/profile.d</code>), and a person in their own shell setup; <code>--dry-run</code> shows where it will go (<code>JOBID</code> for the number to come).</p>
+<h3 id="through-local-scratch">Through local scratch<a class="headerlink" href="#through-local-scratch" title="Permanent link">&para;</a></h3>
+<p>A job on one node runs through its node's own disk (1.24): faster for the program, and lighter on the shared <code>/scratch</code>. <code>nomad submit</code> sends nomad's own small script in place of the person's, and on the node the job:</p>
+<ol>
+<li>makes <code>/localscratch/USER/job_JOBID</code> (private, <code>0700</code>; <code>/localscratch/USER</code> is made if it isn't there), after checking the node has room for the job's folder and still keeps free the larger of 50 GB and a tenth of that disk (local scratch is often a folder on the node's own <code>/</code>). It holds a lock on it (<code>/localscratch/USER/job_JOBID.lock</code>) for as long as any of the job's processes lives;</li>
+<li>copies the job's folder in (where the job runs: the folder nomad is run in, or its <code>--chdir</code>) and notes each file's size, times and inode, in the folder and in the copy (and what each small file held). A relative link that leads out of the folder becomes an absolute link to where it led, so reads and writes through it go where they always went;</li>
+<li>runs the person's script there, as it was when sent (the way sbatch keeps a script), with its own <code>#!</code> line, arguments, standard input, signals and locale; <code>$SLURM_SUBMIT_DIR</code> is the local folder (a script that does <code>cd $SLURM_SUBMIT_DIR</code> stays in it), <code>$NOMAD_SUBMIT_DIR</code> the folder it came from. An <code>sbatch</code> the script runs indirectly (in another script it calls) whose job would work in the node's copy is sent to work in the same folder where the job came from (a <code>--chdir</code> added just before its script, and <code>-o</code>/<code>-e</code>/<code>-i</code> paths into the copy mapped the same way); one that works elsewhere (its own <code>-D</code> or <code>#SBATCH --chdir</code> outside the copy) is sent as it is; one that would work in a folder that is only in the copy (made by this job: it isn't in the folder until this job ends) is refused, saying so. Should a job still be sent from the copy (Slurm's own <code>sbatch</code> first on a PATH a script resets), it is moved to that folder while it waits (<code>scontrol update WorkDir=</code>), or else the copy is kept, and what that job writes in it is brought back (<code>nomad-recovered-*</code>) once it has ended;</li>
+<li>when the script ends, stops what it left running in the background (as Slurm would at the job's end), then copies <strong>what is new or changed</strong> back to the folder it ran from, as if it had run there: what it didn't change isn't written again, and each file is written beside and renamed in place, so a copy cut short never leaves half a file. Files it deleted or renamed there aren't deleted or renamed in the folder. <strong>What changed in the folder while the job ran is never undone</strong>: a file the person or another job changed there meanwhile is left as it is, and the job's version goes in <code>nomad-conflicts-JOBID/</code> in the job's folder (the job then ends with exit code 75, and its <code>.out</code> says which); a file of lines both only added to at its end (a log, a table of rows) gets the job's new lines added after the others' (never a file that was empty, or whose beginning either one changed); a file only touched or <code>chmod</code>ed there meanwhile (the same content) isn't a conflict, and keeps its new mode. Jobs from one folder copy back one at a time (a lock on the folder's <code>.nomad-lock</code>, which stays there, hidden, writable by all so a lab's members' jobs take turns too). Where that lock can't be shared between nodes (NFS mounted <code>nolock</code> or <code>local_lock=</code>), can't be had, or another job holds it for over 15 minutes, the copy back goes file by file and checks each one just before it goes in;</li>
+<li>checks each file it copied back (sha256 of both copies, the one on <code>/scratch</code> read back from the server, not the node's cache; a link's target; a folder), copies again what doesn't match, and only then removes the local folder (and keeps it while any process still works in it). What still doesn't match stays on the node, the job's <code>.out</code> says what and where, a job pinned to that node brings it back once this one ends (see below), and a job that had succeeded ends with exit code 75, so Slurm records it as failed.</li>
+</ol>
+<p>The job's <code>.out</code> says what it did (<code>nomad-stage: copied ... to /localscratch/amy/job_4242 on spdr05 in 12s</code>, <code>copied back 3 new or changed item(s) (1.2 GB) ... and checked each (sha256)</code>). It uses <code>rsync</code> where the node has it (else Python's own copy) and the node's own <code>python3</code> (<code>/usr/bin/python3</code>, isolated: <code>-I</code>, so a cluster's <code>PYTHONHOME</code> or <code>PYTHONPATH</code> don't reach it); nothing of nomad's is needed on the node. nomad's own steps run without the job's <code>LD_LIBRARY_PATH</code> and <code>LD_PRELOAD</code> (a login environment's can break system tools: 1.24.1); the script gets them back as they were.</p>
+<p><strong>Time limits and stops.</strong> nomad asks Slurm to warn the job before its limit (<code>#SBATCH --signal=B:USR1@600</code>, a sixth of a limit under an hour but at least 5 minutes; not when the script sets its own <code>--signal</code>). At the warning the job stops the program (TERM to it and everything it started, KILL after a minute), copies back what it has, checks it, then waits for the limit, so Slurm still records the job as <code>TIMEOUT</code> (and nomad's sizing reads it as one). <code>scancel -b -s USR1 JOBID</code> does the same at any time and ends the job there. A job cancelled (<code>scancel</code>) or preempted: Slurm has already sent TERM to all of it and KILLs it after <code>KillWait</code> (30 s on spydur); the program keeps 15 s of that, the copy back the rest. A script's own <code>--signal=B:SIG</code> still reaches it (nomad's script passes it on).</p>
+<p><strong>What a stopped job leaves.</strong> When a job is stopped, or its copy back fails, it first sends a small job of its own (<code>nomad-recover-JOBID</code>: one CPU, 1 GB, 2 hours, pinned to that node with <code>-w</code>, <code>--dependency=afterany:JOBID</code>, its output in the job's folder). That job, once the first has ended, brings back what is still on the node; so does the person's next staged job on that node (up to three such folders, when it has 15 minutes left). Either one takes only a folder whose lock is free (its job is gone), and puts what it brings back in a folder of its own, <code>nomad-recovered-NODE-TIME/</code>, in the job's folder (<code>/scratch/USER/jobs/JOBID-NAME/</code>, beside its <code>.out</code>; else where the job ran): <strong>nothing recovered ever overwrites anything</strong>. A folder an earlier run of the same job left (a job requeued onto the same node) is moved aside for that, never copied over the new run's results.</p>
+<p><strong>Sent as it is</strong>, and nomad says why: a job on several nodes (each would have its own local scratch); an array (its tasks would each copy the folder, with what the others brought back: <code>--localscratch</code> stages it anyway, up to a tenth of the size limit; an array that comes from <code>$SBATCH_ARRAY_INX</code> is caught on the node); a time limit under 30 minutes (too short to gain from it, and to copy back before the limit); a script that leaves its folder itself (<code>cd /abs/path</code>, <code>cd ~</code>, <code>cd ..</code> or any <code>..</code>, <code>cd $OTHER</code>, <code>cd -</code>, <code>popd</code>; <code>cd $SLURM_SUBMIT_DIR</code> and folders inside it are fine) or sends jobs itself (<code>sbatch</code> anywhere in its commands, <code>nomad submit</code>, Snakemake, Nextflow, Cromwell, Toil, FireWorks, Parsl: a job sent from the node's copy would start there); a folder larger than 50 GB (<code>$NOMAD_STAGE_MAX</code>, e.g. <code>NOMAD_STAGE_MAX=200G</code>); the person's home folder itself (submit from a project's folder); a script without a <code>#!</code> line or with DOS line breaks, <code>--wrap</code>, <code>--test-only</code> and heterogeneous jobs. On the node, the job runs where it is (as without nomad) when the node has no <code>/localscratch</code>, no <code>python3</code>, not enough room, or Slurm gave it several nodes. <code>--no-localscratch</code> sends a script as it is; <code>NOMAD_LOCALSCRATCH=off</code> does it for every job (a site in <code>/etc/profile.d</code>, a person in their own shell setup), and <code>--localscratch</code> turns it on for one job even then. <code>NOMAD_LOCALSCRATCH=/local/{user}/scratch</code> puts the local folder elsewhere (<code>{user}</code> required). The jobs folder (<code>/scratch/USER/jobs</code>) is never copied in, when the job runs from a folder that holds it.</p>
+<p><strong>nomad's copy of the script.</strong> What sbatch is given is nomad's script, named as sbatch would have named the job (<code>--job-name=</code> the script's name, unless it names itself). Its first lines say which script it carries, and it carries that script's text, so nomad still knows the person's own script for a job sent this way: <code>nomad submit --again</code> runs the person's script (staged again), and past runs are compared by it. The tag records it: <code>;stage=l</code>. Since 1.25.2 sbatch reads that script on its standard input (<code>sbatch [OPTIONS] &lt; FILE</code>; <code>/dev/stdin</code> before the job's arguments when it has some), never from a file of nomad's that someone could change before sbatch reads it; nomad keeps its record of it in <code>~/.local/share/nomad/staged/NAME-HASH.sh</code> (private; the same job sent again is the same file; those unused for 400 days are removed), and notes which record each job came from by its cluster and number (<code>staged/jobs/CLUSTER.JOBID</code>: Slurm keeps no file name for a script it read on its standard input), with the job's folder and when it was sent: a note that doesn't agree with Slurm's record of the job (another cluster sharing the home, a number Slurm used again) isn't taken for it. Notes go with the records they name, after 400 days. The command nomad shows ends <code>&lt; RECORD</code>: the same job, by hand.</p>
+<p>What runs differently from an unstaged job: results appear in the folder when the job ends, not while it runs (watch the local folder on the node, or the <code>.out</code>); a file another job or the person changed in the folder meanwhile keeps their change, the job's own version set aside (above); a job that restarts from its own checkpoints after a requeue starts again from the folder, so it should write its checkpoints by their full path, or use <code>--no-localscratch</code>. Files a copy back writes are written in a hidden <code>.nomad-tmp-JOBID/</code> in the folder first and renamed into place (a recovery removes one a stopped job left).</p>
+<h2 id="what-it-reads">What it reads<a class="headerlink" href="#what-it-reads" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The script</strong>, and the input file it names (at most 2 MB), as the person: their own run of nomad reads their own files.</li>
+<li><strong>Slurm's accounting</strong>: the person's own jobs of the last 180 days (<code>--days</code>), with <code>sacct -u</code> and the person's own user name (from the system, never from <code>$USER</code>). The full folder and submit line let nomad find each past job's script and name its program. Slurm before 21.08 has no submit line: jobs are then compared by name only.</li>
+<li><strong>The partitions</strong>: <code>scontrol --all show partition</code> and <code>sinfo -a -e</code> (hidden ones too; each kind of node on its own line), the person's groups and Slurm accounts (<code>sacctmgr show assoc</code>, <code>show user</code>).</li>
+</ul>
+<p><code>nomad size --db PATH --user NETID</code> sizes a script from nomad's database instead (on the hub, for staff), where folders and command lines are never kept whole, so jobs are compared by name only (and so only raise values); <code>--job</code> looks at one's own jobs only.</p>
+<h2 id="installing-it-for-users">Installing it for users<a class="headerlink" href="#installing-it-for-users" title="Permanent link">&para;</a></h2>
+<p>Users run one central install on each cluster, not one of their own, and <code>nomad size</code> and <code>nomad submit</code> need no nomad.toml. <code>scripts/install_nomad_for_users.sh</code> makes it, as the account that owns the folder (<code>/usr/local/sw/nomad</code>, or <code>NOMAD_USERS_DIR</code>), on the cluster or from a nomad checkout:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ssh OWNER@CLUSTER 'bash -s 1.18.1' &lt; scripts/install_nomad_for_users.sh
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ssh OWNER@CLUSTER 'NOMAD_USERS_DIR=/path bash -s 1.18.1' &lt; scripts/install_nomad_for_users.sh
+</code></pre></div>
+<p>Running it again with another version upgrades: that is how a cluster follows nomad's releases, one step of each release beside the hub's upgrade.</p>
+<ul>
+<li><strong>Each release whole in its own folder.</strong> <code>releases/VERSION</code> holds its own Python 3.12, installed by uv (from uv's release on GitHub, checked against a checksum fixed in the script), and its own environment, so the system's Python doesn't matter (a <code>python3</code> of 3.6 is fine). uv's cache and downloads are in a private temporary folder, and one run goes at a time.</li>
+<li><strong>One step to switch.</strong> The release is built and checked first; only then is <code>bin/nomad</code> replaced, in one step, by one that runs it. Until then users go on with the one they had, and a release that fails is removed. The one before is kept (with its <code>bin/nomad</code>, as <code>bin/nomad.before</code>), and the script prints how to go back to it; older ones are removed. Two releases take about 0.9 GB. An install made by 1.18.0's script is replaced the same way, and its folders removed after the switch. A removal that fails then (a file still open on NFS, say) is reported and left for the next run.</li>
+<li><strong>The right folder.</strong> The script refuses a folder another account owns (run it as that account), and one that holds anything it doesn't recognise as its own or 1.18.0's script's (a wrong <code>NOMAD_USERS_DIR</code>, say): such a folder is left untouched.</li>
+<li><strong><code>bin/nomad</code></strong> starts nomad's Python isolated (<code>python -I</code>, writing no bytecode), so <code>PYTHONHOME</code> and <code>PYTHONPATH</code> a cluster sets for another Python (Anaconda's, say) don't reach it, while the jobs nomad submits get the environment as it is.</li>
+<li><strong>Nothing writable but by the owner,</strong> nor owned by anyone else; the script stops if it finds otherwise, and says so when a folder above the install is writable by others (who could then replace it).</li>
+<li><strong>On users' PATH</strong>: <code>bin/</code> holds only <code>nomad</code> (and, from 1.25.0, <code>nomad-gate</code>: see below; run by anyone else it does only what they could do themselves), so it can't shadow anyone's Python. A link in a folder already on everyone's PATH (<code>ln -s /usr/local/sw/nomad/bin/nomad /usr/local/sw/bin/nomad</code>), or a module, or <code>/etc/profile.d</code>; last on the PATH, an account with its own nomad keeps it.</li>
+<li><strong><code>check_current.sh</code></strong>, beside it, says when nomad-hpc has a newer release than the one installed (and prints the command that upgrades) and says nothing otherwise: for the owner's crontab, weekly, with <code>MAILTO</code> set. It never upgrades anything itself.</li>
+<li><strong><code>bin/nomad-gate</code></strong> (1.25.0 and later): what the hub's gate key runs on the cluster (below). It runs the same release as <code>bin/nomad</code>, is switched with it (and kept as <code>bin/nomad-gate.before</code>), and is left out for a release that has none (a release that has it but whose gate doesn't start stops the install). After the switch the script asks it <code>nomad-gate check</code> and says if it wouldn't serve as installed. To go back from 1.25.0 or later, use the <code>back</code> command the script printed, or this script from 1.25.0 or later: an older checkout's script doesn't know <code>bin/nomad-gate</code> and stops.</li>
+</ul>
+<h2 id="from-the-console-nomad-gate">From the Console: nomad-gate<a class="headerlink" href="#from-the-console-nomad-gate" title="Permanent link">&para;</a></h2>
+<p>The Console's Submit page (and Run it again) sends a person's job <strong>as that person</strong>, through <code>nomad-gate</code> on the cluster:</p>
+<ul>
+<li><strong>A key that can do one thing.</strong> The hub has a key of its own for this (<code>~/.config/nomad/gate/id_ed25519</code> of the Console's account; <code>nomad gate key</code> makes it), apart from <code>nomad sync</code>'s and the actions' agent key. On the cluster its line in the nomad account's <code>authorized_keys</code> (<code>nomad gate install-key</code>, which refuses a gate path that isn't plain or isn't safe to run from) has <code>restrict</code> (no terminal, no forwarding), <code>from=</code> the hub's address (an address: host names work only where sshd has <code>UseDNS yes</code>) and <code>command="/usr/local/sw/nomad/bin/nomad-gate serve"</code>: whatever is sent with that key, sshd runs only the gate. The hub offers only that key (no agent, no other key, no shared connection, none of its account's ssh settings nor the system's: <code>-F /dev/null</code>, so the cluster is reached directly, with ssh's own defaults) and refuses an unknown host key: the Console's account needs the cluster's host key in its <code>~/.ssh/known_hosts</code> under the very name <code>host</code> gives (not an alias from an ssh config).</li>
+<li><strong>A short list.</strong> <code>version</code>, <code>size --script PATH | --job N</code>, <code>submit --script PATH --sha256 HEX</code> (with the person's own <code>--cpus --mem --time --gpus --partition --keep --localscratch/--no-localscratch</code> if they gave any), <code>again --job N --sha256 HEX</code> (the same), <code>jobs</code> (theirs, <code>squeue -u</code>), <code>job --job N</code> (one of theirs: Slurm's view of it now, its accounting -- steps, memory, CPU time -- and the end of its output, read as them; someone else's is refused), <code>cancel --job N</code>, <code>ls --dir PATH</code> (to pick a script) and <code>show --script PATH</code> (its text and sha256). Every value is checked (a job number, <code>8G</code>, <code>4:00:00</code>, a partition's name, a full path without <code>.</code> or <code>..</code> parts or invisible characters, a sha256), by the hub before sending, by the gate as the cluster's account, and again as the person; nothing ever goes through a shell. At most four requests are served at once on the cluster; more are told it is busy.</li>
+<li><strong>What was shown is what is sent (1.25.1).</strong> A script to send or show must be the person's own regular file (not a link), at most 256 KB, beginning with <code>#!</code>. To send it, the Console passes the sha256 of the text it showed them (for a job sent again, of its script, which it shows too); the gate refuses a script that is no longer that text ("changed since you looked at it"), <code>nomad submit</code> checks it once more, and sbatch is given that text itself, never the path: the local-scratch script (which carries it), else the text as it is, on sbatch's standard input (1.25.2; 1.25.1 gave sbatch a private copy, so it refused while someone else could change a folder above that copy). nomad keeps its record of it in <code>~/.local/share/nomad/staged/</code> with, beside it, the path of the person's own script, so the job is sent again (and compared with) from theirs. So a folder others can change (a <code>/scratch/USER</code> writable by everyone's group, say) can't swap the script on its way. It is said, not refused: <code>show</code> gives a <code>warning</code> naming the first file or folder others could change, and the <code>chmod</code> that closes it (the person's own private group aside, without an access list; an NFSv4 access list on a NAS can't be seen). What the job reads from such a folder (its input, programs it calls) is as open as it is without the Console. The script is read once, checked, and that very text is what nomad sizes, stages and sends; one that isn't plain UTF-8 text is sent exactly as it is, not through local scratch.</li>
+<li><strong>Text files (1.25.4).</strong> Besides job scripts, the Console opens and saves a person's own text files with an extension on <code>TEXT_EXTENSIONS</code> (<code>.py .R .m .jl .sh .in .inp .com .gjf .yaml .yml .json .toml .cfg .conf .txt .md</code>, any case): <code>read --path PATH</code> gives one's text and sha256 (only with <code>serve --edit</code>, as <code>save</code>, and where the hub's <code>edit = true</code>), <code>save</code> writes one with the same rules as a script (the person's own regular file, not a link, UTF-8, at most 256 KB, no NUL, no hidden part in its path nor its folder as it really is, no other name for it (a hard link: it could be any file of theirs, a hidden one too); only over the very text opened, or as a new file; the text before kept). <code>versions</code> and <code>recall</code> are behind the same switch now. <code>ls</code> marks them <code>text</code>. A file of any other kind (data, <code>.csv</code>, notebooks, binaries) isn't opened.</li>
+<li><strong>Saving a script (1.25.3).</strong> Off unless both sides say so: the site's <code>[[hub.sites]]</code> has <code>edit = true</code> (the Console asks <code>remote.editing</code>), and the cluster's nomad account let the hub's key in with <code>nomad gate install-key ... --edit</code> (sshd then runs <code>nomad-gate serve --edit</code>; without it the gate refuses every save). That is the cluster's choice because it changes what the hub's key can do: with it, whoever holds the key could write a person's script and send it, that is run code as anyone the gate acts for, not only send the scripts they already have. <code>nomad gate test --site S</code> says which side has it on. <code>save --script PATH (--sha256 HEX | --new) --body-sha256 HEX</code>, the text on standard input: the person's own job script, written as them, only over the very text they opened (and only UTF-8 text: <code>show</code> says <code>utf8</code>) or as a new file (mode 600: the gate can't know the umask the person's login sets), never through a link or into a hidden file or folder (as given, or as the folder really is); written beside it and put in its place in one step, keeping its mode, group and access lists (none taken from the folder's default list); the text before kept first, privately (<code>~/.local/share/nomad/versions</code>, the last 20 of each script; <code>versions --script PATH</code> lists them, <code>recall --script PATH --id ID</code> gives one back). The gate's syslog line has the sha256 before and after.</li>
+<li><strong>The account, and the sbatch that is run (1.25.2).</strong> <code>show</code>'s <code>warning</code> also names the first place in the person's own account others could change so as to run programs as them -- their home folder, the files bash reads when they log in (<code>~/.bash_profile</code>, <code>~/.bash_login</code>, <code>~/.profile</code>, <code>~/.bashrc</code>), and <code>~/.local</code> (<code>bin/</code> is on PATH, <code>lib/python*/site-packages</code> is read by Python at its start, <code>share/nomad</code> holds nomad's records) -- with what closes it (<code>chmod -R go-w ~/.local</code>; above the home folder, the site's). It is open with or without the Console (the person's own logins run the same files), so it is said, not refused, and it is no longer said once it is closed: nothing to change in nomad when the site changes how accounts are set up. From the Console, Slurm's programs (<code>sbatch</code>, <code>scontrol</code>, <code>sinfo</code>, <code>sacct</code>, <code>sacctmgr</code>, <code>squeue</code>, <code>scancel</code>) are each found once on the person's login PATH, before any of them runs, and run by their full paths (so nothing put earlier on PATH meanwhile runs instead); nothing runs when one of them, a folder above it or a link on the way to it (each link followed in turn) belongs to an account other than root, the person, the account nomad is installed by or Slurm's own, or could be changed by others -- someone else could have put it there, and it would act as the person (<code>sbatch</code> would be given the text they saw). The gate's own steps (<code>jobs</code>, <code>job</code>, <code>cancel</code>) go through <code>nomad-gate exec NAME</code>, in the person's login, for the same check. By hand, nomad runs them by name, as before.</li>
+<li><strong>As the person.</strong> The gate acts as the person with the cluster account's own sudo (<code>sudo -n -u PERSON nomad-gate run ...</code>), never as root, a system account (uid under 1000, <code>nobody</code>), the gate's own account or nomad's own accounts. It first asks sudo whether it may (<code>sudo -n -l</code>, by its exit status); where it may not (on spydur installer may act as members of <code>managed</code>), the answer says so, and the Console gives them the command to paste instead.</li>
+<li><strong>As if they typed it.</strong> nomad runs in the person's login environment (<code>bash -l</code>, as when they log in; a tcsh or zsh user gets bash's login setup, not their own), from the script's folder (from their home folder for <code>again</code>), with nothing on its input and the login's own locale, so the job gets the environment it would by hand; it is tagged <code>via=console</code>. Each answer is one line of JSON. A job that may have been sent without the gate being able to say so (sbatch slow to answer, the connection lost on the way) is said to be maybe sent, so it isn't sent twice; sending waits up to 10 minutes.</li>
+<li><strong>Logged.</strong> Each request goes to the cluster's syslog (authpriv, <code>/var/log/secure</code> on RHEL), as plain text: who, what, and the job it made; sudo logs it too.</li>
+<li><strong>Refused when it is installed wrong.</strong> The gate doesn't serve when it, the <code>nomad</code> beside it, their Python, or anything in the release's environment and Python could be changed by anyone but its owner or root (<code>nomad-gate check</code> says what). It is a check for a mistake in how it was installed, made when it serves (a pass is kept for a minute); it can't undo a change someone already made.</li>
+</ul>
+<p>Setting it up, once per cluster:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a># on the hub, as the Console's account (where the Console runs as nomad, with /etc/nomad/nomad.toml):
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>sudo -u nomad -H /opt/nomad/venv/bin/nomad -c /etc/nomad/nomad.toml gate key
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a># on the cluster, as its nomad account (after install_nomad_for_users.sh 1.25.0 or later):
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>/usr/local/sw/nomad/bin/nomad gate install-key 'ssh-ed25519 AAAA... nomad-gate@hub' --from HUB-ADDRESS
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>/usr/local/sw/nomad/bin/nomad gate install-key 'ssh-ed25519 AAAA... nomad-gate@hub' --from HUB-ADDRESS --apply
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a># on the hub: in that site's [[hub.sites]] of nomad.toml
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>submit = "gate"
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>#   gate_user / gate_host: when not ssh_user / host; [hub] gate_key: another key file
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>#   edit = true: the Console may also save people's job scripts there (1.25.3), if the
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>#   cluster agrees: install-key ... --edit (run it again with --edit, the same key and --from)
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a># then, as the Console's account: is it there, and may it act as you?
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>nomad gate test --site CLUSTER --user YOU
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>nomad gate ask --site CLUSTER --user YOU size --script /scratch/YOU/run/job.sh
+</code></pre></div>
+<p><code>nomad-gate run OP ...</code>, run by a person on the cluster, answers as the hub would get it, as them (<code>nomad-gate run jobs</code>): handy to see what the Console will show.</p>
+<h2 id="where-it-starts-soonest-1254">Where it starts soonest (1.25.4)<a class="headerlink" href="#where-it-starts-soonest-1254" title="Permanent link">&para;</a></h2>
+<p>On the Console's Submit page, <strong>Where would it start soonest?</strong> lists the partitions the person may send the job to, in the order the site prefers, each with when Slurm would start it there now and how long jobs usually wait there. One click puts a partition in <strong>Yours</strong>. <strong>Fastest start</strong> takes nomad's pick by itself.</p>
+<ul>
+<li><strong>Slurm's own estimate.</strong> The gate's <code>starts --script PATH --sha256 HEX --partitions P1,P2,...</code> (with the person's <code>--cpus --mem --time --gpus --keep</code>; <code>--job N</code> instead of <code>--script</code> for a job sent again) runs <code>nomad submit --starts</code> as the person, which gives <code>sbatch --test-only</code> the very text they were shown, as nomad would send it, once for each partition (at most 12, four at a time, each at most 60 s, its times in ISO form whatever the person's <code>SLURM_TIME_FORMAT</code>). Nothing is submitted. An estimate Slurm gives for another partition than the one asked (a site's <code>job_submit</code> moving it) isn't taken for it. The gate answers at most two of these at once (<code>STARTS_HERE</code>), so they never hold up sending; the Console asks for one person's job at a time, and two at once in all. It answers with each start time, the nodes' states (<code>sinfo</code>), and the values nomad would send. Where running jobs have no time limit, Slurm can't tell when a node frees and puts the start a year or so away: a start 7 days or more away is shown as "later (Slurm can't say when)", with its date, and nomad doesn't rank by it. Beside it, the usual wait from nomad's own records (the median over 30 days, at least 5 jobs).</li>
+<li><strong>The order.</strong> The hub sorts the cluster's partitions from its own records (the nodes in each, their memory and GPUs) and the condo reports' <code>report.toml</code> (each condo's owners, nodes and members; its <code>guest_partitions</code>):</li>
+<li><strong>your lab's condo</strong>: for its owners, and the people its <code>members</code> names in <code>report.toml</code> (a list, a <code>group:</code>, or an <code>account:</code>'s users this past year). Without <code>members</code>, only its owners (1.25.6): the condo reports then take the owners' lab groups, but such a group can hold far more than the lab, and "yours" has no guest limit. <code>nomad partitions --site S --sorted</code> lists the condos without <code>members</code>;</li>
+<li><strong>shared</strong>: the nodes with the least memory, where any job may go; GPU nodes only for jobs that ask for GPUs;</li>
+<li><strong>the default partition</strong>, whatever it holds: where the job goes if it names none;</li>
+<li><strong>labs' condos, as a guest</strong>: a partition holding several condos stands for them all (Slurm picks the free one). Only for a job with a time limit within <code>guest_max_days</code> (the condo policy's, <code>[report.policy] guest_max_days</code>);</li>
+<li><strong>big-memory nodes</strong>: shared nodes with more memory than the least any shared CPU node has. They are few, and kept for the jobs that need them. A job that doesn't need them goes there only with a time limit of at most <code>overflow_max_hours</code>, so the node comes back at a known time, and only while more than <code>reserve_nodes</code> of them are idle (when <code>sinfo</code> didn't say, not at all). A job that needs them gets them first.</li>
+<li>A partition of nodes of several kinds (every node, say) isn't suggested. Partitions with the very same nodes are one (the others shown as "also"). A shared partition inside another of its kind is left to that one. A job that names any of these keeps it.</li>
+<li><strong>What nomad doesn't know, it doesn't offer.</strong> A partition with a node nomad has no memory reading for is of several kinds (not suggested); while any shared node has none, no partition is "shared, least memory" for sure (the default is still offered). A condo <code>report.toml</code> lists but hasn't confirmed is a condo's nodes, never shared ones (and no one's own until confirmed). The nodes of a guest partition (<code>guest_partitions</code>, or one named like "condo") are condos' nodes even where <code>report.toml</code> lists no condo for them: offered to guests, no one's own. A site with no condos table in <code>report.toml</code> (<code>[report.clusters.SITE.condos]</code>), or a listed condo whose nodes nomad can't find (no <code>nodes</code>, and its <code>partition</code> isn't Slurm's now), gets only its default partition suggested, and the page says why: write the table (<code>nomad usage-report condos init</code>; an empty one for a site with no condos), or fix the condo's partition.</li>
+<li><strong>Nodes that run slow</strong> (1.27.0): a partition whose nodes the clock collector finds throttled (a CPU braked far below its clock: <a href="../collectors/">Collectors</a>, "CPU clocks") isn't suggested when all of them are, says which when some are, and isn't nomad's pick while another partition has none.</li>
+<li><strong>nomad's pick</strong> is the first in that order that would start now, else the one Slurm says starts soonest (not "later"), else the shortest usual wait, else the first in the order. <strong>Fastest start</strong> takes the same, only on something known (else nothing), and never another lab's condo unless <code>fastest_guests = true</code>. It never replaces a partition the person typed while Slurm was asked. Each row that can't be suggested says why.</li>
+<li><strong>Nothing changes in Slurm.</strong> The person's choice goes in Yours, and is sent as any other value of theirs. With "Keep the job's own values" ticked the partition is the script's: nothing here can be chosen until it is unticked.</li>
+</ul>
+<p><code>nomad partitions --site SITE --sorted</code> (on the hub) shows how a site's partitions are sorted, and what nomad doesn't know yet (condos not confirmed, nodes with no memory reading): look at it before people rely on the page.</p>
+<p>In the hub's nomad.toml (<code>[submit.where.SITE]</code> for one site; these are the defaults):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">[submit.where]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">guests</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="w">                  </span><span class="c1"># offer other labs' condos to guests</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># guest_max_days = 10          # default: report.toml's [report.policy] guest_max_days</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">overflow_max_hours</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">24</span><span class="w">        </span><span class="c1"># a job that fits the small nodes, on big ones: at most this long</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">reserve_nodes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="w">              </span><span class="c1"># big-memory nodes kept idle for the jobs that need them</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">fastest_guests</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="w">         </span><span class="c1"># Fastest start may pick another lab's condo by itself</span>
+</code></pre></div>
+<h2 id="making-a-script-1260">Making a script (1.26.0)<a class="headerlink" href="#making-a-script-1260" title="Permanent link">&para;</a></h2>
+<p>For someone with no job script yet, the Console's Submit page has <strong>No script
+yet? Make one</strong>: they pick the program, its version, and their input (a file,
+or a folder of inputs), and nomad writes the script. It is shown in full and
+can be changed, then saved beside the input as a new file, as them, through
+the gate's <code>save</code> (only where saving is on: <a href="#from-the-console-nomad-gate">From the Console</a>;
+elsewhere they copy it). From there it is sized, checked and sent as any
+other script.</p>
+<ul>
+<li><strong>A template per program</strong>, written once by the site's staff in the hub's
+  nomad.toml (<code>[[submit.templates]]</code>): how the site runs it, which modules
+  are its versions, what to ask when nothing better is known.</li>
+<li><strong>The versions the cluster has</strong>, from its <code>modules</code> collector
+  (<a href="../collectors/">Collectors</a>, "Environment modules"): the modules matching
+  the template's patterns, copies kept aside (<code>.bak</code>, <code>.old</code>, ...) left out.
+  Chosen first: the template's <code>default</code> when the cluster has it, else the
+  cluster's own default, else the highest version; the person can pick any.
+  A version that runs otherwise (Gaussian 09 and 16) gets its own line
+  (<code>run_for</code>).</li>
+<li><strong>Text only.</strong> Making a script runs nothing and reads no file: the path is
+  the person's choice in the file browser, and its name goes into the script
+  quoted for the shell. The script is named after the input (<code>water.gjf</code> →
+  <code>water.sh</code>; a folder of inputs → <code>run.sh</code> in it); the page offers
+  <code>water-2.sh</code> when <code>water.sh</code> is there already, and says when an output the
+  job writes (<code>water.log</code>) is there already.</li>
+</ul>
+<p>In the hub's nomad.toml:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[submit.build.spydur]</span><span class="w">                          </span><span class="c1"># a site's own settings</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">module_paths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"/usr/local/sw/modulefiles"</span><span class="p">]</span><span class="w">   </span><span class="c1"># module use, before module load</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">scratch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/scratch/$USER/$SLURM_JOB_ID"</span><span class="w">       </span><span class="c1"># {scratch}: must name the job ($SLURM_JOB_ID)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="k">[[submit.templates]]</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">program</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Gaussian"</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">sites</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"spydur"</span><span class="p">,</span><span class="w"> </span><span class="s2">"arachne"</span><span class="p">]</span><span class="w">          </span><span class="c1"># where it is offered (default: every site)</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">modules</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"gaussian/*"</span><span class="p">]</span><span class="w">               </span><span class="c1"># its versions (shell patterns)</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="n">default</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"gaussian/latest"</span><span class="w">            </span><span class="c1"># chosen first, when the cluster has it (or a list)</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="n">inputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">".gjf"</span><span class="p">,</span><span class="w"> </span><span class="s2">".com"</span><span class="p">]</span><span class="w">              </span><span class="c1"># the input: a file with one of these endings ...</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1"># folder = "control.run"               # ... or a folder holding this file (run there)</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="n">setup</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"export GAUSS_SCRDIR={scratch}"</span><span class="p">,</span><span class="w"> </span><span class="s2">"mkdir -p {scratch}"</span><span class="p">]</span>
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a><span class="n">run</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"g16 &lt; {input} &gt; {stem}.log"</span>
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a><span class="n">after</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"rm -rf {scratch}"</span><span class="p">]</span>
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a><span class="n">outputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"{stem}.log"</span><span class="p">]</span><span class="w">               </span><span class="c1"># said if one is there already</span>
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8</span><span class="w">                               </span><span class="c1"># what to ask when nothing better is known</span>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a><span class="n">mem</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"16G"</span>
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a><span class="n">time</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"1-00:00:00"</span>
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a><span class="c1"># gpus = 1</span>
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a><span class="c1"># partition = "gpunodes"               # or one a site: { spydur = "gpunodes" }</span>
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a><span class="c1"># parallel = "mpi"                     # cpus as --ntasks (MPI), not --cpus-per-task</span>
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a><span class="k">[submit.templates.run_for]</span>
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a><span class="s2">"gaussian/g09*"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"g09 &lt; {input} &gt; {stem}.log"</span>
+</code></pre></div>
+<p>In a template's lines: <code>{input}</code> (the input's name, quoted for the shell),
+<code>{stem}</code> (its name without the ending), <code>{folder}</code> (where the job runs),
+<code>{cpus}</code>, <code>{tasks}</code> and <code>{threads}</code> (1.29.0: the processes and each one's
+threads), <code>{mem_mb}</code> (the job's memory, MB), <code>{mem_mb_each}</code> (each process's
+share of nine tenths of it: Columbus's <code>runc -m</code>), <code>{gpus}</code>, <code>{module}</code>,
+<code>{scratch}</code>; anything else in braces stays as it is (<code>${SLURM_CPUS_PER_TASK}</code>).</p>
+<h3 id="a-templates-options-1290">A template's options (1.29.0)<a class="headerlink" href="#a-templates-options-1290" title="Permanent link">&para;</a></h3>
+<p>A template may offer a few choices, shown on the page beside the version: how
+it runs in parallel, which program of a suite, what it does when it is put
+back in the queue. At most four options, each of two to six choices; the
+first is chosen unless the person picks another, so a template's usual way
+needs no choosing. A choice changes only what it names:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">[[submit.templates]]</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">program</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"CP2K"</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">modules</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"cp2k/*"</span><span class="p">]</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">inputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">".inp"</span><span class="p">]</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">parallel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"mpi"</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">cpus</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">16</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">run</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"srun cp2k.psmp -i {input} -o {stem}.out"</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">outputs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"{stem}.out"</span><span class="p">]</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="k">[[submit.templates.options]]</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"parallel"</span><span class="w">                      </span><span class="c1"># a short key (--choose parallel=2)</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Runs as"</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="k">[[submit.templates.options.choices]]</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"MPI processes, one a core"</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="n">omp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="w">                             </span><span class="c1"># export OMP_NUM_THREADS={threads} (1 here)</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="k">[[submit.templates.options.choices]]</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"MPI processes of 4 threads each"</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">parallel</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"hybrid"</span><span class="w">                    </span><span class="c1"># --ntasks = cpus / 4, --cpus-per-task = 4</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="n">threads_per_task</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">4</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a><span class="n">omp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a><span class="k">[[submit.templates.options]]</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"restart"</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"If it is put back in the queue"</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a><span class="k">[[submit.templates.options.choices]]</span>
+<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Goes on from its restart file"</span>
+<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a><span class="n">setup</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s1">'[ "${SLURM_RESTART_COUNT:-0}" -gt 0 ] &amp;&amp; echo "requeued: the input reads {stem}-1.restart"'</span><span class="p">]</span>
+<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a><span class="k">[[submit.templates.options.choices]]</span>
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Starts over"</span>
+</code></pre></div>
+<p>What a choice may set: <code>run</code> (in place of the template's), <code>setup</code> and
+<code>after</code> (lines added to the template's: its own clean-up stays last),
+<code>outputs</code>, <code>sbatch</code> (options of nomad's own: <code>--constraint=a100</code>; not those
+nomad writes itself), <code>parallel</code>, <code>threads_per_task</code>, <code>omp</code>, <code>cpus</code>, <code>mem</code>,
+<code>time</code>, <code>gpus</code>, <code>partition</code>. Only one option may set the run line, and only
+one how it runs in parallel. <code>parallel</code> is <code>"threads"</code> (one process,
+<code>--cpus-per-task</code>), <code>"mpi"</code> (one process a CPU, <code>--ntasks</code>, on one node) or
+<code>"hybrid"</code> (processes of <code>threads_per_task</code> threads each, on one node). A
+choice's sizes are what the script asks for unless the person says otherwise.</p>
+<p>Every made script also:</p>
+<ul>
+<li>writes Slurm's output file with <code>--open-mode=append</code>, so a job Slurm
+  puts back in the queue (a condo's owners took its node) keeps what it
+  printed before;</li>
+<li>names each choice in its heading (<code># Runs as: MPI processes of 4 threads each</code>);</li>
+<li>reads the counts as the job has them when it runs: <code>{tasks}</code> is <code>${SLURM_NTASKS:-16}</code>, <code>{threads}</code>
+  <code>${SLURM_CPUS_PER_TASK:-4}</code> (and <code>{cpus}</code> the one that fits), so a job resized when it is sent
+  (nomad size, the Console's sizing) runs as many processes as it has, not the number first written;
+  <code>{mem_mb_each}</code> is each process's share (all of it for one process of threads);</li>
+<li>with threads and <code>srun</code> in its lines, exports <code>SRUN_CPUS_PER_TASK</code>: since
+  Slurm 22.05 a step doesn't take the job's <code>--cpus-per-task</code> by itself, and
+  would run on one CPU.</li>
+</ul>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>nomad templates --site spydur --hub          each template's options, numbered
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>nomad templates --site spydur --hub --make CP2K --input /home/amy/h2o.inp --choose parallel=2
+</code></pre></div>
+A script that uses <code>{scratch}</code> stops at once when it isn't run by Slurm
+(<code>bash water.sh</code>, or sourced: its <code>rm -rf {scratch}</code> would otherwise take
+the person's whole scratch folder), and a site's <code>scratch</code> must name the
+job (<code>$SLURM_JOB_ID</code>; else <code>/tmp/$USER/$SLURM_JOB_ID</code>, and it is said).
+A template that can't be used (a bad pattern, an unknown place, a partition
+that isn't a name) is said, never guessed at: <code>nomad templates --site S</code>
+lists the problems, and the Console shows them to its admins.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>nomad templates --site spydur --hub                                   the programs, each with its versions there
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf --module gaussian/g16c02
+</code></pre></div>
+<h2 id="guests-on-condos-and-the-owners-first-claim-1280">Guests on condos, and the owners' first claim (1.28.0)<a class="headerlink" href="#guests-on-condos-and-the-owners-first-claim-1280" title="Permanent link">&para;</a></h2>
+<p>A condo's owners paid for its nodes; others may run there while the nodes are
+free, as guests, and give them back when the owners need them. That is
+Slurm's to do: the owners' partition at a higher <code>PriorityTier</code>, admitting
+their lab; a guests' partition (<code>condo_overflow</code>) holding the condo nodes at
+the lower tier, with <code>PreemptMode=REQUEUE</code> and a <code>GraceTime</code>; and
+<code>PreemptType=preempt/partition_prio</code> (with <code>PreemptMode=REQUEUE</code>, which
+then applies to every partition that sets none: every other partition gets
+<code>PreemptMode=OFF</code> on its line). When an owner's job needs a node a guest
+holds, Slurm signals the guest job's steps (SIGTERM to programs started with
+<code>srun</code>; a program the script runs itself hears nothing until the end), waits
+up to the grace time, then stops the job and puts it back in the queue: the
+same job, run again from the top of its script, wherever nodes are free
+(cancelled instead if it asked <code>--no-requeue</code>, isn't a batch job, or the
+cluster has <code>JobRequeue=0</code> and it didn't ask <code>--requeue</code>).</p>
+<p>The switch is Slurm's configuration, applied by the site's staff; nomad
+follows what Slurm does:</p>
+<ul>
+<li><strong><code>nomad partitions --site S --condos</code></strong> (on the hub) checks each
+  confirmed condo of report.toml against Slurm: the owners first on their
+  nodes, only their lab in their partition (report.toml's <code>members =
+  "group:cparish$"</code> against the partition's <code>AllowGroups</code>; a condo two labs
+  share names both, <code>"group:myang$,knolin$"</code>, and Slurm admits anyone in
+  either; or <code>"account:NAME"</code>
+  (else the condo's own <code>account</code>) against <code>AllowAccounts</code>, which keeps
+  others out only where Slurm enforces associations,
+  <code>AccountingStorageEnforce</code>; a condo whose members name neither isn't
+  ranked first: anyone could then send jobs there and preempt the guests),
+  every other partition on those nodes a guests' one. It prints what
+  slurm.conf would change to turn it on, line by line, and the same settings
+  as scontrol shows them now, to turn it back off. The guests' partition is
+  added beside today's (<code>condos</code>), which is drained and removed once its
+  jobs are done (jobs in a partition that is gone fail); until then both are
+  guests' doors, and report.toml's <code>guest_partitions</code> lists both (the condo
+  reports find the guests through it). It also says when the grace is longer
+  than report.toml's <code>[report.policy] owner_start_minutes</code>: an owner's job
+  can wait the whole grace, and the reports would count it late.
+  Slurm's own preemption settings are read with the partitions (nomad
+  1.28.0's node_state collector, <code>scontrol show config</code>).</li>
+<li><strong>Where it starts soonest</strong> tells a guest, on the guests' partition's row,
+  what happens when the owners need their nodes, once Slurm preempts there.</li>
+<li><strong><code>nomad size --requeue job.sh</code></strong> says whether a script survives being
+  requeued, and what to change: <code>--no-requeue</code>, a log written anew
+  (<code>--open-mode=append</code>), a program that starts over instead of resuming
+  from its checkpoint (GROMACS <code>-cpi</code>, VASP's <code>CONTCAR</code>, CP2K's restart file,
+  Gaussian's <code>%chk</code>, ORCA's <code>.gbw</code>; <code>$SLURM_RESTART_COUNT</code>), steps that fail
+  the second time (<code>mkdir</code> without <code>-p</code> under <code>set -e</code>, <code>rm</code> or <code>mv</code> of
+  inputs), files kept on the node's own disk.</li>
+<li><strong>A message when it happens</strong> (<code>notices = true</code>): the <code>preemptions</code>
+  collector on the cluster keeps each job instance Slurm preempted (<code>sacct
+  -D -s PR</code>), and whether the job came back (requeued) or was cancelled;
+  after each sync the hub emails the person (their NetID at report.toml's
+  <code>mail_domain</code>), one message a person a run, each job once, only where
+  Slurm preempts that partition: where it ran, for how long, what Slurm did,
+  how to make it resume next time (in a message about many, the cancelled
+  first). A job that ended minutes ago and isn't known to be back in the
+  queue yet waits a sync. The first run after turning notices on (or after
+  two days with notices off) only notes what is there.</li>
+</ul>
+<p>In the hub's nomad.toml (these are the defaults):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">[submit.preemption]</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">guest_partition</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"condo_overflow"</span><span class="w">   </span><span class="c1"># the guests' partition the plan names</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">grace_minutes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">30</span><span class="w">                   </span><span class="c1"># GraceTime the plan proposes</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">owner_tier</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">2</span><span class="w">                       </span><span class="c1"># the owners' PriorityTier the plan proposes</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">notices</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="w">                      </span><span class="c1"># email a person when a job of theirs is preempted</span>
+</code></pre></div>
+<p>On the cluster's (the head node's account, which sees every user's jobs):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">[collectors.preemptions]</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

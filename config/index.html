@@ -1,0 +1,2625 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Lightweight HPC monitoring, visualization, and predictive analytics">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/config/">
+      
+      
+        <link rel="prev" href="../system-install/">
+      
+      
+        <link rel="next" href="../collectors/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Configuration - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dashboard/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Technical
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Locations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration Locations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-file-cant-be-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the file can't be read
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console access
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Console access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-machines-and-labs-nomad-lab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding machines and labs: nomad lab
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#courses-nomad-course" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Courses: nomad course
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collectors
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../collectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../submit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../condo-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Condo Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy_watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../facts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Facts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-locations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration Locations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration Locations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-file-cant-be-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When the file can't be read
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Console access
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Console access">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-machines-and-labs-nomad-lab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding machines and labs: nomad lab
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#courses-nomad-course" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Courses: nomad course
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#collectors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collectors
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
+<p>NØMAÐ uses TOML configuration files.</p>
+<h2 id="configuration-locations">Configuration Locations<a class="headerlink" href="#configuration-locations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Install Type</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>User</td>
+<td><code>~/.config/nomad/nomad.toml</code></td>
+</tr>
+<tr>
+<td>System</td>
+<td><code>/etc/nomad/nomad.toml</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="when-the-file-cant-be-read">When the file can't be read<a class="headerlink" href="#when-the-file-cant-be-read" title="Permanent link">&para;</a></h3>
+<p>A file with a mistake in it is not read at all: nomad then runs with <strong>none</strong>
+of its settings (database, collectors, roles, labs), and the Console shows no
+PIs or labs. It is not replaced by the next file either (<code>/etc/nomad/nomad.toml</code>
+behind a broken <code>~/.config</code> one): only nomad's packaged defaults apply. So
+nomad says so instead of carrying on quietly:</p>
+<ul>
+<li>every command prints, on stderr, which file and which line (when nobody is
+  at a terminal, as under cron, once an hour for the same problem);</li>
+<li><code>nomad syscheck</code> marks it ✗, and <code>nomad console roles</code> says the Console has
+  no labs until it is fixed;</li>
+<li><code>nomad lab</code> refuses to edit it.</li>
+</ul>
+<p>After editing the file by hand, check it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$ nomad config check
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>✗ /home/hpcadmin/.config/nomad/nomad.toml can't be read
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  line 211: `leads` is set twice in [console.labs] (first on line 209); keep one of them
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    209 | leads = { jdoe = ["pi1$"] }
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  &gt; 211 | leads = {}
+</code></pre></div>
+<p>A key set twice in the same table (as above), or a table declared twice, is
+the usual cause. The exit status is 1 while the file can't be read, 0 once it
+does; the messages name keys and tables, never values from the file.</p>
+<h2 id="example-configuration">Example Configuration<a class="headerlink" href="#example-configuration" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># nomad.toml</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="k">[general]</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">cluster_name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"spydur"</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">data_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/var/lib/nomad"</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">log_level</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"INFO"</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="k">[database]</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">path</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"/var/lib/nomad/nomad.db"</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="k">[collectors]</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="n">interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">60</span><span class="w">  </span><span class="c1"># seconds, for `nomad collect` without --once</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># Each collector is turned on or off in its own table (see Collectors).</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="k">[collectors.nfs]</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="k">[collectors.disk]</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="n">filesystems</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"/"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/home"</span><span class="p">,</span><span class="w"> </span><span class="s2">"/scratch"</span><span class="p">]</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="n">quota_enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="k">[collectors.slurm]</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="n">partitions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"compute"</span><span class="p">,</span><span class="w"> </span><span class="s2">"gpu"</span><span class="p">,</span><span class="w"> </span><span class="s2">"highmem"</span><span class="p">]</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="k">[dashboard]</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"127.0.0.1"</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="n">port</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">8050</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="k">[alerts]</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a><span class="k">[mail]</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="n">host</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"smtp.example.edu"</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="n">from</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"hpc@example.edu"</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="k">[support]</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="n">email</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"hpc-support@example.edu"</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="n">institution</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Example University"</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="k">[alerts.email]</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="n">recipients</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"admin@example.edu"</span><span class="p">]</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="k">[alerts.slack]</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="n">webhook_url</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"https://hooks.slack.com/services/..."</span>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="k">[alerts.thresholds]</span>
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a><span class="n">disk_warning</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">85</span>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="n">disk_critical</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">95</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a><span class="n">gpu_temp_warning</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">80</span>
+<a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>
+<a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a><span class="k">[ml]</span>
+<a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a><span class="n">similarity_threshold</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.7</span>
+</code></pre></div>
+<h2 id="console-access">Console access<a class="headerlink" href="#console-access" title="Permanent link">&para;</a></h2>
+<p>Who may see what in the Console is set in <code>nomad.toml</code> on the machine that
+runs it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">[console.roles]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">admin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"jtonini"</span><span class="p">]</span><span class="w">            </span><span class="c1"># everything, settings included</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">operator</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span><span class="w">                  </span><span class="c1"># everything, no settings</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">viewer</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[]</span><span class="w">                    </span><span class="c1"># named: their own work, whatever else says</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">[console.labs]</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">group_pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"{netid}$"</span><span class="w">     </span><span class="c1"># the group a faculty member leads, by its name</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">leads</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">NETID</span><span class="w"> </span><span class="p">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"chemlab$"</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w">   </span><span class="c1"># exceptions and extra groups</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">not_labs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"svc$"</span><span class="p">]</span><span class="w">            </span><span class="c1"># never a lab, whatever else says (1.17.10)</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="k">[console.labs.resources.</span><span class="s2">"NETID$"</span><span class="k">]</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Smith Lab"</span><span class="w">             </span><span class="c1"># how the lab is shown (else its group)</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">workstations</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"adam"</span><span class="p">,</span><span class="w"> </span><span class="s2">"eve"</span><span class="p">]</span><span class="w"> </span><span class="c1"># the lab's own machines</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="n">storage</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"sarahvaughan"</span><span class="p">]</span><span class="w">     </span><span class="c1"># its storage: a server, or server:/export</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="k">[console.labs.assistants]</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="s2">"NETID$"</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"eve"</span><span class="p">]</span><span class="w">             </span><span class="c1"># research assistants: see the lab as its PI does</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="k">[console.labs.attention]</span><span class="w">       </span><span class="c1"># what My lab's Needs attention lists (1.17.6); the defaults:</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="c1"># days = 7                     # the jobs, and the growth of data, looked at</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="c1"># waiting_hours = 24           # a job waiting longer for something that won't change by itself,</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="c1"># waiting_max_days = 60        # and no longer (an old record, not a job)</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="c1"># failing_jobs = 3             # failed jobs, at least half of a member's that ran to an end</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="c1"># storage_pct = 90             # a lab storage server this full</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="c1"># holders = 3                  # the lab's biggest holders of data named (0: none),</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="c1"># holder_gb = 100              # each holding this much or more,</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a><span class="c1"># growth_gb = 100              # and anyone whose data grew this much in `days` (0: none)</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a><span class="c1"># quota_pct = 90               # a member this close to a quota</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a><span class="c1"># over_cpu_hours = 100         # core-hours held by measured jobs,</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a><span class="c1"># over_cpu_pct = 25            # used under this share of them</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a><span class="c1"># over_memory_pct = 20         # memory used under this share of what jobs asked for,</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a><span class="c1"># over_memory_jobs = 3         # over this many measured jobs</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a><span class="c1"># workstation_hours = 2        # a lab workstation silent this long</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="k">[console.storage.</span><span class="s2">"10.0.0.28"</span><span class="k">]</span><span class="w">  </span><span class="c1"># a storage server, as the mounts name it</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"sarahvaughan"</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a><span class="n">note</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"community $HOME, all users"</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a><span class="k">[console.machines.</span><span class="s2">"labhead1"</span><span class="k">]</span><span class="w">   </span><span class="c1"># what a machine is, beside its name (1.17.7)</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a><span class="n">note</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"the Smith lab's head node: collects its workstations"</span>
+</code></pre></div>
+<p><code>nomad console role NETID admin|operator|viewer|none</code> changes one person's
+role here (<code>--apply</code> writes it): only their name in the <code>admin</code>, <code>operator</code>
+and <code>viewer</code> lists changes, and each list's line and comment stay. <code>viewer</code>
+names them a viewer whatever else would make them more (a directory admin
+group, an older role in the Console's own records); <code>none</code> takes them off
+every list, so the Console's own record decides. Roles written inline
+(<code>roles = {...}</code>), a list spread over several lines, or a multi-line string
+are left to be changed by hand. It refuses to write when the file changed
+since it was read, keeps the file's line endings, and keeps the newest 20 of
+its backups (<code>nomad.toml.bak-role-*</code>; ones named by hand stay). Give it the
+file the Console reads. Saving writes in the file's folder (the backup, then
+the new file swapped in), so run it as an account that can write that folder,
+or as root (<code>sudo -u nomad nomad -c /etc/nomad/nomad.toml console role jdoe
+operator --apply</code> where the nomad account or its group may write /etc/nomad;
+else <code>sudo nomad -c ...</code>).</p>
+<ul>
+<li><strong>Viewer:</strong> anyone the file does not name who signs in. They see their own
+  work, and the aggregates (queues, capacity, storage) everyone sees.</li>
+<li><strong>PI:</strong> a viewer who leads a lab also sees its members, one by one. They
+  lead the group <code>group_pattern</code> names for them, when that group exists in the
+  groups collector's data, and any group listed for them in <code>leads</code>
+  (<code>nomad lab lead LAB NETID</code> adds one, below). Members are the people the
+  group lists now who still have an account; someone taken out of the group,
+  or whose account was deleted while a group file still names them, is not
+  one (see the groups collector).
+  <code>group_pattern</code> is empty by default: a site that has not said how its groups
+  work gets no lab view rather than a wrong one.
+  A group that is a course this term (<code>[console.courses]</code>: listed, as
+  <code>nomad course add</code> on an instructor's own group does, or named like a
+  course) is a class, not a lab: that term it is not the instructor's lab,
+  unless storage or machines are listed for it under
+  <code>[console.labs.resources]</code> or a <code>leads</code> entry names it (<code>nomad lab lead
+  LAB NETID</code> writes one, for the instructor too: its PI and research
+  assistants then see its members, the class's students, one by one); a
+  workstation only tagged with the group doesn't count. <code>nomad console roles
+  NETID</code> and <code>nomad facts lab NETID</code> say when someone's own group is a class
+  this term. <code>nomad course add</code> says so when it makes a
+  lab a class. It is a lab again the term it isn't a course. The condo
+  reports' members are the owner's group either way.</li>
+<li><strong>Research assistant:</strong> a viewer listed for a lab under
+  <code>[console.labs.assistants]</code> (<code>nomad lab assistant LAB NETID</code>, below, or the
+  PI from the lab's Members page in the Console) sees it as its PI does: its
+  members one by one, its machines and storage -- but for whoever leads it:
+  the PI's own work stays theirs. Only while they are one of
+  the lab's members: someone who leaves the group stops being its assistant
+  with nothing to edit, and <code>nomad console roles</code> lists the entries that no
+  longer apply. Only a lab has them: a group named in <code>[console.labs]</code>
+  (machines, storage, a name, a lead) or the one <code>group_pattern</code> names for
+  one of its own members, not any group with members; a lab that is a
+  class this term (above) has none that term. Names that aren't NetIDs are
+  reported and left out.</li>
+<li><strong>Not a lab:</strong> <code>not_labs</code> lists groups that are never labs, whatever the
+  rules above say (1.17.10): a service account's group, a mistyped one, the
+  group of someone who left. The Console leaves them out (Labs, search,
+  Groups, My lab), nobody leads them or is their research assistant, and
+  <code>nomad facts lab</code> and <code>nomad console roles</code> say why. Nothing on the
+  clusters changes and their data stays: the condo reports count a hidden
+  group's members as before, and hiding one of an owner's labs moves no
+  condo onto another. Taking a group off the list makes it a lab again. <code>nomad lab hide LAB</code> writes it (below). A name, machines
+  or a lead nomad.toml gives a group it lists are kept but don't apply, and
+  <code>nomad config check</code> says so.</li>
+<li><strong>A lab's machines:</strong> a PI also sees their labs' workstations and storage.
+  On those machines, people outside the lab appear as "another user".
+  A workstation belongs to a lab when the collector that monitors it tags it
+  with the lab's group: <code>department = "NETID$"</code> in its
+  <code>[[collectors.workstation.workstations]]</code> entry, on the machine that
+  collects it. The tag reaches the hub with the data, so a workstation is
+  assigned once, where it is added. A machine moved to another lab follows its
+  latest tag. Workstations can also be listed under
+  <code>[console.labs.resources."group"]</code> (one not collected, say), and storage is
+  listed there: a storage server's name, or one export (<code>server:/export</code>) as
+  the workstations mount it. Nothing is guessed from names.</li>
+<li><strong>Needs attention:</strong> the lab's PI (and its research assistants, and
+  staff) see at the top of each lab what needs them: members' jobs stuck
+  waiting, out of memory, out of time or mostly failing, the lab's storage
+  filling, who holds the most data and where, someone near a quota, jobs
+  holding far more than they use, a workstation gone quiet
+  (<a href="../facts/#lab">details</a>). <code>[console.labs.attention]</code> sets each limit;
+  <code>nomad config check</code> reports a value it can't use (its default applies).
+  <code>nomad facts lab NETID --each</code> prints the same list.</li>
+<li><strong>Storage servers:</strong> <code>[console.storage."SERVER"]</code> gives a server a <code>name</code>
+  and a <code>note</code>, shown wherever its exports are (and beside a member's data in
+  Needs attention: a note saying what it is, "spydur's /home and /scratch",
+  tells a PI where that is). When the storage collector
+  reads that server (under its address, or under that name, as an ssh
+  alias), its state, space and pools' health go on the server's line. SERVER is the server as the
+  mounts name it, the part before the colon in <code>server:/export</code> (often an
+  address). A server that everyone shares should say so in its note: its
+  used space is everyone's, and would otherwise read as the lab's own.</li>
+<li><strong>What each machine is:</strong> <code>[console.machines."NAME"]</code> gives any machine
+  (a head node, the hub, a NAS, a cluster, a workstation) a <code>note</code>, a short
+  line saying what it is: the Console shows it when the pointer is over the
+  machine's name (and under the name on a lab's Workstations), and
+  <code>nomad facts</code>, <code>nomad lab show</code> print it. NAME as nomad shows the machine,
+  compared without case; at most 200 characters. A storage server's
+  <code>[console.storage]</code> note is used when it has none here.
+  <code>nomad machine note NAME "..."</code> shows the change and <code>--apply</code> writes it
+  (with a backup, <code>nomad.toml.bak-machine-*</code>, the newest 20 kept; only the
+  note line changes, the table's other keys and comments stay); <code>--remove</code> takes it away; <code>nomad machine list</code> lists them.
+  A storage server has one description under its address and its name.
+  A note is seen by whoever sees the machine named: a site, a storage
+  server or a cluster's node is everyone's (a site that is also a lab's
+  head node is a site; a machine listed or collected as storage is
+  storage); a workstation is its lab's PI's, research assistants' and
+  staff's; a name nomad can't place, staff's.</li>
+<li><strong>Operator:</strong> sees everything, changes no settings.</li>
+<li><strong>Admin:</strong> everything, settings included.</li>
+</ul>
+<p>NetIDs are compared without regard to case. For anyone named here the file
+wins over the Console's own records (<code>users.json</code>), which keep only what is
+private or automatic: the break-glass password, and the record made at
+someone's first login. A setting that is wrong is reported and left out,
+never guessed at.</p>
+<h3 id="adding-machines-and-labs-nomad-lab">Adding machines and labs: <code>nomad lab</code><a class="headerlink" href="#adding-machines-and-labs-nomad-lab" title="Permanent link">&para;</a></h3>
+<p><code>nomad lab</code> edits these settings in <code>nomad.toml</code> for you: it backs up the
+file first, keeps its comments, and writes nothing that doesn't read back as
+intended. Each command shows the change; <code>--apply</code> writes it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>nomad lab show [LAB]
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>nomad lab add-machine LAB HOST          a workstation collected here, tagged with the lab
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>nomad lab add-nas LAB HOST [--name NAME] [--note "..."] [--type zfs|nfs] [--path P]
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>                                        a NAS collected here (its pools), listed as the lab's
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>nomad lab add-storage LAB SERVER[:/export] [--name NAME] [--note "..."]
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>                                        storage the lab's machines mount, listed as the lab's
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>nomad lab name LAB "NAME"               how the lab is shown, e.g. "Smith Lab"
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>nomad lab lead LAB NETID [--remove]     NETID leads LAB too (or no longer)
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>nomad lab assistant LAB NETID [--remove]
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>                                        NETID is a research assistant of LAB (or no longer)
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>nomad lab hide LAB [--remove]           LAB is never a lab, not shown (or a lab again)
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>nomad lab remove LAB HOST
+</code></pre></div>
+<p>For storage that is everyone's, LAB is <code>shared</code>: <code>nomad lab add-nas shared
+HOST --note "community $HOME"</code> collects it and names it, listed for no lab.
+It stays collected when a lab that also lists it removes it.</p>
+<p>LAB is the PI's NetID when <code>group_pattern</code> is set (<code>jdoe</code> is <code>jdoe$</code>
+with <code>"{netid}$"</code>), or the lab's group itself.</p>
+<ul>
+<li><strong>add-machine</strong> goes on the host that collects the workstation (a lab's
+  own head node, or the hub for a lab without one). It turns the workstation
+  collector on there if needed, and says whether the host answers over SSH
+  with a key.</li>
+<li><strong>add-nas</strong> is for a NAS the storage collector reads over SSH: pool health,
+  and the space users have (each pool's root dataset, so RAIDZ parity isn't
+  counted; a boot pool isn't storage). A host listed as a workstation moves
+  to storage. It says whether cron on this host runs the storage collector.</li>
+<li><strong>add-storage</strong> goes on the Console's machine: an export the lab's machines
+  mount, or a server, with an optional name and note for the server.</li>
+<li><strong>lead</strong> goes on the Console's machine: someone besides the PI who leads
+  the lab (a co-PI, a lab manager, a test account) sees its machines and,
+  one by one, its members. LAB may also be the lab's name as <code>nomad lab
+  show</code> prints it, and must be a lab nomad knows (listed machines or storage,
+  tagged workstations, or members in the groups data) unless <code>--new-group</code>
+  is given: a mistyped NetID could be another PI's lab. It writes
+  <code>[console.labs.leads]</code>; a <code>leads = {}</code> line in <code>[console.labs]</code>, as in
+  <code>nomad.toml.example</code>, becomes that table. Editing <code>leads</code> by hand risks
+  setting it twice, which makes the whole file unreadable. The PI
+  <code>group_pattern</code> names needs no entry.</li>
+<li><strong>assistant</strong> goes on the Console's machine: a research assistant sees
+  the lab as its PI does while one of its members (above). LAB as for
+  <code>lead</code>, and a lab by nomad's rules (above), not just any group with
+  members; taking a name off works for any. It says how many members the lab has, and when NETID isn't one of
+  them in the groups data now (the entry applies once they are), and writes
+  <code>[console.labs.assistants]</code>, which goes when its last name does. Like
+  <code>leads</code>, the table is written whole: comments inside it aren't kept, and
+  an entry nomad can't read is left for a person to fix first.</li>
+<li><strong>hide</strong> goes on the Console's machine: LAB is not a lab (above), so the
+  Console doesn't show it; nothing on the clusters changes. It writes the
+  <code>not_labs = [...]</code> line of <code>[console.labs]</code> on one line (a list spread over
+  several lines is left to change by hand), says when nomad knows no such
+  group here (a mistyped name hides nothing; <code>--db</code> gives the groups data
+  when nomad can't find it), and <code>--remove</code> makes it a lab again. A group
+  nomad knows by that very name (<code>research</code>, a workstation tag) is taken as
+  it is, not as a PI's NetID; LAB may also be the lab's name as <code>nomad lab
+  show</code> prints it ("Smith Lab"). <code>nomad lab show</code> lists them.</li>
+<li><strong>remove</strong> takes a host out of a lab: no longer collected here, no longer
+  listed.</li>
+</ul>
+<p>A workstation's lab travels with its data, so it is added where it is
+collected; storage listings and server names are read on the Console's
+machine. On a hub that also collects a lab, one command does all of it.</p>
+<p><code>nomad console roles</code> shows what the file grants, and anything wrong in it;
+<code>nomad console roles NETID</code> shows what that person would see, with each lab's
+size, and whether each of their machines is online (and when it last was) or
+whether each storage export is mounted and responding, by server (with its
+name and note), with its space when the lab machines report it: percent used, used of total and free, in decimal units
+(those of <code>df -H</code>), and for exports of one pool "free space shared with ..."
+and a line with their space together (see docs/collectors.md, Workstation
+mounts), and for a NAS the storage collector reads, its state, space and
+pools' health. A machine or NAS whose latest record is over an hour old
+shows as "no report since ..."; a workstation with no record in two days no
+longer counts as its lab's. A machine known only by
+its tag is marked <code>[tagged]</code> (<code>--db</code> for the database holding group membership, such as the hub's
+combined database; <code>--mask</code> for counts only).</p>
+<h3 id="courses-nomad-course">Courses: <code>nomad course</code><a class="headerlink" href="#courses-nomad-course" title="Permanent link">&para;</a></h3>
+<p>A course is a Unix group (<code>demo101</code>, say), a software environment, or both.
+Its instructors see it in <code>nomad facts course</code> (and the Console): the class
+this term, each student as a row, when the class works. Nothing is a course
+until <code>[console.courses]</code> is there: a site that hasn't said how its classes
+work gets no course view rather than a wrong one. <code>nomad course setup</code>
+asks, showing what it finds here for each answer.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">[console.courses]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">sources</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"groups"</span><span class="p">,</span><span class="w"> </span><span class="s2">"environments"</span><span class="p">]</span><span class="w">     </span><span class="c1"># how classes get access (below)</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">pattern</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"^[a-z]{2,6}[0-9]{3}[a-z]?$"</span><span class="w">   </span><span class="c1"># which groups and environments are courses, by name</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">faculty_group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"faculty"</span><span class="w">                </span><span class="c1"># whose members can teach one</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">term_start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"2026-08-24"</span><span class="w">                </span><span class="c1"># this term's first day</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">min_students</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="w">                         </span><span class="c1"># fewer students this term: counts only</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">names</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="w">                            </span><span class="c1"># instructors see students by name</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">not_teaching</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"jdoe"</span><span class="p">]</span><span class="w">                  </span><span class="c1"># in the faculty group, teaches no course (staff)</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="k">[console.courses.groups.</span><span class="s2">"demo101"</span><span class="k">]</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Econometrics"</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">instructors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"jdoe"</span><span class="p">]</span><span class="w">                   </span><span class="c1"># teaches it every term</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">exclude</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"asmith"</span><span class="p">]</span><span class="w">                     </span><span class="c1"># in the group and faculty, never teaches it</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="n">environments</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"datakit"</span><span class="p">]</span><span class="w">              </span><span class="c1"># whoever used it this term is in the class</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="k">[console.courses.groups.</span><span class="s2">"demo101"</span><span class="k">.terms.</span><span class="s2">"2026-08-24"</span><span class="k">]</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="n">instructors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"bsmith"</span><span class="p">]</span><span class="w">                 </span><span class="c1"># teaches it this term</span>
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="n">exclude</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"cjones"</span><span class="p">]</span><span class="w">                     </span><span class="c1"># doesn't teach it this term</span>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a><span class="k">[console.courses.groups.</span><span class="s2">"lab201"</span><span class="k">]</span>
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a><span class="n">course</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="w">                           </span><span class="c1"># named like a course, but isn't one</span>
+</code></pre></div>
+<ul>
+<li><strong>How classes get access</strong> differs from one institution to the next;
+  <code>sources</code> says which of these happen here (default <code>["groups"]</code>):</li>
+<li><code>groups</code>: a Unix group per course, named for it. A group whose name
+    matches <code>pattern</code> is a course; its members are the course's people.</li>
+<li><code>environments</code>: a software environment per course, a conda environment
+    or a Jupyter kernel named for it. The interactive servers record which
+    environment each session runs from (nomad 1.12.5; <code>environment_patterns</code>
+    under the interactive collector, <a href="../collectors/">collectors</a>), and
+    whether it is the person's own (they own it, or keep it in their home):
+    anyone can name one like a course, so a session from one's own counts
+    only for a faculty member (an instructor who built their course's). An
+    environment named like a course group
+    (<code>pattern</code>) counts for that course: whoever used it this term, on two
+    days or more, is one of its members, whatever groups they are in. Shared
+    software is named like courses too (<code>py311</code>, <code>cuda121</code>): an environment
+    with no group of its name is a course only when listed (<code>nomad course
+    env NAME NAME</code>).</li>
+<li><code>own_groups</code>: an instructor's own group (<code>jdoe$</code>, by <code>[console.labs]
+    group_pattern</code>) holds their class. Such a group is often their lab too,
+    so none becomes a course by itself: <code>nomad course discover</code> proposes the
+    ones with people active this term, and one becomes a course when someone
+    is added to it. A course this term, it is not their lab that term (see
+    the PI under Console access): add one that mostly holds a class.</li>
+</ul>
+<p>Whatever the sources, a group listed under <code>groups</code> is a course (unless
+  <code>course = false</code>), and a course's <code>environments</code> add whoever used them this
+  term to its students (<code>nomad course env GROUP ENV</code>): for a class whose
+  environment isn't named like its course. They add no one to choose its
+  instructors among: an environment two courses share says who is in a
+  class, not who teaches it (its users are students of both). An
+  environment listed under a course counts for that course, not as one of
+  its own. Environments are listed for good; a group listed only by a term's
+  decisions (someone added to an instructor's own group for a term) is a
+  course that term only.
+- A course's <strong>instructors this term</strong>, in this order:
+  1. anyone listed (<code>nomad course add</code>), this term or every term. When
+     anyone is, they alone teach it that term: nothing below adds anyone,
+     and nobody is asked about it in the Console. A group reused from an
+     earlier term keeps that term's instructor among its members, so adding
+     this term's takes the earlier one out; list a co-instructor or a TA too;
+  2. otherwise, of its members in <code>faculty_group</code> (its group's, and whoever used the
+     environment named for it), those who said in the Console that they
+     teach it this term (<code>nomad course answers</code>);
+  3. when none has, its one faculty member, when it has one;
+  4. when it has several, those who joined its group this term;
+  5. when none did, those who used its environment this term;
+  6. when none did, those active this term where the course's students work
+     (the servers and clusters most of its active students used: research
+     on another cluster says nothing about a course).</p>
+<p>Groups are reused term after term and nobody takes last term's instructor
+  out; when nothing above settles it, nomad can't tell who teaches it, and
+  nobody does until someone says so or is added. Left out: anyone excluded
+  from the group (<code>nomad course exclude</code>), this term or every term; anyone
+  who said they don't teach it this term; anyone in <code>not_teaching</code> (staff in
+  the faculty group, old accounts, people who retired; <code>nomad course
+  not-teaching</code>) unless added to the course by name. nomad.toml wins over
+  what people said, and both over nomad's guess. A course with no instructor
+  is shown to no one; <code>nomad course list</code> names those last.
+- <strong>Decisions hold for a term.</strong> Who teaches a course changes from term to
+  term, so <code>nomad course add</code> and <code>exclude</code> write under the term's own table
+  and stop applying when <code>term_start</code> moves on (they stay in nomad.toml as a
+  record); <code>--every-term</code> writes them for good. So do the answers people give
+  in the Console: each is for one term.
+- <strong><code>term_start</code> must move on.</strong> When it is set, a new term begins only when
+  it is changed (<code>nomad course setup --term-start YYYY-MM-DD</code>); <code>nomad course
+  list</code> says when the calendar's term has moved past it. Left unset, it is the
+  Monday on or after 15 August, 1 January or 1 June (a US academic calendar);
+  set it to the first day of classes, or the weeks before would count in each
+  student's range as weeks of nothing.
+- Activity is a person's, not a course's: a faculty member active this term
+  where a course's students work counts in every group of several they are
+  in, and one who teaches without using the server is left out. <code>nomad
+  course list</code> shows why each instructor is there; check it once a term.
+  <code>course add</code> takes no one off. Join dates say more than activity: an
+  instructor added to a reused group shows as joined that term (a
+  membership nomad saw before 1.11, on any site, has no date); someone added
+  only for access counts as joined too: exclude them.
+- <strong>What people say</strong> is kept beside the hub's combined database
+  (<code>course_answers.db</code>, readable by its owner only), not in nomad.toml.
+  Only the course's faculty members can answer (in its group, or a user of
+  the environment named for it; not those excluded, staff, or those already
+  added by name); <code>nomad course answer GROUP NETID
+  --yes|--no|--clear</code> records an answer someone gave you another way.
+- Its <strong>students</strong> are its other people; of those, <strong>this term's</strong> joined its
+  group since <code>term_start</code> or used an interactive server or a cluster since
+  then (groups nobody prunes keep earlier terms' students). For a course
+  whose class is in its environment rather than its group -- more of the
+  environment's users are outside the group than the group has students who
+  joined or were active this term; or, early in a term, a faculty member
+  outside the group uses it, none of the group's does, and fewer than half
+  the group's active students do -- the environment says it: this term's
+  students joined its group this term or used its environment, an earlier
+  student's work this term in another class doesn't count, and its group's
+  faculty members count only if they joined it this term or used the
+  environment (left out otherwise: not last term's instructor shown this
+  term's class). One outsider in a course's kernel changes nothing. nomad
+  records when a membership began from 1.11 on; before that, a member who
+  hasn't been active this term can't be told from an earlier term's, and is
+  left out (and counted as such).
+- A group named like a course that isn't one (a project's or a lab's) is
+  marked <code>course = false</code> (<code>nomad course ignore GROUP</code>): otherwise every
+  faculty member in it would see its other members as a class. <code>nomad course
+  list</code> shows every group taken for a course.
+- <code>min_students</code> defaults to 0: a small institution's course may have three
+  students. With so few, even figures for the class together are close to
+  each student's, and unnamed rows are not anonymous to someone who knows
+  the class. <code>names</code> (default false) decides whether instructors see each
+  student by name: both are for the institution to decide (FERPA).</p>
+<p>A faculty member who used the environment named for a course on two days or
+more this term is among those it chooses its instructors from when they are
+in its group, or when its class is in the environment (above); with several,
+those who used it count as teaching it. A faculty member outside a course's
+group who used its environment counts only when people besides faculty
+outside the group used it too (a colleague who borrowed a group course's
+kernel is not one).
+<code>nomad course list</code> shows why; exclude whoever doesn't teach it. Its students' figures are all their work
+this term, as for a group's students, not only in its environment.</p>
+<p><strong><code>nomad course discover</code></strong> (read-only) lists what may be a course that
+nomad.toml doesn't say is one yet: each environment people had a session in
+this term (how many, the faculty members among them, the course it counts
+for, the group most of its users are in), and groups with a faculty member
+and at least three people active this term besides faculty (whose own group
+each is, and the environment most of them used). Then what to do, as
+commands that each show their change first: environments named like a
+course group (<code>setup --sources ...,environments</code>), one named like a course
+with no group (<code>course env NAME NAME</code>), an environment four in five of whose
+users are in a course's group (<code>course env</code>), an instructor's own group
+whose people are active (<code>course add</code>, for this term, when <code>own_groups</code> is a
+source). Nothing for an environment several faculty members use: that is
+shared software, not a class's.
+<code>--mask</code> numbers groups, environments and NetIDs. Run it a week or two into
+a term.</p>
+<p><strong><code>nomad course setup</code></strong> in a terminal with no setting given asks: how
+classes get access (the sources, with how many groups and environments here
+are named like a course and how many instructors' own groups have people
+active), which names are courses' (and what they match), the faculty group
+(and its size), the term's first day, <code>min_students</code> and <code>names</code>; then shows
+how many courses those settings make, what <code>discover</code> would suggest, and
+what would change, and asks before writing (<code>--apply</code>: without asking).
+Each setting is also an option (<code>--sources groups,environments</code>), for
+scripts; <code>--ask</code> asks even then.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>nomad course setup                           turn courses on: asks how classes get access
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>nomad course setup --term-start 2026-08-24   start a new term (or --sources, --pattern, ...)
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>nomad course discover                        what here may be a course, and what to do
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>nomad course list                            each course: instructors (and why), students
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>nomad course env GROUP ENV [--remove]        whoever used environment ENV is in GROUP's class
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>nomad course add GROUP NETID                 NETID teaches GROUP this term
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>nomad course exclude GROUP NETID             in GROUP and faculty, not teaching it this term
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>                                             (add, exclude: --every-term for good)
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>nomad course remove GROUP NETID              off either list
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>nomad course name GROUP "Econometrics"       how the course is shown
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>nomad course ignore GROUP [--undo]           named like a course, but isn't one
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>nomad course not-teaching NETID [--undo]     in the faculty group, teaches no course
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>nomad course answers                         what faculty members said this term
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>nomad course answer GROUP NETID --yes|--no   record what someone said
+</code></pre></div>
+<p>Like <code>nomad lab</code>, each change is shown first and written with <code>--apply</code>,
+after a backup, only if the file still reads back as intended.</p>
+<h2 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>NOMAD_CONFIG</code></td>
+<td>Config file path</td>
+</tr>
+<tr>
+<td><code>NOMAD_DB</code></td>
+<td>Database path</td>
+</tr>
+<tr>
+<td><code>NOMAD_LOG_LEVEL</code></td>
+<td>Log level (DEBUG, INFO, WARNING, ERROR)</td>
+</tr>
+<tr>
+<td><code>NOMAD_CONSOLE_HOST</code></td>
+<td>The machine serving the Console, for <code>nomad console</code></td>
+</tr>
+<tr>
+<td><code>NOMAD_LOGIN_HOST</code></td>
+<td>This cluster's name as people's computers reach it, for <code>nomad console</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="collectors">Collectors<a class="headerlink" href="#collectors" title="Permanent link">&para;</a></h2>
+<p>See <a href="../ARCHITECTURE/">ARCHITECTURE.md</a> for detailed collector documentation.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
