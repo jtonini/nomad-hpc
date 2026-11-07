@@ -462,6 +462,37 @@ class JobMetricsCollector(BaseCollector):
             logger.debug(f"Failed to parse sacct line: {e}")
             return None
 
+    SHELLS = ("batch", "interactive")           # a job's script or salloc's shell
+    SHELL_MB = 1024.0                            # a shell holding more than this runs a program itself
+    SLACK = timedelta(seconds=5)                 # Slurm may record a step's end just after the next's start
+
+    @classmethod
+    def _most_at_once(cls, spans: list) -> int:
+        """The most tasks running at once across a job's steps (step, start,
+        end, tasks, MaxRSS in MB): steps whose times overlap added up; one
+        ending within a few seconds of another's start doesn't overlap it.
+        The extern step runs none of the job's steps. The batch step (and
+        salloc's interactive one) is its script's shell, left out while steps
+        it started run, unless it held more than a shell does (a program of
+        its own beside them); it is counted when it runs alone. A step whose
+        start or end isn't known is taken to overlap all the others."""
+        lo, hi = datetime.min, datetime.max
+        steps = []
+        for name, a, b, n, rss in spans:
+            if name == "extern" or (name in cls.SHELLS and rss < cls.SHELL_MB):
+                continue
+            a, b = a or lo, b or hi
+            if a is not lo and b is not hi:
+                b = max(a, b - cls.SLACK)
+            steps.append((a, b, n))
+        alone = max((n for name, _a, _b, n, _r in spans if name in cls.SHELLS), default=0)
+        events = sorted([(a, 1, n) for a, _b, n in steps] + [(b, 0, -n) for _a, b, n in steps])
+        most = cur = 0
+        for _t, _kind, n in events:
+            cur += n
+            most = max(most, cur)
+        return max(most, alone)
+
     def _merge_step_metrics(self, job: JobMetrics, step_lines: list[str]) -> None:
         """
         Merge step-level metrics into the parent job record.
@@ -489,6 +520,7 @@ class JobMetricsCollector(BaseCollector):
         avg_disk_write_count = 0
         cpu_seconds_total = 0.0
         max_tasks = 0
+        spans = []                     # (step, start, end, tasks): which ran at once (1.32.2)
 
         for line in step_lines:
             parts = line.split('|')
@@ -496,6 +528,11 @@ class JobMetricsCollector(BaseCollector):
                 continue
             if len(parts) > 25:
                 max_tasks = max(max_tasks, self._parse_int(parts[25]))
+                name = parts[0].partition('.')[2]
+                spans.append((name, self._parse_datetime(parts[8]), self._parse_datetime(parts[9]),
+                              # tasks not said: more than one, unless a shell's or the extern step's
+                              self._parse_int(parts[25]) or (1 if name in ('batch', 'interactive', 'extern') else 2),
+                              self._parse_memory(parts[16]) or 0.0))
             # AveCPU is parts[15]: cumulative CPU time, summed across steps
             ave_cpu = self._parse_elapsed(parts[15])
             if ave_cpu:
@@ -532,8 +569,12 @@ class JobMetricsCollector(BaseCollector):
                 avg_disk_write_sum += v
                 avg_disk_write_count += 1
 
-        if max_tasks:
-            job.max_tasks = max_tasks
+        # The most tasks that ran at once (1.32.2): a step's own, or steps run
+        # side by side added up (srun ... & in a loop). Slurm's MaxRSS is one
+        # task's, so a job's memory peak is its own only when this is 1.
+        at_once = max(max_tasks, self._most_at_once(spans))
+        if at_once:
+            job.max_tasks = at_once
         # How the cores were asked for, when the command line didn't say: a
         # step that ran several tasks means --ntasks.
         if job.cpu_request is None and max_tasks > 1:

@@ -725,7 +725,41 @@ per running job in `job_live`. A job that has ended loses its row. Per job:
 - **memory at its peak so far** (`peak_rss_mb`): the most one of its tasks has
   held (MaxRSS), measured as an ended job's peak is.
 - **memory held now** (`rss_now_mb`): every task's, added up (AveRSS times
-  tasks), its extern step left out.
+  tasks). Since 1.32.2 its extern step's too: processes started by ssh into
+  the job's node land there (pam_slurm_adopt: a notebook or an editor
+  reached by ssh) and count against its memory.
+- **the most held together** (`held_most_mb`, 1.32.2): the most all its
+  tasks held at any of nomad's readings since this run of it started (a
+  peak between readings isn't seen; a requeued job starts again).
+- **their peaks added up** (`peaks_sum_mb`, 1.32.2): the most its running
+  steps' tasks' own peaks came to at a reading (MaxRSS times tasks). While
+  no step has gone unseen, it can't be less than what they held at once,
+  wherever Slurm placed them.
+- **a step gone unseen** (`steps_unseen`, 1.32.2): 1 once a step of this run
+  has ended, or come and gone, between nomad's readings. What it held after
+  nomad last read it isn't known, so the peaks added up no longer bound the
+  job's; the Console then doesn't suggest asking for less. srun numbers a
+  job's steps in order, so a number skipped is a step never read.
+
+MaxRSS is the peak of a job's largest task. For a job of one task at a time
+(one program with many threads, like most) that is the job's peak. For a
+job of many tasks at once (MPI, or `srun -n1 ... &` side by side) it is one
+task's: a 40-task job whose tasks each held 2 GB of the 100 GB it asked
+reads 2 GB, while it holds 80. Slurm doesn't keep what they held together,
+so nomad reads it at each run, and adds their own peaks up for a figure the
+job's peak can't be over. Both are the whole job's: a job's request is per
+node, and how Slurm spread its tasks over its nodes isn't known. Memory a
+job's processes share (shared memory between MPI ranks) is counted once
+per process, so it can read more than the job holds.
+
+An ended job's `max_tasks` (job_metrics) is the most tasks that ran at once
+(1.32.2): its steps' times overlapped and added up (a step ending within 5
+seconds of another's start doesn't overlap it: Slurm may record an end just
+after the next start). The batch step (or salloc's interactive one) is left
+out while steps it started run, unless it held more than 1 GB (a program of
+its own beside them). A step whose tasks Slurm didn't say counts as more
+than one. A job of more than one isn't scored on memory: its peak is one
+task's.
 
 The node's own figures can't say this. Slurm's "free memory" (and `free`'s
 "free") leaves out the file cache, which on spydur's spdr10 was 697 of its

@@ -445,14 +445,15 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
     # an 8-task MPI job whose tasks each held 1.5GB of a 16GB request reads
     # as 9% used, and "ask for 3GB" would kill it. nomad can't add the tasks
     # up from what sacct keeps, so jobs that ran several tasks aren't scored
-    # on memory (max_tasks: the most tasks any step ran, 1.13).
+    # on memory (max_tasks: the most tasks any step ran, 1.13; since 1.32.2
+    # the most that ran at once, steps run side by side added up).
     tasks = summary.get("max_tasks") or 0
     if tasks > 1:
         return DimensionScore(
             name="Memory Efficiency",
             score=50,
             level="Unknown",
-            detail=(f"The job ran {tasks} tasks, and Slurm records the memory of "
+            detail=(f"The job ran {tasks} tasks at once, and Slurm records the memory of "
                     f"the largest one, not of all of them together. Not scored."),
             applicable=False,
         )

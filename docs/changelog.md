@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.32.2 (November 2026)
+
+### Fixes
+- A job's memory peak for a job of many tasks at once. Slurm's MaxRSS is the
+  peak of a job's largest task, not of the job: a 40-task MPI job whose
+  tasks each held 2 GB of the 100 GB it asked read 2 GB, while it held 80.
+  `job_live` now keeps, since each run of a job started, the most all its
+  tasks held together at any of nomad's readings (`held_most_mb`) and the
+  most its running steps' tasks' own peaks came to, added up
+  (`peaks_sum_mb`: while no step has gone unseen, never less than what they
+  held at once, wherever Slurm placed them), and whether a step ended or
+  came and went between readings (`steps_unseen`). Both figures outlast the
+  steps that set them, and count the extern step's memory (processes started
+  by ssh into the job's node). Tables made by 1.32.0 and 1.32.1 gain the
+  columns.
+- An ended job's `max_tasks` is now the most tasks that ran at once: steps
+  run side by side (`srun -n1 ... &`) added up, the batch step's shell left
+  out while they run unless it held more than 1 GB. Before, it was the most one step ran, so twenty
+  one-task steps at once read as one task, and their memory peak (one
+  task's) was scored as the job's. Such a job's memory isn't scored now.
+
 ## v1.32.1 (November 2026)
 
 ### Fixes

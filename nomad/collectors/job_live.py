@@ -16,7 +16,21 @@ Each run lists the running jobs (``squeue``), asks ``sstat`` for their steps
   a job whose steps came and went reads low).
 - ``peak_rss_mb``: the most memory one of its tasks has held (MaxRSS, as an
   ended job's peak is measured); ``rss_now_mb``: what all its tasks hold
-  now (AveRSS times tasks, every step but the extern one).
+  now (AveRSS times tasks; every step but the extern one until 1.32.2, which
+  counts what was started by ssh into its node too).
+- Since this run of it started (1.32.2): ``held_most_mb``, the most all its
+  tasks held together at any of nomad's readings (a peak between readings
+  isn't seen); ``peaks_sum_mb``, the most its running steps' tasks' own
+  peaks came to, added up (MaxRSS times tasks) at a reading; and
+  ``steps_unseen``, 1 once a step of this run has ended, or come and gone,
+  between readings, so what it held after nomad last read it isn't known.
+  MaxRSS is the peak of a job's largest task: for a job of one task at a
+  time (one program with many threads, like most) it is the job's; for one
+  of many tasks at once (MPI, or steps run side by side) it is one task's,
+  and says little of the job. While no step has gone unseen, their peaks
+  added up can't be less than what they held together at once, whichever
+  node each ran on (but for memory their processes share, which Slurm
+  counts once per process, and Slurm's own sampling).
 
 sstat shows someone else's job only to root and Slurm's own account, so it
 runs as Slurm's account through sudo (``sstat_as``, by default ``[actions]
@@ -121,18 +135,24 @@ def parse_sstat(text: str) -> dict[str, list[dict]]:
 
 
 def summarise(steps: list[dict]) -> dict:
-    """A job's figures from its steps' lines (the extern step left out: it
-    runs nothing of the job's)."""
+    """A job's figures from its steps' lines. The extern step runs none of
+    the job's own steps, so it isn't among its tasks, steps or CPU time; but
+    what it holds counts against the job's memory (1.32.2): processes started
+    over ssh into the job's node land there (pam_slurm_adopt: a notebook or
+    an editor reached by ssh)."""
     real = [s for s in steps if s["step"] != "extern"]
     if not real:
-        return {"measured": 0, "tasks": None, "steps": None, "cpu_s": None, "rss_now_mb": None, "peak_rss_mb": None}
+        return {"measured": 0, "tasks": None, "steps": None, "cpu_s": None, "rss_now_mb": None, "peak_rss_mb": None,
+                "peaks_sum_mb": None}
     tasks = sum((s["tasks"] or 1) for s in real)
     cpu = sum((s["ave_cpu_s"] or 0.0) * (s["tasks"] or 1) for s in real)
-    now = sum((s["ave_rss_mb"] or 0.0) * (s["tasks"] or 1) for s in real)
-    peaks = [s["max_rss_mb"] for s in real if s["max_rss_mb"] is not None]
+    now = sum((s["ave_rss_mb"] or 0.0) * (s["tasks"] or 1) for s in steps)
+    peaks = [s["max_rss_mb"] for s in steps if s["max_rss_mb"] is not None]
+    added = sum((s["max_rss_mb"] or 0.0) * (s["tasks"] or 1) for s in steps)
     return {"measured": 1, "tasks": tasks, "steps": ",".join(sorted(s["step"] for s in real)),
             "cpu_s": round(cpu, 1), "rss_now_mb": round(now, 1),
-            "peak_rss_mb": round(max(peaks), 1) if peaks else None}
+            "peak_rss_mb": round(max(peaks), 1) if peaks else None,
+            "peaks_sum_mb": round(added, 1) if peaks else None}
 
 
 def _account() -> str:
@@ -154,8 +174,11 @@ class JobLiveCollector(BaseCollector):
         CREATE TABLE IF NOT EXISTS job_live (
             job_id TEXT PRIMARY KEY, slurm_id TEXT, user TEXT, cpus INTEGER, nodes INTEGER, start TEXT,
             sampled_at TEXT NOT NULL, elapsed_s INTEGER, measured INTEGER, tasks INTEGER, steps TEXT,
-            cpu_s REAL, busy_now REAL, busy_avg REAL, rss_now_mb REAL, peak_rss_mb REAL);
+            cpu_s REAL, busy_now REAL, busy_avg REAL, rss_now_mb REAL, peak_rss_mb REAL,
+            held_most_mb REAL, peaks_sum_mb REAL, steps_unseen INTEGER);
     """
+    # Columns added since the table first was (1.32.2): put on a table made before.
+    ADDED = (("held_most_mb", "REAL"), ("peaks_sum_mb", "REAL"), ("steps_unseen", "INTEGER"))
 
     def __init__(self, config: dict[str, Any], db_path):
         super().__init__(config, db_path)
@@ -260,29 +283,68 @@ class JobLiveCollector(BaseCollector):
             return None
         return round(used / dt, 2)
 
+    @staticmethod
+    def most(prev: dict | None, d: dict, now_key: str, kept_key: str) -> float | None:
+        """The most a figure has been at any reading of this run of the job
+        (same start; a requeued job starts again): this reading's, or the
+        most kept from those before."""
+        before = prev.get(kept_key) if prev and prev.get("start") == d.get("start") else None
+        have = [v for v in (d.get(now_key), before) if v is not None]
+        return max(have) if have else None
+
+    @staticmethod
+    def unseen(prev: dict | None, d: dict) -> int:
+        """1 once a step of this run of the job (same start) has ended, or
+        come and gone, between nomad's readings: what it held after the last
+        reading of it isn't known, so its tasks' peaks added up no longer
+        bound the job's. srun numbers a job's steps 0, 1, 2 ... in order, so
+        while none has gone unseen every number up to the highest is still
+        running: a number missing, or one read before and gone now, is one
+        unseen. A reading sstat said nothing of a job in changes nothing."""
+        same = bool(prev) and prev.get("start") == d.get("start")
+        if same and prev.get("steps_unseen"):
+            return 1
+        if not d.get("measured"):
+            return 0
+
+        def ids(text):
+            return {int(x) for x in (text or "").split(",") if x.isdigit()}
+        now = ids(d.get("steps"))
+        before = ids(prev.get("steps")) if same and prev.get("measured") else set()
+        if before - now:
+            return 1
+        new = now - before
+        base = max(before) if before else -1
+        return 1 if new and len(new) != max(new) - base else 0
+
+    COLS = ("job_id", "slurm_id", "user", "cpus", "nodes", "start", "sampled_at", "elapsed_s", "measured", "tasks",
+            "steps", "cpu_s", "busy_now", "busy_avg", "rss_now_mb", "peak_rss_mb", "held_most_mb", "peaks_sum_mb",
+            "steps_unseen")
+
     def store(self, data: list[dict[str, Any]]) -> None:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
         try:
             conn.executescript(self.SCHEMA)
+            have = {r[1] for r in conn.execute("PRAGMA table_info(job_live)")}
+            for col, kind in self.ADDED:
+                if col not in have:
+                    conn.execute(f"ALTER TABLE job_live ADD COLUMN {col} {kind}")
             prev = {r["job_id"]: dict(r) for r in conn.execute("SELECT * FROM job_live")}
             keep = set()
+            names = ", ".join(self.COLS)
+            values = ", ".join(f":{c}" for c in self.COLS)
+            sets = ", ".join(f"{c} = excluded.{c}" for c in self.COLS if c != "job_id")
             for d in data:
                 keep.add(d["job_id"])
-                row = {k: d.get(k) for k in ("job_id", "slurm_id", "user", "cpus", "nodes", "start", "sampled_at",
-                                             "elapsed_s", "measured", "tasks", "steps", "cpu_s", "busy_avg",
-                                             "rss_now_mb", "peak_rss_mb")}
-                row["busy_now"] = self.busy_now(prev.get(d["job_id"]), d)
-                conn.execute(
-                    "INSERT INTO job_live (job_id, slurm_id, user, cpus, nodes, start, sampled_at, elapsed_s, measured, "
-                    "tasks, steps, cpu_s, busy_now, busy_avg, rss_now_mb, peak_rss_mb) VALUES (:job_id, :slurm_id, "
-                    ":user, :cpus, :nodes, :start, :sampled_at, :elapsed_s, :measured, :tasks, :steps, :cpu_s, "
-                    ":busy_now, :busy_avg, :rss_now_mb, :peak_rss_mb) ON CONFLICT(job_id) DO UPDATE SET "
-                    "slurm_id = excluded.slurm_id, user = excluded.user, cpus = excluded.cpus, nodes = excluded.nodes, "
-                    "start = excluded.start, sampled_at = excluded.sampled_at, elapsed_s = excluded.elapsed_s, "
-                    "measured = excluded.measured, tasks = excluded.tasks, steps = excluded.steps, "
-                    "cpu_s = excluded.cpu_s, busy_now = excluded.busy_now, busy_avg = excluded.busy_avg, "
-                    "rss_now_mb = excluded.rss_now_mb, peak_rss_mb = excluded.peak_rss_mb", row)
+                before = prev.get(d["job_id"])
+                row = {k: d.get(k) for k in self.COLS}
+                row["busy_now"] = self.busy_now(before, d)
+                row["held_most_mb"] = self.most(before, d, "rss_now_mb", "held_most_mb")
+                row["peaks_sum_mb"] = self.most(before, d, "peaks_sum_mb", "peaks_sum_mb")
+                row["steps_unseen"] = self.unseen(before, d)
+                conn.execute(f"INSERT INTO job_live ({names}) VALUES ({values}) "
+                             f"ON CONFLICT(job_id) DO UPDATE SET {sets}", row)
             gone = [k for k in prev if k not in keep]
             for i in range(0, len(gone), 500):
                 part = gone[i:i + 500]
