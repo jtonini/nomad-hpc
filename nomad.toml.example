@@ -525,6 +525,20 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # [console.labs.assistants]
 # "NETID$" = ["eve"]
 
+# Each term, a lab's PI says who is still in it, on My lab; the answers are
+# ARC's to-do (`nomad lab check`, docs/lab-check.md). Off until opens is set.
+# mail_domain, send_from and review_to not given here are report.toml's.
+# [console.labs.check]
+# opens = ["09-15", "02-01", "06-15"]   # MM-DD: the day each term's check opens
+# remind_days = [14, 28]                # reminders to PIs who haven't answered
+# closes_days = 42                      # unanswered by then: on ARC's to-do
+# claim_days = 120                      # condo users of these days are asked about
+# link = "https://nomad.example.edu/lab"   # where PIs answer, in the email
+# mail_domain = "example.edu"           # a PI's address: NETID@mail_domain
+# send_from = "Research Computing <rc@example.edu>"
+# review_to = ["rc@example.edu"]        # while set, every email goes here instead
+# db = "/home/nomad/.local/share/nomad/lab_check.db"   # default: beside combined.db
+
 # What My lab's Needs attention lists (docs/facts.md); these are the defaults.
 # [console.labs.attention]
 # days = 7                 # the jobs, and the growth of data, looked at

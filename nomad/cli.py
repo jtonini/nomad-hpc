@@ -8873,6 +8873,7 @@ def lab():
     nomad lab assistant LAB NETID      NETID sees LAB as its PI does while one of its
                                        members: a research assistant (--remove: no longer)
     nomad lab remove LAB HOST
+    nomad lab check ...                each term, a lab's PI says who is still in it
 
     For storage that is everyone's, LAB is "shared": add-nas shared HOST.
 
@@ -11384,6 +11385,9 @@ cli.add_command(gate_group)
 # What the policy watch found on login and compute nodes (1.19).
 from nomad.watch.cli import watch_group  # noqa: E402
 cli.add_command(watch_group)
+# Each term, a lab's PI says who is still in it (1.33).
+from nomad.lab_check_cli import check_group as lab_check_group  # noqa: E402
+lab.add_command(lab_check_group)
 
 # =============================================================================
 # COMMUNITY COMMANDS

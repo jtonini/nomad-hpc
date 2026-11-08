@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.33.0 (November 2026)
+
+### New
+- **Lab membership check** (`nomad lab check`, docs/lab-check.md). Once a
+  term, on dates `[console.labs.check] opens` sets, each lab's PI is asked on
+  My lab who is still in the lab: each member of its group (still here, has
+  left with what to do with their data, or not in the lab), and each person
+  who used its condo without being in its group (in the lab, or a guest).
+  The answers become ARC's to-do a cluster at a time: take someone out of a
+  group, put someone in one, a leaver's data with where it is and how big,
+  labs that didn't answer. A group change is done once nomad's groups
+  reading shows it; the rest is marked done with a note. Emails when the
+  check opens and reminders, to review_to while it is set
+  (`nomad lab check mail --send`, `nomad lab check timer`). The answers are
+  kept in lab_check.db beside combined.db, with a log of every change.
+  nomad changes no group, account or file itself. A condo's owners answer
+  for its group; a Console administrator may answer for a PI (kept as
+  such). Off until `opens` is set. The Console's pages come with its fix 89.
+
 ## v1.32.2 (November 2026)
 
 ### Fixes

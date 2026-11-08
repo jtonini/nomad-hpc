@@ -13,6 +13,7 @@
 | `nomad console role NETID ROLE` | Make one person admin, operator or viewer in nomad.toml's `[console.roles]`, or `none` (`--apply` writes it) ([Configuration](config.md)) |
 | `nomad lab lead LAB NETID` | NETID leads LAB too: a co-PI, a lab manager (`--remove`: no longer; `--apply` writes it) ([Configuration](config.md)) |
 | `nomad lab assistant LAB NETID` | NETID is a research assistant of LAB: sees it as its PI does while one of its members (`--remove`: no longer; `--apply` writes it) |
+| `nomad lab check ...` | Each term, a lab's PI says who is still in it; ARC's to-do from the answers ([Lab membership check](lab-check.md)) |
 | `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as (quickstart.md) |
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |
