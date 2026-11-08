@@ -68,7 +68,8 @@ _GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$?$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 NOTE_MAX = 300
 _KEYS = ("opens", "remind_days", "closes_days", "claim_days", "link", "mail_domain", "send_from", "review_to",
-         "db")
+         "db", "not_sites")
+QUIET_DAYS = 365                         # no job this long, and in the group longer: "no job in a year"
 
 
 class CheckError(ValueError):
@@ -87,6 +88,7 @@ class Settings:
     review_to: tuple = ()
     review_broken: bool = False          # review_to given, but no address in it works: nothing is sent
     db: Path | None = None
+    not_sites: tuple = ()                # sites whose groups the check leaves out (a teaching server)
     problems: tuple = ()
 
     @property
@@ -209,10 +211,17 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
     if db is not None and not isinstance(db, str):
         problems.append("[console.labs.check] db: a path")
         db = None
+    skip = raw.get("not_sites", [])
+    if isinstance(skip, str):
+        skip = [skip]
+    if not isinstance(skip, list) or not all(isinstance(x, str) and x.strip() for x in skip):
+        problems.append("[console.labs.check] not_sites: a list of site names")
+        skip = []
     return Settings(opens=tuple(opens), remind_days=tuple(sorted(set(remind))), closes_days=closes,
                     claim_days=claim, link=link, mail_domain=mail_domain, send_from=send_from,
                     review_to=tuple(good), review_broken=held,
-                    db=Path(db).expanduser() if db else None, problems=tuple(problems))
+                    db=Path(db).expanduser() if db else None,
+                    not_sites=tuple(sorted({x.strip() for x in skip})), problems=tuple(problems))
 
 
 def round_of(s: Settings, today: date) -> Round | None:
@@ -376,6 +385,53 @@ def by_site(conn) -> dict:
     return out
 
 
+def _groups(conn, s: Settings) -> dict:
+    """by_site without the sites the check leaves out (not_sites)."""
+    out = {}
+    for g, sites in (by_site(conn) if conn is not None else {}).items():
+        kept = {site: people for site, people in sites.items() if site not in s.not_sites}
+        if kept:
+            out[g] = kept
+    return out
+
+
+def _held(report, acc, groups: dict, s: Settings, owners: dict | None = None) -> dict:
+    """condo_labs without condos on the sites the check leaves out."""
+    if report is None:
+        return {}
+    out = {}
+    for g, places in condo_labs(report, acc, groups, owners).items():
+        kept = [p for p in places if p[0] not in s.not_sites]
+        if kept:
+            out[g] = kept
+    return out
+
+
+def last_jobs(conn, names, s: Settings | None = None) -> dict:
+    """netid -> the day of their latest job on any cluster (YYYY-MM-DD),
+    the sites the check leaves out apart; not listed: none on record."""
+    names = sorted({n for n in names if n})
+    if conn is None or not names:
+        return {}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if not {"user_name", "submit_time"} <= cols:
+        return {}
+    skip = tuple(s.not_sites) if s is not None else ()
+    where = (f" AND source_site NOT IN ({','.join('?' * len(skip))})" if skip and "source_site" in cols else "")
+    out: dict = {}
+    for i in range(0, len(names), 400):
+        chunk = names[i:i + 400]
+        for user, t in conn.execute(
+                f"SELECT user_name, MAX(submit_time) FROM jobs WHERE user_name IN ({','.join('?' * len(chunk))})"
+                f"{where} GROUP BY user_name", chunk + (list(skip) if where else [])):
+            n = _clean(user)
+            if n and t:
+                day = str(t)[:10]
+                if day > out.get(n, ""):
+                    out[n] = day
+    return out
+
+
 def _inside(entry) -> bool:
     """In the group now at a site: listed now, with an account (or not known)."""
     return bool(entry and entry[0] and entry[1] is not False)
@@ -439,6 +495,7 @@ class Lab:
     members: dict = field(default_factory=dict)      # netid -> {site: in the group now there}
     claims: dict = field(default_factory=dict)       # netid -> {site: [condo partitions]}
     condos: list = field(default_factory=list)       # [(site, partition, condo)]
+    joined: dict = field(default_factory=dict)       # netid -> when first seen in the group (None: not known)
 
     def questions(self) -> list:
         return [("member", n) for n in sorted(self.members)] + [("claim", n) for n in sorted(self.claims)]
@@ -455,10 +512,10 @@ def labs(conn, config: dict | None, report=None, s: Settings | None = None,
     now = now or datetime.now()
     s = s or settings(config, report)
     acc = access_from(config or {}, log=False)
-    groups = by_site(conn) if conn is not None else {}
+    groups = _groups(conn, s)
     members_of = (lambda g: _members(groups.get(g, {})))
     owners: dict = {}
-    held = condo_labs(report, acc, groups, owners) if report is not None else {}
+    held = _held(report, acc, groups, s, owners)
     holders: dict = {}                   # (site, partition) -> the lab groups holding that condo
     for g, places in held.items():
         for site, part, _name in places:
@@ -466,14 +523,16 @@ def labs(conn, config: dict | None, report=None, s: Settings | None = None,
     since = (now - timedelta(days=s.claim_days)).isoformat(timespec="seconds")
 
     def leaders_of(g) -> set:
-        # A lab by nomad's rules: who leads it (group_pattern, leads); a
-        # condo's group otherwise only its leads entries (the pattern would
-        # make a PI of a group named for no one: "chemlab$" -> chemlab).
-        # A condo's owners answer for its group too.
+        # A lab by nomad's rules: who leads it (group_pattern, leads), and
+        # no one else: two labs sharing a condo don't answer for each
+        # other's people. A condo's group with no PI of its own (the
+        # pattern would make one of a group named for no one: "chemlab$"
+        # -> chemlab): its leads entries, and the condo's owners.
         if acc.is_lab(g, members_of):
-            got = set(acc.leaders(g))
-        else:
-            got = {n for n, gs in acc.leads.items() if g in gs}
+            own = set(acc.leaders(g))
+            if own:
+                return own
+        got = {n for n, gs in acc.leads.items() if g in gs}
         return got | owners.get(g, set())
     out = []
     for g in sorted(set(groups) | set(held)):
@@ -489,6 +548,8 @@ def labs(conn, config: dict | None, report=None, s: Settings | None = None,
         everyone = _members(sites)
         for n in sorted(everyone - set(leaders)):
             lab.members[n] = {site: _inside(people.get(n)) for site, people in sites.items() if n in people}
+            seen = [people[n][2] for people in sites.values() if _inside(people.get(n))]
+            lab.joined[n] = None if not seen or any(x is None for x in seen) else min(seen)
         if lab.condos and conn is not None:
             for n, where in _condo_users(conn, lab.condos, since).items():
                 if n in everyone:
@@ -579,6 +640,38 @@ def record(rec, rnd: Round, lab: Lab, netid: str, answer: str, data: str | None 
     return row
 
 
+MANY_MAX = 1000                          # answers kept at once (the bulk answer)
+
+
+def record_many(rec, rnd: Round, lab: Lab, netids, answer: str, data: str | None = None,
+                note: str | None = None, by: str = "", as_role: str | None = None) -> list[dict]:
+    """Keep the same answer for several people at once, all or none: each
+    is checked first (``validate``), and one that doesn't fit keeps none."""
+    names = []
+    for x in netids or []:
+        n, _ = validate(lab, x, answer, data)
+        if n not in names:
+            names.append(n)
+    if not names:
+        raise CheckError("no one to answer for")
+    if len(names) > MANY_MAX:
+        raise CheckError(f"at most {MANY_MAX} at once")
+    note = clean_note(note)
+    who = _clean(by) or (by or "").strip() or getpass.getuser()
+    at = _now()
+    rows = [{"round": rnd.id, "lab": lab.group, "netid": n, "kind": validate(lab, n, answer, data)[1],
+             "answer": answer, "data": data, "note": note, "by": who, "as_role": as_role, "at": at} for n in names]
+    with rec:
+        rec.executemany("INSERT INTO lab_check_answers (round, lab, netid, kind, answer, data, note, by, as_role, at) "
+                        "VALUES (:round, :lab, :netid, :kind, :answer, :data, :note, :by, :as_role, :at) "
+                        "ON CONFLICT(round, lab, netid) DO UPDATE SET kind = excluded.kind, "
+                        "answer = excluded.answer, data = excluded.data, note = excluded.note, by = excluded.by, "
+                        "as_role = excluded.as_role, at = excluded.at", rows)
+        _log(rec, who, {"answers": {"round": rnd.id, "lab": lab.group, "netids": names, "answer": answer,
+                                    "data": data, "note": note, "as_role": as_role, "at": at}})
+    return rows
+
+
 def submit(rec, rnd: Round, lab: Lab, by: str = "", as_role: str | None = None) -> dict:
     """The PI is done with this round: every question answered."""
     have = {r["netid"] for r in answers(rec, rnd.id, lab.group)}
@@ -622,18 +715,28 @@ def view(conn, rec, config: dict | None, report, lab_group: str, now: datetime |
                    (lab.group, rnd.id)):
         before[r["netid"]] = r
     qs = []
+    ran = last_jobs(conn, [n for _, n in lab.questions()], s)
+    quiet_from = (now - timedelta(days=QUIET_DAYS)).date().isoformat()
+
+    def _day(x):
+        return str(x).replace("T", " ")[:10] if x else None
     for kind, n in lab.questions():
         a = mine.get(n)
         b = before.get(n)
-        q = {"netid": n, "kind": kind,
+        q = {"netid": n, "kind": kind, "last_job": ran.get(n),
              "answer": a["answer"] if a else None, "data": a["data"] if a else None,
              "note": a["note"] if a else None, "by": a["by"] if a else None, "at": a["at"] if a else None,
              "last_term": {"round": b["round"], "answer": b["answer"], "data": b["data"]} if b else None}
         if kind == "member":
             q["sites"] = sorted(site for site, inside in lab.members[n].items() if inside)
+            q["since"] = _day(lab.joined.get(n))
+            # No job in a year, and in the group longer (or since before nomad kept when).
+            q["quiet"] = (ran.get(n) or "") < quiet_from and (q["since"] is None or q["since"] < quiet_from)
         else:
             q["used"] = [{"site": site, "partitions": parts} for site, parts in sorted(lab.claims[n].items())]
         qs.append(q)
+    # Most recent job first, so the people a PI knows come first; no job on record last.
+    qs.sort(key=lambda q: (q["kind"] != "member", -int((q["last_job"] or "0000-00-00").replace("-", "")), q["netid"]))
     done = submitted(rec, rnd.id).get(lab.group)
     return {"round": rnd.id, "opened": rnd.opened.isoformat(), "closes": rnd.closes.isoformat(),
             "next_opens": rnd.next_opens.isoformat(), "lab": lab.group, "name": lab.name,
@@ -641,7 +744,7 @@ def view(conn, rec, config: dict | None, report, lab_group: str, now: datetime |
                                                      for c in lab.condos],
             "questions": qs, "answered": sum(1 for q in qs if q["answer"]), "asked": len(qs),
             "submitted": {"by": done["by"], "at": done["at"]} if done else None,
-            "claim_days": s.claim_days}
+            "claim_days": s.claim_days, "quiet_days": QUIET_DAYS, "not_sites": list(s.not_sites)}
 
 
 # --- ARC's to-do -------------------------------------------------------------------------
@@ -674,8 +777,8 @@ def todo(conn, rec, config: dict | None, report, now: datetime | None = None, do
     from nomad.config.access import access_from
     now = now or datetime.now()
     s = settings(config, report, report_problem)
-    groups = by_site(conn) if conn is not None else {}
-    held = condo_labs(report, access_from(config or {}, log=False), groups) if report is not None else {}
+    groups = _groups(conn, s)
+    held = _held(report, access_from(config or {}, log=False), groups, s)
     found = {lab.group: lab for lab in labs(conn, config, report, s, now)} if conn is not None else {}
     marks = _done(rec)
     items, closed = [], []
@@ -955,7 +1058,8 @@ def lab_for(conn, config, report, group: str, now: datetime | None = None) -> La
 
 
 __all__ = ["CheckError", "Settings", "Round", "Lab", "settings", "round_of", "db_path", "open_records",
-           "by_site", "condo_labs", "labs", "answers", "submitted", "validate", "record", "submit", "view",
+           "by_site", "condo_labs", "labs", "answers", "submitted", "validate", "record", "record_many", "submit",
+           "view", "last_jobs",
            "todo", "led_by",
            "mark_done", "mail_plan", "send", "status", "lab_for", "clean_note", "MEMBER_ANSWERS",
            "CLAIM_ANSWERS", "DATA_ANSWERS", "KINDS", "SAID"]

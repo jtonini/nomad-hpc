@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.33.1 (November 2026)
+
+### Fixes
+- **Lab membership check:** a condo two labs share made each lab's PI one
+  of the other's too (yangnolin: knolin answered for myang$, and myang for
+  knolin$). A condo's owners now answer only for a group with no PI of its
+  own (`members = "group:chemlab$"`).
+
+### New
+- `[console.labs.check] not_sites`: sites whose groups the check leaves out,
+  members, condos, jobs and to-do alike. On a teaching server an
+  instructor's group holds their course's students, which a PI is not the
+  one to answer for (UR: `not_sites = ["spiderweb"]`).
+- Each person's last job on any cluster, beside the question, most recent
+  first, on My lab and in `nomad lab check show`. Members with no job in a
+  year who were in the group before that can be marked as having left at
+  once, with what to do with their data (`nomad.lab_check.record_many`; the
+  Console's fix 90); each answer can still be changed after.
+
 ## v1.33.0 (November 2026)
 
 ### New

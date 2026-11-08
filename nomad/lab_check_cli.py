@@ -143,7 +143,8 @@ def check_show(ctx, lab, as_json):
         where = (f"in the group on {', '.join(q['sites'])}" if q["kind"] == "member" else
                  "used " + "; ".join(f"{u['site']} {', '.join(u['partitions'])}" for u in q["used"]))
         last = f" (last term: {L.SAID.get(q['last_term']['answer'], q['last_term']['answer'])})" if q["last_term"] else ""
-        click.echo(f"  {q['netid']:<12} {where}: {said}{last}")
+        job = f"last job {q['last_job']}" if q.get("last_job") else "no job on record"
+        click.echo(f"  {q['netid']:<12} {job:<20} {where}: {said}{last}")
 
 
 @check_group.command("answer")

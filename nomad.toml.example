@@ -538,6 +538,7 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # send_from = "Research Computing <rc@example.edu>"
 # review_to = ["rc@example.edu"]        # while set, every email goes here instead
 # db = "/home/nomad/.local/share/nomad/lab_check.db"   # default: beside combined.db
+# not_sites = ["teaching"]              # sites whose groups it leaves out (a teaching server's course groups)
 
 # What My lab's Needs attention lists (docs/facts.md); these are the defaults.
 # [console.labs.attention]

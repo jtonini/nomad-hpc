@@ -21,14 +21,23 @@ For each lab with a PI and someone to ask about:
 
 Answers are kept as they are given; the PI sends the lab's check in when
 every question is answered. Last term's answer is shown beside each
-question.
+question, and when the person last sent a job to any cluster, most recent
+first. Members with no job in a year, who were in the group before that, can
+be marked as having left at once, with what to do with their data; any
+answer can be changed after.
+
+`not_sites` leaves out a site's groups altogether (members, condos, jobs
+and the to-do): on a teaching server an instructor's group holds their
+course's students, whom the PI is not the one to answer for.
 
 Labs are found as the Console finds them (`[console.labs]`: `group_pattern`,
 `leads`, `not_labs`; a course this term is not a lab), and their members as
 it counts them. A lab's condos come from report.toml (see
 [Condo reports](condo-reports.md)): a condo's `members` groups, else its
-owners' groups. A condo's owners answer for its group too, which matters
-for a group not named for anyone (`members = "group:chemlab$"`). A condo
+owners' groups. A condo's owners answer for its group when it has no PI of its own,
+which matters for a group not named for anyone (`members =
+"group:chemlab$"`); two labs sharing a condo each answer only for their
+own. A condo
 given people by name or by Slurm account has no group to put anyone in, so
 it doesn't ask about its users.
 
@@ -98,6 +107,7 @@ mail_domain = "example.edu"          # a PI's address: NETID@mail_domain
 send_from = "Research Computing <rc@example.edu>"
 review_to = ["rc@example.edu"]       # while set, every email goes here instead
 # db = "/home/nomad/.local/share/nomad/lab_check.db"   # the answers (default: beside combined.db)
+not_sites = ["spiderweb"]            # sites whose groups it leaves out (default: none)
 ```
 
 `mail_domain`, `send_from` and `review_to` not given here are report.toml's
