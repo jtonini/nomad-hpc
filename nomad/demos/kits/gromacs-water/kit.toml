@@ -1,0 +1,39 @@
+name = "gromacs-water"
+program = "GROMACS"
+title = "A box of water on a GPU: 100 ps of its molecules moving"
+about = """
+GROMACS follows about 2,000 water molecules (SPC/E) for 100 ps at 300 K, on a
+GPU. Its log says which GPU it used and, at the end, how fast it ran
+(ns/day: nanoseconds simulated in a day of running). The trajectory is
+water.xtc. The input (water.tpr) was made once when the kit was built at
+your site.
+"""
+licence = "open"
+source = "Made for nomad (AGPL-3.0) from GROMACS's own SPC/E water box (LGPL)"
+input = "water.tpr"
+files = ["water.tpr"]
+cpus = 4
+gpus = 1
+mem = "4G"
+time = "00:20:00"
+minutes = 2
+
+[[look]]
+file = "water.log"
+what = "The GPU it found and used"
+match = "GPU"
+
+[[look]]
+file = "water.log"
+what = "How fast it ran: ns/day"
+match = "^Performance:"
+
+[build]
+module = "gromacs/2026.2-gpu"
+commands = [
+  "gmx solvate -cs spc216.gro -box 4 4 4 -o box.gro -p topol.top",
+  "gmx grompp -f em.mdp -c box.gro -p topol.top -o em.tpr",
+  "gmx mdrun -deffnm em -ntmpi 1 -ntomp 2 -nb cpu",
+  "gmx grompp -f md.mdp -c em.gro -p topol.top -o water.tpr",
+]
+makes = ["water.tpr"]

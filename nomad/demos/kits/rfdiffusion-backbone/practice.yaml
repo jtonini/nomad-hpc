@@ -1,0 +1,12 @@
+# A practice run (nomad demos): one made-up protein backbone of 50 residues,
+# with no target. Its result means nothing for research.
+defaults:
+  - base
+  - _self_
+
+inference:
+  output_prefix: designs/practice
+  num_designs: 1
+
+contigmap:
+  contigs: ["50-50"]

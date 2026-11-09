@@ -1,0 +1,5 @@
+Minimise the box first (made once, when the kit is built)
+ &cntrl
+  imin=1, maxcyc=1000, ncyc=500,
+  ntb=1, cut=9.0,
+ /

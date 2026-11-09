@@ -1,0 +1,32 @@
+name = "molcas-water"
+program = "Molcas"
+title = "Water: Hartree-Fock, then MP2"
+about = """
+Molcas works out the integrals for water (SEWARD), its Hartree-Fock energy
+(SCF), then a correction for electron correlation (MBPT2). Each module writes
+its own part of the log, so it shows how a Molcas job is a chain of programs.
+"""
+licence = "licensed"
+licence_note = "Molcas 8 runs only where your HPC has a Molcas licence."
+source = "Written for nomad (AGPL-3.0): a standard water geometry"
+input = "water.input"
+files = ["water.input"]
+cpus = 1
+mem = "4G"
+time = "00:20:00"
+minutes = 1
+
+[[look]]
+file = "water.log"
+what = "The Hartree-Fock energy"
+match = "Total SCF energy"
+
+[[look]]
+file = "water.log"
+what = "The MP2 energy"
+match = "Total energy"
+
+[[look]]
+file = "water.log"
+what = "How it ended"
+match = "Happy landing"

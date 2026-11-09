@@ -1002,6 +1002,14 @@ share = 0.8
 # threads_per_task = 4
 # omp = true                   # export OMP_NUM_THREADS={threads}
 
+# [submit.demos] — Practice runs (1.34.0; docs/demos.md): small inputs, known
+# to work, that show a newcomer how a job runs. Kits come with nomad; a
+# site's own (and those built there with nomad demos build) are in dirs.
+# [submit.demos]
+# dirs = ["/usr/local/sw/nomad-demos"]   # a site's own kits (folders of kit folders)
+# bundled = true                         # also the kits that come with nomad
+# into = "~/nomad-demos"                 # where nomad demos copy puts a copy: a new folder each time
+
 # [submit.preemption] — Guests on condos, and the owners' first claim (1.28.0;
 # the hub's nomad.toml; docs/submit.md). Slurm's configuration is the switch;
 # nomad partitions --site S --condos says what would change.

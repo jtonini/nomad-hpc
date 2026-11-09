@@ -11388,6 +11388,9 @@ cli.add_command(watch_group)
 # Each term, a lab's PI says who is still in it (1.33).
 from nomad.lab_check_cli import check_group as lab_check_group  # noqa: E402
 lab.add_command(lab_check_group)
+# Practice runs: small inputs that show how a job runs (1.34).
+from nomad.demos.cli import demos_group  # noqa: E402
+cli.add_command(demos_group)
 
 # =============================================================================
 # COMMUNITY COMMANDS

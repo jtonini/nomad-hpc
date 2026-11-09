@@ -1,0 +1,33 @@
+name = "orca-benzene"
+program = "ORCA"
+title = "Benzene: its best shape"
+about = """
+ORCA finds benzene's lowest-energy shape (B3LYP/def2-SVP), running as 4
+processes (%pal nprocs 4 in the input: keep it the same as the job's CPUs).
+The output shows each step's energy, where it converges, and the total run
+time.
+"""
+licence = "academic"
+licence_note = "ORCA is free for academic use; each user agrees to its licence."
+source = "Written for nomad (AGPL-3.0): a standard benzene geometry"
+input = "benzene.inp"
+files = ["benzene.inp"]
+cpus = 4
+mem = "8G"
+time = "00:30:00"
+minutes = 2
+
+[[look]]
+file = "benzene.out"
+what = "Each step's energy"
+match = "FINAL SINGLE POINT ENERGY"
+
+[[look]]
+file = "benzene.out"
+what = "Where the optimisation converges"
+match = "OPTIMIZATION HAS CONVERGED"
+
+[[look]]
+file = "benzene.out"
+what = "How it ended, and how long it took"
+match = "ORCA TERMINATED NORMALLY|TOTAL RUN TIME"

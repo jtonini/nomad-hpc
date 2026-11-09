@@ -1,0 +1,24 @@
+* TIP3P water in CHARMM form, for a practice run (nomad demos): the CHARMM22 TIP3P model.
+*
+
+ATOMS
+MASS     1 HT     1.00800
+MASS     2 OT    15.99940
+
+BONDS
+OT   HT    450.000   0.9572
+HT   HT      0.000   1.5139
+
+ANGLES
+HT   OT   HT     55.000   104.52
+
+DIHEDRALS
+
+IMPROPER
+
+NONBONDED nbxmod  5 atom cdiel shift vatom vdistance vswitch -
+cutnb 14.0 ctofnb 12.0 ctonnb 10.0 eps 1.0 e14fac 1.0 wmin 1.5
+OT     0.000000  -0.152100     1.768200
+HT     0.000000  -0.046000     0.224500
+
+END

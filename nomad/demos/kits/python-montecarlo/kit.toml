@@ -1,0 +1,26 @@
+name = "python-montecarlo"
+program = "Python"
+title = "Pi from random points"
+about = """
+A Python script with NumPy throws 2 billion random points at a square and
+counts how many land inside a circle, printing its guess at pi as it goes.
+It shows how a Python job's printing reaches its output file while it runs,
+and what it writes at the end.
+"""
+licence = "open"
+source = "Written for nomad (AGPL-3.0); Python and NumPy are open source"
+input = "montecarlo.py"
+files = ["montecarlo.py"]
+cpus = 1
+mem = "2G"
+time = "00:20:00"
+minutes = 1
+
+[[look]]
+file = "montecarlo-*.out"
+what = "Its guess at pi growing better, then how long it took"
+match = "points"
+
+[[look]]
+file = "pi.txt"
+what = "The last guess"

@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.34.0 (November 2026)
+
+### New
+- **Practice runs** (`nomad demos`, docs/demos.md): kits of small inputs,
+  known to work, that show a newcomer how a job runs: how it is sent, waits
+  and runs, what it writes, and where its time, memory and cores are read.
+  Their results mean nothing for research, and their size says nothing about
+  what a real calculation needs: every kit and every copy says so.
+- Kits that come with nomad, fitted to UR's job-script templates: Gaussian,
+  Q-Chem and ORCA (benzene), Molcas and CP2K (water), NAMD on CPUs and on a
+  GPU (a box of water, made by scripts/demos/make_namd_water.py and checked
+  with OpenMM), R (a bootstrap), Python (pi from random points), RFdiffusion
+  (one backbone); GROMACS (a box of water) and AMBER (a peptide in water),
+  whose inputs a site makes once with `nomad demos build`.
+- Each kit is labelled: open source, free for academic use, or needs a
+  licence (it runs only where the HPC has one). A kit's input is the
+  template's, so a practice run runs the way real work will.
+- `nomad demos list | show | copy | look | build | check | scripts`; `[submit.demos]` dirs,
+  bundled, into. A copy is made as the person, in a new folder, and never
+  writes over a file.
+
 ## v1.33.1 (November 2026)
 
 ### Fixes

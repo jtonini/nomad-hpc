@@ -1,0 +1,7 @@
+# A small peptide (Ace-Ala-Nme) in a box of water, for a practice run (nomad demos)
+source leaprc.protein.ff14SB
+source leaprc.water.tip3p
+m = sequence { ACE ALA NME }
+solvatebox m TIP3PBOX 10.0
+saveamberparm m peptide.prmtop start.rst7
+quit

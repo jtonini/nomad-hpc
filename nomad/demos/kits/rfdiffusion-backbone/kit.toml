@@ -1,0 +1,27 @@
+name = "rfdiffusion-backbone"
+program = "RFdiffusion"
+title = "One made-up protein backbone"
+about = """
+RFdiffusion designs one protein backbone of 50 residues from nothing, on a
+GPU. It shows how a GPU job is asked for and runs, and what RFdiffusion
+writes: a PDB file of the backbone (open it in a molecule viewer) and a .trb
+file of its settings.
+"""
+licence = "open"
+source = "Written for nomad (AGPL-3.0); RFdiffusion is BSD-licensed"
+input = "practice.yaml"
+files = ["practice.yaml"]
+cpus = 4
+mem = "16G"
+gpus = 1
+time = "00:30:00"
+minutes = 3
+
+[[look]]
+file = "designs/practice_0.pdb"
+what = "The backbone it designed (a PDB file)"
+
+[[look]]
+file = "practice-*.out"
+what = "How long the design took"
+match = "Finished design"

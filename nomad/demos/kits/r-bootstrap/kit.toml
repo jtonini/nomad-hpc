@@ -1,0 +1,27 @@
+name = "r-bootstrap"
+program = "R"
+title = "A straight line through made-up data, and how sure its slope is"
+about = """
+An R script makes up 2,000 points around a straight line, fits the line, then
+refits it 20,000 times on resampled data (a bootstrap) to see how much the
+slope moves. Run it once on one core and once with the job's "8 cores" choice:
+the output says how long the fits took each way, which is the point of
+asking for more cores.
+"""
+licence = "open"
+source = "Written for nomad (AGPL-3.0); R is GPL"
+input = "bootstrap.R"
+files = ["bootstrap.R"]
+cpus = 1
+mem = "2G"
+time = "00:20:00"
+minutes = 2
+
+[[look]]
+file = "bootstrap-*.out"
+what = "What the script printed: the slope, and how long the fits took on how many cores"
+match = "slope|bootstrap fits"
+
+[[look]]
+file = "bootstrap_slopes.pdf"
+what = "A histogram of the 20,000 slopes"

@@ -1,0 +1,9 @@
+; A box of water for a practice run (nomad demos): SPC/E water, OPLS-AA.
+; Its results mean nothing for research.
+#include "oplsaa.ff/forcefield.itp"
+#include "oplsaa.ff/spce.itp"
+
+[ system ]
+A box of water (a practice run)
+
+[ molecules ]

@@ -1,0 +1,8 @@
+; Minimise the box first (made once, when the kit is built)
+integrator    = steep
+nsteps        = 500
+emtol         = 1000.0
+cutoff-scheme = Verlet
+coulombtype   = PME
+rcoulomb      = 1.0
+rvdw          = 1.0

@@ -1,0 +1,43 @@
+# A box of 1,000 water molecules: a practice run (nomad demos).
+# Its results mean nothing for research. Minimised, then 100 ps at 300 K.
+structure          water.psf
+coordinates        water.pdb
+paraTypeCharmm     on
+parameters         par_water.prm
+temperature        300
+
+exclude            scaled1-4
+1-4scaling         1.0
+cutoff             12.0
+switching          on
+switchdist         10.0
+pairlistdist       14.0
+
+timestep           2.0
+rigidBonds         all
+nonbondedFreq      1
+fullElectFrequency 2
+stepspercycle      10
+
+cellBasisVector1   31.040 0.0 0.0
+cellBasisVector2   0.0 31.040 0.0
+cellBasisVector3   0.0 0.0 31.040
+cellOrigin         15.520 15.520 15.520
+wrapAll            on
+PME                yes
+PMEGridSpacing     1.0
+
+langevin           on
+langevinDamping    1
+langevinTemp       300
+langevinHydrogen   off
+
+outputName         water-md
+dcdfreq            5000
+xstFreq            5000
+outputEnergies     1000
+outputTiming       5000
+
+minimize           500
+reinitvels         300
+run                50000

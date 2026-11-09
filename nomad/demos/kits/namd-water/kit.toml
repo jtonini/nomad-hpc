@@ -1,0 +1,33 @@
+name = "namd-water"
+program = "NAMD"
+title = "A box of water: 100 ps of its molecules moving"
+about = """
+NAMD minimises a box of 1,000 water molecules (TIP3P), then follows them for
+100 ps at 300 K, on 8 cores. The log shows the energies as it goes, and how fast it
+ran (days of computing a nanosecond takes, and seconds a step); the
+trajectory (water-md.dcd) opens in VMD with water.psf.
+"""
+licence = "academic"
+licence_note = "NAMD is free for non-commercial use under its own licence."
+source = "Made for nomad (AGPL-3.0) by scripts/demos/make_namd_water.py; TIP3P parameters from CHARMM22"
+input = "water.namd"
+files = ["water.namd", "water.psf", "water.pdb", "par_water.prm"]
+cpus = 8
+mem = "4G"
+time = "00:30:00"
+minutes = 3
+
+[[look]]
+file = "water.log"
+what = "The energies every 1,000 steps (TEMP is the temperature)"
+match = "^ENERGY:"
+
+[[look]]
+file = "water.log"
+what = "How fast it ran"
+match = "Benchmark time|TIMING:"
+
+[[look]]
+file = "water.log"
+what = "How it ended"
+match = "End of program|WallClock"

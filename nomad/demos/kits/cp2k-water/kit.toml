@@ -1,0 +1,32 @@
+name = "cp2k-water"
+program = "CP2K"
+title = "One water molecule: its best shape"
+about = """
+CP2K optimises the shape of a water molecule in a small periodic box (PBE,
+DZVP-MOLOPT basis), running as 4 MPI processes. The output shows each step's
+energy and the timing table CP2K prints at the end, which says where the time
+went. The basis and potential files come with the cluster's CP2K.
+"""
+licence = "open"
+source = "Written for nomad (AGPL-3.0); CP2K is GPL"
+input = "water.inp"
+files = ["water.inp"]
+cpus = 4
+mem = "4G"
+time = "00:20:00"
+minutes = 1
+
+[[look]]
+file = "water.out"
+what = "Each step's energy"
+match = "ENERGY\\| Total FORCE_EVAL"
+
+[[look]]
+file = "water.out"
+what = "Where the optimisation ends"
+match = "GEOMETRY OPTIMIZATION COMPLETED"
+
+[[look]]
+file = "water.out"
+what = "When it ended (the timing table is just above)"
+match = "PROGRAM ENDED AT"

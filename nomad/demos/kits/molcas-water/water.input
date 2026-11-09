@@ -1,0 +1,13 @@
+* Water: a practice run (nomad demos). Its results mean nothing for research.
+&GATEWAY
+  Coord
+  3
+  water, in angstrom
+  O   0.000000   0.000000   0.117790
+  H   0.000000   0.755453  -0.471161
+  H   0.000000  -0.755453  -0.471161
+  Basis = ANO-S-VDZP
+  Group = NoSym
+&SEWARD
+&SCF
+&MBPT2

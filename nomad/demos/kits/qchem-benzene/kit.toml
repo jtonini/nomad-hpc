@@ -1,0 +1,33 @@
+name = "qchem-benzene"
+program = "Q-Chem"
+title = "Benzene: its best shape"
+about = """
+Q-Chem finds benzene's lowest-energy shape (B3LYP/6-31G*). The output shows
+each optimisation step's energy, the moment it converges, and how long the
+whole job took. The template tells Q-Chem how many threads to use (-nt), from
+the job's CPUs.
+"""
+licence = "licensed"
+licence_note = "Q-Chem runs only where your HPC has a Q-Chem licence."
+source = "Written for nomad (AGPL-3.0): a standard benzene geometry"
+input = "benzene.in"
+files = ["benzene.in"]
+cpus = 4
+mem = "8G"
+time = "00:30:00"
+minutes = 2
+
+[[look]]
+file = "benzene.out"
+what = "Each step's energy"
+match = "Total energy in the final basis set"
+
+[[look]]
+file = "benzene.out"
+what = "Where the optimisation converges"
+match = "OPTIMIZATION CONVERGED"
+
+[[look]]
+file = "benzene.out"
+what = "How long it took"
+match = "Total job time"

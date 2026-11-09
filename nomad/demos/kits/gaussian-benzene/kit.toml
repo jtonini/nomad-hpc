@@ -1,0 +1,35 @@
+name = "gaussian-benzene"
+program = "Gaussian"
+title = "Benzene: its best shape, then how it vibrates"
+about = """
+Gaussian finds benzene's lowest-energy shape (B3LYP/6-31G(d)), then works out
+how the molecule vibrates there. It shows a Gaussian job from start to end:
+the steps of the optimisation in the log, the frequencies, and the CPU time
+against the time it took, which is about the cores it used. The input asks
+for 4 cores (%NProcShared) and 6 GB (%Mem): keep those the same as the job's
+CPUs and a little under its memory when you change one.
+"""
+licence = "licensed"
+licence_note = "Gaussian runs only where your HPC has a Gaussian licence."
+source = "Written for nomad (AGPL-3.0): a standard benzene geometry"
+input = "benzene.gjf"
+files = ["benzene.gjf"]
+cpus = 4
+mem = "8G"
+time = "00:30:00"
+minutes = 3
+
+[[look]]
+file = "benzene.log"
+what = "Each step's energy, the last one lowest"
+match = "SCF Done"
+
+[[look]]
+file = "benzene.log"
+what = "The vibrations, in cm-1 (none negative: a true minimum)"
+match = "Frequencies --"
+
+[[look]]
+file = "benzene.log"
+what = "CPU time over elapsed time: about the cores it kept busy"
+match = "Job cpu time|Elapsed time"
