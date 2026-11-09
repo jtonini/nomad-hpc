@@ -1,0 +1,40 @@
+name = "columbus-water"
+program = "Columbus"
+title = "Water: Hartree-Fock, then a CI, in a weak electric field"
+about = """
+COLUMBUS's own example for water (EXAMPLES/FFIELD/h2o-srci): the integrals,
+the Hartree-Fock (SCF) wave function, then a single-reference CI (all single
+and double excitations), with a weak electric field added, and the dipole
+moment of each. The folder holds what colinp writes for a real calculation:
+control.run, which says what runs and in what order, the geometry (geom), the
+basis (daltaoin) and each program's input. runc runs it in the folder and
+writes its listings in LISTINGS/. It takes seconds.
+"""
+licence = "open"
+source = "COLUMBUS 7.2.2's own example (EXAMPLES/FFIELD/h2o-srci), LGPL-3"
+input = "."
+files = ["argosin", "cidenin", "cidrtin", "cigrdin", "cikey", "cipcin", "cisrtin", "ciudgin", "control.run", "daltaoin", "exptvlyn", "fieldin", "fort.13", "geom", "hermitin", "hermitin.new", "iargos.key", "infofl", "infofl.argos", "infofl.hermit", "intprogram", "propin", "scfin", "trancidenin", "tranin"]
+cpus = 1
+mem = "2G"
+time = "00:10:00"
+minutes = 1
+
+[[look]]
+file = "LISTINGS/scfls.sp"
+what = "The Hartree-Fock (SCF) energy, in hartree"
+match = "total energy ="
+
+[[look]]
+file = "LISTINGS/ciudgsm.sp"
+what = "The CI energy at each iteration, then the final one (eci): lower than the SCF energy by the correlation it adds"
+match = "^ mr-sdci #|^ eci +="
+
+[[look]]
+file = "LISTINGS/propls.ci.drt1.state1.sp"
+what = "The CI wave function's dipole moment, in debye (the SCF one is in LISTINGS/propls.scf.sp)"
+match = "total Dipole moment"
+
+[[look]]
+file = "runls"
+what = "How long each program took: Columbus's own timings, at the end"
+match = "walltime"

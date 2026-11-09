@@ -23,6 +23,7 @@ nomad comes with these, each fitted to UR's job-script templates
 | orca-benzene | ORCA | free for academic use | benzene: its best shape (B3LYP/def2-SVP) |
 | molcas-water | Molcas | needs a licence | water: Hartree-Fock, then MP2 |
 | cp2k-water | CP2K | open source | one water molecule: its best shape (PBE) |
+| columbus-water | Columbus | open source | water: Hartree-Fock, then a single-reference CI, in a weak electric field (COLUMBUS's own example; the folder is the input) |
 | namd-water, namd-gpu-water | NAMD, NAMD GPU | free for academic use | 1,000 water molecules for 100 ps |
 | gromacs-water | GROMACS | open source | about 2,000 water molecules for 2 ns, on a GPU (built once at a site) |
 | amber-peptide | AMBER | free for academic use | a small peptide in water for 100 ps, on a GPU (built once at a site) |

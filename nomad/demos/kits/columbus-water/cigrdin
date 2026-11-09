@@ -1,0 +1,5 @@
+ &input
+ nmiter=30,print=0,fresdd=1,
+ fresaa=1,fresvv=1,
+ wndtol=1e-5,wnatol=1e-5,wnvtol=1e-5,
+/&end

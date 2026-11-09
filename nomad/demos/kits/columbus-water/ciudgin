@@ -1,0 +1,9 @@
+ &input
+  NTYPE = 0,
+  RTOLCI=0.00010000,
+  VOUT  = 1,
+  NBKITR= 1,
+  NITER= 20,
+ IDEN=   1,
+  IVMODE=   3,
+/&end

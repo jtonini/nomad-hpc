@@ -1,0 +1,47 @@
+  1 /Input the spin multiplicity
+ 10 /input the total number of electrons
+  4/input the number of irreps (1-8)
+Y /enter symmetry labels:
+ a1
+ b1
+ b2
+ a2
+   11    7    4    2
+  1 /input the molecular spatial symmetry (irrep 1:nsym)
+  /input the frozen core orbitals (sym(i),rmo(i),i=1,nfct)
+  /Input the frozen virtual orbitals (sym(i),rmo(i),i=1,nfvt)
+  1  1  1  2  2  1  1  3  3  1
+  /Input the internal orbitals (sym(i),rmo(i),i=1,niot)
+  5 /Input the number of ref-csf doubly-occupied orbitals
+  2
+/
+/
+/
+/
+ 1111 1111 1111 1111 1111
+-1/
+ ^
+  2
+/
+/
+/
+/
+ 1111 1111 1111 1111 1111
+-1/
+N /impose generalized interacting space restrictions?
+-1/
+/
+/list of allowed reference symmetries
+n /keep all of the z-walks as references?
+y /generate walks while applying reference drt restrictions?
+n /impose additional orbital-group occupation restrictions?
+n /apply primary reference occupation restrictions?
+n /manually select individual walks?
+-1/
+0 /input reference walk number (0 to end)
+/
+n
+0 /input mrsdci walk number (0 to end)
+ h2o pvdz                                                                       
+ 
+y   /write the drt file?

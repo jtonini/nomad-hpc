@@ -1002,6 +1002,10 @@ share = 0.8
 # threads_per_task = 4
 # omp = true                   # export OMP_NUM_THREADS={threads}
 
+# [edu] — Job scores (docs/proficiency.md).
+# [edu]
+# memory_floor_gb = 2          # 1.35.2: memory requests up to this aren't judged (0: off)
+
 # [submit.demos] — Practice runs (1.34.0; docs/demos.md): small inputs, known
 # to work, that show a newcomer how a job runs. Kits come with nomad; a
 # site's own (and those built there with nomad demos build) are in dirs.

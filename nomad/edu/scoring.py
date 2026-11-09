@@ -53,6 +53,31 @@ LEVELS = [
 # limit (1.25.3): starting up, staging and Slurm's own steps are most of it,
 # and a limit can't usefully be cut much below a few minutes.
 SHORT_JOB_SECONDS = 300
+# A memory request this small (MB) isn't judged (1.35.2): asking 1 or 2 GB is
+# the least anyone usually asks, and what it leaves unused is too little to
+# matter on a node. [edu] memory_floor_gb in nomad.toml changes it.
+MEMORY_FLOOR_MB = 2048
+_FLOOR: dict = {}
+
+
+def _gb(x: float) -> str:
+    """GB as said: 3.9, not 4 (under 10, one decimal)."""
+    return f"{x:.1f}" if x < 10 else f"{x:.0f}"
+
+
+def memory_floor_mb() -> int:
+    """[edu] memory_floor_gb (read once), else MEMORY_FLOOR_MB; 0 turns it off."""
+    if "mb" not in _FLOOR:
+        mb = MEMORY_FLOOR_MB
+        try:
+            from nomad.config import load_config
+            v = (load_config() or {}).get("edu", {}).get("memory_floor_gb")
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1024:
+                mb = int(v * 1024)
+        except Exception:                                  # noqa: BLE001 -- no settings: the default
+            pass
+        _FLOOR["mb"] = mb
+    return _FLOOR["mb"]
 
 
 def _short(job: dict) -> bool:
@@ -481,6 +506,13 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
         return _not_judged("Memory Efficiency",
                            f"Asked {format_memory(req_mem_mb)} and peaked at {peak_mem_gb * 1024:,.0f} MB: "
                            f"{format_memory(req_mem_mb)} is already as little as nomad would suggest.")
+    # A small request (1.35.2): up to the floor (2 GB), asking less would leave too little
+    # free on a node to matter, and few ask less.
+    floor = memory_floor_mb()
+    if utilization < 50 and req_mem_mb <= floor:
+        return _not_judged("Memory Efficiency",
+                           f"Asked {format_memory(req_mem_mb)} and peaked at {peak_mem_gb * 1024:,.0f} MB: "
+                           f"a request of {format_memory(floor)} or less is too small to judge.")
 
     # Score formula
     if 50 <= utilization <= 90:
@@ -511,7 +543,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
     elif score >= 40:
         suggested_mb = round_memory_up(peak_mem_gb * 1024 * 2)  # 2x buffer
         detail = (f"Moderate memory over-request. Used {peak_mem_gb:.1f}GB "
-                  f"of {req_mem_gb:.0f}GB requested. {waste_gb:.0f}GB unused.")
+                  f"of {req_mem_gb:.0f}GB requested. {_gb(waste_gb)}GB unused.")
         suggestion = Suggestion(
             directive="mem",
             suggested_value=suggested_mb,
@@ -539,7 +571,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
         suggested_mb = round_memory_up(peak_mem_gb * 1024 * 2)
         detail = (f"Requested {req_mem_gb:.0f}GB but peaked at "
                   f"{peak_mem_gb:.1f}GB ({utilization:.0f}% utilization). "
-                  f"{waste_gb:.0f}GB was unused.")
+                  f"{_gb(waste_gb)}GB was unused.")
         suggestion = Suggestion(
             directive="mem",
             suggested_value=suggested_mb,

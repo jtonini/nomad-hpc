@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.35.2 (November 2026)
+
+- **A memory request of 2 GB or less isn't judged** ("not judged", with
+  why; no advice): asking 1 or 2 GB is the least anyone usually asks, and
+  what it leaves unused is too little to matter on a node. A 2 GB job that
+  peaked at 92 MB scored 11 ("Needs Work") before. `[edu] memory_floor_gb`
+  sets the floor (0 turns it off).
+- Unused memory is said to a tenth of a GB under 10 GB ("3.9GB was unused",
+  not "4GB").
+- **A Columbus practice run** (`columbus-water`): COLUMBUS 7.2.2's own water
+  example (EXAMPLES/FFIELD/h2o-srci, LGPL-3): Hartree-Fock, then a
+  single-reference CI with a weak electric field, and their dipole moments,
+  in seconds on one core. The folder is the input, as the Columbus template
+  takes it; what to look at is in LISTINGS/ and runls.
+
 ## v1.35.1 (November 2026)
 
 A practice run is known for what it is (with Console fix 92):

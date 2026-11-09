@@ -104,6 +104,17 @@ The asymmetric formula penalizes under-utilization more harshly than slight over
 - Copy-pasting scripts without adjusting memory
 - Not profiling memory requirements
 
+**Small requests aren't judged** (1.35.2). A request of 2 GB or less, or one
+already as small as nomad would suggest (the peak doubled, rounded up to a size
+Slurm takes, at least 1 GB), is "not judged": asking 1 or 2 GB is the least
+anyone usually asks, and what it leaves unused is too little to matter on a
+node. The floor is a setting:
+
+```toml
+[edu]
+memory_floor_gb = 2      # requests up to this aren't judged; 0 turns it off
+```
+
 **Used more than requested**: where Slurm doesn't enforce memory limits a job
 can peak above its request. It scores low and the advice is to request what it
 uses; it is not described as waste.

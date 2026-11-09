@@ -1,0 +1,7 @@
+niter = 1 
+hermit
+scf
+ciudg
+ffield
+scfprop
+ciprop
