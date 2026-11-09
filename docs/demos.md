@@ -104,6 +104,20 @@ A practice run sizes nothing but itself: Submit's "jobs like this one" leave
 out jobs that ran in a practice copy (a folder holding
 `README-practice.txt`), unless it is the same folder or script.
 
+## Known as a practice run (1.35.1)
+
+A practice run's job is named `practice-KIT`, so `squeue`, `sacct` and the
+Console's job lists say what it is. The hub knows one by its folder, named
+after its kit (`r-bootstrap`, `r-bootstrap-2`, `r-bootstrap-20261109-131500`:
+the Console's copies and `nomad demos copy`'s), and its job's name:
+`practice-KIT`, or, before 1.35.1, the kit's own (`bootstrap`, `water`). A
+copy made elsewhere with `--to` runs as a practice run all the same, but the
+hub's lists won't mark it. Scores and advice leave practice runs out. On the Console (fix 92), My jobs marks them, and a practice
+run's page says what to look at in its folder now, with the kit's recorded
+run beside it (the gate reads the folder, as the person). Their scores are
+shown, but not their advice: a practice run's size says nothing about real
+work.
+
 ## The recorded runs
 
 A kit can keep one real run of itself, to hold a new one against: its

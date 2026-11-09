@@ -225,9 +225,12 @@ def _load_user_jobs(
         """, (username, cutoff)).fetchall()
         ceilings = memory_ceilings(conn)
         conn.close()
+        from nomad.demos.kits import practice_row
         out = []
         for r in rows:
             row = dict(r)
+            if practice_row(row):                  # a practice run (1.35.1) says nothing of their work
+                continue
             row["_node_memory_mb"] = memory_ceiling(
                 ceilings, row.get("source_site") or row.get("cluster"))
             out.append(row)

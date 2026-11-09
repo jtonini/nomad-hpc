@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.35.1 (November 2026)
+
+A practice run is known for what it is (with Console fix 92):
+
+- Its job is named `practice-KIT` (`nomad.demos.kits.mark`): squeue, sacct,
+  the hub's records and the Console say what it is. Each copy's
+  `README-practice.txt` names its kit (`Kit: NAME`, and `Kit folder:` for a
+  site's own).
+- The hub tells one from its records (`practice_names`, `practice_label`,
+  `practice_row`): a folder named after a kit (`KIT`, `KIT-2`,
+  `KIT-YYYYMMDD-HHMMSS`; the hub keeps a job's folder's last two parts only)
+  and its job named `practice-KIT` or, before 1.35.1, as the kit's script
+  names it. A practice script copied into real work is not one.
+- Scores and advice leave practice runs out (`nomad.edu.population`,
+  `progress`): they say nothing of anyone's work.
+- The gate's answer for one of the person's jobs (`job`) carries `practice`:
+  for a job that ran in a practice copy, its kit (a site's own from the
+  folder the copy names, once checked as `kits` checks it), what to look at
+  in its folder now -- that job's own files first, else the newest -- and
+  the kit's recorded run (`practice_of`); `null` for any other job.
+- `look()` reads the last 4 MB of a file and 2,000 entries of a folder (a
+  named file directly), shows 6 files a pattern and 400 characters of a
+  line, and opens only plain files, never through a link.
+
 ## v1.35.0 (November 2026)
 
 ### New

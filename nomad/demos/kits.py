@@ -503,7 +503,11 @@ def _readme(kit: Kit) -> str:
              f"Program: {kit.program}. {LICENCES[kit.licence]}." + (f" {kit.licence_note}" if kit.licence_note else ""),
              f"Size: {kit.cpus} CPU(s), {kit.mem}" + (f", {kit.gpus} GPU(s)" if kit.gpus else "")
              + f", at most {kit.time}; it runs for about {kit.minutes} minute(s).",
-             f"Input: {'this folder' if kit.input == '.' else kit.input}", ""]
+             f"Input: {'this folder' if kit.input == '.' else kit.input}",
+             f"Kit: {kit.name}"]
+    if not kit.bundled:
+        lines.append(f"Kit folder: {kit.path.parent}")            # a site's own: where the gate finds it again
+    lines += [f"(nomad demos show {kit.name}; once it has run, nomad demos look {kit.name} THIS-FOLDER)", ""]
     if kit.recorded:
         lines += [recorded_text(kit), "(Yours may take longer or shorter: it depends on the node, and the queue.)", ""]
     if kit.look:
@@ -672,8 +676,93 @@ def mark(text: str, kit) -> str:
         raise KitError("a practice kit's name is lower-case letters, digits and -")
     note = (f"# A practice run (nomad's {name} kit): its results mean nothing for research,\n"
             "# and its size says nothing about what real work needs.\n")
+    # Its job is named practice-KIT (1.35.1): squeue, sacct, the hub's records and the Console say what it is.
+    text, n = _JOB_NAME.subn(lambda m: m.group(1) + f"practice-{name}", text, count=1)
     first, nl, rest = text.partition("\n")
-    return first + nl + note + rest if first.startswith("#!") and nl else note + text
+    if first.startswith("#!") and nl:
+        return first + nl + note + ("" if n else f"#SBATCH --job-name=practice-{name}\n") + rest
+    return note + ("" if n else f"#SBATCH --job-name=practice-{name}\n") + text
+
+
+_JOB_NAME = re.compile(r"(?m)^(#SBATCH[ \t]+(?:--job-name[= ]|-J[ \t]*))[^\s#]+")
+PRACTICE_JOB = "practice-"          # the job name's start: practice-KIT
+_COPY_FOLDER = re.compile(r"^(?P<kit>[a-z0-9][a-z0-9-]{1,47}?)(?:-[0-9]{1,3}|-[0-9]{8}-[0-9]{6})?$")
+
+
+def practice_names(config: dict | None = None) -> dict:
+    """{kit name: the job name its script gives it (the input's stem; None for a
+    folder kit)}, for practice_label: nomad's kits, and a site's in dirs."""
+    from nomad.submit.templates import job_name
+    got, _ = kits(config)
+    return {k.name: (None if k.input == "." else job_name(Path(k.input).stem)) for k in got}
+
+
+def practice_label(job_name: str | None, work_tail: str | None, names: dict) -> str | None:
+    """The kit a job of the hub's records ran, or None. A practice copy is a
+    folder named after its kit (KIT, KIT-2, KIT-YYYYMMDD-HHMMSS: the Console's
+    and nomad demos copy's; the hub keeps a job's folder's last two parts
+    only), and its job is named practice-KIT (1.35.1's scripts; a site's own
+    kit too) or, before 1.35.1, as KIT's script names it. A script copied
+    into real work, or a kit-named job elsewhere, is not one."""
+    name = str(job_name or "")
+    last = str(work_tail or "").rstrip("/").rpartition("/")[2]
+    m = _COPY_FOLDER.match(last)
+    if not m:
+        return None
+    for kit in dict.fromkeys((m.group("kit"), last)):
+        if not _NAME.match(kit):
+            continue
+        if name == PRACTICE_JOB + kit:
+            return kit
+        if names.get(kit) and names[kit] == name:
+            return kit
+    return None
+
+
+_KNOWN: dict = {}
+
+
+def practice_row(row: dict) -> str | None:
+    """practice_label for a row of the hub's jobs table (its job_name and
+    work_tail), with nomad's own kits: what scores and advice leave out."""
+    if "names" not in _KNOWN:
+        try:
+            _KNOWN["names"] = practice_names()
+        except Exception:                                  # noqa: BLE001 -- none known: nothing left out
+            _KNOWN["names"] = {}
+    return practice_label(row.get("job_name"), row.get("work_tail"), _KNOWN["names"])
+
+
+def kit_source(folder: str | Path) -> tuple:
+    """(kit name, the site folder it came from or None, title) from a
+    practice copy's README, read without following a link; (None, None, None)
+    when there is none."""
+    try:
+        fd = os.open(os.path.join(str(folder), README), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None, None, None
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            return None, None, None
+        text = f.read(64 * 1024).decode("utf-8", errors="replace")
+    m = re.search(r"(?m)^Kit: ([a-z0-9][a-z0-9-]{1,47})[ \t]*$", text)
+    d = re.search(r"(?m)^Kit folder: (/[^\n]{1,500})$", text)
+    src = d.group(1).strip() if d and ".." not in d.group(1).split("/") else None
+    return (m.group(1) if m else None), src, text.split("\n", 1)[0].strip()
+
+
+def kit_of(folder: str | Path, config: dict | None = None) -> Kit | None:
+    """The kit a practice copy in ``folder`` was made from, by its README
+    (its Kit: line, 1.35.1; before, its title), among the kits ``config``
+    offers, or None."""
+    name, _src, title = kit_source(folder)
+    if name is None and title is None:
+        return None
+    got, _ = kits(config)
+    if name:
+        return next((k for k in got if k.name == name), None)
+    same = [k for k in got if k.title == title]
+    return same[0] if len(same) == 1 else None
 
 
 def recorded_look(kit: Kit, last: int = 6) -> list:
@@ -684,12 +773,22 @@ def recorded_look(kit: Kit, last: int = 6) -> list:
     return look(kit, kit.recorded_from / "recorded", last=last)
 
 
-def look(kit: Kit, folder: str | Path, last: int = 6) -> list:
+LOOK_BYTES = 4 * 1024 * 1024       # of a file's end, looked through (the gate does this on a job's page)
+LOOK_ENTRIES = 2000                 # entries of a folder looked through for a pattern
+LOOK_FOUND = 6                      # files shown for one pattern
+LOOK_LINE = 400                     # characters of a line shown
+
+
+def look(kit: Kit, folder: str | Path, last: int = 6, job: str | None = None) -> list:
     """What to look at once a copy of the kit has run in ``folder``: for each
     [[look]] entry, the files it names there and (with match) their last
-    ``last`` matching lines. [{file, what, found: [{path, lines|size}]}]."""
+    ``last`` matching lines, in the last LOOK_BYTES of each file. ``job``: a
+    job's number -- its own files (a name holding it) are shown, else the
+    newest first. [{file, what, found: [{path, lines|size}]}]."""
     import fnmatch
+    import itertools
     base = Path(os.path.expanduser(str(folder)))
+    own = re.compile(rf"(?<![0-9]){re.escape(str(job))}(?![0-9])") if job else None
     out = []
     for x in kit.look:
         pattern = x["file"]
@@ -697,21 +796,76 @@ def look(kit: Kit, folder: str | Path, last: int = 6) -> list:
         where = base / head if head else base
         found = []
         if where.is_dir() and not where.is_symlink():
-            for p in sorted(where.iterdir()):
-                if not fnmatch.fnmatch(p.name, name) or p.is_symlink() or not p.is_file():
+            if any(c in name for c in "*?["):
+                try:
+                    with os.scandir(where) as it:
+                        names = [e.name for e in itertools.islice(it, LOOK_ENTRIES)]
+                except OSError:
+                    names = []
+                names = [n for n in names if fnmatch.fnmatch(n, name)]
+            else:
+                names = [name]                             # one file: looked at directly, however full the folder
+            files = []
+            for n in names:
+                p = where / n
+                try:
+                    st = os.lstat(p)
+                except OSError:
                     continue
-                item = {"path": str(p), "size": p.stat().st_size}
+                if stat.S_ISREG(st.st_mode):
+                    files.append((p, st))
+            if own and any(own.search(p.name) for p, _ in files):
+                files = [(p, st) for p, st in files if own.search(p.name)]
+            files.sort(key=lambda f: (-f[1].st_mtime, f[0].name))
+            for p, st in files[:LOOK_FOUND]:
+                item = {"path": str(p), "size": st.st_size}
                 if x.get("match"):
-                    rx = re.compile(x["match"])
-                    hits = []
-                    with open(p, encoding="utf-8", errors="replace") as f:
-                        for line in f:
-                            if rx.search(line):
-                                hits.append(line.rstrip("\n"))
-                                hits = hits[-last:]
-                    item["lines"] = hits
+                    item["lines"] = _matching(p, re.compile(x["match"]), last)
                 found.append(item)
         out.append({"file": pattern, "what": x["what"], "found": found})
+    return out
+
+
+def _matching(p: Path, rx, last: int) -> list:
+    """The last ``last`` lines of file p matching rx, in its last LOOK_BYTES
+    (opened without following a link, and only a plain file: never a FIFO)."""
+    try:
+        fd = os.open(str(p), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return []
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            return []
+        f.seek(max(0, st.st_size - LOOK_BYTES))
+        data = f.read(LOOK_BYTES).decode("utf-8", errors="replace")
+    hits = []
+    for line in data.splitlines():
+        if rx.search(line):
+            hits.append(line[:LOOK_LINE])
+            hits = hits[-last:]
+    return hits
+
+
+def practice_of(folder: str | None, config: dict | None = None, job: str | None = None) -> dict | None:
+    """For a job that ran in ``folder``: None unless it is a practice copy;
+    else its kit, what to look at there now (``job``'s own files first), and
+    the kit's recorded run (its numbers, and the same things to look at in
+    what it wrote), for the Console's job pages (the gate's job answer,
+    1.35.1). ``config``: the kits to know it among (the gate adds the site's
+    folder the copy names, once it has checked it)."""
+    if not folder or not is_practice(folder):
+        return None
+    kit = kit_of(folder, config)
+    out = {"folder": str(folder), "practice": PRACTICE, "kit": None}
+    if kit is None:
+        return out
+    rec = []
+    top = (kit.recorded_from / "recorded") if kit.recorded_from else None
+    for x in recorded_look(kit):
+        rec.append({**x, "found": [{**f, "path": "recorded/" + os.path.relpath(f["path"], top)} for f in x["found"]]})
+    out.update({"kit": kit.name, "title": kit.title, "program": kit.program, "look": look(kit, folder, job=job),
+                "recorded_text": recorded_text(kit), "recorded": rec})
     return out
 
 

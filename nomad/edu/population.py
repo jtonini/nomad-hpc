@@ -189,10 +189,11 @@ def _compute(db_path: str, days: int, window_size: int) -> Population:
             WHERE j.state IN ({','.join('?' * len(FINISHED))})
               AND j.end_time >= ?
         """, (*FINISHED, since))
+        from nomad.demos.kits import practice_row
         for r in rows:
             row = dict(r)
             user = row.get("user_name")
-            if not user:
+            if not user or practice_row(row):      # a practice run (1.35.1) says nothing of anyone's work
                 continue
             row["_node_memory_mb"] = memory_ceiling(
                 ceilings, row.get("source_site") or row.get("cluster"))

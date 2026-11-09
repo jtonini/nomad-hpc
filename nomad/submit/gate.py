@@ -1143,7 +1143,42 @@ def job_details(job: str, run_=None, *, me: str) -> dict:
                 if p:
                     paths.append(p)
     out["output"] = [_tail(p) for p in paths[:2]]
+    # A practice run (1.35.1): its kit, what to look at in its folder now, and the kit's recorded run;
+    # None for any other job (the key says this gate can tell).
+    workdir = now.get("WorkDir") or next((r["WorkDir"] for r in acct if r.get("WorkDir")), "")
+    # an array task's own number names its files (%j), not its array's
+    own = (now.get("JobId") or "").strip() or job.partition("_")[0]
+    out["practice"] = _practice(workdir, own) if workdir.startswith("/") else None
     return out
+
+
+def _kit_folder(src: str, name: str | None) -> tuple:
+    """(config, what is wrong) for a site's kit a copy names (its README's
+    Kit folder): that kit's own folder only, checked as kits' are -- the
+    README is the person's, so it may name any folder."""
+    if not name or not os.path.isdir(os.path.join(src, name)):
+        return {}, [f"the kit {name or '?'} isn't in {src} here"]
+    owners = trusted_owners()
+    folder = os.path.join(src, name)
+    why = unsafe(folder, owners) or tree_unsafe(folder, owners)
+    if why:
+        return {}, [f"the site's kit in {folder} isn't used: {why}"]
+    return {"submit": {"demos": {"dirs": [src]}}}, []
+
+
+def _practice(workdir: str, job: str) -> dict | None:
+    from nomad.demos import kits as K
+    try:
+        name, src, _title = K.kit_source(workdir)
+        config, said = _kit_folder(src, name) if src else ({}, [])
+        got = K.practice_of(workdir, config, job=job)
+        if got and got.get("kit") is None:
+            got["error"] = (said[0] if said else
+                            "its kit can't be told here: a site's own kit copied before 1.35.1, or its "
+                            "README-practice.txt was changed")
+        return got
+    except Exception as e:                              # noqa: BLE001 -- the job's details stand without it
+        return {"folder": workdir, "kit": None, "error": f"what to look at couldn't be read ({type(e).__name__})"}
 
 
 def listing(path: str) -> dict:
