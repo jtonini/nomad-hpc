@@ -18,17 +18,31 @@ cpus = 1
 gpus = 1
 mem = "2G"
 time = "00:20:00"
-minutes = 2
+minutes = 1
 
 [[look]]
 file = "md.out"
-what = "The energies every 5,000 steps (TEMP(K) is the temperature)"
+what = "The energies every 5,000 steps (TEMP(K) is the temperature); the last two lines are the run's average, and how much it varied"
 match = "NSTEP ="
 
 [[look]]
 file = "md.out"
 what = "How fast it ran"
 match = "ns/day"
+
+[recorded]                      # one real run (its output is kept at the site, not here)
+site = "spydur"
+date = "2026-11-09"
+module = "amber/26"
+partition = "gpunodes"
+cpus = 1
+gpus = 1
+gpu = "NVIDIA A40"
+runtime_s = 14
+cpu_s = 13
+cores_busy = 0.9
+peak_mb = 488
+files = []
 
 [build]
 module = "amber/26"

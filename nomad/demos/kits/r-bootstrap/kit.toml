@@ -15,7 +15,7 @@ files = ["bootstrap.R"]
 cpus = 1
 mem = "2G"
 time = "00:20:00"
-minutes = 2
+minutes = 1
 
 [[look]]
 file = "bootstrap-*.out"
@@ -25,3 +25,15 @@ match = "slope|bootstrap fits"
 [[look]]
 file = "bootstrap_slopes.pdf"
 what = "A histogram of the 20,000 slopes"
+
+[recorded]                      # one real run, kept with the kit
+site = "spydur"
+date = "2026-11-09"
+module = "R/4.4.2"
+partition = "condos"
+cpus = 1
+runtime_s = 29
+cpu_s = 29
+cores_busy = 1.0
+peak_mb = 90
+files = ["recorded/bootstrap-89548.out", "recorded/bootstrap_slopes.pdf"]

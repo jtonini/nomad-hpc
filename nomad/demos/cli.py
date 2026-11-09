@@ -21,6 +21,7 @@ def demos_group():
     nomad demos show NAME                        what it does, its files, what to look at
     nomad demos copy NAME [--to DIR]             a copy, as you, in a new folder
     nomad demos look NAME DIR                    once a copy has run in DIR: what to look at
+    nomad demos look NAME --recorded             what one real run of it showed (the kit keeps it)
     nomad demos build NAME --to DIR              staff: make a kit's files once, at a site
     nomad demos check --site S                   staff: every kit against the site's templates
     nomad demos scripts --site S --hub --root R --out DIR
@@ -74,6 +75,8 @@ def demos_show(ctx, name):
         click.echo("Its template's choices: " + ", ".join(f"{o}={n}" for o, n in k.choose.items()))
     for x in k.look:
         click.echo(f"  look at {x['file']}: {x['what']}" + (f"  [{x['match']}]" if x.get("match") else ""))
+    if k.recorded:
+        click.echo(K.recorded_text(k) + (f"  (nomad demos look {k.name} --recorded)" if k.recorded["files"] else ""))
     click.echo(f"Source: {k.source}" + ("" if k.bundled else f"  (from {k.path})"))
 
 
@@ -112,25 +115,33 @@ def demos_copy(ctx, name, dest, extra):
 
 @demos_group.command("look")
 @click.argument("name")
-@click.argument("folder", type=click.Path(file_okay=False))
+@click.argument("folder", type=click.Path(file_okay=False), required=False)
+@click.option("--recorded", is_flag=True, help="What one real run of it showed, kept with the kit.")
 @click.pass_context
-def demos_look(ctx, name, folder):
+def demos_look(ctx, name, folder, recorded):
     """Once a copy of kit NAME has run in FOLDER: each thing to look at, and
-    the lines that show it."""
+    the lines that show it; with --recorded, what the kit's recorded run showed."""
     try:
         k = K.find(_config(ctx), name)
     except K.KitError as e:
         raise click.ClickException(str(e)) from None
-    for x in K.look(k, folder):
+    if recorded == bool(folder):
+        raise click.UsageError("give the FOLDER a copy ran in, or --recorded (one of them)")
+    if recorded and not k.recorded:
+        raise click.ClickException(f"{k.name} keeps no recorded run")
+    for x in (K.recorded_look(k) if recorded else K.look(k, folder)):
         click.echo(f"{x['file']}: {x['what']}")
         if not x["found"]:
-            click.echo("    (not there: has it run, and ended?)")
+            click.echo("    (not kept with the kit)" if recorded else "    (not there: has it run, and ended?)")
         for f in x["found"]:
             if "lines" in f:
                 for line in f["lines"] or ["    (no line of it says so yet)"]:
                     click.echo("    " + line.strip()[:200])
             else:
-                click.echo(f"    {f['path']} ({f['size']} bytes)")
+                shown = f["path"].split("/recorded/", 1)[-1] if recorded else f["path"]
+                click.echo(f"    {shown} ({f['size']} bytes)")
+    if k.recorded:
+        click.echo(("" if recorded else "To compare: ") + K.recorded_text(k))
     click.echo(K.PRACTICE)
 
 
@@ -219,7 +230,6 @@ def demos_scripts(ctx, site, on_hub, root, out):
     dest.mkdir(parents=True, exist_ok=True)
     dest.chmod(0o755)                       # scripts for others to send: readable, whatever the umask
     got, _ = K.kits(config)
-    s = K.settings(config)
     made = 0
     for k in got:
         p = offer.get(k.program.lower())
@@ -230,8 +240,7 @@ def demos_scripts(ctx, site, on_hub, root, out):
         try:
             m = TT.make(config, site, p["program"], module=p["choose"], available=mods,
                         input_path=folder if k.input == "." else posixpath.join(folder, k.input),
-                        cpus=k.cpus, mem=k.mem, time=k.time, gpus=k.gpus or None,
-                        partition=s.partition_for(site, k.gpus), choose=dict(k.choose) or None)
+                        **K.job_values(k, config, site))
         except TT.TemplateError as e:
             click.echo(f"  !! {k.name:<22} {e}")
             continue
@@ -239,7 +248,7 @@ def demos_scripts(ctx, site, on_hub, root, out):
         if target.exists():
             click.echo(f"  !! {k.name:<22} {target} is there already: not written over")
             continue
-        target.write_text(m["text"])
+        target.write_text(K.mark(m["text"], k))
         target.chmod(0o644)
         made += 1
         click.echo(f"  ok {k.name:<22} {target}  ({p['choose']}{'; not built yet' if not k.ready else ''})")

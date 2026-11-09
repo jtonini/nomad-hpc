@@ -105,9 +105,11 @@ _PATH = re.compile("/[^\x00-\x1f\x7f-\x9f\xad\u034f\u061c\u115f\u1160\u17b4\u17b
 _SHA = re.compile(r"[0-9a-f]{64}")
 _VID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{12}")       # an earlier version kept (1.25.3)
 _PARTS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(,[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,11}")   # 1.25.4
-_KIND_WORDS = {"parts": "a list of up to 12 partitions, comma between,", "vid": "a version id"}
+_KIT = re.compile(r"[a-z0-9][a-z0-9-]{1,47}")                                                     # 1.35.0
+_KIND_WORDS = {"parts": "a list of up to 12 partitions, comma between,", "vid": "a version id",
+               "kit": "a practice kit's name"}
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
-          "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS}
+          "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS, "kit": _KIT}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
@@ -135,11 +137,17 @@ OPS = {
     # --job: a job of theirs that ran, as "again" would send it (--sha256: its script as shown).
     "starts": {"--script": "path", "--job": "job", "--sha256": "sha", "--partitions": "parts", "--cpus": "int",
                "--mem": "mem", "--time": "time", "--gpus": "int", "--keep": "flag"},
+    # Practice runs (1.35.0): the kits ready here (nomad's, and the site's in --kits-dir), a copy of one
+    # in a new or empty folder of the person's, and a new folder of theirs to put things in.
+    "kits": {"--kits-dir": "path"},
+    "practice": {"--kit": "kit", "--dir": "path", "--kits-dir": "path"},
+    "mkdir": {"--dir": "path"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
             "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
             "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"],
-            "starts": ["--sha256", "--partitions"], "read": ["--path"]}
+            "starts": ["--sha256", "--partitions"], "read": ["--path"], "practice": ["--kit", "--dir"],
+            "mkdir": ["--dir"]}
 # The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
 WITH_BODY = {"save"}
 
@@ -600,7 +608,7 @@ def _read_body(stream) -> str:
 # job scripts for it, or the earlier texts saving kept (1.25.4): served only
 # with `serve --edit`, the cluster's own say (the hub's [[hub.sites]]
 # edit = true is the hub's).
-EDITS = {"save", "read", "versions", "recall"}
+EDITS = {"save", "read", "versions", "recall", "practice", "mkdir"}    # practice, mkdir: they write (1.35.0)
 
 
 def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False) -> int:
@@ -969,6 +977,12 @@ def run(words: list, me: str, run_=None) -> int:
         if op == "recall":
             return answer({"ok": True, "script": got["--script"], "id": got["--id"],
                            "text": recall(got["--script"], got["--id"])})
+        if op == "kits":
+            return answer({"ok": True, **practice_kits(got.get("--kits-dir"))})
+        if op == "practice":
+            return answer({"ok": True, **practice_copy(got["--kit"], got["--dir"], got.get("--kits-dir"))})
+        if op == "mkdir":
+            return answer({"ok": True, **new_folder(got["--dir"])})
         if op == "size":
             if "--script" in got:
                 script_bytes(got["--script"])
@@ -1164,6 +1178,83 @@ def listing(path: str) -> dict:
                      "mine": mine, "script": script, "text": bool(text)})
     rows.sort(key=lambda r: (r["kind"] != "folder", r["name"].lower()))
     return {"dir": os.path.normpath(path), "entries": rows[:MAX_LS], "more": len(rows) > MAX_LS}
+
+
+# ── practice runs (1.35.0) ─────────────────────────────────────────────────
+# A kit's files copied, as the person, into a folder of theirs that is new
+# or empty (never over a file: nomad.demos.kits.copy), from nomad's own kits
+# or the site's (--kits-dir, the hub's [submit.demos] site_dirs); and a new
+# folder of theirs. Both only in a folder whose parent is there already.
+
+def _kits_config(kits_dir: str | None) -> tuple:
+    """(nomad's kits and the site's in ``kits_dir``, what is wrong): the
+    site's folder only when no one but root, the person, nomad's installer
+    and Slurm could have put a kit there -- its files are copied as the
+    person, and its scripts run as them."""
+    if not kits_dir:
+        return {}, []
+    owners = trusted_owners()
+    why = unsafe(kits_dir, owners) if os.path.isdir(kits_dir) else f"{kits_dir} isn't a folder here"
+    why = why or tree_unsafe(kits_dir, owners)
+    if why:
+        return {}, [f"the site's kits in {kits_dir} aren't used: {why}"]
+    return {"submit": {"demos": {"dirs": [kits_dir]}}}, []
+
+
+def _not_hidden(path: str) -> None:
+    """No part of the folder hidden, as given nor where it really leads (a
+    link to ~/.bashrc.d is ~/.bashrc.d)."""
+    real = os.path.join(os.path.realpath(os.path.dirname(os.path.normpath(path))), os.path.basename(path))
+    for p in (path, real):
+        if any(part.startswith(".") for part in p.split("/") if part):
+            raise Refused(f"{path}: not a hidden folder, nor one in a hidden folder")
+
+
+def practice_kits(kits_dir: str | None) -> dict:
+    """The practice kits ready here (a kit to build: once built at the site)."""
+    from nomad.demos import kits as K
+    config, said = _kits_config(kits_dir)
+    got, problems = K.kits(config, ready_only=True)
+    problems = said + problems
+    # a site's own kit: where it is, for `nomad demos copy NAME --from` where copying from the Console is off
+    return {"kits": [{**k.to_dict(), **({} if k.bundled else {"from": str(k.path.parent)})} for k in got],
+            "practice": K.PRACTICE,
+            "problems": [str(p)[:300] for p in problems][:10]}
+
+
+def _parent_there(path: str) -> None:
+    parent = os.path.dirname(os.path.normpath(path))
+    if not os.path.isdir(parent):
+        raise Refused(f"{parent} isn't a folder here: make it first")
+
+
+def practice_copy(name: str, dest: str, kits_dir: str | None) -> dict:
+    """A copy of practice kit ``name`` in ``dest`` (new, or empty), as the person."""
+    from nomad.demos import kits as K
+    _not_hidden(dest)
+    _parent_there(dest)
+    config, _said = _kits_config(kits_dir)
+    try:
+        k = K.find(config, name)
+        got = K.copy(k, dest=dest)
+    except K.KitError as e:
+        raise Refused(str(e)) from None
+    except OSError as e:
+        raise Refused(f"{dest}: {e.strerror or e}") from None
+    return {"kit": k.name, "program": k.program, **got, "practice": K.PRACTICE}
+
+
+def new_folder(path: str) -> dict:
+    """A new folder of the person's, in one that is there already."""
+    _not_hidden(path)
+    _parent_there(path)
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        raise Refused(f"{path} is there already") from None
+    except OSError as e:
+        raise Refused(f"{path}: {e.strerror or e}") from None
+    return {"dir": os.path.normpath(path)}
 
 
 # ── save: a job script written as the person (1.25.3) ──────────────────────

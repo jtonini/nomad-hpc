@@ -28,6 +28,20 @@ file = "water.log"
 what = "How fast it ran: ns/day"
 match = "^Performance:"
 
+[recorded]                      # one real run, kept with the kit
+site = "spydur"
+date = "2026-11-09"
+module = "gromacs/2026.2-gpu"
+partition = "gpunodes"
+cpus = 4
+gpus = 1
+gpu = "NVIDIA A40"
+runtime_s = 88
+cpu_s = 342
+cores_busy = 3.9
+peak_mb = 149
+files = ["recorded/water.log"]
+
 [build]
 module = "gromacs/2026.2-gpu"
 commands = [

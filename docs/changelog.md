@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.35.0 (November 2026)
+
+### New
+- **Practice runs from the Console** (with Console fix 91): the gate's
+  `kits` (the kits ready at the cluster, with `--kits-dir`), `practice`
+  (copy one, as the person, into a new or empty folder of theirs) and
+  `mkdir` (a new folder of theirs). `practice` and `mkdir` write: audited,
+  and only with the gate's editing on. `[submit.demos] site_dirs` (the
+  hub's): each cluster's built kits; `kits` names a site's own kit's folder
+  (`from`), for `nomad demos copy --from` where copying from the Console is
+  off.
+- A kit's job script (`nomad.demos.kits.kit_values`, `job_values`, `mark`):
+  the kit's own size, the partition practice runs go to, its choices, and
+  two lines under `#!` saying it is a practice run. A choice of the person's
+  own is sized as the template sizes it (R's 8 cores; AMBER's one CPU core:
+  no GPU, not the GPU nodes); choosing an option's first choice changes
+  nothing. A kit may be a gate's description of one (the hub may not have a
+  site's own kit). `nomad demos scripts` writes them so too.
+- The gate's `practice` and `mkdir` write in no hidden folder; a copy is made
+  through folder descriptors and never follows a link; a site's kit folder
+  is used only when no one but root, nomad's installer, the person or Slurm
+  could have changed it (`kits` says why not, in `problems`); `nomad demos
+  build` leaves what it makes writable by no one else.
+- **Recorded runs**: a kit's `[recorded]` table keeps one real run of it
+  (site, date, module, partition, CPUs, GPUs, run time, CPU time, cores
+  busy, peak memory) and, in its `recorded/` folder, what it wrote.
+  `nomad demos show`, `look` (and `look NAME --recorded`), each copy's
+  README and the Console show it. cp2k-water, gromacs-water, amber-peptide
+  (numbers only), r-bootstrap and rfdiffusion-backbone carry their spydur
+  runs of 9 November. A built kit with none takes nomad's; `nomad demos
+  build` carries it along.
+
+### Changed
+- Submit's "jobs like this one" leave out practice runs (a folder holding
+  `README-practice.txt`), unless it is the same folder or script: a
+  practice run's size says nothing about real work.
+- The kits' "about N minutes" from their recorded runs (CP2K, R, AMBER: 1;
+  GROMACS, RFdiffusion: 2). AMBER's look says the last two lines are the
+  run's average and how much it varied.
+
 ## v1.34.1 (November 2026)
 
 From the practice runs' first runs on spydur (9 Nov):

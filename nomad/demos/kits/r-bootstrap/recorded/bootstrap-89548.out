@@ -1,0 +1,4 @@
+Fitted slope: 0.803 (the made-up data used 0.8)
+20000 bootstrap fits on 1 core(s) in 28.4 s
+Slope, middle 95% of the bootstrap fits: 0.773 to 0.834
+Wrote bootstrap_slopes.csv and bootstrap_slopes.pdf

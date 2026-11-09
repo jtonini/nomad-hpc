@@ -30,3 +30,15 @@ match = "GEOMETRY OPTIMIZATION COMPLETED"
 file = "water.out"
 what = "When it ended (the timing table is just above)"
 match = "PROGRAM ENDED AT"
+
+[recorded]                      # one real run, kept with the kit
+site = "spydur"
+date = "2026-11-09"
+module = "cp2k/2026.2"
+partition = "condos"
+cpus = 4
+runtime_s = 5
+cpu_s = 17
+cores_busy = 3.4
+peak_mb = 657
+files = ["recorded/water.out"]

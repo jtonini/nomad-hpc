@@ -89,6 +89,8 @@ BUSINESS_NOTES.md
 *.synctex.gz
 *.bbl
 *.blg
+# ...but a practice kit's recorded run is kept (nomad/demos/kits/*/recorded)
+!nomad/demos/kits/*/recorded/**
 patch_dashboard_insights.py
 ruff-fixes.patch
 # Patch-script safety backups (e.g., from apply_migration_v6.py, edit_*.py, fix_demo_py.py)

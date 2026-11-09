@@ -255,7 +255,8 @@ def test_copy_from_a_sites_built_kits(tmp_path, monkeypatch):
     built = tmp_path / "built" / "gromacs-water"
     built.mkdir(parents=True)
     for f in K.find(CONFIG, "gromacs-water").path.iterdir():
-        (built / f.name).write_bytes(f.read_bytes())
+        if f.is_file():                                  # 1.35.0: a kit's recorded/ folder too
+            (built / f.name).write_bytes(f.read_bytes())
     (built / "water.tpr").write_bytes(b"tpr")
     monkeypatch.setattr(C, "_config", lambda ctx: {"submit": {"templates": TEMPLATES}})
     run = CliRunner()

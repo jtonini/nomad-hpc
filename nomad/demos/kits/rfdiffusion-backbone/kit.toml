@@ -15,7 +15,7 @@ cpus = 4
 mem = "16G"
 gpus = 1
 time = "00:30:00"
-minutes = 3
+minutes = 2
 
 [[look]]
 file = "designs/practice_0.pdb"
@@ -25,3 +25,17 @@ what = "The backbone it designed (a PDB file)"
 file = "practice-*.out"
 what = "How long the design took"
 match = "Finished design"
+
+[recorded]                      # one real run, kept with the kit
+site = "spydur"
+date = "2026-11-09"
+module = "rfdiffusion/latest"
+partition = "gpunodes"
+cpus = 4
+gpus = 1
+gpu = "NVIDIA A40"
+runtime_s = 58
+cpu_s = 77
+cores_busy = 1.3
+peak_mb = 5105
+files = ["recorded/designs/practice_0.pdb", "recorded/practice-89549.out"]

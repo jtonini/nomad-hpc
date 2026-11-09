@@ -24,8 +24,8 @@ nomad comes with these, each fitted to UR's job-script templates
 | molcas-water | Molcas | needs a licence | water: Hartree-Fock, then MP2 |
 | cp2k-water | CP2K | open source | one water molecule: its best shape (PBE) |
 | namd-water, namd-gpu-water | NAMD, NAMD GPU | free for academic use | 1,000 water molecules for 100 ps |
-| gromacs-water | GROMACS | open source | about 2,000 water molecules for 100 ps, on a GPU (built once at a site) |
-| amber-peptide | AMBER | free for academic use | a small peptide in water for 20 ps (built once at a site) |
+| gromacs-water | GROMACS | open source | about 2,000 water molecules for 2 ns, on a GPU (built once at a site) |
+| amber-peptide | AMBER | free for academic use | a small peptide in water for 100 ps, on a GPU (built once at a site) |
 | r-bootstrap | R | open source | a line through made-up data, and 20,000 bootstrap fits, on one core or eight |
 | python-montecarlo | Python | open source | pi from 2 billion random points |
 | rfdiffusion-backbone | RFdiffusion | open source | one made-up backbone of 50 residues, on a GPU |
@@ -46,12 +46,104 @@ own small size.
 | `nomad demos show NAME` | what it does, its files, what to look at once it has run |
 | `nomad demos copy NAME [--to DIR]` | a copy, as you, in a new folder (never over a file) |
 | `nomad demos look NAME DIR` | once the copy in DIR has run: each thing to look at, and the lines that show it |
+| `nomad demos look NAME --recorded` | what the kit's recorded run showed (below) |
 | `nomad demos build NAME --to DIR [--site S \| --module-path P] [--module M]` | staff: make a kit's files once, at a site |
 | `nomad demos check --site S` | staff: every kit against the site's templates |
 | `nomad demos scripts --site S --hub --root R --out DIR` | staff: each kit's job script, as the site's template makes it for a copy in R/NAME |
 
 After `copy`, the Console's Submit a job page makes the script: No script
 yet? Make one, the kit's program, and the copied input.
+
+## From the Console (1.35.0)
+
+On the Submit a job page (Console fix 91), steps 2 and 3 stay greyed until
+there is a script, so the whole way is on one page. A person can make a
+folder of theirs on the cluster (**New folder**, in the folder open). Under
+**No script yet? Make one**, once a program is chosen, **Start from an
+example** lists the kits ready at that cluster for it, each with its licence,
+its size and the practice-run notice, what it does, what to look at, and its
+recorded run. **Copy it into** copies the kit, as the person and through
+their gate, into a new folder named after it in the folder open (`r-bootstrap`,
+then `r-bootstrap-2`, ...), and chooses its input. The script is then made
+with the kit's own small size, in the partition practice runs go to, and
+says in its first lines that it is a practice run. A choice of the person's
+own is sized as the template sizes it, with the kit's memory and time: R's
+"8 cores" gives 8 CPUs, AMBER's "one CPU core" no GPU (and not the GPU
+nodes). The hub makes the script from what the cluster's gate said of the
+kit, so a site's own kits work as nomad's do. Saved, it is sized and
+sent like any script, and runs in its folder.
+
+Where copying from the Console is off (editing isn't on for that cluster),
+each kit shows the command to type there instead:
+`nomad demos copy NAME --to DIR` (with `--from FOLDER` for a site's own
+kit).
+
+The hub names each cluster's built kits for the Console:
+
+```toml
+[submit.demos]
+site_dirs = { spydur = "/usr/local/sw/nomad-demos" }
+```
+
+The gate's `kits`, `practice` and `mkdir` requests do the work on the
+cluster (nomad 1.35.0 there). `practice` and `mkdir` write, so they are
+audited and need the gate's editing on, like saving a script; neither
+writes in a hidden folder (`~/.bashrc.d`, `~/.config`), and a copy never
+follows a link. The site's kit folder is used only when it, the folders
+above it and everything in it belong to root, nomad's installer, the person
+or Slurm and no one else can change them (as for nomad-gate itself): a kit
+is copied as each person who uses it, and its script runs as them. That is
+the rule nomad-gate's own folder is held to, so beside it
+(`/usr/local/sw/nomad-demos` beside `/usr/local/sw/nomad`) is a good place.
+`nomad demos build` leaves what it makes writable by no one else, whatever
+the builder's umask; kits built before 1.35.0 may need
+`chmod -R go-w` once. Staff see on the Console's Submit page why a site's
+kits aren't offered (the gate's `kits` answer says, in `problems`).
+
+A practice run sizes nothing but itself: Submit's "jobs like this one" leave
+out jobs that ran in a practice copy (a folder holding
+`README-practice.txt`), unless it is the same folder or script.
+
+## The recorded runs
+
+A kit can keep one real run of itself, to hold a new one against: its
+numbers in `kit.toml`, and (where the program's licence allows) what it
+wrote, in the kit's `recorded/` folder.
+
+```toml
+[recorded]
+site = "spydur"
+date = "2026-11-09"
+module = "gromacs/2026.2-gpu"
+partition = "gpunodes"
+cpus = 4
+gpus = 1
+gpu = "NVIDIA A40"
+runtime_s = 88
+cpu_s = 342
+cores_busy = 3.9
+peak_mb = 149
+files = ["recorded/water.log"]
+```
+
+`nomad demos show` gives it in a sentence, `nomad demos look NAME
+--recorded` shows what its kept files show (the same things to look at as a
+copy's), and `look` on a copy ends with it, to compare. Each copy's
+`README-practice.txt` has it too. A built kit with none of its own takes
+nomad's (same program, same files); `nomad demos build` carries it along.
+
+These came from spydur on 9 November 2026 (sacct):
+
+| Kit | Where | Size | Ran | CPU time | Memory |
+|---|---|---|---|---|---|
+| cp2k-water | condos | 4 CPUs | 5 s | 17 s (3.4 cores busy) | 657 MB |
+| gromacs-water | gpunodes | 4 CPUs, 1 A40 | 88 s | 5 min 42 s (3.9 busy) | 149 MB |
+| amber-peptide | gpunodes | 1 CPU, 1 A40 | 14 s | 13 s | 488 MB |
+| r-bootstrap | condos | 1 CPU | 29 s | 29 s (1.0 busy) | 90 MB |
+| rfdiffusion-backbone | gpunodes | 4 CPUs, 1 A40 | 58 s | 77 s (1.3 busy) | 5.0 GB |
+
+AMBER's output is not kept (its licence is an academic one); its numbers
+are. The kept files were made anonymous (the home folder reads `/home/you`).
 
 To send every practice run once (after a module upgrade, say), staff make
 their scripts on the hub, where the templates are, then send them on the
@@ -99,6 +191,7 @@ bundled = true                         # also the kits that come with nomad (def
 into = "~/nomad-demos"                 # where a copy goes: a new folder each time
 partition = { spydur = "condos" }      # where practice runs with no GPU are sent (default: the template's)
 gpu_partition = "gpunodes"             # and those with one (a name: every site)
+site_dirs = { spydur = "/usr/local/sw/nomad-demos" }   # the hub's: each cluster's built kits, for the Console
 ```
 
 A practice run that waits days behind long research jobs teaches the wrong

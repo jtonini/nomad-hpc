@@ -196,7 +196,17 @@ def similar(runs: list, *, script: str | None = None, program: Program | None = 
     the same program anywhere (raise only). An interpreter (python, R...)
     or a program nomad doesn't know isn't "the same program": two scripts
     run with python can be anything."""
-    ended = [r for r in runs or [] if r.state in ENDED]
+    from nomad.demos.kits import is_practice
+    # A practice run (1.35.0: a copy of a kit, README-practice.txt beside it) sizes nothing but itself:
+    # its small input says nothing about real work. Each folder is looked at once (they may be on NFS).
+    looked: dict = {}
+
+    def practice(workdir: str) -> bool:
+        if workdir not in looked:
+            looked[workdir] = is_practice(workdir)
+        return looked[workdir]
+    ended = [r for r in runs or [] if r.state in ENDED
+             and (not r.workdir or r.workdir == folder or (script and r.script == script) or not practice(r.workdir))]
     exe = program.executable if program else None
     fam = program.family if program else None
     specific = bool(fam) and fam not in GENERIC

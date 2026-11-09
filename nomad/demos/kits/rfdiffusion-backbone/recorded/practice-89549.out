@@ -1,0 +1,107 @@
+[2026-11-09 13:15:52,711][__main__][INFO] - Found GPU with device_name NVIDIA A40. Will run RFdiffusion on NVIDIA A40
+Reading models from /app/RFdiffusion/rfdiffusion/inference/../../models
+[2026-11-09 13:15:52,711][rfdiffusion.inference.model_runners][INFO] - Reading checkpoint from /app/RFdiffusion/rfdiffusion/inference/../../models/Base_ckpt.pt
+This is inf_conf.ckpt_path
+/app/RFdiffusion/rfdiffusion/inference/../../models/Base_ckpt.pt
+Assembling -model, -diffuser and -preprocess configs from checkpoint
+USING MODEL CONFIG: self._conf[model][n_extra_block] = 4
+USING MODEL CONFIG: self._conf[model][n_main_block] = 32
+USING MODEL CONFIG: self._conf[model][n_ref_block] = 4
+USING MODEL CONFIG: self._conf[model][d_msa] = 256
+USING MODEL CONFIG: self._conf[model][d_msa_full] = 64
+USING MODEL CONFIG: self._conf[model][d_pair] = 128
+USING MODEL CONFIG: self._conf[model][d_templ] = 64
+USING MODEL CONFIG: self._conf[model][n_head_msa] = 8
+USING MODEL CONFIG: self._conf[model][n_head_pair] = 4
+USING MODEL CONFIG: self._conf[model][n_head_templ] = 4
+USING MODEL CONFIG: self._conf[model][d_hidden] = 32
+USING MODEL CONFIG: self._conf[model][d_hidden_templ] = 32
+USING MODEL CONFIG: self._conf[model][p_drop] = 0.15
+USING MODEL CONFIG: self._conf[model][SE3_param_full] = {'num_layers': 1, 'num_channels': 32, 'num_degrees': 2, 'n_heads': 4, 'div': 4, 'l0_in_features': 8, 'l0_out_features': 8, 'l1_in_features': 3, 'l1_out_features': 2, 'num_edge_features': 32}
+USING MODEL CONFIG: self._conf[model][SE3_param_topk] = {'num_layers': 1, 'num_channels': 32, 'num_degrees': 2, 'n_heads': 4, 'div': 4, 'l0_in_features': 64, 'l0_out_features': 64, 'l1_in_features': 3, 'l1_out_features': 2, 'num_edge_features': 64}
+USING MODEL CONFIG: self._conf[model][freeze_track_motif] = False
+USING MODEL CONFIG: self._conf[model][use_motif_timestep] = True
+USING MODEL CONFIG: self._conf[diffuser][T] = 50
+USING MODEL CONFIG: self._conf[diffuser][b_0] = 0.01
+USING MODEL CONFIG: self._conf[diffuser][b_T] = 0.07
+USING MODEL CONFIG: self._conf[diffuser][schedule_type] = linear
+USING MODEL CONFIG: self._conf[diffuser][so3_type] = igso3
+USING MODEL CONFIG: self._conf[diffuser][crd_scale] = 0.25
+USING MODEL CONFIG: self._conf[diffuser][so3_schedule_type] = linear
+USING MODEL CONFIG: self._conf[diffuser][min_b] = 1.5
+USING MODEL CONFIG: self._conf[diffuser][max_b] = 2.5
+USING MODEL CONFIG: self._conf[diffuser][min_sigma] = 0.02
+USING MODEL CONFIG: self._conf[diffuser][max_sigma] = 1.5
+USING MODEL CONFIG: self._conf[preprocess][sidechain_input] = False
+USING MODEL CONFIG: self._conf[preprocess][motif_sidechain_input] = True
+USING MODEL CONFIG: self._conf[preprocess][d_t1d] = 22
+USING MODEL CONFIG: self._conf[preprocess][d_t2d] = 44
+USING MODEL CONFIG: self._conf[preprocess][prob_self_cond] = 0.5
+USING MODEL CONFIG: self._conf[preprocess][str_self_cond] = True
+USING MODEL CONFIG: self._conf[preprocess][predict_previous] = False
+[2026-11-09 13:16:03,738][rfdiffusion.inference.model_runners][INFO] - Loading checkpoint.
+[2026-11-09 13:16:06,908][rfdiffusion.diffusion][INFO] - Calculating IGSO3.
+Successful diffuser __init__
+[2026-11-09 13:16:13,018][__main__][INFO] - Making design designs/practice_0
+[2026-11-09 13:16:13,023][rfdiffusion.inference.model_runners][INFO] - Using contig: ['50-50']
+With this beta schedule (linear schedule, beta_0 = 0.04, beta_T = 0.28), alpha_bar_T = 0.00013696048699785024
+[2026-11-09 13:16:13,048][rfdiffusion.inference.model_runners][INFO] - Sequence init: --------------------------------------------------
+/app/RFdiffusion/rfdiffusion/Embeddings.py:50: UserWarning: __floordiv__ is deprecated, and its behavior will change in a future version of pytorch. It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). This results in incorrect rounding for negative values. To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), or for actual floor division, use torch.div(a, b, rounding_mode='floor').
+  seqsep[:,cur_mask*(seqsep[0]>cur_ncyc//2)] -= cur_ncyc
+/app/RFdiffusion/rfdiffusion/Embeddings.py:51: UserWarning: __floordiv__ is deprecated, and its behavior will change in a future version of pytorch. It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). This results in incorrect rounding for negative values. To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), or for actual floor division, use torch.div(a, b, rounding_mode='floor').
+  seqsep[:,cur_mask*(seqsep[0]<-cur_ncyc//2)] += cur_ncyc
+/app/RFdiffusion/.venv/lib/python3.9/site-packages/e3nn/o3/_spherical_harmonics.py:82: UserWarning: FALLBACK path has been taken inside: compileCudaFusionGroup. This is an indication that codegen Failed for some reason.
+To debug try disable codegen fallback path via setting the env variable `export PYTORCH_NVFUSER_DISABLE=fallback`
+To report the issue, try enable logging via setting the envvariable ` export PYTORCH_JIT_LOG_LEVEL=manager.cpp`
+ (Triggered internally at  ../torch/csrc/jit/codegen/cuda/manager.cpp:237.)
+  sh = _spherical_harmonics(self._lmax, x[..., 0], x[..., 1], x[..., 2])
+[2026-11-09 13:16:19,583][rfdiffusion.inference.model_runners][INFO] - Timestep 50, input to next step: --------------------------------------------------
+[2026-11-09 13:16:20,082][rfdiffusion.inference.model_runners][INFO] - Timestep 49, input to next step: --------------------------------------------------
+[2026-11-09 13:16:20,567][rfdiffusion.inference.model_runners][INFO] - Timestep 48, input to next step: --------------------------------------------------
+[2026-11-09 13:16:21,051][rfdiffusion.inference.model_runners][INFO] - Timestep 47, input to next step: --------------------------------------------------
+[2026-11-09 13:16:21,544][rfdiffusion.inference.model_runners][INFO] - Timestep 46, input to next step: --------------------------------------------------
+[2026-11-09 13:16:22,018][rfdiffusion.inference.model_runners][INFO] - Timestep 45, input to next step: --------------------------------------------------
+[2026-11-09 13:16:22,514][rfdiffusion.inference.model_runners][INFO] - Timestep 44, input to next step: --------------------------------------------------
+[2026-11-09 13:16:22,985][rfdiffusion.inference.model_runners][INFO] - Timestep 43, input to next step: --------------------------------------------------
+[2026-11-09 13:16:23,479][rfdiffusion.inference.model_runners][INFO] - Timestep 42, input to next step: --------------------------------------------------
+[2026-11-09 13:16:23,963][rfdiffusion.inference.model_runners][INFO] - Timestep 41, input to next step: --------------------------------------------------
+[2026-11-09 13:16:24,449][rfdiffusion.inference.model_runners][INFO] - Timestep 40, input to next step: --------------------------------------------------
+[2026-11-09 13:16:24,941][rfdiffusion.inference.model_runners][INFO] - Timestep 39, input to next step: --------------------------------------------------
+[2026-11-09 13:16:25,415][rfdiffusion.inference.model_runners][INFO] - Timestep 38, input to next step: --------------------------------------------------
+[2026-11-09 13:16:25,909][rfdiffusion.inference.model_runners][INFO] - Timestep 37, input to next step: --------------------------------------------------
+[2026-11-09 13:16:26,381][rfdiffusion.inference.model_runners][INFO] - Timestep 36, input to next step: --------------------------------------------------
+[2026-11-09 13:16:26,873][rfdiffusion.inference.model_runners][INFO] - Timestep 35, input to next step: --------------------------------------------------
+[2026-11-09 13:16:27,357][rfdiffusion.inference.model_runners][INFO] - Timestep 34, input to next step: --------------------------------------------------
+[2026-11-09 13:16:27,857][rfdiffusion.inference.model_runners][INFO] - Timestep 33, input to next step: --------------------------------------------------
+[2026-11-09 13:16:28,358][rfdiffusion.inference.model_runners][INFO] - Timestep 32, input to next step: --------------------------------------------------
+[2026-11-09 13:16:28,841][rfdiffusion.inference.model_runners][INFO] - Timestep 31, input to next step: --------------------------------------------------
+[2026-11-09 13:16:29,342][rfdiffusion.inference.model_runners][INFO] - Timestep 30, input to next step: --------------------------------------------------
+[2026-11-09 13:16:29,834][rfdiffusion.inference.model_runners][INFO] - Timestep 29, input to next step: --------------------------------------------------
+[2026-11-09 13:16:30,322][rfdiffusion.inference.model_runners][INFO] - Timestep 28, input to next step: --------------------------------------------------
+[2026-11-09 13:16:30,822][rfdiffusion.inference.model_runners][INFO] - Timestep 27, input to next step: --------------------------------------------------
+[2026-11-09 13:16:31,302][rfdiffusion.inference.model_runners][INFO] - Timestep 26, input to next step: --------------------------------------------------
+[2026-11-09 13:16:31,801][rfdiffusion.inference.model_runners][INFO] - Timestep 25, input to next step: --------------------------------------------------
+[2026-11-09 13:16:32,282][rfdiffusion.inference.model_runners][INFO] - Timestep 24, input to next step: --------------------------------------------------
+[2026-11-09 13:16:32,778][rfdiffusion.inference.model_runners][INFO] - Timestep 23, input to next step: --------------------------------------------------
+[2026-11-09 13:16:33,276][rfdiffusion.inference.model_runners][INFO] - Timestep 22, input to next step: --------------------------------------------------
+[2026-11-09 13:16:33,757][rfdiffusion.inference.model_runners][INFO] - Timestep 21, input to next step: --------------------------------------------------
+[2026-11-09 13:16:34,249][rfdiffusion.inference.model_runners][INFO] - Timestep 20, input to next step: --------------------------------------------------
+[2026-11-09 13:16:34,719][rfdiffusion.inference.model_runners][INFO] - Timestep 19, input to next step: --------------------------------------------------
+[2026-11-09 13:16:35,214][rfdiffusion.inference.model_runners][INFO] - Timestep 18, input to next step: --------------------------------------------------
+[2026-11-09 13:16:35,691][rfdiffusion.inference.model_runners][INFO] - Timestep 17, input to next step: --------------------------------------------------
+[2026-11-09 13:16:36,177][rfdiffusion.inference.model_runners][INFO] - Timestep 16, input to next step: --------------------------------------------------
+[2026-11-09 13:16:36,666][rfdiffusion.inference.model_runners][INFO] - Timestep 15, input to next step: --------------------------------------------------
+[2026-11-09 13:16:37,142][rfdiffusion.inference.model_runners][INFO] - Timestep 14, input to next step: --------------------------------------------------
+[2026-11-09 13:16:37,632][rfdiffusion.inference.model_runners][INFO] - Timestep 13, input to next step: --------------------------------------------------
+[2026-11-09 13:16:38,106][rfdiffusion.inference.model_runners][INFO] - Timestep 12, input to next step: --------------------------------------------------
+[2026-11-09 13:16:38,596][rfdiffusion.inference.model_runners][INFO] - Timestep 11, input to next step: --------------------------------------------------
+[2026-11-09 13:16:39,076][rfdiffusion.inference.model_runners][INFO] - Timestep 10, input to next step: --------------------------------------------------
+[2026-11-09 13:16:39,560][rfdiffusion.inference.model_runners][INFO] - Timestep 9, input to next step: --------------------------------------------------
+[2026-11-09 13:16:40,049][rfdiffusion.inference.model_runners][INFO] - Timestep 8, input to next step: --------------------------------------------------
+[2026-11-09 13:16:40,524][rfdiffusion.inference.model_runners][INFO] - Timestep 7, input to next step: --------------------------------------------------
+[2026-11-09 13:16:41,016][rfdiffusion.inference.model_runners][INFO] - Timestep 6, input to next step: --------------------------------------------------
+[2026-11-09 13:16:41,490][rfdiffusion.inference.model_runners][INFO] - Timestep 5, input to next step: --------------------------------------------------
+[2026-11-09 13:16:41,980][rfdiffusion.inference.model_runners][INFO] - Timestep 4, input to next step: --------------------------------------------------
+[2026-11-09 13:16:42,478][rfdiffusion.inference.model_runners][INFO] - Timestep 3, input to next step: --------------------------------------------------
+[2026-11-09 13:16:42,970][rfdiffusion.inference.model_runners][INFO] - Timestep 2, input to next step: --------------------------------------------------
+[2026-11-09 13:16:43,854][__main__][INFO] - Finished design in 0.51 minutes
