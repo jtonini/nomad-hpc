@@ -156,6 +156,7 @@ These came from spydur on 9 November 2026 (sacct):
 | amber-peptide | gpunodes | 1 CPU, 1 A40 | 14 s | 13 s | 488 MB |
 | r-bootstrap | condos | 1 CPU | 29 s | 29 s (1.0 busy) | 90 MB |
 | rfdiffusion-backbone | gpunodes | 4 CPUs, 1 A40 | 58 s | 77 s (1.3 busy) | 5.0 GB |
+| columbus-water | condos | 1 CPU | 1 s | 0.4 s | 121 MB |
 
 AMBER's output is not kept (its licence is an academic one); its numbers
 are. The kept files were made anonymous (the home folder reads `/home/you`).

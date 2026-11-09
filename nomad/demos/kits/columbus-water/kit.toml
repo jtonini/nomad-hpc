@@ -36,5 +36,16 @@ match = "total Dipole moment"
 
 [[look]]
 file = "runls"
-what = "How long each program took: Columbus's own timings, at the end"
-match = "walltime"
+what = "runc's own log: when it started, and the energies it reports along the way (the job's .out file stays empty: runc writes here)"
+match = "runc start:|Nuclear repulsion energy|^ +total energy"
+
+[recorded]                      # one real run, kept with the kit
+site = "spydur"
+date = "2026-11-09"
+module = "columbus/722"
+partition = "condos"
+cpus = 1
+runtime_s = 1
+peak_mb = 121
+files = ["recorded/LISTINGS/scfls.sp", "recorded/LISTINGS/ciudgsm.sp", "recorded/LISTINGS/propls.ci.drt1.state1.sp",
+         "recorded/runls"]

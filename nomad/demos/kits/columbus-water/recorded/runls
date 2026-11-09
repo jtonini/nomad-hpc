@@ -1,0 +1,196 @@
+===========================================================
+===                   runc                              ===
+===           version 7.2.2 , Sept. 2022             ===
+===          requires COLUMBUS version Col_7.2.2        ===
+===                                                     ===
+===   written by: Thomas Mueller                        ===
+===   gradient ext. by: Michal Dallos                   ===
+===               University of Vienna                  ===
+===   maintained by: Felix Plasser                      ===
+===               Loughborough University               ===
+===========================================================
+
+
+coremem. (seq.): 1843 MB,  coremem. (par.): 1843 MB
+Vdisk size: 0 DP
+Reading job control file control.run ... SMOLCAS=/usr/local/sw/Columbus/columbus-v7.2.2-impi2021/OpenMolcas/build
+Found serial Molcas Installation at /usr/local/sw/Columbus/columbus-v7.2.2-impi2021/OpenMolcas/build
+  done 
+Creating various directories ... 
+ done 
+SMOLCAS=/usr/local/sw/Columbus/columbus-v7.2.2-impi2021/OpenMolcas/build
+PMOLCAS=
+Checking for illegal keywords and keyword combinations ... done 
+Checking for complete set of input files ... done
+
+ ++++++++++++++++++ input file generation +++++++++++++ 
+ runc start: Mon Nov  9 17:22:14 EST 2026
+ 
+  runc start: Mon Nov  9 17:22:14 EST 2026
+ 
+ starting unik.gets.x > unikls at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- unik.gets.x ------------------------
+ --------------------------------------------------- 
+ starting hernew.x at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- hernew.x ------------------------
+ --------------------------------------------------- 
+ ++++++++++++++++++++ ao integral calculation ++++++++++++++++
+starting dalton.x -m 1843 > hermitls at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- dalton.x ------------------------
+  Nuclear repulsion energy:        9.1872110280
+
+ Irred. repr. : A1     B1     B2     A2      
+ # orbitals  :  11 7 4 2 
+ --------------------------------------------------- 
+ starting ffield.x -m 1843  at Mon Nov  9 17:22:14 EST 2026
+
+ field strength: 0.001
+ N(x): 0.000
+ N(y): 0.000
+ N(z): 1.000
+
+
+ N(xx): 0.000
+ N(xy): 0.000
+ N(xz): 0.000
+ N(yy): 0.000
+ N(yz): 0.000
+ N(zz): 0.000
+ O  charge= 8.000x=  0.0000y=  0.0000z=  0.0000
+ H  charge= 1.000x=  1.4314y=  0.0000z=  1.1083
+ H  charge= 1.000x= -1.4314y=  0.0000z=  1.1083
+ Nuclear dipole moment:
+                    <x>=  0.0000
+                    <y>=  0.0000
+                    <z>=  2.2167
+
+ -------------------- ffield.x ------------------------
+ --------------------------------------------------- 
+ >>>>>>>>> added finite field integrals <<<<<<<<<
+++++++++++++++++++++ SCF calculation +++++++++++++++
+starting scfpq.x -m 1843 at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- scfpq.x ------------------------
+  nuclear repulsion energy          9.1872110280
+  kinetic energy                   75.9852654525
+  potential energy               -152.0106208009
+  total energy                    -76.0253553484
+  virial theorem                    1.9994726773
+ --------------------------------------------------- 
+  ------ scf properties ----------
+starting exptvl.x -m 1843  at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- exptvl.x ------------------------
+  === dipole moment === 
+                     X               Y               Z   
+   nuclear       0.00000000      0.00000000      2.21669400
+   electronic    0.00000000      0.00000000     -1.40220961
+   total         0.00000000      0.00000000      0.81448439
+   total Dipole moment =   2.07021487    Debye
+
+  === second moment === 
+                     XX              XY              XZ              YY  
+   nuclear       4.09809820      0.00000000      0.00000000      0.00000000
+   electronic   -7.15750531      0.00000000      0.00000000     -5.23077457
+   total        -3.05940710      0.00000000      0.00000000     -5.23077457
+
+  === quadrupole moment === 
+                    QXX             QXY             QXZ             QYY             Q
+   nuclear       2.86966513      0.00000000      0.00000000     -3.27748217
+   electronic   -1.30719543      0.00000000      0.00000000      1.58290068
+   total         1.56246971      0.00000000      0.00000000     -1.69458150
+  
+                    QYZ             QZZ             Q
+   nuclear       0.00000000      0.40781704
+   electronic    0.00000000     -0.27570525
+   total         0.00000000      0.13211179
+
+ --------------------------------------------------- 
+  using the SCF MOs ... 
+starting cidrt.x   -m 1843 < cidrtin > cidrtls  at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- cidrt.x ------------------------
+ total number of orbitals            :    24
+ number of frozen core orbitals      :     0
+ number of frozen virtual orbitals   :     0
+ number of internal orbitals         :     5
+ number of external orbitals         :    19
+ spatial symmetry:   a1 
+ 
+ total number of configurations       1311
+ number of reference configurations     1
+ --------------------------------------------------- 
+ starting tran.x -m 1843  at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- tran.x ------------------------
+ --------------------------------------------------- 
+ skipping cisrt.x call .... 
+ no nroot/froot entry in ciudgin, using default nroot=1 
+starting ciudg.x -m 1843 at Mon Nov  9 17:22:14 EST 2026
+
+  waiting after driverwrap ....                     0
+ -------------------- ciudg.x ------------------------
+ type of calculation:          mr-sdci
+ number of configurations:     1311
+ total mr-sdci energy              -76.2305400880 
+ last mr-sdci energy change           0.0000000296 
+ residual                             0.0000773640 
+  c0**2 =   0.95069902  c**2 (all zwalks) =   0.95069902
+ mr-sdci+(1-c0**2)*(eci-eref)             =     -76.240655896000 
+ mr-sdci+(1-c0**2)/(c0**2)*(eci-eref)     =     -76.241180477602 
+ mr-sdci+(1-c0**2)/(2*c0**2-1)*(eci-eref) =     -76.241762442033 
+ --------------------------------------------------- 
+ starting cipc.x -m 1843 < cipcin > cipcls at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- cipc.x ------------------------
+ --------------------------------------------------- 
+  --- ci properties for state 1 of  DRT 1 ----
+starting exptvl.x -m 1843  at Mon Nov  9 17:22:14 EST 2026
+
+ -------------------- exptvl.x ------------------------
+  === dipole moment === 
+                     X               Y               Z   
+   nuclear       0.00000000      0.00000000      2.21669400
+   electronic    0.00000000      0.00000000     -1.43767481
+   total         0.00000000      0.00000000      0.77901919
+   total Dipole moment =   1.98007125    Debye
+
+  === second moment === 
+                     XX              XY              XZ              YY  
+   nuclear       4.09809820      0.00000000      0.00000000      0.00000000
+   electronic   -7.25744270      0.00000000      0.00000000     -5.24934032
+   total        -3.15934449      0.00000000      0.00000000     -5.24934032
+
+  === quadrupole moment === 
+                    QXX             QXY             QXZ             QYY             Q
+   nuclear       2.86966513      0.00000000      0.00000000     -3.27748217
+   electronic   -1.36402963      0.00000000      0.00000000      1.64812394
+   total         1.50563550      0.00000000      0.00000000     -1.62935823
+  
+                    QYZ             QZZ             Q
+   nuclear       0.00000000      0.40781704
+   electronic    0.00000000     -0.28409431
+   total         0.00000000      0.12372273
+
+ --------------------------------------------------- 
+ 
+
+============== timings ===================
+
+   unik.gets.x    
+   hernew.x       
+   dalton.x       
+   ffield.x       
+   scfpq.x        
+   exptvl.x       
+   cidrt.x        
+   tran.x         
+   ciudg.x        
+   cipc.x         
+   exptvl.x       
+
+==========================================
+

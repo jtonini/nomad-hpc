@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.35.3 (November 2026)
+
+- `columbus-water` keeps its first run on spydur (9 November, job 89551:
+  condos, 1 CPU, 1 s, 121 MB) and what it wrote: the SCF energy
+  -76.0253553484, the CI energy -76.2305400880 and the dipole moment
+  1.98007125 D, exactly as COLUMBUS's own example has them.
+- Its log entry reads what runc 7.2.2 writes (when it started, and the
+  energies along the way); its timings list names the programs only.
+
 ## v1.35.2 (November 2026)
 
 - **A memory request of 2 GB or less isn't judged** ("not judged", with
