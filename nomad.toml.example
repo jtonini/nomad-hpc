@@ -1009,6 +1009,8 @@ share = 0.8
 # dirs = ["/usr/local/sw/nomad-demos"]   # a site's own kits (folders of kit folders)
 # bundled = true                         # also the kits that come with nomad
 # into = "~/nomad-demos"                 # where nomad demos copy puts a copy: a new folder each time
+# partition = { spydur = "condos" }      # where practice runs with no GPU are sent (default: the template's)
+# gpu_partition = "gpunodes"             # and those with one (a name: every site)
 
 # [submit.preemption] — Guests on condos, and the owners' first claim (1.28.0;
 # the hub's nomad.toml; docs/submit.md). Slurm's configuration is the switch;

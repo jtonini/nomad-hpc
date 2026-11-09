@@ -219,6 +219,7 @@ def demos_scripts(ctx, site, on_hub, root, out):
     dest.mkdir(parents=True, exist_ok=True)
     dest.chmod(0o755)                       # scripts for others to send: readable, whatever the umask
     got, _ = K.kits(config)
+    s = K.settings(config)
     made = 0
     for k in got:
         p = offer.get(k.program.lower())
@@ -230,7 +231,7 @@ def demos_scripts(ctx, site, on_hub, root, out):
             m = TT.make(config, site, p["program"], module=p["choose"], available=mods,
                         input_path=folder if k.input == "." else posixpath.join(folder, k.input),
                         cpus=k.cpus, mem=k.mem, time=k.time, gpus=k.gpus or None,
-                        choose=dict(k.choose) or None)
+                        partition=s.partition_for(site, k.gpus), choose=dict(k.choose) or None)
         except TT.TemplateError as e:
             click.echo(f"  !! {k.name:<22} {e}")
             continue

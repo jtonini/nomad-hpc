@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.34.1 (November 2026)
+
+From the practice runs' first runs on spydur (9 Nov):
+
+- `[submit.demos] partition` and `gpu_partition` (a name, or `{ site =
+  partition }`): where practice runs are sent, so they don't wait behind
+  long research jobs (spydur: the condo guest queue).
+- amber-peptide: a box pmemd.cuda accepts (16 A of water around the
+  peptide; the GPU code refused a smaller one), and 100 ps.
+- gromacs-water: 2 ns, about a minute and a half on an A40 (100 ps took 7 s).
+- rfdiffusion-backbone: RFdiffusion keeps its noise schedules in the job's
+  folder (`inference.schedule_directory_path`); its own folder in the
+  container is read-only, so a run without it fails. The template's run line
+  needs the same for everyone's jobs (docs/demos.md).
+
 ## v1.34.0 (November 2026)
 
 ### New

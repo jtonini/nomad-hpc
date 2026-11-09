@@ -45,6 +45,8 @@ Kits come with nomad (nomad/demos/kits) and from a site's own folders::
     dirs = ["/usr/local/share/nomad-demos"]   # folders of kit folders (a site's own, and those built there)
     bundled = true                            # also the kits that come with nomad (default)
     into = "~/nomad-demos"                    # where a copy goes: a new folder each time
+    partition = { spydur = "condos" }         # where practice runs with no GPU are sent (default: the template's)
+    gpu_partition = "gpunodes"                # and those with one (a name: every site)
 
 A site's kit of the same name is used instead of nomad's (a built one).
 Copying never writes over anything; building runs a kit's commands as
@@ -83,6 +85,7 @@ _MEM = re.compile(r"^[1-9][0-9]{0,4}[MG]$")
 _TIME = re.compile(r"^(?:[0-9]{1,2}-)?[0-9]{1,2}:[0-5][0-9]:[0-5][0-9]$")
 _MODULE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+/-]{0,127}$")
 _OPTION = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+_PARTITION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _KEYS = {"name", "program", "title", "about", "licence", "licence_note", "source", "input", "files", "cpus",
          "mem", "time", "gpus", "minutes", "choose", "look", "build", "recorded"}
 _LOOK_KEYS = {"file", "what", "match"}
@@ -248,7 +251,15 @@ class Settings:
     dirs: tuple = ()
     bundled: bool = True
     into: str = DEFAULT_INTO
+    partition: dict = field(default_factory=dict)       # site -> where practice runs with no GPU go ("*": any site)
+    gpu_partition: dict = field(default_factory=dict)   # site -> where those with a GPU go
     problems: tuple = ()
+
+    def partition_for(self, site: str | None, gpus: int = 0) -> str | None:
+        """Where a practice run is sent at ``site``: the setting for its kind
+        (GPU or not), that site's or "*"; None: its template's."""
+        d = self.gpu_partition if gpus else self.partition
+        return d.get(site) or d.get("*") if site else d.get("*")
 
 
 def settings(config: dict | None) -> Settings:
@@ -259,7 +270,8 @@ def settings(config: dict | None) -> Settings:
         return Settings()
     if not isinstance(raw, dict):
         return Settings(problems=("[submit.demos] should be a table: ignored",))
-    problems = [f"[submit.demos] {k}: unknown setting" for k in sorted(set(raw) - {"dirs", "bundled", "into"})]
+    problems = [f"[submit.demos] {k}: unknown setting"
+                for k in sorted(set(raw) - {"dirs", "bundled", "into", "partition", "gpu_partition"})]
     dirs = raw.get("dirs", [])
     if isinstance(dirs, str):
         dirs = [dirs]
@@ -274,7 +286,22 @@ def settings(config: dict | None) -> Settings:
     if not isinstance(into, str) or not (into.startswith("/") or into.startswith("~/")):
         problems.append(f"[submit.demos] into should be a full path or one in your home (~/...): {DEFAULT_INTO} used")
         into = DEFAULT_INTO
-    return Settings(dirs=tuple(dirs), bundled=bundled, into=into, problems=tuple(problems))
+    parts = {}
+    for key in ("partition", "gpu_partition"):
+        v = raw.get(key)
+        if v is None:
+            parts[key] = {}
+        elif isinstance(v, str) and _PARTITION.match(v):
+            parts[key] = {"*": v}
+        elif isinstance(v, dict) and all(isinstance(k, str) and isinstance(x, str) and _PARTITION.match(x)
+                                         for k, x in v.items()):
+            parts[key] = dict(v)
+        else:
+            problems.append(f"[submit.demos] {key} should be a partition's name, or {{site = partition}}: "
+                            "the templates' used")
+            parts[key] = {}
+    return Settings(dirs=tuple(dirs), bundled=bundled, into=into, partition=parts["partition"],
+                    gpu_partition=parts["gpu_partition"], problems=tuple(problems))
 
 
 def kits(config: dict | None = None, program: str | None = None, ready_only: bool = False) -> tuple[list, list]:

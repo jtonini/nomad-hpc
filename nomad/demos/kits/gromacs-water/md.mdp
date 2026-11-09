@@ -1,10 +1,10 @@
-; A practice run (nomad demos): 100 ps of water at 300 K. Its results mean nothing for research.
+; A practice run (nomad demos): 2 ns of water at 300 K. Its results mean nothing for research.
 integrator          = md
 dt                  = 0.002
-nsteps              = 50000
-nstxout-compressed  = 5000
-nstenergy           = 500
-nstlog              = 5000
+nsteps              = 1000000
+nstxout-compressed  = 50000
+nstenergy           = 5000
+nstlog              = 50000
 cutoff-scheme       = Verlet
 coulombtype         = PME
 rcoulomb            = 1.0

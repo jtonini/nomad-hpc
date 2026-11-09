@@ -97,4 +97,25 @@ writes itself (a folder with a `kit.toml`; see `nomad/demos/kits.py`).
 dirs = ["/usr/local/sw/nomad-demos"]   # a site's own kits (folders of kit folders)
 bundled = true                         # also the kits that come with nomad (default)
 into = "~/nomad-demos"                 # where a copy goes: a new folder each time
+partition = { spydur = "condos" }      # where practice runs with no GPU are sent (default: the template's)
+gpu_partition = "gpunodes"             # and those with one (a name: every site)
 ```
+
+A practice run that waits days behind long research jobs teaches the wrong
+lesson. Send them where they start within minutes: a short partition, a
+reservation, or a condo guest queue (they are short, so being put back in
+the queue hardly matters).
+
+## What the first runs found (spydur, 9 Nov 2026)
+
+Practice runs double as a check of the cluster's own software. The first
+runs found, beyond the kits:
+
+- modules that point at software no longer there (`namd/2.11`,
+  `orca/orca` 3.0.3, `molcas/8.0`: builds in `/usr/local/...` from an older
+  cluster);
+- a licence tied to some nodes only (Q-Chem on a condo node);
+- a template whose program writes into its read-only container
+  (RFdiffusion: give it `inference.schedule_directory_path="$PWD/schedules"`
+  on the run line);
+- a licence group doing its job (Gaussian: `chem`).

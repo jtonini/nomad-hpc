@@ -7,6 +7,7 @@ defaults:
 inference:
   output_prefix: designs/practice
   num_designs: 1
+  schedule_directory_path: schedules     # RFdiffusion keeps these; its own folder is read-only
 
 contigmap:
   contigs: ["50-50"]

@@ -264,3 +264,27 @@ def test_copy_from_a_sites_built_kits(tmp_path, monkeypatch):
     r = run.invoke(cli, ["demos", "copy", "gromacs-water", "--from", str(tmp_path / "built"), "--to", str(tmp_path / "b")])
     assert r.exit_code == 0, r.output
     assert (tmp_path / "b" / "water.tpr").read_bytes() == b"tpr"
+
+
+def test_where_practice_runs_are_sent(tmp_path, monkeypatch):
+    s = K.settings({"submit": {"demos": {"partition": {"spydur": "condos"}, "gpu_partition": "gpunodes"}}})
+    assert s.partition_for("spydur", 0) == "condos" and s.partition_for("arachne", 0) is None
+    assert s.partition_for("spydur", 1) == "gpunodes" and s.partition_for("arachne", 1) == "gpunodes"
+    bad = K.settings({"submit": {"demos": {"partition": "no spaces"}}})
+    assert bad.partition == {} and bad.problems
+    import sqlite3
+    from nomad.cli import cli
+    from nomad.demos import cli as C
+    db = tmp_path / "combined.db"
+    sqlite3.connect(db).close()
+    cfg = {"submit": {"templates": TEMPLATES, "demos": {"partition": {"spydur": "condos"}}},
+           "hub": {"output_db": str(db)}}
+    monkeypatch.setattr(C, "_config", lambda ctx: cfg)
+    monkeypatch.setattr("nomad.collectors.modules.available",
+                        lambda conn, site=None: ["R/4.4.2", "gromacs/2026.2-gpu", "rfdiffusion/latest"])
+    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "spydur", "--hub", "--root", "/home/me/p",
+                                 "--out", str(tmp_path / "out")])
+    assert r.exit_code == 0, r.output
+    assert "--partition=condos" in (tmp_path / "out" / "r-bootstrap.sh").read_text()
+    gpu = (tmp_path / "out" / "rfdiffusion-backbone.sh").read_text()
+    assert "--partition=condos" not in gpu and "--gres=gpu:1" in gpu

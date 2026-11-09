@@ -1,10 +1,10 @@
 name = "amber-peptide"
 program = "AMBER"
-title = "A small peptide in water: 20 ps of it moving"
+title = "A small peptide in water: 100 ps of it moving"
 about = """
-pmemd follows a small peptide (Ace-Ala-Nme) in a box of about 600 water
-molecules for 20 ps at 300 K, on a GPU (or one CPU core, if you choose that:
-then it takes a few minutes, which is the difference a GPU makes). md.out
+pmemd follows a small peptide (Ace-Ala-Nme) in a box of about 2,000 water
+molecules for 100 ps at 300 K, on a GPU (or one CPU core, if you choose that:
+then it takes much longer, which is the difference a GPU makes). md.out
 shows the energies as it goes and, at the end, how fast it ran (ns/day). The
 topology and starting structure were made once when the kit was built at your
 site.
@@ -18,11 +18,11 @@ cpus = 1
 gpus = 1
 mem = "2G"
 time = "00:20:00"
-minutes = 1
+minutes = 2
 
 [[look]]
 file = "md.out"
-what = "The energies every 1,000 steps (TEMP(K) is the temperature)"
+what = "The energies every 5,000 steps (TEMP(K) is the temperature)"
 match = "NSTEP ="
 
 [[look]]

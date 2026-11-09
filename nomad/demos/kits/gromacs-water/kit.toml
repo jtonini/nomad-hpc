@@ -1,8 +1,8 @@
 name = "gromacs-water"
 program = "GROMACS"
-title = "A box of water on a GPU: 100 ps of its molecules moving"
+title = "A box of water on a GPU: 2 ns of its molecules moving"
 about = """
-GROMACS follows about 2,000 water molecules (SPC/E) for 100 ps at 300 K, on a
+GROMACS follows about 2,000 water molecules (SPC/E) for 2 ns at 300 K, on a
 GPU. Its log says which GPU it used and, at the end, how fast it ran
 (ns/day: nanoseconds simulated in a day of running). The trajectory is
 water.xtc. The input (water.tpr) was made once when the kit was built at
@@ -21,7 +21,7 @@ minutes = 2
 [[look]]
 file = "water.log"
 what = "The GPU it found and used"
-match = "GPU"
+match = "GPUs? detected|#[0-9]+: NVIDIA|GPUs? selected|GPU tasks? in"
 
 [[look]]
 file = "water.log"

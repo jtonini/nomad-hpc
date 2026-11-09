@@ -2,6 +2,6 @@
 source leaprc.protein.ff14SB
 source leaprc.water.tip3p
 m = sequence { ACE ALA NME }
-solvatebox m TIP3PBOX 10.0
+solvatebox m TIP3PBOX 16.0
 saveamberparm m peptide.prmtop start.rst7
 quit
