@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.37.0 (November 2026)
+
+- **A site watches its hub.** The hub said so when a site stopped
+  answering; nothing said so when the hub itself stopped (its disk died one
+  night, and every page showed that evening's data until someone looked).
+  Each time the hub reads a site it now leaves a note there (its name, when
+  it read), and after each collection the site's own nomad checks: a hub
+  that read it regularly (twenty times over a day) and has not for
+  `[alerts.hub] after_minutes` (60; three of its usual intervals when that
+  is longer) is said so through the site's own alert backends, source
+  `hub`: a warning, critical after a day, once, again when worse, then
+  every `reminder_hours`. Only silence the site saw counts: after its own
+  outage the hub has the time again. A hub silent for a week is taken as
+  retired. Starts a day after the hub and the site are on 1.37.
+- **Declared maintenance**: `nomad maintenance start SITE --until WHEN
+  --reason WHY [--from WHEN]`, `nomad maintenance end SITE` (both show what
+  they would do; `--apply` does it), `nomad maintenance` (now, coming,
+  lately). SITE is one of the hub's sites, `all`, or `hub`. While a site's
+  window lasts, and `[hub] maintenance_grace_minutes` (60) after it, the hub
+  holds every alert it raises about that site, and the site's own nomad
+  holds its alerts too (the hub tells it at once, and with each read;
+  `[alerts] maintenance_hold = false` at a site keeps them coming; the hold
+  lapses a day after the hub's last read). What still holds afterwards is
+  raised then, as news, with when the window ended; what came and went
+  during the window is not sent afterwards. For `hub`, the sites don't
+  report the hub as silent. A window always ends (`--until`, at most `[hub]
+  maintenance_max_days`, 14); one per site at a time. The windows are kept
+  in `maintenance.json` beside the hub's combined database.
+- `nomad sync` says what is in maintenance; its "not synced" alerts name
+  their site, so one in maintenance is held.
+- The Console may ask for them: actions `maintenance` (what is declared),
+  `maintenance.start` and `maintenance.end` (a dry run unless applied, as a
+  node's drain).
+
 ## v1.36.0 (November 2026)
 
 - **`nomad lab check names --set`**: the PIs' names for the lab check's

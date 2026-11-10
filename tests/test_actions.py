@@ -102,11 +102,13 @@ def test_check_sites_and_periods():
 def test_catalog_is_read_only_json():
     cat = actions.catalog()
     assert json.loads(json.dumps(cat)) == cat
-    # 1.31: the only two that change something, each a dry run unless its apply flag is set, on sites only
+    # The only ones that change something, each a dry run unless its apply flag is set: a node's
+    # (1.31) on sites only, a maintenance window's (1.37) on the hub only
     changing = {a["name"]: a for a in cat if not a["read_only"]}
-    assert set(changing) == {"node.drain", "node.resume"}
+    assert set(changing) == {"node.drain", "node.resume", "maintenance.start", "maintenance.end"}
     for a in changing.values():
-        assert a["where"] == ["site"] and a["apply"] == "apply"
+        assert a["where"] == (["hub"] if a["name"].startswith("maintenance.") else ["site"])
+        assert a["apply"] == "apply"
         assert next(p for p in a["params"] if p["name"] == "apply") == {
             "name": "apply", "kind": "flag", "help": "Make the change (otherwise a dry run: what would change)",
             "required": False, "default": False}

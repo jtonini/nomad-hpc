@@ -37,6 +37,12 @@ does:
 * ``--forget --hub H``: hub H no longer reads this site; with no other hub
   heard from lately, the log and its triggers are taken out.
 * ``--remove``: the log and its triggers taken out.
+* ``--hub-name N``, ``--quiet FROM,UNTIL``, ``--maint FROM,UNTIL[,HELD]
+  --reason R`` with any of the above but the last two, or alone with
+  ``--note`` (1.37.0): what the hub says of itself, kept in ``_nomad_hubs``
+  with when it read. The site's own nomad reads it (nomad.hub_watch): to say
+  so when a hub that read it regularly stops, and to hold its alerts while
+  the site is in maintenance.
 
 Output: a marker line (whatever the site prints before it, a login message,
 is not read), then JSON lines, gzip-compressed: a header, per table its
@@ -91,6 +97,16 @@ PART = 200000
 PRUNE_BATCH = 50000
 PRUNE_PAUSE = 0.1
 DEFAULT_HUB = "hub"
+# What each hub that reads this site says of itself (1.37.0): its name, when
+# it read, when it will be away, when this site is in maintenance. Kept apart
+# from the log (it outlives it): the site's own nomad reads it to notice a
+# hub that stopped reading (nomad.hub_watch), and to hold its alerts while
+# the site is in maintenance.
+HUBS = "_nomad_hubs"
+MAX_WINDOW = 14 * 86400 + 7200  # a window longer than this is not taken (14 days, and the hours a
+                                # change of daylight saving time can add to 14 days by the calendar)
+MAX_HELD = 86400                # nor alerts held longer than this past its end
+RETIRED_DAYS = 7                # a hub not heard from this long is forgotten (as EXPIRE_DAYS)
 # A hub heard from within this long keeps the log from being dropped past
 # its place (a second hub, a trial sync to another file); one silent longer
 # is not waited for (it copies the database if it comes back).
@@ -304,15 +320,21 @@ def install(conn, skip=(), hub=None):
     return epoch, resend
 
 
-def remove(conn):
+def remove(conn, notes=True):
     """The log and its triggers taken out (going back to a nomad that copies
-    whole databases, or nothing reads the log any more)."""
+    whole databases, or nothing reads the log any more). ``notes``: the
+    hubs' notes too (``--remove``: a hub that takes the log out is going
+    back to copying whole databases with a nomad that leaves no notes, and
+    the site would take its silence for a hub that stopped). A log that goes
+    because no hub has read it for EXPIRE_DAYS keeps them: a hub away that
+    long on purpose (its declared window) is still to be reported if it
+    stays silent after it."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         names = list(_our_triggers(conn))
         for n in names:
             conn.execute("DROP TRIGGER IF EXISTS %s" % _q(n))
-        for t in (LOG, CAPTURE, META):
+        for t in (LOG, CAPTURE, META) + ((HUBS,) if notes else ()):
             conn.execute("DROP TABLE IF EXISTS %s" % t)
         conn.execute("COMMIT")
     except BaseException:
@@ -425,7 +447,7 @@ def forget(conn, hub, now=None):
         raise
     if not [h for h, (_, heard) in _hubs(conn).items()
             if heard is not None and heard >= now - EXPIRE_DAYS * 86400]:
-        return remove(conn)
+        return remove(conn, notes=False)          # this hub's own note: forget_note
     prune(conn, now)
     return 0
 
@@ -450,7 +472,7 @@ def expire(conn, now=None, days=EXPIRE_DAYS, max_log=MAX_LOG):
             except (TypeError, ValueError):
                 pass
     if times and now - max(times) > days * 86400:
-        remove(conn)
+        remove(conn, notes=False)
         return "removed"
     top = last_seq(conn)
     if top - int(meta.get("pruned") or 0) <= 2 * max_log:
@@ -602,6 +624,81 @@ def _token_for(conn, hub, held):
         conn.execute("ROLLBACK")
         raise
     return token
+
+
+def window(text):
+    """"FROM,UNTIL[,HELD]" (epoch seconds) as "from,until,held", or None when
+    it is not a window this site takes: not numbers, an end before its
+    start, longer than MAX_WINDOW, or held more than MAX_HELD past its end
+    (then held to its end)."""
+    try:
+        parts = [int(float(x)) for x in str(text or "").split(",")]
+    except (TypeError, ValueError):
+        return None
+    if len(parts) not in (2, 3):
+        return None
+    start, until = parts[0], parts[1]
+    if start < 0 or until <= start or until - start > MAX_WINDOW:
+        return None
+    held = parts[2] if len(parts) == 3 else until
+    if held < until or held - until > MAX_HELD:
+        held = until
+    return "%d,%d,%d" % (start, until, held)
+
+
+def _text(value, limit):
+    value = " ".join(str(value or "").split())
+    return "".join(c for c in value if c.isprintable())[:limit]
+
+
+def note(conn, hub, name=None, quiet=None, maint=None, reason=None, now=None, read=True):
+    """What hub ``hub`` says with this call: its name, the window it will be
+    away for (``quiet``) and the one this site is in maintenance for
+    (``maint``, with why). What it does not say this time is no longer so.
+    ``read``: it read the site with this call (counted, and when); False
+    for a note alone (``--note``: a hub whose reads have stopped is not made
+    to look alive by declaring a window). Hubs not heard from for
+    RETIRED_DAYS are forgotten. Returns the windows as kept ({"quiet",
+    "maint"}: None for one not taken)."""
+    now = _now() if now is None else int(now)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS %s (hub TEXT PRIMARY KEY, name TEXT, first INTEGER, "
+                     "seen INTEGER, reads INTEGER, quiet TEXT, maint TEXT, reason TEXT, noted INTEGER)" % HUBS)
+        row = conn.execute("SELECT first, seen, reads FROM %s WHERE hub = ?" % HUBS, (hub,)).fetchone()
+        first, seen, reads = (row[0], row[1], int(row[2] or 0)) if row else (None, None, 0)
+        if read:
+            first, seen, reads = (now if first is None else first), now, reads + 1
+        quiet, maint = window(quiet), window(maint)
+        conn.execute("INSERT OR REPLACE INTO %s (hub, name, first, seen, reads, quiet, maint, reason, noted) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)" % HUBS,
+                     (hub, _text(name, 64) or None, first, seen, reads, quiet, maint,
+                      (_text(reason, 200) or None) if maint else None, now))
+        # Retired: not heard from for RETIRED_DAYS, counted from the end of
+        # the window it said it would be away for when that is later (a hub
+        # away ten days on purpose is still one to report if it stays silent).
+        for other, last, said, away in conn.execute(
+                "SELECT hub, seen, noted, quiet FROM %s" % HUBS).fetchall():
+            times = [last if last is not None else said]
+            try:
+                times.append(int(str(away).split(",")[1]) if away else None)
+            except (ValueError, IndexError):
+                pass
+            if max([int(x) for x in times if x is not None] or [0]) < now - RETIRED_DAYS * 86400:
+                conn.execute("DELETE FROM %s WHERE hub = ?" % HUBS, (other,))
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return {"quiet": quiet, "maint": maint}
+
+
+def forget_note(conn, hub):
+    """Hub ``hub`` no longer reads this site: nothing to watch for."""
+    try:
+        conn.execute("DELETE FROM %s WHERE hub = ?" % HUBS, (hub,))
+    except sqlite3.OperationalError:
+        pass                                      # never noted here
 
 
 def init(conn, skip=(), hub=DEFAULT_HUB):
@@ -773,6 +870,11 @@ def main(argv=None, out=None):
     ap.add_argument("--epoch")
     ap.add_argument("--token")
     ap.add_argument("--max-log", type=int, default=MAX_LOG)
+    ap.add_argument("--note", action="store_true", help="only what the hub says of itself (below)")
+    ap.add_argument("--hub-name", help="the hub's name, for the site's own messages")
+    ap.add_argument("--quiet", help="FROM,UNTIL: the hub will be away (its own maintenance)")
+    ap.add_argument("--maint", help="FROM,UNTIL[,HELD]: this site is in maintenance")
+    ap.add_argument("--reason", help="why, for --maint")
     args = ap.parse_args(argv)
     out = out if out is not None else sys.stdout.buffer
     path = _db_path(args.db)
@@ -784,17 +886,37 @@ def main(argv=None, out=None):
     try:
         if args.remove:
             write([{"removed": remove(conn)}], out)
-        elif args.forget:
-            write([{"forgot": True, "removed": forget(conn, args.hub)}], out)
+            return 0
+        if args.forget:
+            removed = forget(conn, args.hub)
+            forget_note(conn, args.hub)
+            write([{"forgot": True, "removed": removed}], out)
+            return 0
+        if args.note:
+            pass
         elif args.init:
             write([init(conn, skip, args.hub)], out)
         elif args.whole:
             write(export_whole(conn, skip, args.hub), out)
         else:
             if args.since is None:
-                sys.stderr.write("--since, --init or --whole\n")
+                sys.stderr.write("--since, --init, --whole or --note\n")
                 return 2
             write(export(conn, args.since, args.epoch, skip, args.max_log, args.hub, args.token), out)
+        # The hub was here: noted last, once its answer has been written (a
+        # hub that could not take the answer is not one that read the site).
+        kept = {}
+        if args.note or args.hub_name is not None or args.quiet or args.maint:
+            try:
+                kept = note(conn, args.hub, args.hub_name, args.quiet, args.maint, args.reason,
+                            read=not args.note)
+            except sqlite3.Error:
+                if args.note:
+                    raise                         # all it was asked to do
+        if args.note:
+            # With the windows as kept: one this site does not take (too
+            # long) is not answered as taken.
+            write([{"noted": True, "quiet": kept.get("quiet"), "maint": kept.get("maint")}], out)
     except sqlite3.Error as e:
         sys.stderr.write("sqlite: %s\n" % e)
         return 2

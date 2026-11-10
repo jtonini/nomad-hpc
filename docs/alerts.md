@@ -189,6 +189,126 @@ the hub's alert database says its retry is due (after 15 minutes, then
 longer), not a day later. Leave the site's own `[alerts]` without backends,
 or it sends them too.
 
+### The hub stopped reading a site (1.37.0)
+
+The hub says so when a site stops answering. When the hub itself stops (its
+disk died, it lost the network, its sync timer stopped), every page shows the
+data it had and nobody is told. Each site now notices.
+
+Each time the hub reads a site (`nomad sync`), it leaves a note in the site's
+database: its name and when it read. After each collection the site's own
+nomad looks at the notes, and when a hub that read it regularly has not for
+`after_minutes`, it raises an alert through the site's own `[alerts]`
+backends, with source `hub`:
+
+> The hub mingus has not read spydur for 1 h (last at 2026-11-10 12:59): its
+> pages show spydur as of then. If it reads no site, it is down, cannot reach
+> the sites, or its sync has stopped.
+
+A warning, critical after a day; once, again when worse, then every
+`reminder_hours` while it lasts. A hub that reads again is forgotten, so its
+next silence is news. Every site with alert backends says so, each about
+itself: that several do is how you know it is the hub.
+
+- A hub counts once it has read the site twenty times over at least a day:
+  a trial sync is not a hub to miss. So after upgrading, the watch starts a
+  day later.
+- One that reads seldom is given three of its usual intervals when that is
+  longer than `after_minutes`: a hub that syncs every two hours is not
+  missed after one.
+- Only silence the site saw counts. After the site's own outage (a reboot,
+  its collection stopped for ten minutes or more), the hub has
+  `after_minutes` again from when collection resumed: the site was not
+  there to be read.
+- A hub silent for a week is taken as retired: the site stops saying so (the
+  last reminders say when), and takes out the change log it kept for it.
+- A hub taken out on purpose says so first: remove the site from its
+  `[hub] sites` and sync once (the site forgets it), or declare its
+  maintenance (below).
+- Needs nomad 1.37 on the hub and on the site, and alert backends at the
+  site (`[alerts]` there): a site with none has nobody to tell.
+- A site the hub can only copy whole (it cannot run its exporter there:
+  `nomad sync` says "copying it whole") gets no note: it does not watch the
+  hub, and of the alerts about it only the hub's are held in maintenance.
+
+```toml
+# at each site
+[alerts.hub]
+enabled = true          # watch the hub (default)
+after_minutes = 60      # silent this long: say so
+```
+
+### Declared maintenance (1.37.0)
+
+A site taken down on purpose and one that broke look the same from the hub.
+A window says which:
+
+```bash
+nomad maintenance start cluster-a --until "2026-11-12 18:00" --reason "OS patches" --apply
+nomad maintenance start hub --from 14:00 --until 16:00 --reason "new disk" --apply
+nomad maintenance start all --until +4h --reason "switch firmware" --apply
+nomad maintenance end cluster-a --apply
+nomad maintenance                   # now, coming, the last 7 days
+```
+
+Run them on the hub. `start` and `end` show what they would do; `--apply`
+does it. Times: `"2026-11-12 18:00"`, `18:00` (today; tomorrow when that has
+passed), `+4h`, `+90m`, `+2d`. `--until` counts from the start: with `--from
+14:00`, `--until +2h` is 16:00, and `--until 18:00` is the first 18:00 after
+14:00. The first line of what `start` shows is the window as it will be.
+
+While a site's window lasts, and for `maintenance_grace_minutes` (60) after
+it for the site to come back:
+
+- **the hub holds every alert it raises about that site**: not synced, not
+  collecting, a collector or a GPU node stopped, and for sites whose alerts
+  the hub sends, their nodes, clocks and power supplies;
+- **the site's own nomad holds its alerts too**: the hub tells it of the
+  window each time it reads it, and at once when the window is declared
+  (`[alerts] maintenance_hold = false` at a site keeps its own coming);
+- **the Console shows it as in maintenance**, with the reason, not as stale.
+
+What still holds once the window and its grace are over is raised then, as
+news, saying when the window ended. What only happened during it and is
+over by then (an entry in a board's event log, a node that went down and
+came back) is not sent afterwards. Test alerts (`nomad test-alerts`) are
+always sent.
+
+`start --apply` and `end --apply` tell each site at once and say how it
+went: `told`, or `not reached now; told when the hub next reads it` (a site
+already down holds nothing of its own to send anyway). A site holds its
+alerts on its hub's word only while that hub keeps reading it: a day after
+the hub's last read the hold lapses, so a hub that died after declaring a
+long window does not keep a site quiet.
+
+`nomad maintenance end SITE` ends one thing at a time: the window running;
+else the grace after one just over (the site is back: its alerts are no
+longer held); else the window coming, which is called off. A window ended by
+hand has no grace. A window declared while the grace of the one before
+still holds is told to the site as one with it.
+
+`hub` is the hub itself: during its window the sites don't report it as
+silent; one still silent an hour after the window is reported, with when
+the window ended. Nothing of the hub's own is held for it. Declare it before
+taking the hub down: the sites learn of it from the hub.
+
+A window always ends: it needs `--until`, and can't be longer than
+`maintenance_max_days` (14, the most a site takes). One window per site at a
+time: declaring another replaces it. The windows, past ones too, are kept in
+`maintenance.json` beside the hub's combined database (`[hub] output_db`):
+run the commands as the account the hub's nomad runs as, which is the one
+that can write there. A file that can't be read is no windows: alerts go on,
+and a sync never stops for it. `nomad maintenance` at a site shows what its
+hub told it.
+
+```toml
+# on the hub
+[hub]
+maintenance_grace_minutes = 60     # alerts held this long after a window, for the site to come back
+maintenance_max_days = 14          # the longest window (14 at most)
+# maintenance_file = "/var/lib/nomad/maintenance.json"   # default: beside the combined database
+```
+
 ### A node that fails every job at start (1.25.4)
 
 A node that is up, idle and taking jobs, but whose jobs all fail within

@@ -6,6 +6,11 @@ every ``[alerts] reminder_hours`` while the condition lasts.
 What has been sent is kept in a small JSON file beside the hub's data, so it
 holds whether or not the hub's nomad.toml names a database for alert_state. A
 condition no longer due is forgotten, so its return is news.
+
+An alert about a site in a declared maintenance window (nomad.maintenance,
+1.37.0) is held: not sent, and what was sent about it before is forgotten,
+so whatever still holds when the window (and its grace) is over is sent
+then, as news, with when the window ended.
 """
 from __future__ import annotations
 
@@ -23,6 +28,23 @@ def reminder_hours(config: dict | None) -> float:
         return float((alerts if isinstance(alerts, dict) else {}).get("reminder_hours", 24))
     except (TypeError, ValueError):
         return 24.0
+
+
+def _about(item: dict) -> str | None:
+    """The site an alert is about: its cluster, else its site (a node's is
+    "site/node")."""
+    about = item.get("cluster") or item.get("site")
+    return str(about).split("/")[0] if about is not None else None
+
+
+def _maintenance(config, now) -> tuple[dict, dict]:
+    """({site: its window} for the sites whose alerts are held now, {site:
+    when its window ended} for those whose window ended lately)."""
+    try:
+        from nomad import maintenance
+        return maintenance.held(config, now), maintenance.ended_lately(config, now)
+    except Exception:
+        return {}, {}
 
 
 def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
@@ -47,7 +69,14 @@ def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
         sent = {}
     every = reminder_hours(config) * 3600
     raised, keep = [], {}
+    quiet, ended = _maintenance(config, now)
     for item in due:
+        about = _about(item)
+        if about in quiet:
+            continue                              # held: in maintenance
+        if about in ended:
+            item = {**item, "message": f"{item['message']} (The maintenance declared for {about} "
+                                       f"ended at {ended[about]:%Y-%m-%d %H:%M}.)"}
         key, severity = item["key"], item["severity"]
         prev = sent.get(key) if isinstance(sent.get(key), dict) else None
         try:
@@ -59,7 +88,7 @@ def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
             extra = {"site": item["cluster"]} if item.get("cluster") else {}
             result = send_alert(severity, source, item["message"], host=item.get("host"),
                                 subject=item.get("subject"), details=item.get("details"),
-                                config=config, **extra)
+                                config=config, hold=False, **extra)
             if isinstance(result, Held):
                 # The dispatcher holds it back (a retry after a failed send
                 # not due yet, say): nothing went out, so it isn't noted as
@@ -78,7 +107,8 @@ def send_once(due: list[dict], stamp: Path, source: str, config: dict | None,
             keep[key] = prev
     held = set(hold_sites or ())
     for key, prev in sent.items():
-        if key not in keep and isinstance(prev, dict) and prev.get("site") in held:
+        if (key not in keep and isinstance(prev, dict) and prev.get("site") in held
+                and str(prev.get("site")).split("/")[0] not in quiet):
             keep[key] = prev
     try:
         if keep or sent:

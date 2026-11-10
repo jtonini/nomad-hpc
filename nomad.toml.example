@@ -951,6 +951,20 @@ critical_states = ["DOWN", "NOT_RESPONDING", "FAIL", "OFFLINE", "UNREACH"]
 warning_states  = ["DRAIN", "DRNG", "DRAINING", "CLOSED", "UNAVAIL"]
 ignore_states   = []
 
+# [alerts.hub] — At a site: say so when the hub that reads this site has
+# stopped (1.37.0). A hub counts once it has read the site twenty times over
+# a day; one silent for a week is taken as retired. docs/alerts.md.
+# [alerts.hub]
+# enabled = true
+# after_minutes = 60               # silent this long: say so
+#
+# In [alerts]: maintenance_hold = false keeps this site's own alerts coming
+# while its hub has declared it in maintenance (nomad maintenance, on the hub).
+#
+# On the hub, in [hub] (declared maintenance):
+# maintenance_grace_minutes = 60   # alerts held this long after a window, for the site to come back
+# maintenance_max_days = 14        # the longest window (14 at most)
+
 # [alerts.node_jobs] — A node that fails every job at start (1.25.4): among the
 # jobs that started on a node in the last window_minutes, at least min_jobs
 # failed within fail_fast_seconds and they are at least `share` of them, while

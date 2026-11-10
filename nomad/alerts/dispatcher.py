@@ -110,7 +110,7 @@ class AlertDispatcher:
         # Track recent alerts for deduplication
         self._recent_alerts: dict[str, datetime] = {}
 
-    def dispatch(self, alert: dict) -> dict[str, bool]:
+    def dispatch(self, alert: dict, hold: bool = True) -> dict[str, bool]:
         """
         Dispatch alert to all enabled backends.
         
@@ -121,6 +121,9 @@ class AlertDispatcher:
                 - message: Human-readable message
                 - host: Hostname (optional)
                 - details: Additional data (optional)
+            hold: False for an alert that is not about this site's own
+                state (the hub's about the sites, a site's about its hub):
+                this site being in maintenance does not hold it
         
         Returns:
             Dict mapping backend name to success status
@@ -139,6 +142,18 @@ class AlertDispatcher:
         if alert_severity < min_severity:
             logger.debug(f"Alert below min severity: {alert.get('severity')} < {self.min_severity}")
             return {}
+
+        # This site in maintenance, as its hub declared it (1.37.0): its own
+        # alerts are held, not stored and not counted as raised, so what
+        # still holds when the window is over is raised then, as news. A
+        # test is always sent.
+        if hold and not (alert.get('source') == 'test' or alert.get('test')):
+            window = self._in_maintenance()
+            if window:
+                logger.info("Alert held: this site is in maintenance until %s (%s)",
+                            datetime.fromtimestamp(window['until']).strftime('%Y-%m-%d %H:%M'),
+                            window.get('reason') or 'no reason given')
+                return Held()
 
         # Which condition this is: the same disk path, mount or node on the
         # same host, whatever its numbers. (Source, host and severity alone
@@ -186,6 +201,18 @@ class AlertDispatcher:
             # until its reminder): tried again, as a failed send is.
             self._after_send(key, failed=not any(results.values()))
         return results
+
+    def _in_maintenance(self) -> dict | None:
+        """The maintenance window this site is in now (nomad.hub_watch
+        site_window), unless [alerts] maintenance_hold = false. None when
+        there is no database to read it from, or it can't be read."""
+        if not self.db_path or self.config.get('maintenance_hold', True) is False:
+            return None
+        try:
+            from nomad.hub_watch import site_window
+            return site_window(self.db_path)
+        except Exception:
+            return None
 
     def _slack(self) -> timedelta:
         """A few minutes early, so a daily reminder from 5-minute runs stays
@@ -474,6 +501,7 @@ def send_alert(
     subject: str = None,
     site: str = None,
     test: bool = False,
+    hold: bool = True,
 ) -> dict[str, bool]:
     """
     Convenience function to send an alert.
@@ -492,6 +520,9 @@ def send_alert(
             record, instead of this host's
         test: A test of this alert (nomad temps --check --send, 1.25.7):
             always sent, never counted as raised
+        hold: False when the alert is not about this site's own state (the
+            hub's about its sites, a site's about its hub): this site being
+            in maintenance does not hold it (1.37.0)
     
     Returns:
         Dict mapping backend name to success status
@@ -529,4 +560,4 @@ def send_alert(
     if test:
         alert['test'] = True
 
-    return dispatcher.dispatch(alert)
+    return dispatcher.dispatch(alert, hold=hold)

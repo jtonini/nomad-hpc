@@ -460,11 +460,50 @@ def local_db(db_path: str) -> str:
     return str(p)
 
 
+_NOTES = None            # set_notes: what this hub tells each site it reads
+
+
+def set_notes(provider) -> None:
+    """``provider(site) -> [args]``: what the hub says of itself to each site
+    it reads from here on (nomad.maintenance.site_args: its name, when it
+    will be away, the site's own maintenance window). None: nothing."""
+    global _NOTES
+    _NOTES = provider
+
+
+def _notes(site: dict, args: list) -> list:
+    """The hub's notes for ``site``, for a call that reads it (not one that
+    takes its log out or says the hub is leaving). A provider that fails
+    still says who read (its name): the read goes on, and the site does not
+    take a hub that reads for one that stopped."""
+    if _NOTES is None or {"--remove", "--forget"} & set(args):
+        return []
+    try:
+        return [str(a) for a in (_NOTES(site) or [])]
+    except Exception:
+        import socket
+        return ["--hub-name=" + socket.gethostname().split(".")[0]]
+
+
+def tell_site(site: dict, hub: str, notes: list, timeout: int = 30) -> dict | None:
+    """Tell ``site`` what the hub says of itself now, without reading it (a
+    window just declared or ended). Its answer ({"noted": True, "quiet",
+    "maint": the windows as it kept them}), or None when it could not be
+    told."""
+    try:
+        got = _first(site, ["--hub", hub, "--note"] + [str(a) for a in notes], timeout, "noted")
+    except DeltaError:
+        return None
+    return got if got.get("noted") else None
+
+
 def run_site(site: dict, args: list, timeout: int, out=None):
     """Run the exporter at ``site`` with ``args`` (its database added). What
     it wrote goes to ``out`` (a binary file) when given, else is returned.
     Raises DeltaError when it can't run there."""
     from nomad.db.pull import error_text, is_local
+    if "--note" not in args:
+        args = list(args) + _notes(site, args)
     db = site.get("db_path") or "~/.local/share/nomad/nomad.db"
     if is_local(site.get("host")):
         sink = out if out is not None else io.BytesIO()
@@ -472,6 +511,8 @@ def run_site(site: dict, args: list, timeout: int, out=None):
             rc = delta_site.main(["--db", local_db(db)] + args, out=sink)
         except (sqlite3.Error, OSError) as e:
             raise DeltaError(str(e)) from None
+        except SystemExit as e:                   # its argument parser: arguments it can't read
+            raise DeltaError(f"the exporter refused its arguments (exit {e.code})") from None
         if rc != 0:
             raise DeltaError(f"the exporter stopped (exit {rc})")
         return None if out is not None else sink.getvalue()

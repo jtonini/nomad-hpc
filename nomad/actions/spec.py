@@ -9,10 +9,11 @@ There is no shell anywhere and no way to name a command the list doesn't
 have. Patterns match whole values (a trailing newline is refused too). A site runs only the actions marked for sites, checked again by the
 site itself (it never trusts the hub's checking).
 
-Most actions only read. The two that change something (1.31: draining a
-node and resuming it) are a dry run unless their ``apply`` flag is set, as
-``--apply`` works on the command line; the Console shows the dry run, and
-asks, before it sets it. Who asked (a ``caller`` parameter) is filled in by
+Most actions only read. Those that change something (1.31: draining a
+node and resuming it; 1.37: declaring a maintenance window and ending it)
+are a dry run unless their ``apply`` flag is set, as ``--apply`` works on
+the command line; the Console shows the dry run, and asks, before it sets
+it. Who asked (a ``caller`` parameter) is filled in by
 the Console from the signed-in administrator, never by the page.
 """
 from __future__ import annotations
@@ -171,6 +172,32 @@ ACTIONS: tuple[Action, ...] = (
                   flag="--min-cell", min=2, max=50)),
            hub_db=True, timeout=1800, files=True,
            notes=("Takes a few minutes on a year of data.",)),
+    # Declared maintenance (1.37.0): what is declared, and declaring or ending
+    # a window, on the hub (it tells the sites).
+    Action("maintenance", "Maintenance windows",
+           "The maintenance declared for the sites and the hub: now, coming and lately. Alerts about a "
+           "site are held during its window.",
+           frozenset({HUB}), ("maintenance",),
+           (Param("days", "int", "Past windows of this many days", flag="--days", default=7, min=0, max=400),),
+           timeout=30),
+    Action("maintenance.start", "Declare maintenance",
+           "A site (or the hub, or all the sites) is in maintenance until a time: alerts about it are "
+           "held, the hub's and its own, and the pages say so. What still holds afterwards is raised then.",
+           frozenset({HUB}), ("maintenance", "start", "--json"),
+           (Param("site", "name", "A site's name, hub (the hub itself) or all (every site)", required=True),
+            Param("until", "text", 'When it ends: "2026-11-12 18:00", "18:00", or how long it lasts: "+4h", "+2d"',
+                  flag="--until", required=True),
+            Param("start", "text", 'When it starts: "2026-11-12 14:00", "14:00", "+1h" (default: now)',
+                  flag="--from"),
+            Param("reason", "text", "Why: shown on the pages and with the next alert", flag="--reason",
+                  required=True), _BY, _APPLY),
+           timeout=240, changes=True),
+    Action("maintenance.end", "End maintenance",
+           "A site's maintenance is over now (or its coming window is called off): alerts about it are "
+           "no longer held.",
+           frozenset({HUB}), ("maintenance", "end", "--json"),
+           (Param("site", "name", "A site's name, hub or all", required=True), _BY, _APPLY),
+           timeout=240, changes=True),
     # The first actions that change something (1.31): a dry run unless apply.
     Action("node.drain", "Drain a node",
            "No new job starts on the node; the jobs running there run to their end. Slurm keeps the "

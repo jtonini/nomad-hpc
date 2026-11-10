@@ -282,6 +282,7 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
             click.echo(f"  {status} {c.name}: {result.records_collected} records"
                        + (f" -- {why}" if why else ""))
         _expire_change_log(db_path)
+        _watch_hub(db_path, config)
     else:
         # Continuous collection
         click.echo(f"Starting continuous collection (interval: {interval}s)")
@@ -297,6 +298,7 @@ def collect(ctx: click.Context, collector: tuple, once: bool, interval: int, db:
                                f"{result.records_collected} records"
                                + (f" -- {why}" if why else ""))
                 _expire_change_log(db_path)
+                _watch_hub(db_path, config)
 
                 time.sleep(interval)
         except KeyboardInterrupt:
@@ -321,6 +323,17 @@ def _expire_change_log(db_path) -> None:
                        f"The change log for a hub's sync {done}: it grew too long unread")
     except Exception as e:
         logging.getLogger(__name__).debug(f"change log not checked: {e}")
+
+
+def _watch_hub(db_path, config) -> None:
+    """After a site's collection: say so when a hub that read this site
+    regularly has stopped (nomad.hub_watch, 1.37.0). Never stops collection."""
+    try:
+        from nomad.hub_watch import watch
+        for item in watch(db_path, config):
+            click.echo(click.style(f"  ! {item['message']}", fg="yellow"))
+    except Exception as e:
+        logging.getLogger(__name__).debug(f"hub not watched: {e}")
 
 
 @cli.command('collectors')
@@ -5803,6 +5816,21 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
         _lock_fh = None
 
     from nomad.db import delta_hub
+    # What this hub tells each site it reads (1.37.0): its name, when it will
+    # be away, and the site's own maintenance window, as declared with
+    # `nomad maintenance`.
+    from nomad import maintenance as _maint
+    _cfg_now = ctx.obj.get('config') or {}
+    delta_hub.set_notes(lambda _s: _maint.site_args(_s.get('name', ''), _cfg_now))
+    ctx.call_on_close(lambda: delta_hub.set_notes(None))
+    try:
+        for _w in _maint.listing(_cfg_now, past_days=0):
+            if _w["status"] in ("now", "grace"):
+                click.echo(f"  In maintenance: {_w['site']} until {_maint.shown(_w['until'])} ({_w['reason']})"
+                           + ("" if _w["site"] == _maint.HUB else
+                              f"; alerts about it held until {_maint.shown(_w['held_until'])}"))
+    except Exception as _e:               # what is declared can't be read: the sync goes on
+        click.echo(click.style(f"  Maintenance windows not read ({_e}): no alert is held", fg="yellow"))
     if delta_hub.is_incremental(combined_path):
         # --full too: every site copied whole, but into the database in place
         # (never a new file renamed over one the Console has open).
@@ -6739,7 +6767,7 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
         # change of daylight saving time are that hour apart (1.25.3).
         return (now.timestamp() - when.timestamp()) / 60 if when else None
 
-    due = []      # (key, subject, severity, message, details)
+    due = []      # (key, subject, severity, message, details, the site it is about)
     for name, why in sorted(failing.items()):
         # The last live pull: what the combined DB says, or the cached copy's
         # own time (a complete copy is the only thing that replaces it).
@@ -6763,7 +6791,7 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
                     f"Site {name}: {age}; the hub shows its data as of its last pull. "
                     f"Why: {why}",
                     {"metric": "pull", "site": name,
-                     "last_success": since.isoformat() if since else None, "reason": why}))
+                     "last_success": since.isoformat() if since else None, "reason": why}, name))
     if blocked:
         # When the published build was made: its own record of it (the file's
         # time could be moved by anything else writing to it).
@@ -6786,14 +6814,16 @@ def _sync_alerts(combined_path, failing, cache_dir=None, after=None, blocked=Non
                         f"The hub's combined database has not been replaced for "
                         f"{age_text(minutes)}: every page shows data from then. "
                         f"Why: {blocked}",
-                        {"metric": "combined", "reason": blocked}))
+                        {"metric": "combined", "reason": blocked}, None))
 
     stamp = (Path(cache_dir) if cache_dir is not None else combined_path.parent) / "sync_alerts.json"
     from nomad.alerts.once import send_once
     host = socket.gethostname().split(".")[0]
+    # cluster: the site it is about, so one in a declared maintenance window
+    # is held (nomad.alerts.once, 1.37.0).
     items = [{"key": key, "host": host, "subject": subject, "severity": severity,
-              "message": message, "details": details}
-             for key, subject, severity, message, details in due]
+              "message": message, "details": details, **({"cluster": about} if about else {})}
+             for key, subject, severity, message, details, about in due]
     return [{"site": i["subject"], "severity": i["severity"], "message": i["message"]}
             for i in send_once(items, stamp, "sync", config, now)]
 
@@ -11369,6 +11399,10 @@ cli.add_command(agent_group)
 # Draining a node and resuming it (1.31), by hand or as the Console's actions.
 from nomad.node_cli import node_group  # noqa: E402
 cli.add_command(node_group)
+
+# Declared maintenance windows (1.37.0): alerts held, the Console says so.
+from nomad.maintenance_cli import maintenance_group  # noqa: E402
+cli.add_command(maintenance_group)
 
 # What the Console's /api/v1 answers: sites, a person, a lab.
 from nomad.facts.cli import facts_group  # noqa: E402
