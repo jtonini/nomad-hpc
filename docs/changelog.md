@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.35.5 (November 2026)
+
+- The lab check's email: "Nothing happens automatically. Our team reviews
+  your answers before making any change." (was "Nothing changes
+  automatically: we make only the changes your answers ask for.").
+- `names` in `[console.labs.check]`: a name left empty (`netid = ""`, a
+  list not filled in yet) is as if not there, without a note; `nomad lab
+  check names --missing` lists it.
+
 ## v1.35.4 (November 2026)
 
 - **The lab check's email reads as a letter** to the lab's PI: "Dear Dr.

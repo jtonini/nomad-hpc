@@ -118,7 +118,7 @@ def test_the_opening_email():
     assert "For the Parish Lab (cparish$), please tell us whether each of its 132 members is still in the lab" in body
     assert "until Monday, December 14, 2026." in body
     assert "everyone with no job in the past year in one step" in body           # 132: the bulk answer
-    assert "Nothing changes automatically" in body
+    assert "Nothing happens automatically. Our team reviews your answers before making any change." in body
     assert lines[-4:] == ["", "Academic Research Computing", "Office of the Provost", "University of Richmond"]
     assert lines[-5] == "Thank you,"
     assert L.subject_of(e) == "Please confirm the members of the Parish Lab (cparish$)"

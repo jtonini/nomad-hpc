@@ -293,6 +293,8 @@ def _names(value, problems: list) -> tuple:
     out = []
     for netid, v in value.items():
         n = _clean(netid)
+        if isinstance(v, str) and not v.strip() and n:
+            continue                       # not filled in yet: as if not there (names --missing lists them)
         if isinstance(v, str):
             got = split_name(v)
         elif isinstance(v, dict) and isinstance(v.get("last"), str) and _line(v["last"], NAME_MAX):
@@ -1167,7 +1169,7 @@ def _body(e: dict, s: Settings) -> str:
     lines += [f"You can answer at {where} until {_day(e['closes'], s)}."
               + (" For a long list, the page can mark everyone with no job in the past year in one step."
                  if e["members"] >= BULK_HINT else ""), ""]
-    lines += ["Nothing changes automatically: we make only the changes your answers ask for.", ""]
+    lines += ["Nothing happens automatically. Our team reviews your answers before making any change.", ""]
     if s.contact:
         lines += [s.contact, ""]
     lines += ["Thank you,", ""] + list(s.signature or ("Research Computing",))

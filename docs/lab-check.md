@@ -103,7 +103,7 @@ For the Parish Lab (cparish$), please tell us whether each of its 132 members is
 
 You can answer at https://nomad.example.edu/lab until Monday, December 14, 2026. For a long list, the page can mark everyone with no job in the past year in one step.
 
-Nothing changes automatically: we make only the changes your answers ask for.
+Nothing happens automatically. Our team reviews your answers before making any change.
 
 Thank you,
 
@@ -150,7 +150,9 @@ names = { cparish = "Carol Parish", mdelacruz = { first = "Maria", last = "de la
 ```
 
 `names` is for PIs whose account has no full name, or a last name of more
-than one word (as a table, `{ first = ..., last = ... }`).
+than one word (as a table, `{ first = ..., last = ... }`). A name left
+empty (`netid = ""`) counts as not there yet: `nomad lab check names
+--missing` lists it.
 
 `mail_domain`, `send_from` and `review_to` not given here are report.toml's
 `[report.labs]` (the condo reports'). `review_to = []` here sends to PIs
