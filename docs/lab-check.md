@@ -81,6 +81,40 @@ Without `--send` it only lists what is due; `--text` prints each email as it
 would go. `--lab LAB --send` sends one lab's (to look at one in review); the
 others stay due.
 
+Each email greets the lab's PIs by name ("Dear Dr. Parish,"; `salutation`
+sets how), taken from `names` in `[console.labs.check]`, else from the
+account's full name (`getent passwd`, its GECOS field). A PI nomad has no
+name for is greeted "Dear colleague,". `nomad lab check email LAB
+[--reminder]` prints a lab's email as its PIs would get it now, whatever
+has been sent. `nomad lab check names` shows how
+each lab's email greets its PIs and where each name came from
+(`--missing`: only those without one). The email ends with `signature`,
+by default the Console's `[console.branding]` (its unit lines, then the
+institution), the same lines as the sign-in page and the condo reports.
+
+The opening email, for a lab with 132 members:
+
+```text
+Dear Dr. Parish,
+
+Each term, Academic Research Computing asks the faculty who lead research groups to confirm who belongs to their labs. Your answers keep access to the clusters, condo nodes and research storage up to date.
+
+For the Parish Lab (cparish$), please tell us whether each of its 132 members is still in the lab and, for anyone who has left, what should happen to their data.
+
+You can answer at https://nomad.example.edu/lab until Monday, December 14, 2026. For a long list, the page can mark everyone with no job in the past year in one step.
+
+Nothing changes automatically: we make only the changes your answers ask for.
+
+Thank you,
+
+Academic Research Computing
+Office of the Provost
+Example University
+```
+
+A reminder starts "This is a reminder that the membership review for the
+Parish Lab (cparish$) is still open: 120 people do not have an answer yet."
+
 `nomad lab check timer --apply` (as root) installs a systemd timer that runs
 it every morning as the nomad account:
 
@@ -108,7 +142,15 @@ send_from = "Research Computing <rc@example.edu>"
 review_to = ["rc@example.edu"]       # while set, every email goes here instead
 # db = "/home/nomad/.local/share/nomad/lab_check.db"   # the answers (default: beside combined.db)
 not_sites = ["spiderweb"]            # sites whose groups it leaves out (default: none)
+salutation = "Dr. {last}"            # how a PI is greeted (default): {first}, {last} or {name}
+names = { cparish = "Carol Parish", mdelacruz = { first = "Maria", last = "de la Cruz" } }
+# signature = ["Research Computing", "Example University"]   # default: [console.branding]
+# contact = "Questions: rc@example.edu"   # a line above the signature (default: report.toml's contact)
+# date_format = "%Y-%m-%d"           # the closing day (default: "Monday, December 14, 2026")
 ```
+
+`names` is for PIs whose account has no full name, or a last name of more
+than one word (as a table, `{ first = ..., last = ... }`).
 
 `mail_domain`, `send_from` and `review_to` not given here are report.toml's
 `[report.labs]` (the condo reports'). `review_to = []` here sends to PIs
@@ -145,4 +187,6 @@ root, nomad refuses to make it, or to write one another account owns.
 | `nomad lab check todo` | what the answers leave to do, a cluster at a time |
 | `nomad lab check done LAB NETID KIND --note "..."` | mark a to-do item done |
 | `nomad lab check mail [--send] [--lab LAB] [--text]` | the emails due today (`--text`: as they would go; `--lab`: one lab's) |
+| `nomad lab check email LAB [--reminder]` | the lab's email as its PIs would get it now, whatever was sent (nothing is sent) |
+| `nomad lab check names [--missing]` | how each lab's email greets its PIs, and where each name comes from |
 | `nomad lab check timer [--apply]` | send them every morning, from systemd |

@@ -313,7 +313,7 @@ def test_the_emails(world, monkeypatch):
     assert {e["status"] for e in out} == {"sent"} and len(sent) == 5
     body = next(m for m in sent if "cparish$" in m.get_content()).get_content()
     assert "would have gone to cparish@example.edu" in body and "https://nomad.example.edu/lab" in body
-    assert sent[0]["Subject"].startswith("[review] Who is in")
+    assert sent[0]["Subject"].startswith("[review] Please confirm the members of")
     assert L.send(conn, rec, CONFIG, REPORT, now=opened) == []                     # nothing twice
     # a lab that answered everything gets no reminder
     rnd = L.round_of(L.settings(CONFIG), opened.date())
@@ -387,8 +387,8 @@ def test_the_commands(world, monkeypatch):
     # one lab's email, printed, then sent on its own: the others stay due
     r = run.invoke(cli, ["lab", "check", "mail", "--lab", "cparish$", "--text"])
     assert r.exit_code == 0, r.output
-    assert "Subject: [review] Who is in" in r.output and "would have gone to cparish@example.edu" in r.output
-    assert "(cparish$) this term?" in r.output and "For " in r.output and "(cparish$), we'd like" in r.output
+    assert "Subject: [review] Please confirm the members of" in r.output
+    assert "would have gone to cparish@example.edu" in r.output and "For your lab (cparish$), please tell us" in r.output
     assert "cbukach$" not in r.output and "A dry run" in r.output
     sent = []
     monkeypatch.setattr("nomad.mail.send", lambda msg, cfg, timeout=15: sent.append(msg))

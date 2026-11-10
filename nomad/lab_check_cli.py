@@ -79,6 +79,8 @@ def check_group():
     nomad lab check todo            what ARC is left to do, a cluster at a time
     nomad lab check done LAB NETID remove|add|data|no_answer --note "..."
     nomad lab check mail [--send] [--lab LAB] [--text]   the emails due today (review_to while set)
+    nomad lab check email LAB [--reminder]   LAB's email as its PIs would get it now (nothing sent)
+    nomad lab check names [--missing]   how each email greets its PIs, and the names nomad has
     nomad lab check timer [--apply] send them each day, from systemd
 
     Settings: [console.labs.check] in the hub's nomad.toml (docs/lab-check.md).
@@ -116,6 +118,53 @@ def check_status(ctx, as_json):
         done = f"sent in {lab['submitted'][:10]}" if lab["submitted"] else f"{lab['answered']} of {lab['asked']} answered"
         click.echo(f"  {lab['lab']:<14} {lab['name'][:28]:<28} PI {', '.join(lab['leaders'])}: "
                    f"{lab['members']} members, {lab['claims']} condo users; {done}; emails: {sent}")
+
+
+@check_group.command("email")
+@click.argument("lab")
+@click.option("--reminder", is_flag=True, help="The reminder, not the opening email.")
+@click.pass_context
+def check_email(ctx, lab, reminder):
+    """LAB's email as its PIs would get it now (LAB: its group, e.g.
+    smith$), whatever has been sent; nothing is sent."""
+    config, report, s, conn, rec_path = _ctx(ctx)
+    _problems(s)
+    _round(s)
+    if conn is None:
+        raise click.ClickException("no combined database here: run it on the hub")
+    got = L.letter(conn, L.open_records(rec_path), config, report, lab, reminder=reminder)
+    if got is None:
+        raise click.ClickException(f"{lab}: no lab with anyone to ask about this term")
+    click.echo(f"To: {', '.join(got['to']) or '(no address)'}\nSubject: {got['subject']}\n\n{got['text']}", nl=False)
+
+
+@check_group.command("names")
+@click.option("--missing", is_flag=True, help="Only the PIs nomad has no name for.")
+@click.pass_context
+def check_names(ctx, missing):
+    """How each lab's email greets its PIs, and where the name comes from:
+    names in [console.labs.check], the account's full name (getent passwd),
+    or none ("Dear colleague,"). Add a name with
+    names = { NETID = "First Last" } in [console.labs.check]."""
+    config, report, s, conn, _ = _ctx(ctx)
+    _problems(s)
+    if conn is None:
+        raise click.ClickException("no combined database here: run it on the hub")
+    labs = L.labs(conn, config, report, s)
+    if not labs:
+        click.echo("No lab has anyone to ask about.")
+        return
+    none = 0
+    for lab in labs:
+        found = [(n, *L.name_of(n, s)) for n in lab.leaders]
+        none += sum(1 for _, got, _ in found if got is None)
+        if missing and all(got is not None for _, got, _ in found):
+            continue
+        who = "; ".join(f"{n} = {' '.join(x for x in got if x) if got else '(no name)'} [{src}]"
+                        for n, got, src in found)
+        click.echo(f"  {lab.group:<14} {L.greeting(lab.leaders, s):<34} {who}")
+    click.echo(f"{none} PI{'s' if none != 1 else ''} with no name (greeted \"Dear colleague,\")." if none else
+               "Every PI has a name.")
 
 
 @check_group.command("show")

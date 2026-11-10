@@ -34,6 +34,13 @@ Settings, in the hub's nomad.toml::
     send_from = "Research Computing <rc@example.edu>"
     review_to = ["rc@example.edu"]       # while set, every email goes here instead
     # db = "/home/nomad/.local/share/nomad/lab_check.db"   # the answers (default: beside combined.db)
+    salutation = "Dr. {last}"            # the greeting: "Dear Dr. Parish," ({first}, {last}, {name})
+    names = { cparish = "Carol Parish" } # where the account's full name (getent passwd) won't do
+    signature = ["Research Computing", "Example University"]   # default: [console.branding]
+    contact = "Questions: rc@example.edu"   # default: report.toml's [report.labs] contact
+
+A PI nomad has no name for is greeted "Dear colleague," (``nomad lab check
+names`` lists them).
 
 ``mail_domain``, ``send_from`` and ``review_to`` not given here are
 report.toml's [report.labs] (the condo reports'): ``review_to = []`` here
@@ -68,8 +75,14 @@ _GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$?$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 NOTE_MAX = 300
 _KEYS = ("opens", "remind_days", "closes_days", "claim_days", "link", "mail_domain", "send_from", "review_to",
-         "db", "not_sites")
+         "db", "not_sites", "salutation", "names", "signature", "date_format", "contact")
 QUIET_DAYS = 365                         # no job this long, and in the group longer: "no job in a year"
+SALUTATION = "Dr. {last}"                # how the email greets a PI ("Dear Dr. Parish,")
+_FIELDS = {"first", "last", "name"}      # what a salutation may use
+_SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "phd", "ph.d.", "ph.d", "md", "m.d.", "esq", "esq."}
+NAME_MAX = 80
+SIGNATURE_MAX = 5                        # lines
+BULK_HINT = 20                           # members from which the email mentions the one answer for many
 
 
 class CheckError(ValueError):
@@ -89,6 +102,11 @@ class Settings:
     review_broken: bool = False          # review_to given, but no address in it works: nothing is sent
     db: Path | None = None
     not_sites: tuple = ()                # sites whose groups the check leaves out (a teaching server)
+    salutation: str = SALUTATION         # how a PI is greeted: {first}, {last}, {name}
+    names: tuple = ()                    # (netid, first, last): a PI's name where the account's won't do
+    signature: tuple = ()                # the lines the email ends with: who asks
+    date_format: str | None = None       # strftime for the closing day (default: "Monday, December 14, 2026")
+    contact: str | None = None           # a line for questions
     problems: tuple = ()
 
     @property
@@ -217,11 +235,163 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
     if not isinstance(skip, list) or not all(isinstance(x, str) and x.strip() for x in skip):
         problems.append("[console.labs.check] not_sites: a list of site names")
         skip = []
+    salutation = _salutation(raw.get("salutation"), problems)
+    names = _names(raw.get("names"), problems)
+    signature = _signature(raw.get("signature"), config, delivery, problems)
+    date_format = raw.get("date_format")
+    if date_format is not None:
+        try:
+            ok = isinstance(date_format, str) and bool(date(2026, 12, 14).strftime(date_format).strip())
+        except (ValueError, TypeError):
+            ok = False
+        if not ok:
+            problems.append(f"[console.labs.check] date_format: {date_format!r} is not a strftime format")
+            date_format = None
+    contact = _line(text("contact", getattr(delivery, "contact", None)))
     return Settings(opens=tuple(opens), remind_days=tuple(sorted(set(remind))), closes_days=closes,
                     claim_days=claim, link=link, mail_domain=mail_domain, send_from=send_from,
                     review_to=tuple(good), review_broken=held,
                     db=Path(db).expanduser() if db else None,
-                    not_sites=tuple(sorted({x.strip() for x in skip})), problems=tuple(problems))
+                    not_sites=tuple(sorted({x.strip() for x in skip})), salutation=salutation, names=names,
+                    signature=signature, date_format=date_format, contact=contact or None,
+                    problems=tuple(problems))
+
+
+def _line(value, limit: int = 120) -> str:
+    """One line of text for an email: printable, spaces as one, cut at ``limit``."""
+    if not isinstance(value, str):
+        return ""
+    return "".join(c for c in " ".join(value.split()) if c.isprintable())[:limit]
+
+
+def _salutation(value, problems: list) -> str:
+    if value is None:
+        return SALUTATION
+    import string
+    try:
+        fields = {f for _, f, spec, conv in string.Formatter().parse(value) if f is not None} \
+            if isinstance(value, str) else None
+        bad = fields is None or not fields or not fields <= _FIELDS or any(
+            spec or conv for _, f, spec, conv in string.Formatter().parse(value) if f is not None)
+    except ValueError:
+        bad = True
+    if bad or not _line(value):
+        problems.append(f"[console.labs.check] salutation: {value!r} is not text with {{first}}, {{last}} "
+                        f"or {{name}} (e.g. \"Dr. {{last}}\")")
+        return SALUTATION
+    return _line(value)
+
+
+def _names(value, problems: list) -> tuple:
+    """[console.labs.check] names: {netid = "First Last"} or {netid = {first = ..., last = ...}}
+    (a last name of more than one word)."""
+    if value is None:
+        return ()
+    if not isinstance(value, dict):
+        problems.append("[console.labs.check] names: a table of NETID = \"First Last\"")
+        return ()
+    out = []
+    for netid, v in value.items():
+        n = _clean(netid)
+        if isinstance(v, str):
+            got = split_name(v)
+        elif isinstance(v, dict) and isinstance(v.get("last"), str) and _line(v["last"], NAME_MAX):
+            got = (_line(v.get("first") if isinstance(v.get("first"), str) else "", NAME_MAX),
+                   _line(v["last"], NAME_MAX))
+        else:
+            got = None
+        if not n or not got:
+            problems.append(f"[console.labs.check] names: {netid} = {v!r} is not a name (left out)")
+            continue
+        out.append((n, got[0], got[1]))
+    return tuple(sorted(out))
+
+
+def _signature(value, config, delivery, problems: list) -> tuple:
+    """The lines the email ends with: [console.labs.check] signature, else the
+    Console's [console.branding] (its unit lines, then the institution), else
+    report.toml's institution."""
+    if value is not None:
+        lines = [value] if isinstance(value, str) else value
+        if isinstance(lines, list) and all(isinstance(x, str) for x in lines):
+            got = [x for x in (_line(t) for t in lines) if x][:SIGNATURE_MAX]
+            if got:
+                return tuple(got)
+        problems.append("[console.labs.check] signature: a list of lines")
+    if getattr(delivery, "branding", True):
+        cfg = config or {}
+        console = cfg.get("console") if isinstance(cfg.get("console"), dict) else {}
+        section = console.get("branding") if isinstance(console.get("branding"), dict) else {}
+        support = cfg.get("support") if isinstance(cfg.get("support"), dict) else {}
+        units = section.get("unit")
+        units = units if isinstance(units, list) else [units]
+        got = [x for x in (_line(u) for u in units) if x][:3]
+        inst = _line(section.get("institution")) or _line(support.get("institution"))
+        got += [inst] if inst and inst not in got else []
+        if got:
+            return tuple(got)
+    return (_line(getattr(delivery, "institution", None)) or "Research Computing",)
+
+
+def split_name(full) -> tuple[str, str] | None:
+    """(first, last) of a full name as an account holds it ("Carol A. Parish",
+    "PARISH, CAROL", "Carol Parish Jr."); None when it isn't one."""
+    if not isinstance(full, str):
+        return None
+    head = full.split(",")[0]               # GECOS: the name, then office, phone, ...
+    words = [w for w in _line(head, NAME_MAX).split() if w.lower() not in _SUFFIXES]
+    words = [w for w in words if not any(c.isdigit() or c in "@<>/\\" for c in w)]
+    if not words:
+        return None
+    if all(w.isupper() for w in words if any(c.isalpha() for c in w)) or all(w.islower() for w in words):
+        words = [w.capitalize() for w in words]
+    if len(words) == 1:
+        return "", words[0]
+    return words[0], words[-1]
+
+
+def _system_name(netid: str) -> tuple[str, str] | None:
+    """The account's full name (getent passwd: the GECOS field), as (first, last)."""
+    import pwd
+    try:
+        gecos = pwd.getpwnam(netid).pw_gecos
+    except (KeyError, OSError):
+        return None
+    got = split_name(gecos)
+    if got is None or got[1].lower() == netid.lower() or (got[0] + got[1]).lower() == netid.lower():
+        return None
+    return got
+
+
+def name_of(netid: str, s: Settings) -> tuple[tuple[str, str] | None, str]:
+    """((first, last) or None, where it came from: "names", "account" or "none")."""
+    for n, first, last in s.names:
+        if n == netid:
+            return (first, last), "names"
+    got = _system_name(netid)
+    return (got, "account") if got else (None, "none")
+
+
+def salute(netid: str, s: Settings) -> str | None:
+    """How a PI is greeted ("Dr. Parish"); None when nomad has no name for them,
+    or the salutation needs a part of the name it doesn't have."""
+    got, _ = name_of(netid, s)
+    if got is None:
+        return None
+    first, last = got
+    if "{first}" in s.salutation and not first:
+        return None
+    return _line(s.salutation.format(first=first, last=last, name=f"{first} {last}".strip()))
+
+
+def greeting(leaders, s: Settings) -> str:
+    """"Dear Dr. Parish," / "Dear Dr. Yang and Dr. Nolin,"; "Dear colleague,"
+    when nomad has no name for one of them."""
+    leaders = list(leaders)
+    said = [salute(n, s) for n in leaders]
+    if not said or any(x is None for x in said):
+        return "Dear colleagues," if len(leaders) > 1 else "Dear colleague,"
+    return "Dear " + (said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1]) + ","
 
 
 def round_of(s: Settings, today: date) -> Round | None:
@@ -922,47 +1092,113 @@ def mail_plan(conn, rec, config: dict | None, report, now: datetime | None = Non
             problem = "no address: set mail_domain in [console.labs.check] or report.toml's [report.labs]"
         plan.append({"round": rnd.id, "lab": lab.group, "name": lab.name, "kind": kind,
                      "record": pre + kind, "skipped": [pre + k for k in due if k != kind],
-                     "to": to, "for": pis, "review": s.reviewing,
+                     "to": to, "for": pis, "review": s.reviewing, "leaders": list(lab.leaders),
                      "members": len(lab.members), "claims": len(lab.claims), "left": len(left),
-                     "closes": rnd.closes.isoformat(), "problem": problem})
+                     "condos": bool(lab.condos), "closes": rnd.closes.isoformat(), "problem": problem})
     return plan
 
 
-def _body(e: dict, s: Settings) -> str:
-    asked = []
-    if e["members"]:
-        asked.append(f"{e['members']} member{'s' if e['members'] != 1 else ''} of its group")
-    if e["claims"]:
-        asked.append(f"{e['claims']} {'people' if e['claims'] != 1 else 'person'} who used its condo "
-                     f"without being in its group")
-    where = s.link or "My lab, in the Console"
-    first = e["kind"] == "open"
-    lines = []
-    if e["review"]:
-        lines += [f"[For review: this would have gone to {', '.join(e['for']) or '(no address)'}.]", ""]
-    lines += [
-        ("Each term we ask each lab's PI who is still in the lab, so that access to the "
-         "clusters, condos and storage stays right." if first else
-         f"A reminder: this term's check of {_title(e)} isn't done yet ({e['left']} to answer)."),
-        "",
-        f"For {_title(e)}, we'd like to know about {' and '.join(asked)}: "
-        "for each, whether they are in your lab, and for anyone who has left, what to do with their data.",
-        "",
-        f"Please answer on {where} by {e['closes']}. It takes a few minutes.",
-        "",
-        "Nothing changes by itself: Research Computing makes the changes your answers call for.",
-    ]
-    return "\n".join(lines) + "\n"
+_ARTICLE = {"lab", "laboratory", "group", "team", "center", "centre", "initiative", "project", "collaborative"}
 
 
 def _title(e: dict) -> str:
-    """How an email names the lab: its name, else "your lab" with its group."""
-    return f"{e['name']} ({e['lab']})" if e["name"] and e["name"] != e["lab"] else f"your lab ({e['lab']})"
+    """How an email names the lab: "the Parish Lab (cparish$)", "Smith Lab"
+    names as they are, else "your lab" with its group."""
+    name = e.get("name")
+    if not name or name == e["lab"]:
+        return f"your lab ({e['lab']})"
+    words = name.split()
+    the = (words and words[-1].lower().strip(".") in _ARTICLE and "'" not in name and "’" not in name
+           and not name.lower().startswith("the "))
+    return f"{'the ' if the else ''}{name} ({e['lab']})"
+
+
+def _day(iso: str, s: Settings) -> str:
+    d = date.fromisoformat(iso)
+    if s.date_format:
+        return d.strftime(s.date_format)
+    return f"{d:%A}, {d:%B} {d.day}, {d.year}"
+
+
+def _count(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _asked(e: dict, s: Settings) -> list[str]:
+    """What the PI is asked, a line each."""
+    out = []
+    if e["members"] == 1:
+        out.append("whether its one member is still in the lab and, if they have left, "
+                   "what should happen to their data")
+    elif e["members"]:
+        out.append(f"whether each of its {e['members']} members is still in the lab and, for anyone who has "
+                   "left, what should happen to their data")
+    if e["claims"]:
+        who = ("the one person" if e["claims"] == 1 else f"each of the {e['claims']} people")
+        out.append(f"whether {who} outside the group who ran jobs on your condo nodes in the last "
+                   f"{s.claim_days} days works with you or is a guest")
+    return out
+
+
+def _body(e: dict, s: Settings) -> str:
+    """The email to a lab's PI: who asks and why, what about, where and by when."""
+    who = s.signature[0] if s.signature else "Research Computing"
+    where = s.link or "My lab, in the Console"
+    first = e["kind"] == "open"
+    asked = _asked(e, s)
+    lines = []
+    if e["review"]:
+        lines += [f"[For review: this would have gone to {', '.join(e['for']) or '(no address)'}.]", ""]
+    lines += [greeting(e.get("leaders") or [], s), ""]
+    places = "the clusters, condo nodes and research storage" if e.get("condos") else \
+        "the clusters and research storage"
+    if first:
+        lines += [f"Each term, {who} asks the faculty who lead research groups to confirm who belongs to their labs. "
+                  f"Your answers keep access to {places} up to date.", ""]
+        lead = f"For {_title(e)}, please tell us"
+    else:
+        lines += [f"This is a reminder that the membership review for {_title(e)} is still open: "
+                  f"{_count(e['left'], 'person does', 'people do')} not have an answer yet.", ""]
+        lead = "Please tell us"
+    if len(asked) == 1:
+        lines += [f"{lead} {asked[0]}.", ""]
+    else:
+        lines += [f"{lead}:"] + [f"- {a}{';' if i < len(asked) - 1 else '.'}" for i, a in enumerate(asked)] + [""]
+    lines += [f"You can answer at {where} until {_day(e['closes'], s)}."
+              + (" For a long list, the page can mark everyone with no job in the past year in one step."
+                 if e["members"] >= BULK_HINT else ""), ""]
+    lines += ["Nothing changes automatically: we make only the changes your answers ask for.", ""]
+    if s.contact:
+        lines += [s.contact, ""]
+    lines += ["Thank you,", ""] + list(s.signature or ("Research Computing",))
+    return "\n".join(lines) + "\n"
+
+
+def letter(conn, rec, config: dict | None, report, group: str, reminder: bool = False,
+           now: datetime | None = None) -> dict | None:
+    """One lab's email as its PIs would get it now (the opening, or a
+    reminder), whatever has been sent: {to, subject, text}. None when the
+    check is off or the lab has no one to ask about."""
+    now = now or datetime.now()
+    s = settings(config, report)
+    rnd = round_of(s, now.date())
+    if rnd is None:
+        return None
+    lab = next(iter(labs(conn, config, report, s, now, only={group})), None)
+    if lab is None:
+        return None
+    got = {r["netid"] for r in answers(rec, rnd.id) if r["lab"] == lab.group} if rec is not None else set()
+    left = [n for _, n in lab.questions() if n not in got]
+    pis = [f"{p}@{s.mail_domain}" for p in lab.leaders] if s.mail_domain else []
+    e = {"round": rnd.id, "lab": lab.group, "name": lab.name, "kind": "remind" if reminder else "open",
+         "review": False, "for": pis, "to": pis, "leaders": list(lab.leaders), "members": len(lab.members),
+         "claims": len(lab.claims), "left": len(left), "condos": bool(lab.condos), "closes": rnd.closes.isoformat()}
+    return {"to": pis, "subject": subject_of(e), "text": _body(e, s)}
 
 
 def subject_of(e: dict) -> str:
-    subject = f"Who is in {_title(e)} this term?" if e["kind"] == "open" else \
-        f"Reminder: who is in {_title(e)} this term?"
+    subject = (f"Please confirm the members of {_title(e)}" if e["kind"] == "open" else
+               f"Reminder: please confirm the members of {_title(e)}")
     return ("[review] " if e["review"] else "") + subject
 
 

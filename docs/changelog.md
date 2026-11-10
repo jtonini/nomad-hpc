@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.35.4 (November 2026)
+
+- **The lab check's email reads as a letter** to the lab's PI: "Dear Dr.
+  Parish," (the name from `names` in `[console.labs.check]`, else the
+  account's full name; "Dear colleague," without one), who asks and why,
+  what about (a line for the members, one for condo users outside the
+  group), where to answer and until when ("Monday, December 14, 2026"),
+  and that nothing changes automatically. No contractions, no word said
+  twice where once will do. It ends with the Console's `[console.branding]`
+  lines (e.g. Academic Research Computing, Office of the Provost, the
+  university), as the sign-in page and the condo reports do.
+- Subject: "Please confirm the members of the Parish Lab (cparish$)";
+  reminders start "Reminder:".
+- New settings in `[console.labs.check]`: `salutation` ("Dr. {last}"),
+  `names`, `signature`, `contact`, `date_format`.
+- `nomad lab check names [--missing]`: how each lab's email greets its
+  PIs, and where each name came from; `nomad lab check email LAB
+  [--reminder]`: a lab's email as its PIs would get it now, whatever has
+  been sent (nothing is sent).
+
 ## v1.35.3 (November 2026)
 
 - `columbus-water` keeps its first run on spydur (9 November, job 89551:
