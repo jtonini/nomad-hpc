@@ -413,6 +413,31 @@ nomad per-user --mask                # user and command names replaced, for shar
 
 Each host is named with its role, as its `role` setting says (from its latest sample or flag): `login1 (login node)`, `rstudio1 (interactive server)`, `node01 (compute node)`. Each flagged line is a process (or a user's processes together) and a stretch of time: from when the condition began to when it was last seen, the rules it broke (`!` actionable, `i` informational), and its peaks.
 
+### Told to the person (1.38.0)
+
+What a login node's flags say about someone is shown to them: on the Console's My activity page and Home, and in `nomad edu me`. Each entry says what ran (the program and its command line, which only they and staff see), on which cluster, when, for how long and how much it used; why it matters on a machine everyone logs in to; and the better way: the Console's Submit a job, or a session on a compute node (`srun --pty -c 4 --mem=16G --time=4:00:00 bash`), a build or an archive inside a job. Nothing in it blames: the point is that next time they can do it another way. Staff see the same through View as.
+
+Not every flag is told. By default (`[notices.login_node]`):
+
+- **one program holding half a core or more for 15 minutes or more** (`min_cores`, `min_minutes`): `cpu_50pct_2min` when it held that long. `cpu_10pct_5min` is never told: a `pip install` or a short compile reaches it;
+- **someone's programs together** keeping two cores busy, or holding 32 GB, for 10 minutes (`user_cpu_*`, `user_memory_*`): told as theirs, named after the busiest program;
+- **one program holding 16 GB or more** (`min_memory_gb`; `memory_4gb_10min` is not told);
+- **a large transfer** (`io_50mbs_10min`), unless the program moves data in or out of the cluster: `skip_programs` (`scp`, `sftp-server`, `rsync`, `sshd`) are what a login node is for, and are never told, whatever they used.
+
+One entry per program run: of the rules one program tripped, the strongest names it; a program inside a time when the person's programs together were flagged is part of that entry. The last `days` (30), newest first, in the reader's local time (the collector writes UTC). Only hosts with a login-node role (`headnode`, `login`): an interactive server's flags (role `interactive`) are not told this way.
+
+```toml
+[notices.login_node]
+show = true            # false: told to no one
+days = 30
+min_minutes = 15
+min_cores = 0.5
+min_memory_gb = 16
+skip_programs = ["scp", "sftp-server", "rsync", "sshd"]
+```
+
+On the hub the entries come from the combined database (every site's flags); at a site, `nomad edu me` reads that site's own. The Console notes, once a day, which entries it showed someone (as it does for its other advice), so whether people changed what they do can be told later.
+
 ## Interactive servers (RStudio, JupyterHub)
 
 On a server people use through RStudio Server or JupyterHub, `interactive` records each session every run (`interactive_sessions`: who, which kind, its memory) and keeps each person's day in small totals, kept for good (`interactive_daily`, one row per day, server, person and kind):

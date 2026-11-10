@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.38.0 (November 2026)
+
+- **Heavy use of a login node, told to the person.** What the per_user
+  collector flags on a login node was read only by the admins' insights
+  brief; the person who ran the work never heard of it. `nomad edu me` now
+  ends with "On the login nodes": what ran, on which cluster, when, for how
+  long and how much, why it matters on a machine everyone logs in to, and
+  the better way (Submit a job, an `srun` session, a build or an archive
+  inside a job), without blame. The Console's My activity and Home show the
+  same (Console fix 95). What is told is set in `[notices.login_node]`: one
+  program holding half a core or more for 15 minutes, someone's programs
+  together keeping two cores busy or holding 32 GB, one program holding
+  16 GB, a large transfer; never the 10%-for-5-minutes rule (a `pip
+  install` reaches it), and never programs that move data in or out (`scp`,
+  `sftp-server`, `rsync`, `sshd`). One entry per program run, the last 30
+  days, local time. `nomad config check` says what is wrong in the section.
+
 ## v1.37.0 (November 2026)
 
 - **A site watches its hub.** The hub said so when a site stopped

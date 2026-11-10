@@ -232,6 +232,28 @@ listed first:
   memory peak, and 1.5 times its length. A site without a cluster gets no
   such advice.
 
+**On the login nodes** (1.38.0): the report ends with what a login node's
+monitoring caught of yours in the last 30 days (a long computation, many of
+your programs busy at once, a lot of memory held, a large transfer) and the
+better way, with the commands:
+
+```
+On the login nodes (last 30 days)
+
+  A long computation on the login node
+    python3 on spydur, 2026-11-09 14:10, for 1 h 20 min (1.6 cores)
+    python3 fit_model.py --all
+    One program kept the processor busy for a long time on the login node, ...
+      Run it as a job: in the Console, Submit a job; or start a session on a compute node
+      srun --pty -c 4 --mem=16G --time=4:00:00 bash
+      and run the same command there.
+```
+
+Copying data in and out (`scp`, `sftp`, `rsync`) is never listed: that is
+what a login node is for. What is listed, and for how long, is set in
+`[notices.login_node]` ([collectors](collectors.md#told-to-the-person-1380)).
+`--json` has it as `login_node`.
+
 ## Setting Up Groups
 
 NØMAÐ uses Linux groups for course/lab membership. To track a class:

@@ -8500,6 +8500,9 @@ def config_check(ctx):
     from nomad.impact import impact_from
     for problem in impact_from(data).problems:
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.edu.login_node import config_problems as _login_node_problems
+    for problem in _login_node_problems(data):
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
     _config_check_policy_watch(data)
     _config_check_condos(ctx)
 
@@ -9735,6 +9738,10 @@ def edu_me(ctx, db_path, days, username, detailed, output_json):
     (>50% of jobs scoring below the recommendation threshold). Use this
     to find systemic patterns; use 'nomad edu explain <job>' for one job.
 
+    Also: what of yours a login node's monitoring caught lately (a long
+    computation, many programs busy, a lot of memory), and the better way
+    ([notices.login_node]).
+
     Examples:
         nomad edu me
         nomad edu me --days 30
@@ -9745,6 +9752,7 @@ def edu_me(ctx, db_path, days, username, detailed, output_json):
     import getpass
     import json as _json
     from dataclasses import asdict
+    from nomad.edu import login_node
     from nomad.edu.insights import user_insights, format_user_insights
 
     if not db_path:
@@ -9761,13 +9769,20 @@ def edu_me(ctx, db_path, days, username, detailed, output_json):
         days=days,
         config=config,
     )
+    # Their own heavy use of a login node (1.38.0): what ran, and the better way.
+    _login = login_node.findings(db_path, username, config)
+    _login_days = login_node.settings(config).days
 
     if output_json:
-        click.echo(_json.dumps(asdict(insights), indent=2, default=str))
+        out = asdict(insights)
+        out["login_node"] = login_node.summary(_login, _login_days)
+        click.echo(_json.dumps(out, indent=2, default=str))
         return
 
     text = format_user_insights(insights, detailed=detailed)
     click.echo(text)
+    if _login:
+        click.echo(login_node.text(_login, _login_days), nl=False)
 
     if any(i.severity == "critical" for i in insights.issues):
         raise SystemExit(2)

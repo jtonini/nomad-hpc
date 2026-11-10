@@ -449,6 +449,17 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # duration_seconds = 120
 # severity = "actionable"          # or "informational"
 
+# What a login node's flags say about someone, told to them (1.38.0): on the
+# Console's My activity and Home, and in `nomad edu me`, with the better way.
+# Read where those run (the hub; a site for its own `nomad edu me`).
+# [notices.login_node]
+# show = true                      # false: told to no one
+# days = 30                        # the last this many days
+# min_minutes = 15                 # one program: held at least this long...
+# min_cores = 0.5                  # ...at a CPU rule of at least this many cores
+# min_memory_gb = 16               # one program's memory rule: at least this many GB
+# skip_programs = ["scp", "sftp-server", "rsync", "sshd"]   # moving data in or out: never told
+
 # ============================================
 # MAIL, SUPPORT AND ISSUE REPORTING
 # ============================================
