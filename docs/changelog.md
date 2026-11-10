@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.36.0 (November 2026)
+
+- **`nomad lab check names --set`**: the PIs' names for the lab check's
+  email, found and asked for in one command. nomad looks for each missing
+  name on the system, read-only: the account's full name, then the
+  directory without a login (`[console.labs.check] directory`, else the
+  system's ldap.conf; an anonymous `ldapsearch -x`, never a password). It
+  shows what it found for you to keep, asks for the rest one at a time (a
+  name, Enter for later, or `-` when the group is not a lab: it goes to
+  `[console.labs] not_labs`), shows the change, and writes it only when you
+  say so, with nomad's careful edit of nomad.toml (a backup, owner and mode
+  kept, nothing else changed, never over someone else's edit). It also
+  says when nomad.toml can be read by anyone on the machine.
+- `--from FILE [--apply]`: the answers from a file (the names table, or
+  lines `NETID,First Last`); `--no-lookup`: ask only.
+- **`nomad lab check name NETID First Last [--apply]`** for one PI later
+  (`First | Last` for a last name of more than one word; `--remove`).
+- New setting: `[console.labs.check] directory` (`"auto"`, `false`, or
+  `{ uri, base, id }`).
+- nomad.toml edits can write inline tables (`{ first = "Maria", last = "de la Cruz" }`).
+
 ## v1.35.5 (November 2026)
 
 - The lab check's email: "Nothing happens automatically. Our team reviews

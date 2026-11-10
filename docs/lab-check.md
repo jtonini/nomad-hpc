@@ -82,9 +82,38 @@ would go. `--lab LAB --send` sends one lab's (to look at one in review); the
 others stay due.
 
 Each email greets the lab's PIs by name ("Dear Dr. Parish,"; `salutation`
-sets how), taken from `names` in `[console.labs.check]`, else from the
+sets how), taken from `[console.labs.check.names]`, else from the
 account's full name (`getent passwd`, its GECOS field). A PI nomad has no
-name for is greeted "Dear colleague,". `nomad lab check email LAB
+name for is greeted "Dear colleague,".
+
+### The PIs' names
+
+`nomad lab check names --set` adds the missing ones (run it in a terminal;
+on a hub where nomad runs as its own account, `ssh -t`):
+
+1. It looks for them on the system, read-only: the account's full name,
+   then the directory, without a login (`[console.labs.check] directory`,
+   else the system's `ldap.conf` URI and BASE; an anonymous `ldapsearch -x`
+   for givenName and sn). It never uses a password; a directory that shows
+   no one without a login is said so and left.
+2. It shows what it found, for you to keep (all, none, or each).
+3. It asks for the rest, one at a time: `First Last` (`First | Last` for a
+   last name of more than one word, `Maria | de la Cruz`), Enter to leave
+   it for later, or `-` when the group is not a lab at all (it goes to
+   `[console.labs] not_labs`, as `nomad lab hide` does: no email, no lab
+   page).
+4. It shows the change to nomad.toml and writes it only when you say so:
+   a backup first (`nomad.toml.bak-names-…`), the file's owner and mode
+   kept, nothing written unless the file reads back with only those
+   changes, nor over someone else's edit made meanwhile. It also says so
+   when nomad.toml can be read by anyone on the machine.
+
+`--from FILE` takes the answers from a file instead (the
+`[console.labs.check.names]` table, or lines `NETID,First Last`; `-` for a
+group that is not a lab; empty for later) and writes them with `--apply`.
+`--no-lookup` skips step 1. For one PI later:
+`nomad lab check name NETID First Last [--apply]` (`--remove` takes a name
+out). `nomad lab check email LAB
 [--reminder]` prints a lab's email as its PIs would get it now, whatever
 has been sent. `nomad lab check names` shows how
 each lab's email greets its PIs and where each name came from
@@ -147,6 +176,8 @@ names = { cparish = "Carol Parish", mdelacruz = { first = "Maria", last = "de la
 # signature = ["Research Computing", "Example University"]   # default: [console.branding]
 # contact = "Questions: rc@example.edu"   # a line above the signature (default: report.toml's contact)
 # date_format = "%Y-%m-%d"           # the closing day (default: "Monday, December 14, 2026")
+# directory = { uri = "ldap://ldap.example.edu", base = "ou=people,dc=example,dc=edu", id = "uid" }
+#                                    # where names --set looks names up, no login (default "auto": ldap.conf; false: never)
 ```
 
 `names` is for PIs whose account has no full name, or a last name of more
@@ -191,4 +222,6 @@ root, nomad refuses to make it, or to write one another account owns.
 | `nomad lab check mail [--send] [--lab LAB] [--text]` | the emails due today (`--text`: as they would go; `--lab`: one lab's) |
 | `nomad lab check email LAB [--reminder]` | the lab's email as its PIs would get it now, whatever was sent (nothing is sent) |
 | `nomad lab check names [--missing]` | how each lab's email greets its PIs, and where each name comes from |
+| `nomad lab check names --set [--from FILE [--apply]]` | find the missing names on the system, ask for the rest, write them |
+| `nomad lab check name NETID First Last [--apply]` | one PI's name (`--remove` takes it out) |
 | `nomad lab check timer [--apply]` | send them every morning, from systemd |

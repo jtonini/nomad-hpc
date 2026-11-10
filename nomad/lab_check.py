@@ -75,7 +75,7 @@ _GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$?$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 NOTE_MAX = 300
 _KEYS = ("opens", "remind_days", "closes_days", "claim_days", "link", "mail_domain", "send_from", "review_to",
-         "db", "not_sites", "salutation", "names", "signature", "date_format", "contact")
+         "db", "not_sites", "salutation", "names", "signature", "date_format", "contact", "directory")
 QUIET_DAYS = 365                         # no job this long, and in the group longer: "no job in a year"
 SALUTATION = "Dr. {last}"                # how the email greets a PI ("Dear Dr. Parish,")
 _FIELDS = {"first", "last", "name"}      # what a salutation may use
@@ -107,6 +107,8 @@ class Settings:
     signature: tuple = ()                # the lines the email ends with: who asks
     date_format: str | None = None       # strftime for the closing day (default: "Monday, December 14, 2026")
     contact: str | None = None           # a line for questions
+    directory: object = "auto"           # where `names --set` looks names up (1.36.0): "auto" (ldap.conf),
+                                         # None (off) or (uri, base, id attribute); never with a login
     problems: tuple = ()
 
     @property
@@ -248,13 +250,38 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
             problems.append(f"[console.labs.check] date_format: {date_format!r} is not a strftime format")
             date_format = None
     contact = _line(text("contact", getattr(delivery, "contact", None)))
+    directory = _directory(raw.get("directory", "auto"), problems)
     return Settings(opens=tuple(opens), remind_days=tuple(sorted(set(remind))), closes_days=closes,
                     claim_days=claim, link=link, mail_domain=mail_domain, send_from=send_from,
                     review_to=tuple(good), review_broken=held,
                     db=Path(db).expanduser() if db else None,
                     not_sites=tuple(sorted({x.strip() for x in skip})), salutation=salutation, names=names,
                     signature=signature, date_format=date_format, contact=contact or None,
-                    problems=tuple(problems))
+                    directory=directory, problems=tuple(problems))
+
+
+_LDAP_URI = re.compile(r"^ldaps?://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$")
+_LDAP_BASE = re.compile(r"^[A-Za-z0-9=,. _-]{1,200}$")
+_LDAP_ATTR = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,40}$")
+
+
+def _directory(value, problems: list):
+    """[console.labs.check] directory: where `nomad lab check names --set`
+    looks up the PIs' names, read-only and without a login: "auto" (the
+    default: the system's ldap.conf, when it names a URI and a base), false
+    (never), or { uri = "ldap://...", base = "ou=people,dc=...", id = "uid" }."""
+    if value is None or value is False or value == "off":
+        return None
+    if value == "auto":
+        return "auto"
+    if isinstance(value, dict):
+        uri, base, ident = value.get("uri"), value.get("base"), value.get("id", "uid")
+        if (isinstance(uri, str) and _LDAP_URI.match(uri) and isinstance(base, str) and _LDAP_BASE.match(base)
+                and isinstance(ident, str) and _LDAP_ATTR.match(ident) and set(value) <= {"uri", "base", "id"}):
+            return (uri, base, ident)
+    problems.append("[console.labs.check] directory: \"auto\", false, or { uri = \"ldap://...\", "
+                    "base = \"ou=people,dc=...\", id = \"uid\" } (left off)")
+    return None
 
 
 def _line(value, limit: int = 120) -> str:

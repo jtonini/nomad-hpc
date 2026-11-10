@@ -66,7 +66,7 @@ def header(path: tuple, array: bool = False) -> str:
 
 
 def value(v) -> str:
-    """A TOML value from a str, bool, int or list of str."""
+    """A TOML value from a str, bool, int, a list of these, or a table of them."""
     if isinstance(v, bool):
         return "true" if v else "false"
     if isinstance(v, int):
@@ -75,6 +75,8 @@ def value(v) -> str:
         return json.dumps(v, ensure_ascii=False)
     if isinstance(v, (list, tuple)):
         return "[" + ", ".join(value(x) for x in v) + "]"
+    if isinstance(v, dict):                      # an inline table of the above (1.36.0)
+        return "{ " + ", ".join(f"{quoted_key(k)} = {value(x)}" for k, x in v.items()) + " }" if v else "{}"
     raise TypeError(f"not a TOML value here: {v!r}")
 
 

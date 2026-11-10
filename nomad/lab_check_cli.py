@@ -81,6 +81,8 @@ def check_group():
     nomad lab check mail [--send] [--lab LAB] [--text]   the emails due today (review_to while set)
     nomad lab check email LAB [--reminder]   LAB's email as its PIs would get it now (nothing sent)
     nomad lab check names [--missing]   how each email greets its PIs, and the names nomad has
+    nomad lab check names --set [--from FILE [--apply]]   find the missing names, ask for the rest, write them
+    nomad lab check name NETID First Last [--apply]   one PI's name
     nomad lab check timer [--apply] send them each day, from systemd
 
     Settings: [console.labs.check] in the hub's nomad.toml (docs/lab-check.md).
@@ -140,17 +142,37 @@ def check_email(ctx, lab, reminder):
 
 @check_group.command("names")
 @click.option("--missing", is_flag=True, help="Only the PIs nomad has no name for.")
+@click.option("--set", "set_", is_flag=True,
+              help="Add the names that are missing: looked up on the system first (read-only), "
+                   "the rest asked for; the change is shown and written only once you say so.")
+@click.option("--from", "from_file", type=click.Path(exists=True, dir_okay=False),
+              help="With --set: the names from FILE instead of asking (pi_names.toml, or lines "
+                   "NETID,First Last; - for a group that is not a lab).")
+@click.option("--no-lookup", is_flag=True, help="With --set: don't look names up on the system.")
+@click.option("--apply", is_flag=True, help="With --set --from: write without asking.")
 @click.pass_context
-def check_names(ctx, missing):
-    """How each lab's email greets its PIs, and where the name comes from:
-    names in [console.labs.check], the account's full name (getent passwd),
-    or none ("Dear colleague,"). Add a name with
-    names = { NETID = "First Last" } in [console.labs.check]."""
+def check_names(ctx, missing, set_, from_file, no_lookup, apply):
+    """How each lab's email greets its PIs, and where each name comes from:
+    names in [console.labs.check.names], the account's full name (getent
+    passwd), or none ("Dear colleague,").
+
+    --set adds the missing ones: nomad looks for them on the system
+    (read-only: the account's full name, then the directory without a
+    login), shows what it found for you to keep, and asks for the rest one
+    at a time: a name, Enter to leave it for later, or - when the group is
+    not a lab at all. Then it shows the change to nomad.toml and writes it
+    only once you say so, with a backup. For one PI later: nomad lab check
+    name NETID First Last."""
+    if (from_file or no_lookup or apply) and not set_:
+        raise click.UsageError("--from, --no-lookup and --apply go with --set")
     config, report, s, conn, _ = _ctx(ctx)
     _problems(s)
     if conn is None:
         raise click.ClickException("no combined database here: run it on the hub")
     labs = L.labs(conn, config, report, s)
+    if set_:
+        _set_names(ctx, s, labs, from_file, no_lookup, apply)
+        return
     if not labs:
         click.echo("No lab has anyone to ask about.")
         return
@@ -163,8 +185,158 @@ def check_names(ctx, missing):
         who = "; ".join(f"{n} = {' '.join(x for x in got if x) if got else '(no name)'} [{src}]"
                         for n, got, src in found)
         click.echo(f"  {lab.group:<14} {L.greeting(lab.leaders, s):<34} {who}")
-    click.echo(f"{none} PI{'s' if none != 1 else ''} with no name (greeted \"Dear colleague,\")." if none else
-               "Every PI has a name.")
+    click.echo(f"{none} PI{'s' if none != 1 else ''} with no name (greeted \"Dear colleague,\"). "
+               "Add them: nomad lab check names --set" if none else "Every PI has a name.")
+
+
+def _interactive() -> bool:
+    import sys
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _set_names(ctx, s, labs, from_file, no_lookup, apply):
+    from nomad import lab_check_names as N
+    from nomad.cli import _lab_edit
+    from nomad.config.labs import LabError, lab_group, not_labs_of, set_not_lab
+    if not from_file and not _interactive():
+        raise click.ClickException("--set asks questions: run it in a terminal (ssh -t), or give "
+                                   "the names with --from FILE")
+    edit = _lab_edit(ctx)
+    before = edit.data
+    missing = []                                   # (lab group, netid), in the labs' order
+    for lab in labs:
+        for n in lab.leaders:
+            if L.name_of(n, s)[0] is None and n not in [m for _, m in missing]:
+                missing.append((lab.group, n))
+    add, hide = {}, []
+    if from_file:
+        try:
+            answers = N.load(from_file)
+        except (OSError, ValueError) as e:
+            raise click.ClickException(str(e))
+        lab_of = {n: g for g, n in missing}
+        for n, v in answers.items():
+            if not L._NETID.match(n):
+                click.echo(f"  {n}: not a NetID (left out)")
+                continue
+            if isinstance(v, dict):
+                kind, val = ("name", v) if isinstance(v.get("last"), str) and v["last"].strip() else ("bad", "")
+            else:
+                kind, val = N.parse(str(v))
+            if kind == "name":
+                add[n] = val
+            elif kind == "not a lab":
+                hide.append(lab_of.get(n) or lab_group(before, n))
+            elif kind == "bad":
+                click.echo(f"  {n} = {v!r}: {val or 'not a name'} (left out)")
+    else:
+        if not missing:
+            click.echo("Every PI has a name: nothing to add.")
+            return
+        click.echo(f"{len(missing)} PI{'s' if len(missing) != 1 else ''} with no name."
+                   + (" Looking them up (read-only, no login):" if not no_lookup else ""))
+        found, said = N.find([n for _, n in missing], s, lookup=not no_lookup)
+        for line in said:
+            click.echo(f"  {line}")
+        if found:
+            click.echo(f"\nFound {len(found)}:")
+            for n, ((first, last), src) in found.items():
+                click.echo(f"  {n:<12} {first} {last}  [{src}]")
+            keep = click.prompt("Keep them? (y = all, n = none, e = each)", default="y",
+                                type=click.Choice(["y", "n", "e"]), show_choices=False)
+            for n, ((first, last), _src) in found.items():
+                if keep == "y" or (keep == "e" and click.confirm(f"  {n} = {first} {last}?", default=True)):
+                    add[n] = N.as_value(first, last)
+        rest = [(g, n) for g, n in missing if n not in add]
+        if rest:
+            click.echo(f"\nThe rest, one at a time: type First Last (First | Last for a last name of "
+                       f"more than one word), Enter to leave it for later, or {N.NOT_A_LAB} if the group "
+                       "is not a lab.")
+        hidden = set()
+        for g, n in rest:
+            if g in hidden:
+                continue
+            while True:
+                kind, val = N.parse(click.prompt(f"  {g} ({n})", default="", show_default=False))
+                if kind != "bad":
+                    break
+                click.echo(f"    {val}")
+            if kind == "name":
+                add[n] = val
+            elif kind == "not a lab":
+                hide.append(g)
+                hidden.add(g)
+    try:
+        changes = N.set_names(edit, add)
+        for g in dict.fromkeys(hide):
+            changes += set_not_lab(edit, g)
+    except (ValueError, LabError) as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    if not changes:
+        click.echo("Nothing to change: nomad.toml already says so.")
+        return
+    want = N.written_names(before)
+    want.update(add)
+    hidden_now = not_labs_of(before)
+    want_hidden = hidden_now + [g for g in dict.fromkeys(hide) if g not in hidden_now]
+    click.echo(f"\n{edit.path}:")
+    for c in changes:
+        click.echo(f"  + {c}")
+    note = N.open_to_all(edit.path)
+    if note:
+        click.echo(f"  {note}")
+    if from_file and not apply:
+        click.echo("\nNothing changed. Run again with --apply to write it.")
+        return
+    if not from_file and not click.confirm("Write this?", default=False):
+        click.echo("Nothing changed.")
+        return
+    try:
+        backup = edit.save(N.check(before, want, want_hidden if hide else None), tag="names")
+    except ValueError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    except OSError as e:
+        raise click.ClickException(f"can't write {edit.path} ({e.strerror or e}); nothing changed")
+    click.echo("Written." + (f" Backup: {backup}" if backup else ""))
+    click.echo("The emails and the Console read it from now on: no restart.")
+
+
+@check_group.command("name")
+@click.argument("netid")
+@click.argument("name", nargs=-1)
+@click.option("--remove", is_flag=True, help="Take NETID's name out (greeted \"Dear colleague,\" again).")
+@click.option("--apply", is_flag=True, help="Write the change (default: only show it).")
+@click.pass_context
+def check_name(ctx, netid, name, remove, apply):
+    """One PI's name, for the lab check's email: nomad lab check name jdoe
+    Jane Doe (or Maria | de la Cruz for a last name of more than one word).
+    Shows the change; --apply writes it to [console.labs.check.names]."""
+    from nomad import lab_check_names as N
+    from nomad.cli import _lab_edit
+    n = netid.strip().lower()
+    if not L._NETID.match(n):
+        raise click.ClickException(f"{netid!r} is not a NetID")
+    if remove == bool(name):
+        raise click.UsageError("give the name, or --remove")
+    edit = _lab_edit(ctx)
+    before = edit.data
+    want = N.written_names(before)
+    try:
+        if remove:
+            changes = N.set_names(edit, {}, remove=[n])
+            want.pop(n, None)
+        else:
+            kind, val = N.parse(" ".join(name))
+            if kind != "name":
+                why = val or "a person's name, e.g. Carol Parish"
+                raise click.ClickException(f"{' '.join(name)!r}: {why}")
+            changes = N.set_names(edit, {n: val})
+            want[n] = val
+    except ValueError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    from nomad.cli import _lab_finish
+    note = N.open_to_all(edit.path)
+    _lab_finish(edit, changes, apply, N.check(before, want), [note] if note else [], tag="names")
 
 
 @check_group.command("show")

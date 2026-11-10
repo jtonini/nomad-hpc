@@ -541,6 +541,8 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # not_sites = ["teaching"]              # sites whose groups it leaves out (a teaching server's course groups)
 # salutation = "Dr. {last}"             # the greeting: "Dear Dr. Parish," ({first}, {last}, {name})
 # names = { jsmith = "Jane Smith" }     # where the account's full name (getent passwd) won't do
+#                                       # (nomad lab check names --set finds and asks for them)
+# directory = { uri = "ldap://ldap.example.edu", base = "ou=people,dc=example,dc=edu" }   # names --set, no login (default: ldap.conf)
 # signature = ["Research Computing", "Example University"]   # default: [console.branding]
 # contact = "Questions: rc@example.edu" # default: report.toml's [report.labs] contact
 
