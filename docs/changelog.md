@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.39.0 (November 2026)
+
+- **A weekly email to each person about their own use** (`nomad notices`,
+  docs/notices.md). Once a week at most, and only with something new: what
+  of theirs a login node's monitoring caught (1.38.0), and a pattern of jobs
+  asking for far more than they use (most of at least 5 jobs on a
+  partition, high or critical), with the better way and a link to My
+  activity. Never the same thing twice (a jobs pattern again after 30 days
+  if it still holds). On for everyone by default: a person turns it off on
+  My activity in the Console (Console fix 96), an admin for them with
+  `nomad notices set NETID off --apply`. Accounts only for a course are left
+  out (`courses = true` includes them). Review first: while `review_to` is
+  set every email goes there; people get them only once `[notices]
+  review_to = []` (report.toml's review_to holds them until then; the lab
+  check's never decides them). `nomad notices mail [--send]`, `nomad
+  notices timer [--apply]` (Mondays 09:10 from systemd). The record is
+  `notices.db` beside the combined database.
+
 ## v1.38.0 (November 2026)
 
 - **Heavy use of a login node, told to the person.** What the per_user

@@ -436,7 +436,7 @@ min_memory_gb = 16
 skip_programs = ["scp", "sftp-server", "rsync", "sshd"]
 ```
 
-On the hub the entries come from the combined database (every site's flags); at a site, `nomad edu me` reads that site's own. The Console notes, once a day, which entries it showed someone (as it does for its other advice), so whether people changed what they do can be told later.
+On the hub the entries come from the combined database (every site's flags); at a site, `nomad edu me` reads that site's own. Each person is also emailed what is new, once a week at most ([notices](notices.md), 1.39.0). The Console notes, once a day, which entries it showed someone (as it does for its other advice), so whether people changed what they do can be told later.
 
 ## Interactive servers (RStudio, JupyterHub)
 

@@ -449,6 +449,26 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # duration_seconds = 120
 # severity = "actionable"          # or "informational"
 
+# A weekly email to each person about their own use (1.39.0): what of theirs
+# a login node caught, and a pattern of jobs asking for far more than they
+# use. On for everyone by default (people turn it off on My activity);
+# accounts only in a course are left out. Review first: while review_to is
+# set every email goes there; [] sends to people. docs/notices.md.
+# [notices]
+# kinds = ["login_node", "jobs"]
+# every_days = 7
+# link = "https://nomad.example.edu"   # the Console
+# review_to = ["rc@example.edu"]       # [] sends to people
+# greeting = "Hello,"
+# courses = false                      # true: accounts only in a course too
+# skip_users = []
+#
+# [notices.jobs]
+# days = 30
+# min_jobs = 5
+# severities = ["critical", "high"]
+# repeat_days = 30
+
 # What a login node's flags say about someone, told to them (1.38.0): on the
 # Console's My activity and Home, and in `nomad edu me`, with the better way.
 # Read where those run (the hub; a site for its own `nomad edu me`).

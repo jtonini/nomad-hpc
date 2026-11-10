@@ -8503,6 +8503,9 @@ def config_check(ctx):
     from nomad.edu.login_node import config_problems as _login_node_problems
     for problem in _login_node_problems(data):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.notices import config_problems as _notices_problems
+    for problem in _notices_problems(data):
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
     _config_check_policy_watch(data)
     _config_check_condos(ctx)
 
@@ -11418,6 +11421,10 @@ cli.add_command(node_group)
 # Declared maintenance windows (1.37.0): alerts held, the Console says so.
 from nomad.maintenance_cli import maintenance_group  # noqa: E402
 cli.add_command(maintenance_group)
+
+# The weekly email to each person about their own use (1.39.0).
+from nomad.notices_cli import notices_group  # noqa: E402
+cli.add_command(notices_group)
 
 # What the Console's /api/v1 answers: sites, a person, a lab.
 from nomad.facts.cli import facts_group  # noqa: E402
