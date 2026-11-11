@@ -190,7 +190,9 @@ echo "-- building releases/$new"
 if ! grep -q "^home = $R/python/" "$R/venv/pyvenv.cfg"; then
     stop "the new environment isn't on the Python under $R/python"
 fi
-"$UV" pip install --quiet --compile-bytecode --python "$R/venv/bin/python" "nomad-hpc==$V" </dev/null
+# Wheels only: nothing is compiled here, and on an older system (RHEL 7's glibc 2.17) uv takes the newest
+# releases that have wheels for it (numpy 2.2 rather than a 2.3 it would try to build from source).
+"$UV" pip install --quiet --compile-bytecode --only-binary :all: --python "$R/venv/bin/python" "nomad-hpc==$V" </dev/null
 chmod -R go-w "$R"
 chmod -R a+rX "$R"
 if [ -n "$(find "$R" -not -type l -perm /022 -print -quit)" ]; then stop "$R: still writable by others"; fi
