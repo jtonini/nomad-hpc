@@ -153,6 +153,7 @@ def facts_group():
     nomad facts lab NETID           the labs that person leads, taken together
     nomad facts share NETID         those labs' share of each cluster
     nomad facts busy                when each machine is busiest (last 30 days)
+    nomad facts node SITE NODE      one node over a window: readings and what happened
     Add --json for the data itself, --mask before sharing the output.
     Reads the hub's combined.db when there is one, else this host's database.
     """
@@ -226,6 +227,72 @@ def sites_cmd(ctx, days, db, as_json, mask):
         a = s.get("alerts")
         if a and any(a.values()):
             click.echo("    alerts now: " + ", ".join(f"{v} {k}" for k, v in a.items() if v))
+
+
+@facts_group.command("node")
+@click.argument("site")
+@click.argument("name", required=False)
+@click.option("--hours", type=click.FloatRange(0.25, 92 * 24), default=24, show_default=True,
+              help="The window, up to now (unless --from and --to give it).")
+@click.option("--from", "since", help="Start of the window (2026-11-10T14:00).")
+@click.option("--to", "until", help="End of the window (default: now).")
+@click.option("--as", "netid", help="As this person would see it (their own jobs; the rest counted).")
+@click.option("--db", type=click.Path(), help="Database (default: the hub's, else this host's).")
+@click.option("--json", "as_json", is_flag=True, help="The answer as JSON.")
+@click.pass_context
+def node_cmd(ctx, site, name, hours, since, until, netid, db, as_json):
+    """One node over a window (the Console's node timeline): cores, load,
+    memory, GPUs, temperatures, clock and local disk, and what happened:
+    drained or down (and why), gaps in the readings, jobs started and ended,
+    out-of-memory kills, power events, alerts, maintenance.
+
+    \b
+    nomad facts node spydur                           the site's nodes, by name
+    nomad facts node spydur n012                      the last 24 hours
+    nomad facts node spydur n012 --from 2026-11-10T14:00 --to 2026-11-10T18:00
+    """
+    from datetime import datetime, timedelta
+    from nomad.facts import NodeFactsError, node
+    from nomad.facts._common import parse_time
+    if not name:
+        from nomad.facts.node import site_nodes
+        path, conn = _open(ctx, db)
+        try:
+            names = site_nodes(conn, site)
+        finally:
+            conn.close()
+        if not names:
+            raise click.ClickException(f"no node readings of {site}")
+        click.echo(f"{site}'s nodes in its latest reading ({len(names)}):")
+        click.echo("  " + " ".join(names))
+        return
+    now = datetime.now()
+    end = parse_time(until) if until else now
+    start = parse_time(since) if since else (end - timedelta(hours=hours) if end else None)
+    if start is None or end is None:
+        raise click.ClickException("--from and --to take a date and time: 2026-11-10T14:00")
+    path, conn = _open(ctx, db)
+    try:
+        data = node(conn, site, name, start, end, now=now, staff=not netid, user=netid,
+                    config=ctx.obj.get("config", {}) or {})
+    except NodeFactsError as exc:
+        raise click.ClickException(str(exc)) from None
+    finally:
+        conn.close()
+    if as_json:
+        click.echo(json.dumps(data, indent=2))
+        return
+    for line in data["summary"]:
+        click.echo(line)
+    events = data["events"]
+    if events:
+        click.echo("")
+        for e in events:
+            span = f" to {_when(e['until'])}" if e.get("until") else ""
+            click.echo(f"  {_when(e['at'])}{span}  {e['kind']}: {e['text']}")
+    others = data["jobs"]["others"]
+    if others["started"] or others["ended"]:
+        click.echo(f"  (others' jobs: {others['started']} started, {others['ended']} ended)")
 
 
 @facts_group.command("me")

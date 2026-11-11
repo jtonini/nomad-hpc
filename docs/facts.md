@@ -10,6 +10,7 @@ Three questions every front to nomad asks, answered once, as data:
 | **share** | the share of each cluster of the labs a person leads: core-hours on the lab's own condo, the shared nodes and other labs' condos, against everyone else's and what the nodes could run; how full it kept its own condo; who waited for room while the lab ran there (1.30.0) | the lab's PI and its research assistants (others' figures resting on fewer than 3 people left out, the window to the last midnight); staff for any lab |
 | **course** | the courses a person teaches, this term: the class together, each student as a row, when the class works | the course's instructors; staff for any course |
 | **busy** | when each cluster, interactive server and group of workstations is busiest: the most in use at once and when, a typical week, the busiest and quietest hours (1.14.7) | anyone signed in; each workstation by name for staff only |
+| **node** | one node over a window: its cores, load, memory, GPUs, temperatures, clock and local disk, and what happened on it (drained or down, gaps in the readings, jobs started and ended, out-of-memory kills, power events, alerts, maintenance) (1.41.0) | anyone signed in: their own jobs on it, the others counted; staff every job and whose, Slurm's reasons and nomad's alerts |
 
 The Console serves them at `/api/v1/sites`, `/api/v1/me` and `/api/v1/lab`;
 a dashboard widget elsewhere (an Open OnDemand page, say) or an assistant
@@ -28,6 +29,9 @@ nomad facts share --group G       # one lab by its group (staff)
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
 nomad facts course GROUP              # one course
 nomad facts busy --days 90 --each     # when each machine is busiest, each workstation too
+nomad facts node spydur               # spydur's nodes, by name
+nomad facts node spydur n012          # one node, the last 24 hours (--hours, or --from and --to)
+nomad facts node spydur n012 --as NETID   # as that person would see it
 ```
 
 They read the hub's `combined.db` when there is one, else this host's own
@@ -418,6 +422,42 @@ different days or more, and nothing is ranked when every hour is the same.
 A site whose last reading is more than two hours old is marked `stopped`. Times
 are as the collectors wrote them: each site's local time.
 
+## node
+
+One node over a window (the last 24 hours, or `--hours`, or `--from` and
+`--to`; 92 days at most): the question Grafana answers with a query ("what
+was this node doing on Tuesday afternoon?"), answered once, so the Console's
+node timeline (Nodes, a node, Timeline; `/nodes/timeline?site=&node=`), a
+link someone shares, `nomad facts node` and, later, a local AI model's tool
+all say the same.
+
+- **Readings** (`series`): each a list of `[time, value]` at one `step` (5
+  minutes up to a day, so that no more than 400 points): cores allocated and
+  the load as shares of the node's cores; memory allocated (left out where
+  Slurm doesn't allocate memory) and memory held, the node's memory less
+  what Slurm reports free (the file cache counts as held); GPUs busy as DCGM
+  measures it (nvidia-smi's "utilization" is not used), GPU memory in use
+  and the hottest GPU; the hottest CPU or board sensor (hw_temps, else its
+  hourly figures), with the sensors' critical temperature; the CPU clock as
+  a share of its top speed (cpu_clock: throttling shows here); the fullest
+  local disk (node_disks). Averaged within a step; temperatures and disks:
+  the highest. While the node is drained (with nothing running) or down
+  there are no figures for it: the time shows as out of service, not as an
+  idle node.
+- **What happened** (`events`, each `at`, and `until` for a span): `state`
+  (drained, draining, down, back in service; Slurm's reason for staff),
+  `gap` (no node reading for three usual intervals, 20 minutes at least),
+  `job` (started, ended and how), `oom` (the kernel ended a process for want
+  of memory), `power` (a power supply's IPMI event), `alert` (nomad's
+  alerts about the node, staff only: their text can name people),
+  `maintenance` (a declared window for its site; who declared it, staff
+  only).
+- **Who sees whose jobs**: staff every job on the node, with whose; anyone
+  else their own, the others counted (`jobs.others`), and how a job ended
+  (failed, ran out of time or memory) only for their own. An out-of-memory
+  kill names the process only to staff and to its owner.
+- `summary`: the same in sentences, as the command prints them.
+
 ## Using the functions
 
 ```python
@@ -428,6 +468,8 @@ facts.person(conn, "jdoe", days=30, config=config, db_path=path)   # db_path: sc
 facts.labs(conn, config, "pi1", days=30, min_others=3)             # what a PI is given
 facts.labs(conn, config, groups=["pi1$"])                            # staff, by group
 facts.sites(conn, reasons=True)                                      # staff: node reasons
+facts.node(conn, "spydur", "n012", since, until, staff=True)        # one node over a window
+facts.node(conn, "spydur", "n012", since, until, user="jdoe")       # as jdoe would see it
 facts.busy(conn, days=30, names=False)                               # machines numbered, not named
 ```
 

@@ -9,6 +9,7 @@
     teaches(conn, config, netid, ...)     which courses a person teaches (no figures)
     every_course(conn, config)            every course this term, for staff to choose from
     busy(conn, days, names)               when each machine is busiest (staff)
+    node(conn, site, name, since, until)  one node over a window: readings and events (1.41.0)
 
 Read-only, from a nomad database (a site's own, or the hub's combined.db),
 whatever its tables hold: a figure that rests on nothing measured is None,
@@ -26,6 +27,7 @@ from nomad.facts.busy import busy  # noqa: F401
 from nomad.facts.courses import (courses, every_course, may_answer, questions,  # noqa: F401
                                  teaches)
 from nomad.facts.labs import labs  # noqa: F401
+from nomad.facts.node import NodeFactsError, node  # noqa: F401
 from nomad.facts.person import person  # noqa: F401
 from nomad.facts.share import share  # noqa: F401
 from nomad.facts.sites import sites  # noqa: F401

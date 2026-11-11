@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.41.0 (November 2026)
+
+- **One node over a window** (`nomad.facts.node`; `nomad facts node SITE
+  NODE`). What Grafana answers with a query, answered once: a node's cores
+  allocated and load, memory allocated and held, GPUs busy (DCGM), GPU
+  memory and temperature, the hottest CPU or board sensor, the CPU clock as a
+  share of its top speed and the fullest local disk, at one step for the
+  whole window; and what happened on it: drained, draining, down and back
+  (Slurm's reason for staff), gaps in the readings, jobs started and ended,
+  out-of-memory kills, power events, alerts and declared maintenance, with
+  a summary in sentences. Staff see every job on the node and whose; anyone
+  else their own, the others counted. The Console's node timeline (fix 101)
+  reads it, and a local AI model will.
+
 ## v1.40.0 (November 2026)
 
 - **The gate through another host** (`gate_jump` in a site's
