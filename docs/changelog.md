@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.39.1 (November 2026)
+
+- **The weekly email, as people read it.** What is alike is one note: the
+  times of one kind of login-node use (five shown, the rest on My
+  activity), or one kind of asking for too much over a person's partitions
+  with an `#SBATCH` line each; why it matters and the better way are said
+  once a note, not under every entry (a week's email had the same paragraph
+  eight times). Sizes and times in words ("asked for 1 day; they used about
+  50 min", "32 GB", "8 cores") instead of "2988.5 seconds" and "4903.61 MB";
+  the reason lines are the email's own, without contractions. The subject
+  counts notes.
+- **sshd-session is what a login node is for.** Newer OpenSSH (9.8+) runs
+  each login and transfer as `sshd-session` (and `sshd-auth`): skipped like
+  `sshd` and `scp`, on My activity and in the email.
+
 ## v1.39.0 (November 2026)
 
 - **A weekly email to each person about their own use** (`nomad notices`,

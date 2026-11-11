@@ -461,7 +461,7 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # review_to = ["rc@example.edu"]       # [] sends to people
 # greeting = "Hello,"
 # courses = false                      # true: accounts only in a course too
-# skip_users = []
+# skip_users = []                      # service and admin accounts: never emailed
 #
 # [notices.jobs]
 # days = 30
@@ -478,7 +478,7 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # min_minutes = 15                 # one program: held at least this long...
 # min_cores = 0.5                  # ...at a CPU rule of at least this many cores
 # min_memory_gb = 16               # one program's memory rule: at least this many GB
-# skip_programs = ["scp", "sftp-server", "rsync", "sshd"]   # moving data in or out: never told
+# skip_programs = ["scp", "sftp-server", "rsync", "sshd", "sshd-session", "sshd-auth"]   # moving data in or out: never told
 
 # ============================================
 # MAIL, SUPPORT AND ISSUE REPORTING

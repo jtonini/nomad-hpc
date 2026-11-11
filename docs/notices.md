@@ -9,12 +9,19 @@ new there, with what happened, the better way, and a link to My activity.
 - **On the login nodes**: what of theirs a login node's monitoring caught in
   the last week, as My activity shows it ([collectors](collectors.md#told-to-the-person-1380)):
   a long computation, many programs busy at once, a lot of memory, a large
-  transfer. Copying data in and out (`scp`, `sftp`, `rsync`) is never told.
+  transfer. Copying data in and out (`scp`, `sftp`, `rsync`, and the `sshd`
+  sessions they run in) is never told.
 - **Your jobs**: a pattern over their recent jobs of asking for far more
   than they used: most of at least `min_jobs` (5) jobs on one partition, of
   severity `high` or `critical` by the same rules as `nomad edu me`, with
   the value to ask for instead (`#SBATCH --mem=8G`). Only for people who
   finished jobs in the last week.
+
+What is alike is one note: the times of one kind of login-node use (up to
+five shown, the rest on My activity), or one kind of asking for too much
+over a person's partitions, each with its `#SBATCH` line; why it matters
+and the better way are said once a note (1.39.1). Sizes and times are in
+words ("32 GB", "1 h 38 min"), and the email has no contractions.
 
 ```
 Subject: Research computing: 2 notes on your recent work
@@ -27,17 +34,22 @@ and nothing has been done about it; this is only to help.
 
 On the login nodes
 ------------------
-* A long computation on the login node
-  python3 on spydur, Sun 8 Nov 17:10, for 1 h (1.5 cores)
-  ...
-  srun --pty -c 4 --mem=16G --time=4:00:00 bash
+* A long computation on the login node (3 times)
+  - python3 on spydur, Tue 10 Nov 09:29, for 40 min (1.5 cores)
+    python3 fit.py --part 2
+  - ...
+  One program kept the processor busy for a long time on the login node, ...
+  Run it as a job: in the Console, Submit a job; or start a session on a compute node
+    srun --pty -c 4 --mem=16G --time=4:00:00 bash
+  and run the same command there.
 
 Your jobs
 ---------
 * Your jobs ask for more time than they use
-  On spydur (basic): 7 of your last 9 jobs asked for 2 days, and used about 0.8 hours.
-  Ask for this instead:
-  #SBATCH --time=02:00:00
+  - On spydur (cpunodes), 20 of your last 22 jobs asked for more time than they used (typically 1 day; they used about 1 h 38 min). Ask for this instead:
+      #SBATCH --time=04:00:00
+  - On spydur (gpunodes), ...
+  Jobs that ask for less time start sooner: the scheduler can fit them into gaps ...
 
 The details, and how to do it another way: https://nomad.example.edu/me
 
@@ -57,7 +69,9 @@ stop them, turn off "Email me about my own use" at https://nomad.example.edu/me.
   ([courses](config.md)), in no lab (as a member, a leader or a research
   assistant) and not in the faculty group. `courses = true` includes them.
   Someone nomad knows no groups for is emailed.
-- System accounts (`root`, `slurm`, ...) and `skip_users` never are. An
+- System accounts (`root`, `slurm`, ...) and `skip_users` never are: list
+  the site's own service and admin accounts there (`skip_users = ["zeus",
+  "installer"]`), whose builds and installs on a login node are the job. An
   address is the NetID at `mail_domain`.
 
 ## Review first

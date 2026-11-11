@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""A weekly email to each person about their own use (1.39.0).
+"""A weekly email to each person about their own use (1.39.0; notes grouped, 1.39.1).
 
 What nomad tells a person on the Console's My activity reaches them only
 if they look. Once a week at most, nomad emails each person who has
@@ -16,7 +16,10 @@ something new there:
   for instead. Only for people who finished jobs in the last week.
 
 Each email says what, where and when, and the better way, and links to My
-activity for the details. Never the same thing twice: a login-node entry is
+activity for the details. What is alike is one note: the times of one kind
+of login-node use (at most ``SHOWN`` of them), or one kind of asking for
+too much over a person's partitions, with why it matters and the better way
+said once (1.39.1). Never the same thing twice: a login-node entry is
 told once; a jobs pattern again only after ``repeat_days`` if it still
 holds. At most one email a person every ``every_days`` (7).
 
@@ -72,8 +75,19 @@ GREETING = "Hello,"
 _NETID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 _LINK = re.compile(r"^https?://[^\s<>\"']+$")
-SHOWN = 8               # entries of a kind in one email at most; the rest: "and N more"
+SHOWN = 5               # occurrences of one note in an email at most; the rest: "and N more"
 _ASKED = {"cpu": "cores", "memory": "memory", "time": "time", "gpu": "GPUs", "io": "I/O"}
+# Why it matters, once a note: the email's own words (no contractions, as the rest of it).
+_WHY = {
+    "memory": "Memory a job asks for is held for it for as long as it runs: what it does not use, "
+              "no other job on that node can use either.",
+    "time": "Jobs that ask for less time start sooner: the scheduler can fit them into gaps that a "
+            "longer request would not fit, and the queue moves faster for everyone.",
+    "cpu": "Cores a job asks for are held for it for as long as it runs, used or not, so jobs that "
+           "could use them wait.",
+    "gpu": "GPUs are few: one a job asks for is held for it for as long as it runs, used or not, "
+           "so jobs that need one wait.",
+}
 SYSTEM = frozenset({"root", "nobody", "daemon", "bin", "adm", "slurm", "munge", "nomad"})   # never emailed
 
 
@@ -430,10 +444,78 @@ def _people(conn, s: Settings, now: datetime) -> dict:
 
 @dataclass
 class Entry:
+    """One thing to tell (what is recorded as told), as part of a note: the
+    entries of one ``group`` are one note in the email, under ``title``,
+    each in its ``lines``, then the note's ``advice`` once."""
     kind: str                         # login_node | jobs
     key: str                          # what it is, so it is told once
-    title: str
-    lines: list = field(default_factory=list)
+    title: str                        # the note's heading
+    lines: list = field(default_factory=list)       # this occurrence
+    group: str = ""                   # entries with the same group are one note
+    advice: list = field(default_factory=list)      # the note's why and better way, said once
+    started: str = ""                 # newest first within a note
+
+
+def _mem(mb) -> str:
+    """Megabytes as people say it: "105 MB", "4.8 GB", "125 GB"."""
+    mb = float(mb or 0)
+    if mb < 1024:
+        return f"{max(round(mb), 1)} MB"
+    return f"{mb / 1024:.1f}".rstrip("0").rstrip(".") + " GB"
+
+
+def _dur(seconds) -> str:
+    """Seconds as people say it: "50 min", "1 h 38 min", "16 h", "1 day", "1 day 22 h"."""
+    m = round(float(seconds or 0) / 60)
+    if m < 1:
+        return "under a minute"
+    if m < 60:
+        return f"{m} min"
+    if m < 24 * 60:
+        h, m = divmod(m, 60)
+        return f"{h} h {m} min" if m else f"{h} h"
+    d, h = divmod(round(m / 60), 24)
+    return (f"{d} day" if d == 1 else f"{d} days") + (f" {h} h" if h else "")
+
+
+def _num(x) -> str:
+    x = float(x or 0)
+    return f"{x:.1f}".rstrip("0").rstrip(".")
+
+
+def _many(x, word: str) -> str:
+    n = _num(x)
+    return f"{n} {word}" if n == "1" else f"{n} {word}s"
+
+
+def _asked_for(i) -> str:
+    """What the jobs typically asked for, in words."""
+    v = getattr(i, "current_value_typical", 0) or 0
+    d = getattr(i, "directive", "")
+    if v:
+        if d == "mem":
+            return _mem(v)
+        if d == "time":
+            return _dur(v)
+        if d in ("cores", "ntasks", "cpus-per-task"):
+            return _many(v, "core")
+        if d == "gres":
+            return _many(v, "GPU")
+    return str(getattr(i, "current_display", "") or "more")
+
+
+def _used(stats) -> str:
+    """What they used (the median), in words; "" when not known."""
+    if stats is None:
+        return ""
+    unit = str(stats.unit or "")
+    if unit == "MB":
+        return _mem(stats.median)
+    if unit == "seconds":
+        return _dur(stats.median)
+    if unit in ("cores", "GPUs"):
+        return _num(stats.median)
+    return f"{_num(stats.median)} {unit}".strip()
 
 
 def _login_entries(db_path, username, config, s: Settings, now: datetime, told: dict) -> list[Entry]:
@@ -450,15 +532,15 @@ def _login_entries(db_path, username, config, s: Settings, now: datetime, told: 
         if key in told:
             continue
         what = f.program or "your programs"
-        size = ", ".join(x for x in (f"{f.cores:g} cores" if f.cores else "",
-                                     f"{f.memory_gb:g} GB" if f.memory_gb else "") if x)
+        size = ", ".join(x for x in (_many(f.cores, "core") if f.cores else "",
+                                     f"{_num(f.memory_gb)} GB" if f.memory_gb else "") if x)
         lines = [f"{what} on {f.site}, {_when(f.started)}, for {LN._span(f.minutes)}"
                  + (f" ({size})" if size else "") + (", still going at the last reading" if f.ongoing else "")]
         if f.command and f.command != f.program:
-            lines.append(f.command)
-        lines.append(f.why)
-        lines += f.better
-        out.append(Entry("login_node", key, f.title, lines))
+            cmd = " ".join(f.command.split())
+            lines.append(cmd if len(cmd) <= 160 else cmd[:157] + "...")
+        out.append(Entry("login_node", key, f.title, lines, group=f"login_node:{f.kind}:{'|'.join(f.better)}",
+                         advice=[f.why, *f.better], started=str(f.started or "")))
     return out
 
 
@@ -482,17 +564,15 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
             except ValueError:
                 pass
         where = f"{i.cluster}" + (f" ({i.partition})" if i.partition else "") if i.cluster else "the clusters"
-        used = ""
-        if i.usage_stats is not None:
-            used = f", and used about {i.usage_stats.median:g} {i.usage_stats.unit}".rstrip()
-        lines = [f"On {where}: {i.affected_jobs} of your last {i.total_applicable} jobs asked for "
-                 f"{i.current_display or 'more'}{used}."]
-        if i.rationale:
-            lines.append(i.rationale)
-        lines.append("Ask for this instead:")
-        lines += sbatch_lines(i.directive, i.suggested_display)
         word = _ASKED.get(i.dimension_key, i.dimension_key or "resources")
-        out.append(Entry("jobs", key, f"Your jobs ask for more {word} than they use", lines))
+        used = _used(i.usage_stats)
+        typical = f"typically {_asked_for(i)}" + (f"; they used about {used}" if used else "")
+        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} jobs asked for more {word} "
+                 f"than they used ({typical}). Ask for this instead:"]
+        lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
+        why = _WHY.get(i.dimension_key)
+        out.append(Entry("jobs", key, f"Your jobs ask for more {word} than they use", lines,
+                         group=f"jobs:{i.dimension_key}", advice=[why] if why else []))
     return out
 
 
@@ -560,8 +640,21 @@ def plan(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
 
 # -- the email ----------------------------------------------------------------------------------
 
+def notes_of(entries) -> list[tuple[str, list]]:
+    """The email's notes: (kind, [entries]) a group each, login nodes first,
+    in the order first met; within a note, the newest first."""
+    out: dict = {}
+    for e in entries:
+        out.setdefault((e.kind != "login_node", e.group or e.key), []).append(e)
+    notes = []
+    for (_, _), es in sorted(out.items(), key=lambda kv: kv[0][0]):
+        es.sort(key=lambda e: e.started, reverse=True)
+        notes.append((es[0].kind, es))
+    return notes
+
+
 def subject_of(m: dict) -> str:
-    n = len(m["entries"])
+    n = len(notes_of(m["entries"]))
     words = "a note" if n == 1 else f"{n} notes"
     return (f"[review: for {m['user']}] " if m["review"] else "") + f"Research computing: {words} on your recent work"
 
@@ -576,17 +669,25 @@ def text_of(m: dict, s: Settings) -> str:
               f"NØMAÐ, the monitoring that {who} runs on the clusters, noticed something in your recent "
               "work that could run better. Nothing is wrong and nothing has been done about it; this is "
               "only to help.", ""]
+    notes = notes_of(m["entries"])
     for kind, title in (("login_node", "On the login nodes"), ("jobs", "Your jobs")):
-        es = [e for e in m["entries"] if e.kind == kind]
-        if not es:
+        mine = [es for k, es in notes if k == kind]
+        if not mine:
             continue
         lines += [title, "-" * len(title)]
-        for e in es[:SHOWN]:
-            lines.append(f"* {e.title}")
-            lines += [f"  {x}" for x in e.lines]
+        for es in mine:
+            many = kind == "login_node" and len(es) > 1
+            lines.append(f"* {es[0].title}" + (f" ({len(es)} times)" if many else ""))
+            for e in es[:SHOWN]:
+                first, *rest = e.lines or [""]
+                lines.append(f"  - {first}")
+                lines += [f"    {x}" for x in rest]
+            if len(es) > SHOWN:
+                lines.append(f"  ... and {len(es) - SHOWN} more like these"
+                             + (" on My activity." if s.link else "."))
+            # a command to type stands out from the words around it
+            lines += [f"    {x}" if x.startswith(("srun ", "sbatch ")) else f"  {x}" for x in es[0].advice]
             lines.append("")
-        if len(es) > SHOWN:
-            lines += [f"  ... and {len(es) - SHOWN} more.", ""]
     if s.link:
         lines += [f"The details, and how to do it another way: {s.link}/me", ""]
     stop = (f"These emails come at most once every {s.every_days} days, and only with something new. "

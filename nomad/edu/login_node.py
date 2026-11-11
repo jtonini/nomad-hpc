@@ -28,7 +28,8 @@ What is told (``[notices.login_node]``):
 - one process holding ``min_memory_gb`` (16) GB or more;
 - a large transfer (50 MB/s for ten minutes by default) by a program that
   is not moving data in or out: ``skip_programs`` (scp, sftp-server,
-  rsync, sshd) are what a login node is for, and are never told.
+  rsync, and sshd with newer OpenSSH's sshd-session and sshd-auth) are
+  what a login node is for, and are never told, whatever kind (1.39.1).
 
 One entry per process: of the rules one process tripped, the strongest; a
 process inside a time when the person's processes together were caught is
@@ -47,7 +48,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 LOGIN_ROLES = ("headnode", "login", "head", "login_node")
-SKIP_PROGRAMS = ("scp", "sftp-server", "rsync", "sshd")
+# sshd-session and sshd-auth: what newer OpenSSH (9.8+) runs for each login and transfer.
+SKIP_PROGRAMS = ("scp", "sftp-server", "rsync", "sshd", "sshd-session", "sshd-auth")
 KEYS = {"show", "days", "min_minutes", "min_cores", "min_memory_gb", "skip_programs"}
 ONGOING_MINUTES = 15            # last seen this recently: still going at the last reading
 FOLD_SLACK = 300                # seconds: a process this close to a together-window is part of it

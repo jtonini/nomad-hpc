@@ -57,8 +57,9 @@ def world(tmp_path):
 def jobs_issue(**kw):
     base = {"dimension": "Memory Efficiency", "dimension_key": "memory", "affected_jobs": 7, "total_applicable": 9,
             "avg_score": 20.0, "severity": "critical", "trajectory": "stable", "directive": "mem",
-            "suggested_value": 8192, "suggested_display": "8G", "current_display": "64 GB", "direction": "lower",
-            "cluster": "spydur", "partition": "basic", "usage_stats": UsageStats(6.2, 5, 7, 4, 9, "GB"),
+            "suggested_value": 8192, "suggested_display": "8G", "current_display": "64G", "direction": "lower",
+            "current_value_typical": 65536.0, "cluster": "spydur", "partition": "basic",
+            "usage_stats": UsageStats(6348.8, 5000, 7000, 4000, 9000, "MB"),
             "rationale": "Memory you ask for and leave unused keeps other jobs waiting."}
     base.update(kw)
     return Issue(**base)
@@ -103,12 +104,13 @@ def test_who_gets_an_email_and_what_it_says(tmp_path, insights):
     (e,) = amy["entries"]
     assert e.kind == "login_node" and e.title == "A long computation on the login node"
     assert e.lines[0].startswith("python3 on spydur, ") and "for 1 h" in e.lines[0] and "1.5 cores" in e.lines[0]
-    assert "srun --pty" in " ".join(e.lines)
+    assert "srun --pty" in " ".join(e.advice)
     # jobs: only a pattern, of the severities and size asked, of asking for more than used
     (j,) = got["dan"]["entries"]
     assert j.kind == "jobs" and j.title == "Your jobs ask for more memory than they use"
-    assert j.lines[0] == "On spydur (basic): 7 of your last 9 jobs asked for 64 GB, and used about 6.2 GB."
-    assert "#SBATCH --mem=8G" in j.lines
+    assert j.lines[0] == ("On spydur (basic), 7 of your last 9 jobs asked for more memory than they used "
+                          "(typically 64 GB; they used about 6.2 GB). Ask for this instead:")
+    assert "  #SBATCH --mem=8G" in j.lines
     s = N.settings(CONFIG)
     text = N.text_of(got["dan"], s)
     assert text.startswith("[Review: this would have gone to dan@example.edu.]\n\nHello,\n")
@@ -304,6 +306,6 @@ def test_with_real_jobs(tmp_path):
     (m,) = p["mail"]
     assert m["user"] == "bob" and m["to"] == ["bob@example.edu"]
     (e,) = m["entries"]                     # clusterA (5 jobs, critical); clusterB has 4, under min_jobs
-    assert e.title == "Your jobs ask for more cores than they use" and e.lines[0].startswith("On clusterA (compute): 5 of")
+    assert e.title == "Your jobs ask for more cores than they use" and e.lines[0].startswith("On clusterA (compute), 5 of")
     assert "#SBATCH --cpus-per-task=" in " ".join(e.lines)
     json.dumps([x.__dict__ for x in m["entries"]])
