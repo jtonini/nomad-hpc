@@ -577,6 +577,26 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # signature = ["Research Computing", "Example University"]   # default: [console.branding]
 # contact = "Questions: rc@example.edu" # default: report.toml's [report.labs] contact
 
+# A lab's PI asks ARC for accounts for their students, on My lab; nomad says
+# who each one is, from [directory] below, and emails notify. ARC closes each
+# one (made, or not and why) and the PI is emailed as the check's emails go
+# (`nomad lab accounts`, docs/lab-accounts.md). On once [directory] is set.
+# [console.labs.accounts]
+# sites = ["spydur"]                    # where a PI may ask (default: sites with Slurm nodes read this week)
+# notify = ["hpc@example.edu"]          # new requests are emailed here
+# most = 100                            # people in one request
+# link = "https://nomad.example.edu/diagnostics?tab=labs"   # ARC's page, in its email
+
+# The campus directory, as a service account, over ldaps only: who a NetID
+# or a name is, for account requests. The password is the nomad account's
+# file (600); nomad hands it to ldapsearch in a file, never on a command line.
+# [directory]
+# uri = "ldaps://ldap.example.edu"
+# base = "ou=people,dc=example,dc=edu"
+# bind_dn = "uid=svc-nomad,ou=special,dc=example,dc=edu"
+# password_file = "/home/nomad/.config/nomad/directory_password"
+# timeout = 15
+
 # What My lab's Needs attention lists (docs/facts.md); these are the defaults.
 # [console.labs.attention]
 # days = 7                 # the jobs, and the growth of data, looked at

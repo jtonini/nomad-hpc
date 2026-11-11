@@ -15,6 +15,7 @@
 | `nomad lab assistant LAB NETID` | NETID is a research assistant of LAB: sees it as its PI does while one of its members (`--remove`: no longer; `--apply` writes it) |
 | `nomad demos ...` | Practice runs: small inputs, known to work, that show how a job runs ([Practice runs](demos.md)) |
 | `nomad lab check ...` | Each term, a lab's PI says who is still in it; ARC's to-do from the answers ([Lab membership check](lab-check.md)) |
+| `nomad lab accounts ...` | A lab's PI asks ARC for accounts; who each one is, from the campus directory; ARC closes each ([Account requests](lab-accounts.md)) |
 | `nomad notices` | A weekly email to each person about their own use (login nodes, jobs asking far more than they use): `mail [--send]`, `set NETID on|off`, `timer`; review first ([Notices](notices.md)) |
 | `nomad maintenance` | Declared maintenance windows: `start SITE --until WHEN --reason WHY`, `end SITE` (`--apply` does it); alerts about the site are held, the hub's and its own ([Alerts](alerts.md#declared-maintenance-1370)) |
 | `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as (quickstart.md) |

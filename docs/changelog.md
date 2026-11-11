@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.42.0 (November 2026)
+
+- **A lab's PI asks for accounts** (`nomad.account_requests`; `nomad lab
+  accounts`). On My lab, a PI types or pastes NetIDs, addresses or names, or
+  gives a table (CSV, tab-separated, Excel), and picks the clusters. Before
+  anything goes to Research Computing, nomad says who each one is from the
+  campus directory: found, with their name; several people of that name
+  (the PI picks); not found; already has an account there (nomad has their
+  jobs, logins or groups); already asked for. The request is emailed to
+  `notify`; ARC closes each account, made or not made and why, and the PI
+  is emailed (review_to while set). Every request and close is kept, with
+  who and when: the record ARC has no ticket system for. nomad makes no
+  account itself. The Console's part is fix 102.
+- **The campus directory, as a service account** (`nomad.directory`;
+  `[directory]`). Through `ldapsearch`, over ldaps only, with the password
+  in the nomad account's own file and handed over in a file deleted after,
+  never on a command line. Only a person's NetID and name are read, and only
+  of what a PI typed.
+
 ## v1.41.0 (November 2026)
 
 - **One node over a window** (`nomad.facts.node`; `nomad facts node SITE
