@@ -171,6 +171,28 @@ nomad gate ask --site CLUSTER --user YOU size --script /scratch/YOU/run/job.sh
 
 `nomad-gate run OP ...`, run by a person on the cluster, answers as the hub would get it, as them (`nomad-gate run jobs`): handy to see what the Console will show.
 
+### A cluster reached through another host (1.40.0)
+
+A cluster the hub can reach only through another host (vadur, through jonimitchell) says so in its `[[hub.sites]]`:
+
+```toml
+[[hub.sites]]
+name = "vadur"
+host = "vadur"                     # as the other host reaches it
+ssh_user = "nomad"
+submit = "gate"
+gate_jump = "zeus@jonimitchell"    # account@host, or account@host:port
+```
+
+The hub then asks the gate through that host with the gate's own key and the same settings as always (none of its account's ssh settings, so `nomad sync`'s ProxyJump is never used): the key opens a forwarded connection to the cluster's ssh there (`ssh -W`), and nothing else. On the host it jumps through, as that account, once:
+
+```
+nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to vadur:22 --from HUB-ADDRESS
+nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to vadur:22 --from HUB-ADDRESS --apply
+```
+
+Its line has `restrict` (no terminal), forwarding allowed again only to `--to` (`permitopen`), `command="/bin/false"` should anyone ask it for a session, and `from=` the hub. On the cluster, `nomad gate install-key` takes the address the cluster sees the connection come from: the host jumped through, not the hub. The Console's account must know both host keys under those very names (the jump host's as `gate_jump` names it, the cluster's as `host` does), as with any gate.
+
 ## Where it starts soonest (1.25.4)
 
 On the Console's Submit page, **Where would it start soonest?** lists the partitions the person may send the job to, in the order the site prefers, each with when Slurm would start it there now and how long jobs usually wait there. One click puts a partition in **Yours**. **Fastest start** takes nomad's pick by itself.

@@ -21,6 +21,8 @@ def gate_group():
       nomad gate ask --site S --user U jobs  one request, its answer as JSON
     On the cluster, as its nomad account:
       nomad gate install-key 'PUBKEY' --from HUB-ADDRESS    (a dry run; --apply writes it)
+    On a host the hub reaches the cluster through (gate_jump), as that account:
+      nomad gate jump-key 'PUBKEY' --to CLUSTER:22 --from HUB-ADDRESS
     \b
     The key the hub uses for this can run nothing but nomad-gate, which does
     only its own short list (size, submit, again, starts, jobs, job,
@@ -90,6 +92,38 @@ def install_key_cmd(pubkey, origins, from_anywhere, gate_path, edit, apply):
         click.echo(ln)
 
 
+@gate_group.command("jump-key")
+@click.argument("pubkey")
+@click.option("--to", "to", multiple=True, required=True,
+              help="The cluster's ssh as this host reaches it, host:port (vadur:22); again for more.")
+@click.option("--from", "origins", help="Only from these addresses (sshd's from=): the hub's, as this host "
+              "sees it.")
+@click.option("--from-anywhere", is_flag=True, help="No from= (not advised).")
+@click.option("--apply", is_flag=True, help="Write it (otherwise show what would change).")
+def jump_key_cmd(pubkey, to, origins, from_anywhere, apply):
+    """Let the hub's gate key through this host to a cluster's ssh, and
+    nothing else (1.40.0): for a site whose [[hub.sites]] has gate_jump =
+    "THIS-ACCOUNT@THIS-HOST".
+
+    Adds PUBKEY to ~/.ssh/authorized_keys with `restrict` (no terminal), its
+    forwarding allowed again but only to --to (permitopen), `command=`
+    /bin/false (should anyone ask it for a session) and `from=` the hub. A
+    line already holding the same key is replaced. The cluster's own
+    install-key then takes this host's address as --from.
+    """
+    from nomad.submit import remote
+    if not origins and not from_anywhere:
+        raise click.UsageError("give --from (the hub's address as this host sees it), or --from-anywhere")
+    if origins and from_anywhere:
+        raise click.UsageError("--from or --from-anywhere, not both")
+    try:
+        _, lines = remote.install_jump_key(pubkey, to=list(to), origins=origins, apply=apply)
+    except (ValueError, OSError) as exc:
+        raise click.ClickException(str(exc)) from None
+    for ln in lines:
+        click.echo(ln)
+
+
 def _site(ctx, name):
     from nomad.submit import remote
     sites, hub = remote.hub_sites(ctx.obj.get("config_target") if ctx.obj else None)
@@ -121,7 +155,8 @@ def test_cmd(ctx, site_name, user):
             click.echo(click.style(f"  no   {what}: {doc.get('error')}", fg="red"))
         return doc
 
-    click.echo(f"{site_name} ({remote.mode(s)}):")
+    click.echo(f"{site_name} ({remote.mode(s)}" + (f", through {s['gate_jump']}" if s.get("gate_jump") else "")
+               + "):")
     a = say("the gate answers", remote.call(s, "version", hub=hub))
     if a.get("ok"):
         click.echo(f"       nomad-gate {a.get('gate')}, nomad {a.get('nomad')}, as {a.get('account')}")

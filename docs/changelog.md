@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.40.0 (November 2026)
+
+- **The gate through another host** (`gate_jump` in a site's
+  `[[hub.sites]]`; `nomad gate jump-key`). A cluster the hub reaches only
+  through another host (vadur, through jonimitchell) can have the Console's
+  Submit page and live jobs too: the gate's own key, with the same strict
+  settings, opens a forwarded connection to the cluster's ssh on that host
+  (`ssh -W`), and its line there allows nothing else (no terminal, no
+  command, forwarding only to the cluster's address, from the hub's). The
+  hub's own ssh settings are still never used. Tried against real sshd: the
+  gate answers through the jump; the jump key gets no shell and can forward
+  nowhere else.
+- **How often the hub reads the sites, from nomad.toml** (`[hub]
+  sync_interval_minutes`; `nomad sync timer`). `--apply` writes a drop-in
+  for nomad-sync.timer: every that many minutes, two minutes after the
+  five-minute marks the sites read themselves on. `nomad config check` says
+  when the value isn't minutes that divide an hour. Five minutes (from
+  twenty) costs no storage and about 2% of one of the hub's cores; a job that
+  started shows as running in the Console within minutes.
+
 ## v1.39.1 (November 2026)
 
 - **The weekly email, as people read it.** What is alike is one note: the

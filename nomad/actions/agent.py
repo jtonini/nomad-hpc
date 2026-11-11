@@ -234,12 +234,13 @@ def key_line(pubkey: str, from_pattern: str | None = None, command: str | None =
 
 def install_key(pubkey: str, *, from_pattern: str | None = None, apply: bool = False,
                 path: Path | None = None, command: str | None = None, what: str = "`nomad agent`",
-                tag: str = "nomad-agent") -> tuple[str, list[str]]:
+                tag: str = "nomad-agent", line: str | None = None) -> tuple[str, list[str]]:
     """What adding the hub's key to authorized_keys would change (and, with
     apply, change it). Returns (status, lines to show). ``command``: what
     the key runs instead of `nomad agent` (nomad-gate's key, 1.25), said as
-    ``what``; ``tag`` names the backup."""
-    line = key_line(pubkey, from_pattern, command)
+    ``what``; ``tag`` names the backup; ``line``: the whole line, made
+    elsewhere (the gate key's on a host the hub jumps through, 1.40.0)."""
+    line = line or key_line(pubkey, from_pattern, command)
     _, blob, _ = parse_public_key(pubkey)
     path = path or Path.home() / ".ssh" / "authorized_keys"
     if path.is_symlink():

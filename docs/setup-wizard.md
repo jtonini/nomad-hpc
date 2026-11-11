@@ -378,6 +378,26 @@ nomad dashboard --db ~/.local/share/nomad/combined.db
 */10 * * * * /path/to/nomad sync 2>/dev/null
 ```
 
+   Where systemd runs the syncs (a `nomad-sync.timer`), say how often in
+   nomad.toml and let nomad set the timer (1.40.0):
+
+```toml
+[hub]
+sync_interval_minutes = 5    # 2 to 60, minutes that divide an hour
+```
+
+```bash
+nomad sync timer            # what the timer would be
+sudo nomad sync timer --apply   # a drop-in for nomad-sync.timer; reloads systemd, restarts the timer
+```
+
+   It runs two minutes after each five-minute mark, when the sites have read
+   themselves (they do every 5 minutes by default). More often costs no
+   storage (the same rows arrive in smaller batches) and little network (a
+   site's running and waiting jobs are sent again each time): a job that
+   started shows as running within minutes. systemd never starts a sync while
+   one is still running.
+
 5. See how the syncs go (it only reads; the Console's `sync.status` action
    runs it):
 

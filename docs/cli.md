@@ -23,6 +23,8 @@
 | `nomad config check` | Does nomad.toml read? If not, the line and what is wrong ([Configuration](config.md)) |
 | `nomad sync` | On the hub: bring the combined database up to date from every site ([Setup](setup-wizard.md)) |
 | `nomad sync status` | On the hub: how each site's last syncs went (reads only) |
+| `nomad sync timer` | On the hub: set its sync timer to `[hub] sync_interval_minutes` (`--apply`, as root) ([Setup](setup-wizard.md)) |
+| `nomad gate jump-key` | On a host the hub reaches a cluster through: let the hub's gate key forward to that cluster's ssh, and nothing else ([Submit](submit.md)) |
 
 ## Educational Analytics
 

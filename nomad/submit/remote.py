@@ -19,12 +19,21 @@ says so:
     submit = "gate"            # else "copy": the Console gives the person the command to paste
     # gate_user = "installer"  # default: ssh_user
     # gate_host = "..."        # default: host
+    # gate_jump = "zeus@jonimitchell"   # reached only through that host (1.40.0)
 
 A request is checked here with the gate's own rules before it is sent, and
 by the gate again (as the cluster's account, then as the person). Only
 the gate's key is offered: no agent, no other key, no shared connection,
 and none of this account's ssh settings (-F /dev/null: a key or a proxy
 named there is never used), so the cluster is reached directly.
+
+A cluster the hub reaches only through another host (vadur, through
+jonimitchell) says so with ``gate_jump`` (1.40.0): the gate's own key, with
+the same settings, opens a forwarded connection to the cluster's ssh port
+there (ssh -W), and nothing else -- its line in that account's
+authorized_keys (`nomad gate jump-key`) allows only forwarding to the
+cluster's address and port, from the hub's. The hub's own ssh settings
+(its ProxyJump for nomad sync) are still never used.
 """
 import json
 import os
@@ -101,8 +110,25 @@ def settings(site: dict, hub: dict | None = None) -> dict:
     key = key_path(hub, site)
     if not key.is_file():
         raise GateError(f"{name}: the gate's key {key} isn't there (nomad gate key makes it)")
-    return {"name": name, "host": host, "user": user, "port": int(port) if port is not None else None,
-            "key": str(key)}
+    out = {"name": name, "host": host, "user": user, "port": int(port) if port is not None else None,
+           "key": str(key)}
+    if site.get("gate_jump") not in (None, ""):
+        out["jump"] = jump_of(site.get("gate_jump"), name)
+    return out
+
+
+_JUMP = re.compile(r"(?P<user>[a-z_][a-z0-9_.-]{0,31})@(?P<host>[A-Za-z0-9][A-Za-z0-9.-]{0,252})"
+                   r"(?::(?P<port>\d{1,5}))?")
+
+
+def jump_of(raw, name: str = "a site") -> dict:
+    """``gate_jump`` ("user@host" or "user@host:port") as {user, host, port};
+    else GateError, saying why."""
+    m = _JUMP.fullmatch(str(raw).strip()) if isinstance(raw, str) else None
+    if not m or (m.group("port") and not 0 < int(m.group("port")) < 65536):
+        raise GateError(f'{name}: gate_jump {raw!r} isn\'t "account@host" (or "account@host:port")')
+    return {"user": m.group("user"), "host": m.group("host"),
+            "port": int(m.group("port")) if m.group("port") else None}
 
 
 def ssh_argv(s: dict, words: list, body: bool = False) -> list:
@@ -118,7 +144,26 @@ def ssh_argv(s: dict, words: list, body: bool = False) -> list:
             "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"]
     if s.get("port"):
         argv += ["-p", str(int(s["port"]))]
+    if s.get("jump"):
+        argv += ["-o", "ProxyCommand=" + proxy_command(s)]
     return argv + ["-l", s["user"], "--", s["host"], shlex.join([gate.GATE] + list(words))]
+
+
+def proxy_command(s: dict) -> str:
+    """ssh's ProxyCommand for a gate reached through ``s["jump"]``: the gate's
+    key alone, the same strict settings, and only a forwarded connection to
+    the cluster's ssh port (-W; ssh fills in %h and %p). Run by /bin/sh (the
+    environment ssh is given has no SHELL)."""
+    j = s["jump"]
+    inner = ["ssh", "-F", "/dev/null", "-x", "-a", "-i", s["key"].replace("%", "%%"),
+             "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+             "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+             "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ForwardAgent=no",
+             "-o", "PasswordAuthentication=no", "-o", "KbdInteractiveAuthentication=no",
+             "-o", "ConnectTimeout=10"]
+    if j.get("port"):
+        inner += ["-p", str(int(j["port"]))]
+    return shlex.join(inner + ["-l", j["user"], "-W", "%h:%p", "--", j["host"]])
 
 
 def request(op: str, user: str | None = None, **options) -> list:
@@ -192,7 +237,13 @@ def _why(s: dict, r) -> str:
     if r.returncode == 255:
         last = err.splitlines()[-1] if err else "ssh failed"
         if "host key" in err.lower():
-            return (f"couldn't reach {target}: {last} (this account doesn't know {s['host']}'s host key: "
+            said = next((x for x in err.splitlines() if "host key" in x.lower()), last)
+            if s.get("jump"):
+                j = s["jump"]
+                return (f"couldn't reach {target} through {j['user']}@{j['host']}: {said} (this account must "
+                        f"know both host keys, {j['host']}'s and {s['host']}'s, under those very names: ssh to "
+                        "each once by hand, or add them to ~/.ssh/known_hosts)")
+            return (f"couldn't reach {target}: {said} (this account doesn't know {s['host']}'s host key: "
                     "ssh to it once by hand, or add it to ~/.ssh/known_hosts)")
         if "Permission denied" in err:
             return (f"couldn't reach {target}: {last} (the gate's key isn't in its authorized_keys, or not "
@@ -247,6 +298,38 @@ def forced_command(gate_path: str, owners: set | None = None, edit: bool = False
             raise ValueError(f"--gate {gate_path}: not safe to run from ({why}); install_nomad_for_users.sh "
                              "1.25.0 or later puts it there")
     return f"{gate_path} serve --edit" if edit else f"{gate_path} serve"
+
+
+def jump_line(pubkey: str, to: list, origins: str | None) -> str:
+    """The gate key's authorized_keys line on a host the hub jumps through
+    (1.40.0): no terminal, no command (/bin/false, should a session be
+    asked for), and forwarding only to ``to`` ("host:port" each), from
+    ``origins``."""
+    from nomad.actions.agent import _FROM, parse_public_key
+    kind, blob, comment = parse_public_key(pubkey)
+    if not to:
+        raise ValueError("--to: the cluster's ssh address as this host reaches it (host:22)")
+    opts = ["restrict", "port-forwarding"]
+    for x in to:
+        m = re.fullmatch(r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]{0,252}):(?P<port>\d{1,5})", str(x).strip())
+        if not m or not 0 < int(m.group("port")) < 65536:
+            raise ValueError(f"--to {x!r}: host:port (the cluster's ssh, e.g. vadur:22)")
+        opts.append(f'permitopen="{m.group("host")}:{int(m.group("port"))}"')
+    opts.append('command="/bin/false"')
+    if origins:
+        if not _FROM.fullmatch(origins):
+            raise ValueError("--from takes host or address patterns, comma-separated")
+        opts.append(f'from="{origins}"')
+    return f"{','.join(opts)} {kind} {blob} {comment}".rstrip()
+
+
+def install_jump_key(pubkey: str, *, to: list, origins: str | None, apply: bool = False,
+                     path: Path | None = None) -> tuple:
+    """What adding the gate key's jump line to authorized_keys changes (and,
+    with apply, changing it): forwarding only, to ``to``, from ``origins``."""
+    from nomad.actions.agent import install_key as install
+    return install(pubkey, apply=apply, path=path, line=jump_line(pubkey, to, origins),
+                   what=f"forwarding to {', '.join(to)}", tag="nomad-gate-jump")
 
 
 def install_key(pubkey: str, *, origins: str | None, gate_path: str, apply: bool = False,

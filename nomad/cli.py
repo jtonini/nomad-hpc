@@ -6325,6 +6325,39 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
 FAILURES_BEFORE_COPY = 3
 
 
+@sync.command('timer')
+@click.option('--unit', default='nomad-sync.timer', show_default=True, help="The hub's sync timer.")
+@click.option('--apply', is_flag=True, help='Write it, reload systemd and restart the timer (as root).')
+@click.pass_context
+def sync_timer_cmd(ctx, unit, apply):
+    """Set the hub's sync timer to [hub] sync_interval_minutes (1.40.0): every
+    that many minutes, two minutes after the five-minute marks the sites read
+    themselves on. Without --apply, says what it would be."""
+    import re
+
+    from nomad.sync_timer import apply as apply_timer
+    from nomad.sync_timer import plan
+    if not re.fullmatch(r"[A-Za-z0-9@_.-]+\.timer", unit):
+        raise click.UsageError(f"--unit {unit!r}: a timer's name (nomad-sync.timer)")
+    source = str(Path(ctx.obj.get('config_target') or resolve_config_path()).expanduser())
+    p = plan(ctx.obj.get('config') or {}, source, unit)
+    if p["problem"]:
+        raise click.ClickException(p["problem"])
+    if p["same"]:
+        click.echo(f"{unit} reads the sites every {p['every']} minutes already ({p['when']}): nothing to change.")
+        return
+    if not apply:
+        click.echo(f"Would write {p['path']}:")
+        click.echo("".join(f"  {ln}\n" for ln in p["text"].splitlines()), nl=False)
+        click.echo(f"so {unit} runs every {p['every']} minutes ({p['when']}). Run again with --apply (as root).")
+        return
+    try:
+        now = apply_timer(p, unit)
+    except (OSError, RuntimeError) as e:
+        raise click.ClickException(str(e)) from None
+    click.echo(f"{unit}: every {p['every']} minutes ({now or p['when']}).")
+
+
 @sync.command('status')
 @click.option('--db', type=click.Path(dir_okay=False),
               help="The combined database (default: the hub's, from [hub] output_db).")
@@ -8505,6 +8538,9 @@ def config_check(ctx):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
     from nomad.notices import config_problems as _notices_problems
     for problem in _notices_problems(data):
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.sync_timer import config_problems as _sync_timer_problems
+    for problem in _sync_timer_problems(data):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
     _config_check_policy_watch(data)
     _config_check_condos(ctx)

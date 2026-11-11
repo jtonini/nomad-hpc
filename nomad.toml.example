@@ -995,6 +995,16 @@ ignore_states   = []
 # On the hub, in [hub] (declared maintenance):
 # maintenance_grace_minutes = 60   # alerts held this long after a window, for the site to come back
 # maintenance_max_days = 14        # the longest window (14 at most)
+#
+# On the hub, in [hub] (1.40.0): how often it reads the sites. `nomad sync
+# timer --apply` (as root) sets nomad-sync.timer to it, two minutes after each
+# five-minute mark the sites read themselves on. No storage cost; a job that
+# started shows as running within minutes.
+# sync_interval_minutes = 5        # 2 to 60, minutes that divide an hour
+#
+# A site whose gate the hub reaches only through another host, in its
+# [[hub.sites]] (1.40.0; there, nomad gate jump-key):
+# gate_jump = "zeus@jonimitchell"
 
 # [alerts.node_jobs] — A node that fails every job at start (1.25.4): among the
 # jobs that started on a node in the last window_minutes, at least min_jobs
