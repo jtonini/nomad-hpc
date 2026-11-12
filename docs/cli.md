@@ -171,6 +171,13 @@ nomad agent install-key 'ssh-ed25519 AAAA... nomad-actions@hub' [--from PATTERN]
 # On a cluster: drain a node, or resume it (a dry run unless --apply; [actions] slurm_as)
 nomad node drain NODE --reason TEXT [--by NETID] [--apply] [--json]
 nomad node resume NODE [--reason TEXT] [--by NETID] [--apply] [--json]
+
+# On an interactive server: its RStudio and Jupyter sessions, and the two services
+# (each a dry run unless --apply; [actions] interactive = true)
+nomad interactive sessions [--json]
+nomad interactive stop PERSON PID [--started TIME] [--by NETID] [--apply] [--json]
+nomad interactive clear [--hours N] [--kind all|rstudio|jupyter] [--by NETID] [--apply] [--json]
+nomad interactive restart rstudio|jupyter [--servers N] [--by NETID] [--apply] [--json]
 ```
 
 See [Actions](actions.md).

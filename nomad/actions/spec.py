@@ -112,6 +112,8 @@ _BY = Param("by", "caller", "Who asked (the Console fills it in: the administrat
 _APPLY = Param("apply", "flag", "Make the change (otherwise a dry run: what would change)", flag="--apply",
                default=False)
 _NODE_NOTES = ("Off on a site until its nomad.toml has [actions] slurm_as (see docs/actions.md).",)
+_INTERACTIVE_NOTES = ("Acting on sessions is off on a site until its nomad.toml has [actions] interactive = true "
+                      "(see docs/actions.md).",)
 
 ACTIONS: tuple[Action, ...] = (
     Action("version", "nomad version", "The nomad version on that host.",
@@ -212,6 +214,37 @@ ACTIONS: tuple[Action, ...] = (
            (_NODE, Param("reason", "text", "Why (kept in the logs: Slurm drops a node's reason when it "
                          "resumes)", flag="--reason"), _BY, _APPLY),
            timeout=180, names=True, changes=True, notes=_NODE_NOTES),
+    # An interactive server's sessions and services (1.43.0).
+    Action("interactive.sessions", "Interactive sessions",
+           "The RStudio and Jupyter sessions on the server now, how long each has been idle, its two "
+           "services, and what nomad may do about them there.",
+           frozenset({SITE}), ("interactive", "sessions", "--json"), timeout=60, names=True,
+           notes=_INTERACTIVE_NOTES),
+    Action("interactive.stop", "Stop a session",
+           "An RStudio session is suspended (R saves it; it comes back when its person next opens RStudio); "
+           "a Jupyter server or kernel is stopped as its person.",
+           frozenset({SITE}), ("interactive", "stop", "--json"),
+           (Param("person", "name", "Whose session (their NetID)", required=True),
+            Param("pid", "int", "The session's process number", required=True, min=2, max=4194304),
+            Param("started", "text", "When it started, as the sessions list says: that very process",
+                  flag="--started", required=True), _BY, _APPLY),
+           timeout=120, names=True, changes=True, notes=_INTERACTIVE_NOTES),
+    Action("interactive.clear", "Clear stale sessions",
+           "Each RStudio session and each Jupyter server idle at least that many hours: suspended or stopped.",
+           frozenset({SITE}), ("interactive", "clear", "--json"),
+           (Param("hours", "int", "Idle this long is stale (default: the server's [actions] stale_hours, "
+                  "else 24)", flag="--hours", min=1, max=1440),
+            Param("kind", "choice", "Which sessions", flag="--kind", default="all",
+                  choices=("all", "rstudio", "jupyter")), _BY, _APPLY),
+           timeout=900, names=True, changes=True, notes=_INTERACTIVE_NOTES),
+    Action("interactive.restart", "Restart RStudio or JupyterHub",
+           "systemd restarts the service. Restarting JupyterHub stops every person's server unless its "
+           "configuration keeps them (cleanup_servers = False): then it needs that number.",
+           frozenset({SITE}), ("interactive", "restart", "--json"),
+           (Param("service", "choice", "Which", required=True, choices=("rstudio", "jupyter")),
+            Param("servers", "int", "JupyterHub: how many people's servers it stops, as the dry run says",
+                  flag="--servers", min=0, max=100000), _BY, _APPLY),
+           timeout=240, names=True, changes=True, notes=_INTERACTIVE_NOTES),
 )
 
 _BY_NAME = {a.name: a for a in ACTIONS}

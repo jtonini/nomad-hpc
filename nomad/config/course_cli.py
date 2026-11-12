@@ -1200,6 +1200,13 @@ def interactive_group():
     \b
     nomad interactive backfill      rebuild the totals for the weeks before
                                     nomad 1.11 from the raw snapshots
+    nomad interactive sessions      the sessions here now, and how long idle
+    nomad interactive stop PERSON PID       suspend an RStudio session, or
+                                    stop a Jupyter server or kernel
+    nomad interactive clear         the same for each one idle --hours
+    nomad interactive restart rstudio|jupyter
+    (each a dry run unless --apply; off until [actions] interactive = true:
+    see docs/actions.md)
     """
 
 

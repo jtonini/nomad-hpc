@@ -504,6 +504,19 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # "self": this account is a Slurm administrator. The job_live collector
 # runs sstat as the same account unless [collectors.job_live] sstat_as says.
 # slurm_as = "slurm"
+#
+# On an interactive server (RStudio Workbench, JupyterHub): acting on its
+# sessions and services (1.43: nomad interactive stop|clear|restart, the
+# Console's Interactive servers page); off until true. nomad does only what
+# sudo already lets this account do, and asks sudo first (sudo -n -l):
+#   ACCOUNT ALL=(root) NOPASSWD: /usr/sbin/rstudio-server suspend-session *
+#   ACCOUNT ALL=(root) NOPASSWD: /usr/bin/systemctl restart rstudio-server, /usr/bin/systemctl restart jupyterhub
+#   and, to stop a Jupyter server or kernel as its person: ACCOUNT ALL=(PEOPLE) NOPASSWD: /usr/bin/kill
+# interactive = true
+# rstudio_server = "/usr/sbin/rstudio-server"
+# rstudio_unit = "rstudio-server"
+# jupyter_unit = "jupyterhub"
+# stale_hours = 24       # idle this long is stale (default: [collectors.interactive] idle_session_hours)
 
 # ─── Mail ────────────────────────────────────────────────────────
 # How NØMAÐ hands mail to your institution's mail server: alert email,

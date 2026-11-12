@@ -16,10 +16,14 @@ nomad actions run syscheck --here               # on this host, as a site runs i
 
 ## The catalog
 
-All of them read, but two (1.31): `node.drain` and `node.resume` change a
-node's state in Slurm, and only when their `apply` parameter is true;
-otherwise they are a dry run of it, the way `--apply` works on the command
-line. See [Draining and resuming a node](#draining-and-resuming-a-node).
+All of them read, but these: `node.drain` and `node.resume` (1.31) change a
+node's state in Slurm, `maintenance.start` and `maintenance.end` (1.37)
+declare a window on the hub, and `interactive.stop`, `interactive.clear` and
+`interactive.restart` (1.43) act on an interactive server's sessions and
+services. Each changes something only when its `apply` parameter is true;
+otherwise it is a dry run, the way `--apply` works on the command line. See
+[Draining and resuming a node](#draining-and-resuming-a-node) and
+[An interactive server's sessions](#an-interactive-servers-sessions).
 
 | Action | Runs on | What it is |
 |---|---|---|
@@ -38,6 +42,10 @@ line. See [Draining and resuming a node](#draining-and-resuming-a-node).
 | `usage.report` | hub | `nomad usage-report` (`from`, `to`, `cluster`, `min_cell`) |
 | `node.drain` | sites | `nomad node drain --json` (`node`, `reason`, `by`, `apply`) |
 | `node.resume` | sites | `nomad node resume --json` (`node`, `reason`, `by`, `apply`) |
+| `interactive.sessions` | sites | `nomad interactive sessions --json` |
+| `interactive.stop` | sites | `nomad interactive stop --json` (`person`, `pid`, `started`, `by`, `apply`) |
+| `interactive.clear` | sites | `nomad interactive clear --json` (`hours`, `kind`, `by`, `apply`) |
+| `interactive.restart` | sites | `nomad interactive restart --json` (`service`, `servers`, `by`, `apply`) |
 
 How parameters are checked:
 - **Numbers** must fall within their bounds.
@@ -246,6 +254,95 @@ started it, before it runs.
   They don't run at all when someone else could have put them there (a
   folder above them others may write, say).
 - sudo is looked for in the system's folders only.
+
+## An interactive server's sessions
+
+On a server with RStudio Workbench (or RStudio Server) and JupyterHub, the
+site's agent can act on people's sessions and restart the two services. They
+are `nomad interactive` on that server, which an administrator there can also
+run by hand:
+
+```bash
+nomad interactive sessions                         # who has what open, and how long idle
+nomad interactive stop ann 4101                    # a dry run: what would happen
+nomad interactive stop ann 4101 --apply            # suspend or stop it
+nomad interactive clear --hours 48                 # which sessions are stale
+nomad interactive clear --hours 48 --apply
+nomad interactive restart jupyter                  # says how many servers a restart stops
+nomad interactive restart jupyter --servers 12 --apply
+```
+
+Nothing changes until the nomad.toml of the account the agent runs as says so:
+
+```toml
+[actions]
+interactive = true
+# stale_hours = 24     # idle this long is stale (default: [collectors.interactive] idle_session_hours)
+```
+
+**What each does.**
+- **An RStudio session** is suspended with Workbench's own command,
+  `rstudio-server suspend-session PID`, as root. R saves the session; it
+  comes back as it was when the person next opens RStudio.
+- **A Jupyter server or kernel** is stopped as its person
+  (`sudo -u PERSON kill -TERM PID`), which is what they could do themselves.
+  The hub sees the server gone at its next check; notebooks keep what was
+  last saved. A kernel stopped alone: the notebook offers to start a new one.
+- **Clearing** does one or the other to each RStudio session and each Jupyter
+  server idle at least `hours` (at most 200 at a time, idle longest first).
+- **Restarting** is `systemctl restart` of `rstudio-server` or `jupyterhub`
+  (`rstudio_unit`, `jupyter_unit`). Restarting JupyterHub stops every
+  person's server unless its configuration has
+  `c.JupyterHub.cleanup_servers = False`. The dry run says which, with how
+  many servers, and the restart then needs that number (`--servers`; none
+  running, none needed): if the count has moved on, nothing is restarted.
+
+**Idle.** The interactive collector keeps when each session last used CPU
+(2% of a core or more between two runs; `interactive_state.busy_at`, from
+1.43.0 on). One that started since counts as busy when it started. For one
+already running when nomad began keeping it, its past isn't known: it is
+idle at least since then (`idle_at_least`, "or more"), which is enough to
+call it stale once that is long enough. The collector also keeps
+`interactive_idle`, a row for each open session (when it was last busy), which
+the hub copies like the other tables: the Console's Interactive servers page
+says how long each session has been idle without asking the server. A Jupyter server is busy when its
+person uses it (opening, saving) or any of their kernels computes, so it is
+as idle as the least idle of those, and not known while one of their
+kernels isn't.
+
+**What sudo must allow.** nomad asks sudo first (`sudo -n -l`, which runs
+nothing) and does only what it already lets this account do, without a
+password:
+
+```
+ACCOUNT ALL=(root) NOPASSWD: /usr/sbin/rstudio-server suspend-session *
+ACCOUNT ALL=(root) NOPASSWD: /usr/bin/systemctl restart rstudio-server, /usr/bin/systemctl restart jupyterhub
+ACCOUNT ALL=(PEOPLE) NOPASSWD: /usr/bin/kill
+```
+
+where PEOPLE is who it may act as (a group, `%managed`). A person sudo
+doesn't let it act as is left alone, and the answer says so.
+
+**How it is checked.**
+- The person is a NetID with an account here, not root's or a system
+  account's (uid below 1000).
+- The process is theirs, is an RStudio or Jupyter session (by the program
+  it runs, as the collector tells them), and is the very process that was
+  looked at: its start time (`started`, as `sessions` says it), checked
+  again just before it is signalled. A number now another process's is
+  refused.
+- nomad's own installation is checked as for draining a node: someone else
+  able to change it could otherwise run these as root or as people.
+- rstudio-server, kill, systemctl and sudo are run by their full paths
+  (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`), never through a shell.
+
+**What decides "done".** Stopped: the process is gone within 20 seconds
+(a kernel, 15). Suspended: gone within 45 seconds, or still saving (R
+writing a big workspace), which is a success that says so. Restarted:
+systemd says the unit is active again.
+
+**Logs.** Each change, and each refusal, goes to syslog (authpriv, as
+`nomad-interactive`) and to `~/.local/share/nomad/interactive.log`.
 
 ## For the Console
 

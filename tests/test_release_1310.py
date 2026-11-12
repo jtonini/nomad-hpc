@@ -47,7 +47,8 @@ def test_node_actions_in_the_catalog():
     assert s["read_only"] is False and s["apply"] == "apply" and s["names"] is True
     assert [p["kind"] for p in s["params"]] == ["name", "text", "caller", "flag"]
     assert all(spec.get(a["name"]).schema()["read_only"] for a in spec.catalog()
-               if a["name"] not in ("node.drain", "node.resume", "maintenance.start", "maintenance.end"))
+               if a["name"] not in ("node.drain", "node.resume", "maintenance.start", "maintenance.end",
+                                    "interactive.stop", "interactive.clear", "interactive.restart"))
     assert spec.check(d, {"node": "node02", "reason": " disk "}) == {"node": "node02", "reason": "disk",
                                                                      "apply": False}
     assert spec.check(d, {"node": "n1", "reason": "x", "apply": "true", "by": "jt"})["apply"] is True

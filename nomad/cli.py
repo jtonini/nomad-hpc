@@ -11468,6 +11468,8 @@ cli.add_command(facts_group)
 from nomad.config.course_cli import course_group, interactive_group  # noqa: E402
 cli.add_command(course_group)
 cli.add_command(interactive_group)
+# Acting on an interactive server's sessions (1.43.0): sessions, stop, clear, restart.
+import nomad.interactive_cli  # noqa: E402,F401  (its commands join `nomad interactive`)
 # What a job should ask for, before it runs (1.18).
 from nomad.submit.cli import size_cmd, submit_cmd  # noqa: E402
 from nomad.submit.gate_cli import gate_group  # noqa: E402

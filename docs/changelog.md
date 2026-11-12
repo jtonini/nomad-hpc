@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.43.0 (November 2026)
+
+- **Acting on an interactive server's sessions** (`nomad.interactive_admin`;
+  `nomad interactive sessions|stop|clear|restart`; four actions, on sites).
+  Suspend a person's RStudio session (Workbench's own `suspend-session`: R
+  saves it, and it comes back when they next open RStudio), stop their
+  Jupyter server or kernel as them, clear every session idle so many hours,
+  restart RStudio or JupyterHub. Each is a dry run unless applied, does only
+  what sudo already lets the account do (asked first with `sudo -n -l`),
+  checks that the process is that person's session and the very one looked
+  at, and is logged. Restarting JupyterHub says how many people's servers it
+  stops, and needs that number. Off until `[actions] interactive = true`.
+  The Console's part is fix 104.
+- **When each session was last busy** (`interactive_state.busy_at`): the
+  interactive collector keeps it, for what `clear` calls idle, and writes it
+  for the hub in `interactive_idle` (a row for each open session, changed
+  only when it is busy again), so the Console shows how long each session
+  has been idle.
+
 ## v1.42.0 (November 2026)
 
 - **A lab's PI asks for accounts** (`nomad.account_requests`; `nomad lab

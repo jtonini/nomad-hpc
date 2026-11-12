@@ -75,6 +75,13 @@ sessions are counted, their hours are not guessed. CPU comes from each
 process's own counter, read at every run (``interactive_state``, this host's
 working state, not synced): ps's %CPU is an average over the process's whole
 life, which says a notebook busy now is idle when it was idle for a day.
+
+``interactive_state`` also keeps, for each session, when it was last busy
+(``busy_at``, 1.43.0): what `nomad interactive clear` calls idle for so many
+hours. A session new since the last run counts as busy when it started. For
+one already running when nomad began watching it, its past isn't known:
+``busy_at`` is when watching began, and ``busy_known`` 0 says so (idle at
+least that long) until it is seen busy.
 """
 from __future__ import annotations
 
@@ -162,16 +169,42 @@ CREATE TABLE IF NOT EXISTS interactive_state (
     key        TEXT PRIMARY KEY,
     cpu_ticks  REAL,
     day        TEXT,
-    seen_at    TEXT
+    seen_at    TEXT,
+    busy_at    TEXT,
+    busy_known INTEGER
+)"""
+
+
+# How long each open session has been idle, for the hub (1.43.0): a row for
+# each session open now (deleted when it ends), changed only when it is busy
+# again, so the Console can say "idle 3 days" without asking the server.
+# interactive_state, where this comes from, stays on the host (not synced).
+IDLE = """
+CREATE TABLE IF NOT EXISTS interactive_idle (
+    server_id  TEXT NOT NULL,
+    pid        INTEGER NOT NULL,
+    start_time TEXT NOT NULL,
+    busy_at    TEXT,
+    busy_known INTEGER,
+    UNIQUE (server_id, pid, start_time)
 )"""
 
 
 def ensure(conn: sqlite3.Connection) -> None:
     conn.execute(DAILY)
+    conn.execute(IDLE)
     conn.execute(HOURLY)
     conn.execute(PERSON_HOURLY)
     conn.execute(ENV_DAILY)
     conn.execute(STATE)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(interactive_state)")}
+    for col, kind in (("busy_at", "TEXT"), ("busy_known", "INTEGER")):
+        if col not in have:
+            try:                               # a state from before 1.43.0
+                conn.execute(f"ALTER TABLE interactive_state ADD COLUMN {col} {kind}")
+            except sqlite3.OperationalError as e:
+                if "duplicate column" not in str(e):
+                    raise
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_env_daily_env "
                  "ON interactive_env_daily(environment, day)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_interactive_daily_user "
@@ -224,12 +257,12 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
     epoch = time.time() if epoch is None else epoch
     prev_epoch = None
     prev = {}
-    for key, ticks, day, _seen_at in conn.execute(
-            "SELECT key, cpu_ticks, day, seen_at FROM interactive_state"):
+    for key, ticks, day, _seen_at, busy_at, known in conn.execute(
+            "SELECT key, cpu_ticks, day, seen_at, busy_at, busy_known FROM interactive_state"):
         if key == "last_run":
             prev_epoch = ticks
         else:
-            prev[key] = (ticks, day)
+            prev[key] = (ticks, day, busy_at, known)
     dt = None
     if prev_epoch is not None:
         gap = epoch - prev_epoch
@@ -241,6 +274,7 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                                   "cpu_measured_seconds": 0.0, "cpu_seconds": 0.0,
                                   "mem_mb_seconds": 0.0, "peak_mem_mb": None})
     state = []
+    idle = {}                                  # (pid, start_time) -> (busy_at, known)
     person = defaultdict(lambda: {"busy": False, "measured": False, "mem": 0.0, "cpu": 0.0,
                                   "new": 0})
     # (user, environment, path, own) -> sessions new today, busy, CPU: a
@@ -297,7 +331,21 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                         me["busy"] = True
                         if e is not None:
                             e["busy"] = True
-        state.append((key, ticks, day, now.isoformat()))
+        busy_now = False
+        if dt and ticks is not None:
+            if before is not None and before[0] is not None and ticks >= before[0]:
+                busy_now = (ticks - before[0]) / clk_tck / dt * 100.0 >= BUSY_PERCENT
+        if busy_now:
+            busy_at, known = now.isoformat(), 1
+        elif before is not None and before[2]:
+            busy_at, known = before[2], before[3] if before[3] is not None else 1
+        elif before is None and s.get("start_time") and dt and (s.get("age_seconds") or 1e18) <= dt + 1:
+            busy_at, known = s["start_time"], 1    # new since the last run: as busy when it started
+        else:
+            busy_at, known = now.isoformat(), 0    # its past isn't known: idle at least since now
+        state.append((key, ticks, day, now.isoformat(), busy_at, known))
+        if s.get("pid") is not None and s.get("start_time"):
+            idle[(int(s["pid"]), str(s["start_time"]))] = (busy_at, known)
 
     for user, me in person.items():
         t = totals[(user, ANY)]
@@ -367,11 +415,29 @@ def update(conn: sqlite3.Connection, sessions: list, now: datetime, server_id: s
                  row[4] + t["cpu_seconds"], row[5] + t["mem_mb_seconds"], peak, stamp,
                  day, server_id, user, kind))
     conn.execute("DELETE FROM interactive_state")
-    conn.executemany("INSERT OR REPLACE INTO interactive_state (key, cpu_ticks, day, seen_at) "
-                     "VALUES (?, ?, ?, ?)", state)
+    conn.executemany("INSERT OR REPLACE INTO interactive_state (key, cpu_ticks, day, seen_at, busy_at, "
+                     "busy_known) VALUES (?, ?, ?, ?, ?, ?)", state)
     conn.execute("INSERT OR REPLACE INTO interactive_state (key, cpu_ticks, day, seen_at) "
                  "VALUES ('last_run', ?, ?, ?)", (epoch, day, stamp))
+    _idle(conn, server_id, idle)
     return dict(totals)
+
+
+def _idle(conn: sqlite3.Connection, server_id: str, want: dict) -> None:
+    """interactive_idle as the sessions are now: a row for each open session,
+    rows of ended ones gone, a row changed only when its idleness did (each
+    change is a row the hub copies)."""
+    have = {(pid, st): (b, k) for pid, st, b, k in conn.execute(
+        "SELECT pid, start_time, busy_at, busy_known FROM interactive_idle WHERE server_id = ?", (server_id,))}
+    gone = [(server_id, pid, st) for (pid, st) in have if (pid, st) not in want]
+    conn.executemany("DELETE FROM interactive_idle WHERE server_id = ? AND pid = ? AND start_time = ?", gone)
+    for (pid, st), (b, k) in want.items():
+        if (pid, st) not in have:
+            conn.execute("INSERT INTO interactive_idle (server_id, pid, start_time, busy_at, busy_known) "
+                         "VALUES (?, ?, ?, ?, ?)", (server_id, pid, st, b, k))
+        elif have[(pid, st)] != (b, k):
+            conn.execute("UPDATE interactive_idle SET busy_at = ?, busy_known = ? "
+                         "WHERE server_id = ? AND pid = ? AND start_time = ?", (b, k, server_id, pid, st))
 
 
 def prune(conn: sqlite3.Connection, retention_days: int, now: datetime,
