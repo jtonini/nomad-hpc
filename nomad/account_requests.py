@@ -17,6 +17,13 @@ and every close is kept, with who and when, in the lab check's own small
 database (lab_check.db, beside combined.db) and its log: the record ARC has
 no ticket system for.
 
+Each request has a number, as a ticket would (1.44.0; nomad.tickets):
+ARC-0012, on the PI's card, in both emails' subjects, on the Admin page and
+in the log; ``find`` looks one up by it, or by a NetID, a name, a lab or a
+PI. ``report`` says, for a period, how many were asked for and made, by
+cluster, lab and month, and how long making them took; ``records`` is the
+same as one row per account, for a spreadsheet (``csv_text``).
+
 Settings, in the hub's nomad.toml::
 
     [console.labs.accounts]
@@ -25,6 +32,10 @@ Settings, in the hub's nomad.toml::
     notify = ["hpc@example.edu"]         # new requests go here
     most = 100                           # people in one request
     link = "https://nomad.example.edu/diagnostics?tab=labs"   # ARC's page, in the email
+
+    [console.tickets]
+    prefix = "ARC"                       # the requests' numbers: ARC-0012 (nomad.tickets)
+    digits = 4
 
 The PIs' emails go as the lab check's do ([console.labs.check] mail_domain,
 send_from and review_to, else report.toml's): while ``review_to`` is set,
@@ -36,13 +47,16 @@ import csv
 import getpass
 import io
 import json
+import math
 import re
 import sqlite3
+import statistics
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from xml.etree import ElementTree
 
+from nomad import tickets as T
 from nomad.directory import NETID
 
 STATES = ("asked", "made", "not_made", "withdrawn")
@@ -75,6 +89,7 @@ class Settings:
     most: int = 100
     link: str = ""
     problems: tuple = field(default_factory=tuple)
+    tickets: T.Settings = field(default_factory=T.Settings)
 
 
 def settings(config: dict | None) -> Settings:
@@ -108,8 +123,10 @@ def settings(config: dict | None) -> Settings:
         problems.append("[console.labs.accounts] most should be a number")
     link = raw.get("link", "")
     link = link if isinstance(link, str) and link.startswith(("https://", "http://")) else ""
+    numbers = T.settings(config)
+    problems += list(numbers.problems)
     return Settings(enabled=bool(enabled) and d.on, sites=tuple(sites), notify=tuple(notify), most=most,
-                    link=link, problems=tuple(problems))
+                    link=link, problems=tuple(problems), tickets=numbers)
 
 
 # --- what the PI typed or gave ----------------------------------------------------------
@@ -420,7 +437,13 @@ def open_records(path, write: bool = False):
     rec = lab_check.open_records(path, write)
     if rec is not None and write:
         rec.executescript(SCHEMA)
+        T.ensure(rec)
     return rec
+
+
+def ref_of(number, s: Settings | None = None) -> str:
+    """A request's number as shown: ARC-0012."""
+    return T.ref(number, (s or Settings()).tickets)
 
 
 def _now() -> str:
@@ -489,9 +512,9 @@ def ask(rec, lab: str, people: list[dict], sites: list, s: Settings, by: str, as
     who = (by or getpass.getuser()).strip().lower()
     note = clean_note(note)
     with rec:
-        cur = rec.execute("INSERT INTO account_requests (lab, by, as_role, at, note) VALUES (?, ?, ?, ?, ?)",
-                          (lab, who, as_role, _now(), note))
-        rid = cur.lastrowid
+        rid = T.take(rec, "accounts")
+        rec.execute("INSERT INTO account_requests (id, lab, by, as_role, at, note) VALUES (?, ?, ?, ?, ?, ?)",
+                    (rid, lab, who, as_role, _now(), note))
         rows, skipped = [], []
         for p in clean:
             for site in sites:
@@ -503,34 +526,72 @@ def ask(rec, lab: str, people: list[dict], sites: list, s: Settings, by: str, as
                 rows.append({**p, "site": site})
         if not rows:
             raise RequestError("each of them is already asked for on those clusters")
-        _log(rec, who, {"account_request": {"id": rid, "lab": lab, "as": as_role, "sites": sites,
-                                            "people": [p["netid"] for p in clean], "skipped": skipped}})
-    return {"id": rid, "lab": lab, "by": who, "rows": rows, "skipped": skipped, "note": note}
+        _log(rec, who, {"account_request": {"id": rid, "ref": ref_of(rid, s), "lab": lab, "as": as_role,
+                                            "sites": sites, "people": [p["netid"] for p in clean],
+                                            "skipped": skipped}})
+    return {"id": rid, "ref": ref_of(rid, s), "lab": lab, "by": who, "rows": rows, "skipped": skipped, "note": note}
 
 
-def requests(rec, lab: str | None = None, open_only: bool = False, days: int = 365) -> list[dict]:
-    """The requests (a lab's, or all), newest first, each with its people
-    and what became of each; closed ones of the last ``days``."""
-    since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
-    reqs = _rows(rec, "SELECT * FROM account_requests WHERE at >= ?" + (" AND lab = ?" if lab else "")
-                      + " ORDER BY id DESC", [since] + ([lab] if lab else []))
+def _with_people(rec, reqs: list[dict], s: Settings | None, open_only: bool = False) -> list[dict]:
     if not reqs:
         return []
     ids = [r["id"] for r in reqs]
     people: dict = {}
-    for p in _rows(rec, f"SELECT * FROM account_request_people WHERE request IN ({','.join('?' * len(ids))}) "
-                        "ORDER BY netid, site", ids):
-        people.setdefault(p["request"], []).append(p)
+    for i in range(0, len(ids), 400):
+        part = ids[i:i + 400]
+        for p in _rows(rec, f"SELECT * FROM account_request_people WHERE request IN ({','.join('?' * len(part))}) "
+                            "ORDER BY netid, site", part):
+            people.setdefault(p["request"], []).append(p)
     out = []
     for r in reqs:
         ps = people.get(r["id"], [])
         if open_only and not any(p["state"] == "asked" for p in ps):
             continue
-        out.append({**r, "people": ps, "open": sum(1 for p in ps if p["state"] == "asked")})
+        out.append({**r, "ref": ref_of(r["id"], s), "people": ps, "open": sum(1 for p in ps if p["state"] == "asked")})
     return out
 
 
-def close(rec, request: int, netid: str, site: str, state: str, by: str, note: str | None = None) -> dict:
+def requests(rec, lab: str | None = None, open_only: bool = False, days: int = 365,
+             s: Settings | None = None) -> list[dict]:
+    """The requests (a lab's, or all), newest first, each with its number
+    (``ref``), its people and what became of each; closed ones of the last ``days``."""
+    since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    reqs = _rows(rec, "SELECT * FROM account_requests WHERE at >= ?" + (" AND lab = ?" if lab else "")
+                      + " ORDER BY id DESC", [since] + ([lab] if lab else []))
+    return _with_people(rec, reqs, s, open_only)
+
+
+FIND_MOST = 50
+
+
+def find(rec, text: str, s: Settings | None = None, lab: str | None = None, most: int = FIND_MOST) -> list[dict]:
+    """The requests, of any age, a search finds, newest first: by number
+    (ARC-0012, #12 or 12: that one), else by a NetID, a name, a lab or the
+    PI who asked (any part of one; case doesn't matter). ``lab``: within one lab's."""
+    text = " ".join(str(text or "").split())[:80]
+    if not text:
+        return []
+    n = T.number_of(text, (s or Settings()).tickets)
+    one_lab = " AND r.lab = ?" if lab else ""
+    if n is not None:
+        reqs = _rows(rec, "SELECT * FROM account_requests r WHERE r.id = ?" + one_lab, [n] + ([lab] if lab else []))
+        if reqs or not text.isdigit():          # ARC-0012 is that one or none; 12 may be part of a NetID
+            return _with_people(rec, reqs, s)
+    like = "%" + text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    ids = _rows(rec, "SELECT DISTINCT r.id AS id FROM account_requests r "
+                     "LEFT JOIN account_request_people p ON p.request = r.id "
+                     "WHERE (lower(r.lab) LIKE ? ESCAPE '\\' OR lower(r.by) LIKE ? ESCAPE '\\' "
+                     "OR lower(p.netid) LIKE ? ESCAPE '\\' OR lower(coalesce(p.name, '')) LIKE ? ESCAPE '\\')"
+                + one_lab + " ORDER BY r.id DESC LIMIT ?", [like] * 4 + ([lab] if lab else []) + [int(most)])
+    if not ids:
+        return []
+    marks = ",".join("?" * len(ids))
+    reqs = _rows(rec, f"SELECT * FROM account_requests WHERE id IN ({marks}) ORDER BY id DESC", [r["id"] for r in ids])
+    return _with_people(rec, reqs, s)
+
+
+def close(rec, request: int, netid: str, site: str, state: str, by: str, note: str | None = None,
+          s: Settings | None = None) -> dict:
     """ARC closes one account of a request: made, or not made (and why: a note
     is needed then); or the PI withdraws it while it is still asked for."""
     if state not in STATES[1:]:
@@ -549,14 +610,122 @@ def close(rec, request: int, netid: str, site: str, state: str, by: str, note: s
         rec.execute("UPDATE account_request_people SET state = ?, closed_by = ?, closed_at = ?, closed_note = ? "
                     "WHERE request = ? AND netid = ? AND site = ?",
                     (state, who, _now(), note, int(request), row[0]["netid"], site))
-        _log(rec, who, {"account_closed": {"request": int(request), "netid": row[0]["netid"], "site": site,
-                                           "state": state, "note": note}})
+        _log(rec, who, {"account_closed": {"request": int(request), "ref": ref_of(request, s),
+                                           "netid": row[0]["netid"], "site": site, "state": state, "note": note}})
     return {**row[0], "state": state, "closed_by": who, "closed_at": _now(), "closed_note": note}
 
 
-def request_of(rec, request: int) -> dict | None:
+def request_of(rec, request: int, s: Settings | None = None) -> dict | None:
     got = _rows(rec, "SELECT * FROM account_requests WHERE id = ?", (int(request),))
-    return got[0] if got else None
+    return {**got[0], "ref": ref_of(got[0]["id"], s)} if got else None
+
+
+# --- the report -------------------------------------------------------------------------
+
+STATE_WORDS = {"asked": "still to make", "made": "made", "not_made": "not made", "withdrawn": "withdrawn"}
+
+
+def _at(value) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _days(a, b) -> float | None:
+    a, b = _at(a), _at(b)
+    return round(max((b - a).total_seconds(), 0) / 86400, 1) if a and b else None
+
+
+def _accounts(rec, since: datetime, until: datetime, site: str | None) -> list[dict]:
+    """Each account asked for in [since, until), with its request's lab, PI and time."""
+    return _rows(rec, "SELECT r.id AS request, r.lab, r.by, r.at, r.note AS request_note, p.netid, p.name, p.site, "
+                      "p.state, p.closed_by, p.closed_at, p.closed_note FROM account_requests r "
+                      "JOIN account_request_people p ON p.request = r.id WHERE r.at >= ? AND r.at < ?"
+                 + (" AND p.site = ?" if site else "") + " ORDER BY r.id, p.netid, p.site",
+                 [since.isoformat(timespec="seconds"), until.isoformat(timespec="seconds")] + ([site] if site else []))
+
+
+def _tally(rows: list[dict]) -> dict:
+    """Counts of accounts by what became of them, people, and the days from
+    asked to made (median, 90 in 100 made within, longest)."""
+    out = {"requests": len({r["request"] for r in rows}), "people": len({r["netid"] for r in rows}),
+           "accounts": len(rows)}
+    for state in STATES:
+        out[state if state != "asked" else "open"] = sum(1 for r in rows if r["state"] == state)
+    days = sorted(d for d in (_days(r["at"], r["closed_at"]) for r in rows if r["state"] == "made") if d is not None)
+    out["days_to_make"] = ({"made": len(days), "median": round(statistics.median(days), 1),
+                            "p90": days[max(math.ceil(0.9 * len(days)) - 1, 0)], "longest": days[-1]}
+                           if days else None)
+    return out
+
+
+def report(rec, since: datetime, until: datetime, site: str | None = None, s: Settings | None = None,
+           now: datetime | None = None) -> dict:
+    """The account requests of a period (asked from ``since`` to before
+    ``until``), and what became of each account as of now: in all, by
+    cluster, by lab (with the PIs who asked) and by month; how long making
+    them took (made accounts only: from asked to marked made); the slowest
+    one; and, whenever asked, what is still to make now. ``site``: one cluster's."""
+    now = now or datetime.now()
+    rows = _accounts(rec, since, until, site)
+    by_site, by_lab, by_month = {}, {}, {}
+    for r in rows:
+        by_site.setdefault(r["site"], []).append(r)
+        by_lab.setdefault(r["lab"], []).append(r)
+        by_month.setdefault(r["at"][:7], []).append(r)
+    made = [(d, r) for r in rows if r["state"] == "made" for d in [_days(r["at"], r["closed_at"])] if d is not None]
+    slowest = max(made, key=lambda x: (x[0], -x[1]["request"]), default=None)
+    waiting = _rows(rec, "SELECT r.id AS request, r.at FROM account_requests r JOIN account_request_people p "
+                         "ON p.request = r.id WHERE p.state = 'asked'" + (" AND p.site = ?" if site else ""),
+                    [site] if site else [])
+    oldest = min(waiting, key=lambda r: (r["at"], r["request"]), default=None)
+    first = _rows(rec, "SELECT MIN(at) AS at FROM account_requests")
+    return {
+        "since": since.isoformat(timespec="seconds"), "until": until.isoformat(timespec="seconds"),
+        "site": site, "as_of": now.isoformat(timespec="seconds"),
+        "first_asked": first[0]["at"] if first else None,       # the records begin then (any cluster)
+        "totals": {**_tally(rows), "labs": len(by_lab), "pis": len({r["by"] for r in rows})},
+        "by_cluster": [{"site": k, **_tally(v)} for k, v in sorted(by_site.items())],
+        "by_lab": [{"lab": k, "pis": sorted({r["by"] for r in v}), **_tally(v)} for k, v in sorted(by_lab.items())],
+        "by_month": [{"month": k, **_tally(v)} for k, v in sorted(by_month.items())],
+        "slowest": ({"ref": ref_of(slowest[1]["request"], s), "lab": slowest[1]["lab"], "site": slowest[1]["site"],
+                     "days": slowest[0]} if slowest else None),
+        "open_now": {"accounts": len(waiting), "requests": len({r["request"] for r in waiting}),
+                     "oldest": ({"ref": ref_of(oldest["request"], s), "days": _days(oldest["at"], now)}
+                                if oldest else None)},
+    }
+
+
+RECORD_COLUMNS = ("ref", "lab", "asked_by", "asked_at", "netid", "name", "cluster", "state", "closed_by",
+                  "closed_at", "days", "closed_note", "request_note")
+
+
+def records(rec, since: datetime, until: datetime, site: str | None = None, s: Settings | None = None) -> list[dict]:
+    """The same period as one row per account (RECORD_COLUMNS), for a
+    spreadsheet. It names people: for Research Computing's own use."""
+    return [{"ref": ref_of(r["request"], s), "lab": r["lab"], "asked_by": r["by"], "asked_at": r["at"],
+             "netid": r["netid"], "name": r["name"] or "", "cluster": r["site"], "state": STATE_WORDS[r["state"]],
+             "closed_by": r["closed_by"] or "", "closed_at": r["closed_at"] or "",
+             "days": "" if r["state"] == "asked" else _days(r["at"], r["closed_at"]),
+             "closed_note": r["closed_note"] or "", "request_note": r["request_note"] or ""}
+            for r in _accounts(rec, since, until, site)]
+
+
+def _cell(value) -> str:
+    """A spreadsheet cell: text a spreadsheet would run as a formula (=, +, -,
+    @, a tab or a return first) is kept as text."""
+    v = "" if value is None else str(value)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
+def csv_text(rows: list[dict], columns=RECORD_COLUMNS) -> str:
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\r\n")
+    w.writerow(columns)
+    for r in rows:
+        w.writerow([_cell(r.get(c)) for c in columns])
+    return out.getvalue()
 
 
 # --- email ------------------------------------------------------------------------------
@@ -566,12 +735,14 @@ def _people(rows) -> list:
 
 
 def letter_to_arc(req: dict, s: Settings) -> tuple[str, str]:
-    """(subject, text) of the email to ARC about a new request."""
+    """(subject, text) of the email to ARC about a new request; its number
+    first in the subject, as a ticket system's: "[ARC-0012] Account request: ..."."""
     sites = sorted({r["site"] for r in req["rows"]})
     people = _people(req["rows"])
-    subject = (f"Account request #{req['id']}: {req['lab']}, {len(people)} "
+    ref = ref_of(req["id"], s)
+    subject = (f"[{ref}] Account request: {req['lab']}, {len(people)} "
                f"{'person' if len(people) == 1 else 'people'} on {', '.join(sites)}")
-    lines = [f"{req['by']} asked for accounts for the lab {req['lab']}, on {', '.join(sites)}:", ""]
+    lines = [f"{ref}: {req['by']} asked for accounts for the lab {req['lab']}, on {', '.join(sites)}:", ""]
     lines += [f"  {n:<12} {name}".rstrip() for n, name in people]
     if req.get("note"):
         lines += ["", f"Their note: {req['note']}"]
@@ -583,28 +754,30 @@ def letter_to_arc(req: dict, s: Settings) -> tuple[str, str]:
     return subject, "\n".join(lines) + "\n"
 
 
-def letter_to_pi(req: dict, closed: list, check_settings) -> tuple[str, str]:
+def letter_to_pi(req: dict, closed: list, check_settings, s: Settings | None = None) -> tuple[str, str]:
     """(subject, text) of the email to the PI about the accounts of their
-    request ARC just closed (one or several, at once)."""
+    request ARC just closed (one or several, at once); the request's number
+    first in the subject, so a reply keeps it."""
     from nomad import lab_check
     made = [c for c in closed if c["state"] == "made"]
     not_made = [c for c in closed if c["state"] == "not_made"]
+    ref = ref_of(req["id"], s)
 
     def who(c):
         return f"{c['name']} ({c['netid']})" if c.get("name") else c["netid"]
     if len(closed) == 1:
         c = closed[0]
-        subject = (f"The account for {c['netid']} on {c['site']} is ready" if made else
-                   f"The account for {c['netid']} on {c['site']} was not made")
+        subject = (f"[{ref}] The account for {c['netid']} on {c['site']} is ready" if made else
+                   f"[{ref}] The account for {c['netid']} on {c['site']} was not made")
     else:
-        subject = f"Your account request #{req['id']}: {len(made)} ready" + (f", {len(not_made)} not made"
-                                                                              if not_made else "")
+        subject = f"[{ref}] Your account request: {len(made)} ready" + (f", {len(not_made)} not made"
+                                                                         if not_made else "")
     body = []
     if made:
-        body += [f"These accounts you asked for (request #{req['id']}, {req['lab']}) are ready:"]
+        body += [f"These accounts you asked for (request {ref}, {req['lab']}) are ready:"]
         body += [f"  {who(c)} on {c['site']}" for c in made]
     if not_made:
-        body += ([""] if body else []) + [f"These accounts you asked for (request #{req['id']}) were not made:"]
+        body += ([""] if body else []) + [f"These accounts you asked for (request {ref}) were not made:"]
         body += [f"  {who(c)} on {c['site']}" + (f": {c['closed_note']}" if c.get("closed_note") else "")
                  for c in not_made]
     notes = sorted({c["closed_note"] for c in made if c.get("closed_note")})
@@ -676,7 +849,7 @@ def tell_pi(config, check_settings, s: Settings, req: dict, closed: list) -> str
     closed = [c for c in closed if c["state"] in ("made", "not_made")]
     if not closed:
         return "nothing to say"
-    subject, text = letter_to_pi(req, closed, check_settings)
+    subject, text = letter_to_pi(req, closed, check_settings, s)
     to, reviewing = pi_address(req["by"], check_settings)
     return send(config, check_settings, subject, text, to, reply_to=list(s.notify) or None,
                 review_for=(f"{req['by']}@{check_settings.mail_domain}" if check_settings.mail_domain
@@ -684,5 +857,6 @@ def tell_pi(config, check_settings, s: Settings, req: dict, closed: list) -> str
 
 
 __all__ = ["RequestError", "Settings", "settings", "parse_text", "table_text", "resolve", "has_account",
-           "sites_with_nodes", "open_records", "ask", "asked", "requests", "close", "request_of", "letter_to_arc",
-           "letter_to_pi", "send", "pi_address", "tell_arc", "tell_pi", "STATES", "SAID"]
+           "sites_with_nodes", "open_records", "ask", "asked", "requests", "find", "close", "request_of", "ref_of",
+           "report", "records", "csv_text", "letter_to_arc", "letter_to_pi", "send", "pi_address", "tell_arc",
+           "tell_pi", "STATES", "SAID", "STATE_WORDS", "RECORD_COLUMNS"]

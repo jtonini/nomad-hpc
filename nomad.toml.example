@@ -600,6 +600,25 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # most = 100                            # people in one request
 # link = "https://nomad.example.edu/diagnostics?tab=labs"   # ARC's page, in its email
 
+# Request numbers, as a ticket system's: every account request (and every
+# case Research Computing opens, later) gets one from one sequence, shown
+# ARC-0012 on the PI's card, first in each email's subject, on the Admin page
+# and in the reports. Requests made before 1.44.0 keep theirs (#12 is ARC-0012).
+# [console.tickets]
+# prefix = "ARC"                        # letters and digits, at most 10
+# digits = 4                            # the width, with leading zeros (3 to 8); a larger number just grows
+
+# Data unchanged for a year (`nomad storage cold`; Diagnostics > Storage):
+# who holds at least min_tb of it on a path, and the cases about it (numbered
+# as above). A weekly email to notify, no alert for each person.
+# [console.cold_data]
+# min_tb = 1.0                          # listed from this much unchanged data on one path (decimal TB)
+# days = 365                            # unchanged this long (the scan's ages: nomad-storage.sh -a)
+# full_share = 0.85                     # a path this full is said first
+# quiet_days = 30                       # an open case not updated this long is called out
+# notify = ["hpc@example.edu"]          # the weekly email (default: [console.labs.accounts] notify)
+# link = "https://nomad.example.edu/diagnostics?tab=storage"
+
 # The campus directory, as a service account, over ldaps only: who a NetID
 # or a name is, for account requests. The password is the nomad account's
 # file (600); nomad hands it to ldapsearch in a file, never on a command line.

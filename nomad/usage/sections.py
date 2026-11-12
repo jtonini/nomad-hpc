@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""The fourteen sections of the usage report.
+"""The fifteen sections of the usage report.
 
 Each builder takes the name-free ``Data`` and returns a ``Section``: one
 sentence stating its finding with the number behind it, the facts, and the
@@ -1475,6 +1475,58 @@ def s14_capacity(ctx: Ctx, s01: Section, s02: Section) -> Section:
 
 # ------------------------------------------------------------------------------------
 
+# 15 ----------------------------------------------------------------------------------
+
+ACCOUNTS_SOURCE = "NØMAÐ account requests (lab_check.db)"
+
+
+def s15_accounts(ctx: Ctx) -> Section:
+    """The accounts PIs asked Research Computing for on the cluster, through
+    the Console: how many, what became of them, and how soon they were made.
+    Counts only: labs and PIs are counted, never named."""
+    d = ctx.d
+    s = _section(15, "account_requests", "Accounts asked for by PIs", ctx, source=ACCOUNTS_SOURCE)
+    a = d.accounts
+    if a is None:
+        return _not_measured(s, d.accounts_why or "no account requests read.")
+    where = d.site or d.cfg.name
+    if not a["requests"]:
+        return _not_measured(s, f"no accounts asked for on {where} in the period (PIs ask on My lab in the "
+                                "Console, from nomad 1.42).")
+    s.fact("requests", "requests", a["requests"], "requests")
+    s.fact("labs", "labs that asked", a["labs"], "labs")
+    s.fact("pis", "PIs who asked", a["pis"], "people", people=True)
+    s.fact("people", "people accounts were asked for", a["people"], "people", people=True)
+    s.fact("accounts", "accounts asked for", a["accounts"], "accounts")
+    for k, label in (("made", "made"), ("not_made", "not made"), ("withdrawn", "withdrawn by the PI"),
+                     ("open", "still to make when the report was made")):
+        s.fact(k, f"accounts {label}", a[k], "accounts")
+    days = a["days_to_make"]
+    if days:
+        s.fact("days_to_make.median", "days from asked to made, median", days["median"], "days", n=days["made"])
+        s.fact("days_to_make.p90", "days from asked to made, 9 in 10 within", days["p90"], "days", n=days["made"])
+        s.fact("days_to_make.longest", "days from asked to made, longest", days["longest"], "days", n=days["made"])
+    if len(a["months"]) > 1:
+        rows = [[fmt.month(m["month"]), m["requests"], m["accounts"], m["made"],
+                 fmt.num(m["median_days"], 1) if m["median_days"] is not None else "–"] for m in a["months"]]
+        s.tables.append(Table(f"By month asked ({where})", ["Month", "Requests", "Accounts", "Made", "Median days"],
+                              rows))
+    first = a.get("first_asked")
+    if first and first > d.t0.isoformat():
+        s.notes.append(f"Requests are recorded from {first[:10]}, when PIs began asking in the Console; accounts "
+                       "asked for in other ways (email, tickets) aren't counted.")
+    s.notes.append("Days from asked to made run from the PI's request to Research Computing marking the account "
+                   "made, nights and weekends included.")
+    parts = [f"PIs asked for {fmt.plural(a['accounts'], 'account')} on {where} in "
+             f"{fmt.plural(a['requests'], 'request')} from {fmt.plural(a['labs'], 'lab')}"]
+    parts.append(f"{fmt.num(a['made'])} {'was' if a['made'] == 1 else 'were'} made"
+                 + (f", a median {fmt.num(days['median'], 1)} days after they were asked" if days else ""))
+    if a["open"]:
+        parts.append(f"{fmt.num(a['open'])} {'is' if a['open'] == 1 else 'are'} still to make")
+    s.finding = "; ".join(parts) + "."
+    return s
+
+
 def coverage(ctx: Ctx, report: Report) -> None:
     d = ctx.d
     secs = {s.number: s for s in report.sections}
@@ -1515,6 +1567,9 @@ def coverage(ctx: Ctx, report: Report) -> None:
          if d.user_map_given else "", kind(12)),
         (13, "NØMAÐ interactive sessions", d.teaching_site or "none", "", kind(13)),
         (14, "Sections 1 and 2; report.toml", "", "", kind(14, PROJECTED)),
+        (15, ACCOUNTS_SOURCE, (f"requests from {d.accounts['first_asked'][:10]}"
+                               if d.accounts and d.accounts.get("first_asked") else "none"),
+         "accounts asked for in other ways aren't counted", kind(15)),
     ]
     for n, src, cov, gap, k in rows:
         title = secs[n].title if n in secs else str(n)
@@ -1576,7 +1631,7 @@ def build(d: Data, *, produced: str, nomad_version: str) -> Report:
             s09_storage(ctx), s10_reliability(ctx), s11_policy(ctx, s01, s06), s12_departments(ctx),
             s13_teaching(ctx)]
     s14 = s14_capacity(ctx, s01, s02)
-    secs.append(s14)
+    secs += [s14, s15_accounts(ctx)]
     for s in secs:
         if s.finding:
             s.finding = s.finding[0].upper() + s.finding[1:]

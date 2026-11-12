@@ -153,6 +153,8 @@ class Data:
     usage_rows: list[dict] = field(default_factory=list)          # cluster_usage
     teaching: dict | None = None
     teaching_site: str | None = None
+    accounts: dict | None = None              # account requests (lab_check.db beside the database), counts only
+    accounts_why: str = ""                    # why there are none
     job_summary_count: int = 0
     user_map_given: bool = False
     unmapped_people: int = 0
@@ -619,7 +621,7 @@ def _inventory(conn, data: Data) -> dict[str, set[str]]:
 def load(cfg: ClusterConfig, t0: datetime, t1: datetime, *, db: Path | None = None,
          site: str | None = None, sacct: Path | None = None, exclude: set[str] | None = None,
          user_map: Path | None = None, teaching_site: str | None = None,
-         keep_people: bool = False) -> Data:
+         keep_people: bool = False, accounts_db: Path | None = None) -> Data:
     """Everything the sections need, names removed (``keep_people``: also the
     period's usernames, for the user-map template only)."""
     conn = open_db(db) if db is not None else None
@@ -663,10 +665,45 @@ def load(cfg: ClusterConfig, t0: datetime, t1: datetime, *, db: Path | None = No
             _usage(conn, data)
             if teaching_site:
                 _teaching(conn, data, teaching_site, umap)
+            _account_requests(Path(accounts_db) if accounts_db else Path(db).parent / "lab_check.db", data)
         return data
     finally:
         if conn is not None:
             conn.close()
+
+
+def _account_requests(path: Path, data: Data) -> None:
+    """The accounts PIs asked for on this cluster in the period, from the
+    requests kept in lab_check.db (nomad 1.42; [console.labs.check] db, else
+    beside the database): counted only; no NetID, name, lab or PI leaves
+    this function."""
+    import sqlite3
+
+    from nomad import account_requests as A
+    if not path.exists():
+        data.accounts_why = (f"no account requests kept ({path.name} not found: PIs ask on My lab "
+                             "in the Console, from nomad 1.42).")
+        return
+    try:
+        rec = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+        rec.row_factory = sqlite3.Row
+        rec.execute("SELECT 1 FROM sqlite_master").fetchone()
+    except sqlite3.Error:
+        data.accounts_why = ("lab_check.db can't be read by this account (it is the account's the Console runs "
+                             "as: run the report as it to count account requests).")
+        return
+    try:
+        r = A.report(rec, data.t0, data.t1, data.site or data.cfg.name)
+    finally:
+        rec.close()
+    t = r["totals"]
+    data.accounts = {
+        "first_asked": r["first_asked"], "requests": t["requests"], "labs": t["labs"], "pis": t["pis"],
+        "people": t["people"], "accounts": t["accounts"], "made": t["made"], "not_made": t["not_made"],
+        "withdrawn": t["withdrawn"], "open": t["open"], "days_to_make": t["days_to_make"],
+        "months": [{"month": m["month"], "requests": m["requests"], "accounts": m["accounts"], "made": m["made"],
+                    "median_days": (m["days_to_make"] or {}).get("median")} for m in r["by_month"]],
+    }
 
 
 def _jobs_from_db(conn, site, data: Data, builder: _Builder) -> None:

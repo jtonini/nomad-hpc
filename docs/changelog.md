@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.44.0 (November 2026)
+
+- **Request numbers, as a ticket system's** (`nomad.tickets`;
+  `[console.tickets] prefix, digits`). Every account request has a number,
+  ARC-0012: on the PI's card, first in the subject of both emails (so a
+  reply keeps it), on the Admin page and in the log. Requests made before
+  keep theirs (#12 is ARC-0012). The numbers are one sequence, kept in
+  lab_check.db, which other kinds of request will share.
+- **Finding a request**: `nomad lab accounts list --find TEXT` and `show
+  ARC-0012`; by its number, or a NetID, a name, a lab or the PI who asked.
+  `close` takes the number too.
+- **The account-requests report** (`nomad lab accounts report --since
+  --until [--cluster] [--json | --csv]`): the requests asked in a period and
+  what became of each account as of now, in all, by cluster, lab and month;
+  days from asked to made (median, 9 in 10 within, longest, and which); what
+  is still to make now and the oldest. `--csv` is one row per account for a
+  spreadsheet (text a spreadsheet would run as a formula is kept as text).
+- **Data unchanged for a year, one list with its cases** (`nomad.storage.cold`;
+  `nomad storage cold`; `[console.cold_data]`). Everyone holding at least
+  `min_tb` unchanged a year on a path, on every scanned server (copies
+  apart), with their last job, labs, PIs and what the lab check said of
+  them. Each can become a case (ARC-0013, the same sequence) that moves from
+  to contact, contacted, moving it, to moved or kept (and why), with notes.
+  No alert for each person: a weekly email to Research Computing (`digest
+  --send`, `timer`) says first any path nearly full with data on the list,
+  then what is new, the open cases and those not updated lately.
+- **Usage report, section 15: accounts asked for by PIs**, read from the
+  requests (lab_check.db, where `[console.labs.check] db` keeps it, else
+  beside the database): requests, labs, PIs and
+  people counted, accounts made, not made, withdrawn and still to make,
+  days to make them, by month. No lab, PI or person is named; run as the
+  account the Console runs as (lab_check.db is its own), else "not measured".
+
 ## v1.43.0 (November 2026)
 
 - **Acting on an interactive server's sessions** (`nomad.interactive_admin`;

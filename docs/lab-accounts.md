@@ -3,9 +3,10 @@
 A lab's PI asks Research Computing for accounts for their students on
 **My lab** in the Console, and the request is kept: who asked, for whom, on
 which clusters, and what became of each account, with who closed it and
-when. It is the record a team with no ticket system doesn't otherwise have.
-nomad never makes an account itself: Research Computing makes them as it
-does now, and closes each one here.
+when. It is the record a team with no ticket system doesn't otherwise have:
+each request has a number, as a ticket would (ARC-0012). nomad never makes
+an account itself: Research Computing makes them as it does now, and closes
+each one here.
 
 ## What a PI does
 
@@ -36,7 +37,8 @@ Research Computing as before. On My lab, under **Request accounts**, the PI:
 
 4. sends the ones they mean, with a note if they like.
 
-Research Computing is emailed (`notify`), with the PI's address to reply to.
+Research Computing is emailed (`notify`), with the PI's address to reply to,
+and the PI sees the request's number on the card.
 Someone who never logged in nor ran a job isn't seen by nomad, so "has an
 account" is a hint, not a promise either way.
 
@@ -52,11 +54,57 @@ From the hub's shell, as the account the Console runs as:
 
 ```
 sudo -u nomad nomad lab accounts list --open
-sudo -u nomad nomad lab accounts close 12 jdoe spydur made
-sudo -u nomad nomad lab accounts close 12 asmith spydur not_made --note "not enrolled this term"
+sudo -u nomad nomad lab accounts list --find jdoe
+sudo -u nomad nomad lab accounts show ARC-0012
+sudo -u nomad nomad lab accounts close ARC-0012 jdoe spydur made
+sudo -u nomad nomad lab accounts close ARC-0012 asmith spydur not_made --note "not enrolled this term"
 sudo -u nomad nomad lab accounts lookup "Jane Doe" jdoe --file students.csv
 sudo -u nomad nomad lab accounts check
 ```
+
+## Request numbers
+
+Each request has a number, shown as `ARC-0012`: on the PI's card, first in
+the subject of both emails (`[ARC-0012] Account request: doelab, 3 people on
+spydur`, `[ARC-0012] The account for jdoe on spydur is ready`), on the Admin
+page and in the log. A reply keeps the subject, so the number comes back
+with it. Requests made before nomad 1.44.0 keep their number: #12 is
+ARC-0012.
+
+The numbers are one sequence, kept in lab_check.db, that other kinds of
+request will share: a number is never given twice, whatever it numbers.
+
+```toml
+[console.tickets]
+prefix = "ARC"          # letters and digits, at most 10
+digits = 4              # the width, with leading zeros (3 to 8); a larger number just grows
+```
+
+To find a request, give its number (`ARC-0012`, `#12` or `12`), or a NetID,
+a name, a lab or the PI who asked (any part of one): `nomad lab accounts
+list --find TEXT`, or the search box on the Admin page.
+
+## The report
+
+```
+sudo -u nomad nomad lab accounts report                                   # the last year
+sudo -u nomad nomad lab accounts report --since 2026-07-01 --until 2027-06-30
+sudo -u nomad nomad lab accounts report --cluster spydur --json
+sudo -u nomad nomad lab accounts report --since 2026-07-01 --csv > account-requests.csv
+```
+
+The requests asked in the period (`--until` is included), and what became
+of each account as of now: in all, by cluster, by lab (with its PIs) and by
+month; how long making them took, from the PI's request to the account
+marked made (the median, 9 in 10 within, the longest and which request);
+and what is still to make now, whenever asked, with the oldest. `--csv` is
+the same period as one row per account (number, lab, who asked and when,
+NetID, name, cluster, what became of it, who closed it and when, days, the
+notes), for a spreadsheet; it names people, so it is Research Computing's
+own. The Admin page downloads the same file.
+
+The [usage report](usage-report.md) counts the same requests in its section
+15, for its cluster and period: labs, PIs and people counted, never named.
 
 ## The directory
 

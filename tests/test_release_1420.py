@@ -323,14 +323,15 @@ def test_emails_to_arc_and_to_the_pi(rec, sent):
     assert A.tell_arc(CONFIG, cs, S, req) == "sent"
     m = sent[-1]
     assert m["To"] == "hpc@example.edu" and m["Reply-To"] == "pi1@example.edu"
-    assert m["Subject"].startswith(f"Account request #{req['id']}: doelab, 1 person on spydur")
+    # 1.44.0: the request's number first, as a ticket system's (was "Account request #1: ...")
+    assert m["Subject"].startswith(f"[{req['ref']}] Account request: doelab, 1 person on spydur")
     assert "jdoe" in m.get_content() and "Their note: REU" in m.get_content()
 
     done = A.close(rec, req["id"], "jdoe", "spydur", "made", by="arc1", note="home on /scratch too")
     assert A.tell_pi(CONFIG, cs, S, req, [done]) == "sent"
     m = sent[-1]
     assert m["To"] == "pi1@example.edu" and m["Reply-To"] == "hpc@example.edu"
-    assert m["Subject"] == "The account for jdoe on spydur is ready"
+    assert m["Subject"] == f"[{req['ref']}] The account for jdoe on spydur is ready"
     body = m.get_content()
     assert body.startswith("Dear Dr. Parish,") and "Jane Doe (jdoe) on spydur" in body and "home on /scratch" in body
 
@@ -344,7 +345,7 @@ def test_review_to_holds_the_pis_email(rec, sent):
     b = A.close(rec, req["id"], "bkim", "spydur", "not_made", by="arc1", note="not a student this term")
     assert A.tell_pi(cfg, cs, S, req, [a, b]) == "sent"
     m = sent[-1]
-    assert m["To"] == "rc@example.edu" and m["Subject"].startswith("[review] Your account request")
+    assert m["To"] == "rc@example.edu" and m["Subject"].startswith(f"[review] [{req['ref']}] Your account request")
     assert "would have gone to pi1@example.edu" in m.get_content() and "not a student this term" in m.get_content()
 
 
@@ -364,7 +365,7 @@ def test_cli_list_and_close(tmp_path, rec, sent, monkeypatch):
     monkeypatch.setattr(C, "_ctx", lambda ctx: (CONFIG, None, L.settings(CONFIG), None, tmp_path / "lab_check.db"))
     r = CliRunner().invoke(cli, ["lab", "accounts", "list", "--open"])
     assert r.exit_code == 0, r.output
-    assert f"#{req['id']}" in r.output and "jdoe" in r.output and "asked for" in r.output
+    assert req["ref"] in r.output and "jdoe" in r.output and "asked for" in r.output     # 1.44.0: ARC-0001
     r = CliRunner().invoke(cli, ["lab", "accounts", "close", str(req["id"]), "jdoe", "spydur", "made", "--by", "arc1"])
     assert r.exit_code == 0, r.output
     assert "made" in r.output and "Email to pi1: sent" in r.output

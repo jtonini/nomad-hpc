@@ -14,12 +14,13 @@ from nomad.usage.facts import Report, apply_min_cell
 
 def build(cfg: ClusterConfig, t0: datetime, t1: datetime, *, db: Path | None, site: str | None,
           sacct: Path | None = None, exclude: set[str] | None = None, user_map: Path | None = None,
-          teaching_site: str | None = None, min_cell: int | None = None) -> tuple[Report, sources.Data]:
+          teaching_site: str | None = None, min_cell: int | None = None,
+          accounts_db: Path | None = None) -> tuple[Report, sources.Data]:
     from nomad import __version__
     if min_cell is not None:
         cfg.min_cell = min_cell
     data = sources.load(cfg, t0, t1, db=db, site=site, sacct=sacct, exclude=exclude,
-                        user_map=user_map, teaching_site=teaching_site)
+                        user_map=user_map, teaching_site=teaching_site, accounts_db=accounts_db)
     report = sections.build(data, produced=datetime.now().strftime("%Y-%m-%d %H:%M"),
                             nomad_version=__version__)
     apply_min_cell(report, cfg.min_cell)

@@ -577,7 +577,7 @@ def test_cli_report(site, tmp_path):
     assert md.exists() and js.exists()
     data = json.loads(js.read_text())
     assert {f["id"]: f["value"] for f in data["facts"]}["s01.people"] == 5
-    assert len(data["sections"]) == 14 and data["coverage"] and data["assumptions"]
+    assert len(data["sections"]) == 15 and data["coverage"] and data["assumptions"]     # 1.44.0: 15, account requests
     for name in ("alice", "bob", "frank", "gmx_run", "zlab", "job_frank"):
         assert name not in md.read_text() and name not in js.read_text()
 

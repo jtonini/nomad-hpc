@@ -66,6 +66,7 @@ it didn't measure.
 | 12 | Departments and schools (with `--user-map`) | user map |
 | 13 | Teaching server (with `--teaching SITE`): people by role and department, sessions by kind, hours open and the share computing, the most people on (and computing) at once and when, people on by hour of the day, the busiest weekday, the most memory held at once, CPU busy and run queue against its cores, memory kills, by month | the interactive collector's daily and hourly totals and snapshots; vmstat; the oom collector |
 | 14 | Capacity and projection: practical capacity, projected demand, the year each capacity line is passed | sections 1 and 2; report.toml |
+| 15 | Accounts asked for by PIs: requests, labs and PIs (counted, never named), accounts made, not made, withdrawn and still to make, days from asked to made, by month | the account requests (lab_check.db, where `[console.labs.check] db` keeps it, else beside the database; read as the account the Console runs as) |
 
 After them come a table of where each section's figures come from (source,
 period covered, gaps, and whether the figures are measured, estimated or

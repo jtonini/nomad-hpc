@@ -1273,6 +1273,7 @@ def storage_group():
     nomad storage cron /home /scratch          how to run it there, and nomad.toml's part
     nomad storage use                          who holds what, growth, what is old
     nomad storage status                       what was read from each server, when
+    nomad storage cold                         data unchanged for a year, and the cases about it
 
     Seeing everyone's files takes root on the storage server (or sudo, or an
     account given just those rights), and nomad itself never runs with them:
@@ -7686,10 +7687,20 @@ def usage_report(ctx, since, until, cluster, db, report_config, sacct, user_map,
     site, name = _usage_site(ctx, db_path, cluster)
     cfg = _usage_config(report_config, name, ctx.obj.get('config_target'))
     exclude = {u.strip() for u in (exclude_users or "").split(",") if u.strip()}
+    # The account requests (section 15): where [console.labs.check] db keeps
+    # them, else beside the database.
+    accounts_db = None
+    try:
+        from nomad import lab_check as _lab_check
+        _ls = _lab_check.settings(ctx.obj.get('config') or {})
+        if _ls.db is not None:
+            accounts_db = _lab_check.db_path(_ls, ctx.obj.get('config_target'))
+    except Exception:          # noqa: BLE001 -- the report goes on; section 15 says what it couldn't read
+        accounts_db = None
     try:
         report, data = run.build(cfg, t0, t1, db=db_path, site=site, sacct=Path(sacct) if sacct else None,
                                  exclude=exclude, user_map=Path(user_map) if user_map else None,
-                                 teaching_site=teaching_site, min_cell=min_cell)
+                                 teaching_site=teaching_site, min_cell=min_cell, accounts_db=accounts_db)
     except (sources.SourceError, ExportError, OSError, sqlite3.DatabaseError) as e:
         raise click.ClickException(str(e))
     formats = ['md', 'json'] if fmt_ == 'both' else [fmt_]
@@ -11485,6 +11496,8 @@ lab.add_command(lab_check_group)
 # A lab's PI asks ARC for accounts (1.42).
 from nomad.lab_accounts_cli import accounts_group as lab_accounts_group  # noqa: E402
 lab.add_command(lab_accounts_group)
+from nomad.storage.cold_cli import cold_group  # noqa: E402
+storage_group.add_command(cold_group)
 # Practice runs: small inputs that show how a job runs (1.34).
 from nomad.demos.cli import demos_group  # noqa: E402
 cli.add_command(demos_group)

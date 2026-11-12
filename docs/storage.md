@@ -398,6 +398,56 @@ hard limits beside each owner (`--groups`, `--projects`). A filesystem with
 no accounting has no per-owner figures at all, quotas or not, and is covered
 by the scan.
 
+## Data unchanged for a year
+
+One list, on the hub, of everyone holding at least `min_tb` of data that
+hasn't changed in a year on a path (every scanned server; copies apart):
+who, where, how much of how much, when anything of it last changed, their
+last job, their labs and PIs, and what the [lab check](lab-check.md) said of
+them ("has left the lab; their data can be removed"). It is there to talk
+with them about a better place for it, so each one can become a case,
+numbered like the [account requests](lab-accounts.md) (ARC-0013), that
+moves through states with notes: to contact, contacted, moving it, then
+moved (or removed) or kept, with why.
+
+There is no alert for each person. A weekly email to Research Computing says
+what is new on the list, the open cases and those not updated lately, and
+the largest not yet a case; first of all, any path nearly full
+(`full_share`) with data on the list.
+
+"Unchanged" is the scan's: bytes whose last change (mtime) is older than
+its ages (`nomad-storage.sh -a`, 180 and 365 days by default). `days` takes
+the smallest of them at least that old; when the scan counts no age that
+long, the list uses its oldest and says so. Reading a file doesn't change it.
+
+```
+sudo -u nomad nomad storage cold                                  # the list
+sudo -u nomad nomad storage cold --csv > cold.csv                 # a row each (it names people)
+sudo -u nomad nomad storage cold open jdoe fs1:/home --note "emailed her"
+sudo -u nomad nomad storage cold case ARC-0013 contacted --note "she'll move it to the archive"
+sudo -u nomad nomad storage cold case ARC-0013 keep --note "the lab's reference data"
+sudo -u nomad nomad storage cold show ARC-0013
+sudo -u nomad nomad storage cold digest                           # the weekly email, printed
+sudo nomad storage cold timer --apply                             # sent Mondays (nomad-cold-data.timer)
+```
+
+In the Console it is under Diagnostics, Storage, for operators and
+administrators: the same list, a case opened or moved on from each row, and
+the spreadsheet.
+
+```toml
+[console.cold_data]
+min_tb = 1.0                 # listed from this much unchanged data on one path (decimal TB)
+days = 365                   # unchanged this long
+full_share = 0.85            # a path this full is said first
+quiet_days = 30              # an open case not updated this long is called out
+notify = ["hpc@example.edu"] # the weekly email (default: [console.labs.accounts] notify)
+link = "https://nomad.example.edu/diagnostics?tab=storage"   # the list, in the email
+```
+
+The cases are kept in lab_check.db, beside combined.db (the nomad account's),
+each change in its log.
+
 ## Tables
 
 | Table | Holds |
