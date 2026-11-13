@@ -1,0 +1,6206 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Lightweight HPC monitoring, visualization, and predictive analytics">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/changelog/">
+      
+      
+        <link rel="prev" href="../extending/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Changelog - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#changelog" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../installation/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dashboard/" class="md-tabs__link">
+          
+  
+  
+  Features
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../dev/" class="md-tabs__link">
+          
+  
+  
+  Technical
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../collectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../submit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../condo-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Condo Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-check/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Membership Check
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Account Requests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weekly Notices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Practice Runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy_watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../facts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Facts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Technical
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml-training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training the model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#v1471-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.47.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1470-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.47.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1460-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.46.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1451-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.45.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1450-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.45.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1440-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.44.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1430-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.43.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1420-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.42.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1410-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.41.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1400-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.40.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1391-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.39.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1390-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.39.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1380-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.38.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1370-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.37.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1360-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.36.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1355-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.5 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1354-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.4 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1353-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.3 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1352-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.2 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1351-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1350-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.35.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1341-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.34.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1340-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.34.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.34.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1331-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.33.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.33.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1330-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.33.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.33.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1322-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1321-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1320-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1312-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1311-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1310-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1301-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.30.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.30.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1300-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.30.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.30.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1290-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.29.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.29.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1281-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.28.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.28.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1280-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.28.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.28.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1270-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.27.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.27.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1260-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.26.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.26.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1258-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.8 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.8 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1257-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.7 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.7 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1256-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.6 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.6 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1255-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.5 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.5 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1254-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.4 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.4 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1253-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.3 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.3 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1252-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1251-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1250-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1241-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.24.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.24.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1240-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.24.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.24.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1230-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.23.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.23.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1220-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.22.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.22.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1210-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.21.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.21.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1201-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.20.1 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.20.1 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v131-april-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.3.1 (April 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.3.1 (April 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v130-april-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.3.0 (April 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.3.0 (April 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v126-march-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.6 (March 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.6 (March 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v121-february-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.1 (February 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.1 (February 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bug Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v120-january-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.0 (January 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.0 (January 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v110-december-2025" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.1.0 (December 2025)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.1.0 (December 2025)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v100-november-2025" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.0.0 (November 2025)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#v1471-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.47.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1470-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.47.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1460-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.46.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1451-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.45.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1450-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.45.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1440-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.44.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1430-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.43.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1420-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.42.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1410-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.41.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1400-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.40.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1391-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.39.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1390-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.39.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1380-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.38.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1370-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.37.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1360-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.36.0 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1355-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.5 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1354-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.4 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1353-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.3 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1352-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.2 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1351-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1350-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.35.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.35.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1341-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.34.1 (November 2026)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1340-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.34.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.34.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1331-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.33.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.33.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#new_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1330-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.33.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.33.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#new_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        New
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1322-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1321-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1320-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.32.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.32.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1312-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1311-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1310-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.31.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.31.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1301-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.30.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.30.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1300-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.30.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.30.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1290-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.29.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.29.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1281-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.28.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.28.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1280-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.28.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.28.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1270-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.27.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.27.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1260-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.26.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.26.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1258-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.8 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.8 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1257-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.7 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.7 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1256-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.6 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.6 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fixes_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1255-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.5 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.5 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1254-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.4 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.4 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1253-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.3 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.3 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1252-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.2 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.2 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1251-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1250-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.25.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.25.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1241-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.24.1 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.24.1 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1240-november-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.24.0 (November 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.24.0 (November 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1230-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.23.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.23.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1220-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.22.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.22.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1210-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.21.0 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.21.0 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v1201-october-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.20.1 (October 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.20.1 (October 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v131-april-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.3.1 (April 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.3.1 (April 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fixes_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#features_19" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v130-april-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.3.0 (April 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.3.0 (April 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v126-march-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.6 (March 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.6 (March 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v121-february-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.1 (February 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.1 (February 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bug-fixes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bug Fixes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v120-january-2026" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.2.0 (January 2026)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.2.0 (January 2026)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_23" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#improvements_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Improvements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v110-december-2025" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.1.0 (December 2025)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="v1.1.0 (December 2025)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#features_24" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Features
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#v100-november-2025" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        v1.0.0 (November 2025)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h1>
+<h2 id="v1471-november-2026">v1.47.1 (November 2026)<a class="headerlink" href="#v1471-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>What each compute node's memory holds</strong> (<code>node_disks</code>, <code>memory = true</code>
+  by default; table <code>node_memory</code>): the collector's login to each node, every
+  half hour, also reads <code>/proc/meminfo</code>. Slurm's <code>FreeMem</code> is MemFree, which
+  counts the file cache as used, so a node left idle after a long job read as
+  nearly full: spdr01 showed 82% in use with nothing allocated and a load of
+  0.2. Total less MemAvailable is what programs hold; the cache is kept
+  apart. A node's timeline draws "Memory in use by programs" from it, in
+  place of the cache-counted line, where it is read. The Console's Nodes page
+  uses it in fix 116.</li>
+<li>tests/test_node_disks.py: a node answering here now gives its memory too.</li>
+</ul>
+<h2 id="v1470-november-2026">v1.47.0 (November 2026)<a class="headerlink" href="#v1470-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Which jobs</strong> (<code>nomad edu me</code>, the Console's Recommendations and My
+  Activity): each recommendation carries the jobs it was found in, newest
+  first, at most 50 (<code>jobs</code>): each one's ID, site, partition, name, when it
+  ended and how, its score, and what it asked and used for that dimension
+  (<code>asked</code>, <code>used</code>, <code>unit</code>; for GPUs <code>busy_pct</code>). A "Jobs that failed" card
+  lists the jobs that failed. The text output names the first five ("Jobs:
+  4521, 4519 … and 3 more"). From a user meeting: people wanted to know
+  which of their jobs a card meant.</li>
+<li><strong>The time limit counts a quarter</strong> (<code>[edu.weights]</code>): an overall score (a
+  job's, a person's, a week's, a group's) is the dimensions counted by their
+  weights, CPU, memory and GPU 1, I/O 0.5, the time limit 0.25. Before, all
+  counted the same, and a generous limit, which mostly makes the job itself
+  start later, pulled the overall down as much as idle cores or memory, which
+  keep others waiting. Every overall is worked out when it's shown, so the
+  history moves with the weights. <code>nomad config check</code> says what's wrong
+  with an <code>[edu.weights]</code> table. Each issue carries its dimension's <code>weight</code>;
+  <code>nomad edu me --json</code> has <code>weights</code>.</li>
+<li><strong>Time Limit</strong> (was Time Estimation): "Ran 1h of the 1d 0h it asked for
+  (4%). A limit closer to how long it runs lets Slurm start it sooner, in a
+  gap between other jobs; the limit doesn't change how fast it runs." A
+  job stopped at its limit: "Stopped at its time limit (1h) before it
+  finished". docs/proficiency.md had the time score's old formula; it now
+  has the bands the code uses.</li>
+<li><strong>Cores and memory first</strong>: within a cluster and partition, a "Jobs that
+  failed" card, then the dimensions that count fully, then those that count
+  less (I/O, the time limit), each by severity.</li>
+</ul>
+<p>The Console's part is fix 114 (the jobs under each card, linked to their
+pages; the cards that count less under "Also worth a look"; the weights said
+wherever an overall is explained).</p>
+<h2 id="v1460-november-2026">v1.46.0 (November 2026)<a class="headerlink" href="#v1460-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Cores left idle</strong> (<code>idle</code>, now asked by default with failure): a
+  completed job of 2 cores or more that ran 5 minutes or more and was
+  measured, which on average left more than <code>[ml.train] idle_threshold</code>
+  (0.5) of the cores it asked for unused. These are the jobs the
+  Recommendations judge for cores, judged the same way, matched to
+  job_summary as they match it. Time unused (<code>waste</code>) stays available: at the
+  University of Richmond half the completed jobs used under 1% of the time
+  they asked, and 89% counted as wasted even at 0.9, so its AUCs said little.
+  Each of idle and waste carries its spread (what share of the cores or the
+  time the jobs used), counts only.</li>
+<li><strong>Ranges</strong> (<code>[ml.train] bootstrap</code>, 1000 resamples): the 95% range of each
+  model's AUC and of the difference between them, paired (the same held-out
+  jobs for both in each resample), on all columns and without partition and
+  cluster.</li>
+</ul>
+<h2 id="v1451-november-2026">v1.45.1 (November 2026)<a class="headerlink" href="#v1451-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A fair comparison.</strong> The first run on real jobs had the logistic
+  regression ahead of TESSERA for failure (AUC 0.87 against 0.59). TESSERA
+  had been handicapped: partition and cluster reached it as plain numbers,
+  and its default similarity (simpson) cuts each feature into three
+  equal-width bins. Both models now get partition and cluster as one column
+  per value, and TESSERA's similarity is set in <code>[ml.train.tessera]</code>
+  (<code>similarity</code>, default <code>euclidean</code> on scaled features; <code>n_bins</code>;
+  <code>k_neighbors</code>). On made-up jobs where partition decides failure, TESSERA
+  went from 0.70–0.81 to 0.92–0.96, level with the logistic regression.</li>
+<li><strong>What partition and cluster carry</strong> (<code>[ml.train] compare</code>, default true):
+  each model is also measured without them, and the logistic regression with
+  them alone.</li>
+<li><strong>The spread of used time</strong>, for choosing <code>waste_threshold</code>: how much of
+  their asked time the completed jobs used, at the tenth to nine tenths of
+  them, and how many count as wasted at 0.5, 0.6, 0.75 and 0.9 (counts only).
+  On the first run 99% counted as wasted at 0.6, so waste's AUCs meant little.</li>
+<li>Training worker: two passes asking at the same instant never both take the
+  same request; <code>nomad ml work</code>'s lines reach the journal as they are said
+  (line-buffered under systemd), without matplotlib's font-cache notices;
+  docs/ml-training.md puts the worker's environment in <code>/opt/nomad-ml</code>,
+  since SELinux keeps a system service from running programs in a home
+  folder.</li>
+<li>Data readiness's recommendation points to Train… (or <code>nomad ml ask</code>)
+  rather than only <code>nomad train</code>.</li>
+<li><code>nomad facts node</code>: on a cluster whose Slurm doesn't allocate memory
+  (SelectTypeParameters without <code>_Memory</code>), the memory series carries a note
+  saying so, which the Console's node timeline shows, instead of the
+  "Memory allocated" line simply being absent.</li>
+<li>The hub keeps a training result's summary six levels deep (it kept four,
+  which would have dropped 1.45.1's comparisons).</li>
+</ul>
+<h2 id="v1450-november-2026">v1.45.0 (November 2026)<a class="headerlink" href="#v1450-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Training the model from the Console</strong> (<code>nomad.learn</code>; <code>nomad ml</code>;
+  <code>[ml.train]</code>, <code>[ml.worker]</code>; docs/ml-training.md). An administrator asks on
+  Data readiness; a worker with a GPU asks the Console every 5 minutes over
+  HTTPS with its own key (<code>nomad ml work</code>, <code>nomad ml timer</code>), takes the
+  request, trains TESSERA (tessera-ml 0.3) and a logistic regression, and
+  sends back how well each ranked the newest jobs (held out: given to TESSERA
+  as unknown, learned from by nothing) and the scores of those and of the jobs
+  running or waiting. Predicts failure and waste. What leaves the hub: per
+  job, only what Slurm was asked, as numbers, and what became of it; never a
+  person, job name or ID, partition or cluster name. Requests and results in
+  ml.db (beside lab_check.db). One request at a time; a run not heard from in
+  <code>stale_minutes</code> is given up. <code>nomad ml check</code> on the worker says what the
+  Console answered and whether TESSERA can train there (its version,
+  PyTorch's, the GPU). The worker never follows a redirect, so a sign-in page
+  in front of the Console is said, and never sent the key.</li>
+<li><strong>Advice about size from jobs that completed</strong> (<code>nomad edu me</code>, the
+  Console's Recommendations and My Activity, the job notices). Cores and GPUs
+  are worked out from jobs that completed, memory from those that completed or
+  ran out of memory, time from those that completed or reached their limit: a
+  job that failed early used little because it never got to its work, and
+  three such jobs had been enough to advise "52 cores → 2" and "12 days →
+  2:30". Each issue carries how many of the place's jobs completed and how
+  many failed (<code>completed_jobs</code>, <code>failed_jobs</code>). Where most of the measured
+  jobs on a cluster and partition failed (at least 2), a "Jobs that failed"
+  card (<code>failed</code>) leads that place's cards instead of advice to ask for less.</li>
+<li><code>nomad config check</code> no longer calls <code>[console.labs] accounts</code> an unknown
+  setting: the account requests' table (1.42.0) was always read.</li>
+</ul>
+<h2 id="v1440-november-2026">v1.44.0 (November 2026)<a class="headerlink" href="#v1440-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Request numbers, as a ticket system's</strong> (<code>nomad.tickets</code>;
+  <code>[console.tickets] prefix, digits</code>). Every account request has a number,
+  ARC-0012: on the PI's card, first in the subject of both emails (so a
+  reply keeps it), on the Admin page and in the log. Requests made before
+  keep theirs (#12 is ARC-0012). The numbers are one sequence, kept in
+  lab_check.db, which other kinds of request will share.</li>
+<li><strong>Finding a request</strong>: <code>nomad lab accounts list --find TEXT</code> and <code>show
+  ARC-0012</code>; by its number, or a NetID, a name, a lab or the PI who asked.
+  <code>close</code> takes the number too.</li>
+<li><strong>The account-requests report</strong> (<code>nomad lab accounts report --since
+  --until [--cluster] [--json | --csv]</code>): the requests asked in a period and
+  what became of each account as of now, in all, by cluster, lab and month;
+  days from asked to made (median, 9 in 10 within, longest, and which); what
+  is still to make now and the oldest. <code>--csv</code> is one row per account for a
+  spreadsheet (text a spreadsheet would run as a formula is kept as text).</li>
+<li><strong>Data unchanged for a year, one list with its cases</strong> (<code>nomad.storage.cold</code>;
+  <code>nomad storage cold</code>; <code>[console.cold_data]</code>). Everyone holding at least
+  <code>min_tb</code> unchanged a year on a path, on every scanned server (copies
+  apart), with their last job, labs, PIs and what the lab check said of
+  them. Each can become a case (ARC-0013, the same sequence) that moves from
+  to contact, contacted, moving it, to moved or kept (and why), with notes.
+  No alert for each person: a weekly email to Research Computing (<code>digest
+  --send</code>, <code>timer</code>) says first any path nearly full with data on the list,
+  then what is new, the open cases and those not updated lately.</li>
+<li><strong>Usage report, section 15: accounts asked for by PIs</strong>, read from the
+  requests (lab_check.db, where <code>[console.labs.check] db</code> keeps it, else
+  beside the database): requests, labs, PIs and
+  people counted, accounts made, not made, withdrawn and still to make,
+  days to make them, by month. No lab, PI or person is named; run as the
+  account the Console runs as (lab_check.db is its own), else "not measured".</li>
+</ul>
+<h2 id="v1430-november-2026">v1.43.0 (November 2026)<a class="headerlink" href="#v1430-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Acting on an interactive server's sessions</strong> (<code>nomad.interactive_admin</code>;
+  <code>nomad interactive sessions|stop|clear|restart</code>; four actions, on sites).
+  Suspend a person's RStudio session (Workbench's own <code>suspend-session</code>: R
+  saves it, and it comes back when they next open RStudio), stop their
+  Jupyter server or kernel as them, clear every session idle so many hours,
+  restart RStudio or JupyterHub. Each is a dry run unless applied, does only
+  what sudo already lets the account do (asked first with <code>sudo -n -l</code>),
+  checks that the process is that person's session and the very one looked
+  at, and is logged. Restarting JupyterHub says how many people's servers it
+  stops, and needs that number. Off until <code>[actions] interactive = true</code>.
+  The Console's part is fix 104.</li>
+<li><strong>When each session was last busy</strong> (<code>interactive_state.busy_at</code>): the
+  interactive collector keeps it, for what <code>clear</code> calls idle, and writes it
+  for the hub in <code>interactive_idle</code> (a row for each open session, changed
+  only when it is busy again), so the Console shows how long each session
+  has been idle.</li>
+</ul>
+<h2 id="v1420-november-2026">v1.42.0 (November 2026)<a class="headerlink" href="#v1420-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A lab's PI asks for accounts</strong> (<code>nomad.account_requests</code>; <code>nomad lab
+  accounts</code>). On My lab, a PI types or pastes NetIDs, addresses or names, or
+  gives a table (CSV, tab-separated, Excel), and picks the clusters. Before
+  anything goes to Research Computing, nomad says who each one is from the
+  campus directory: found, with their name; several people of that name
+  (the PI picks); not found; already has an account there (nomad has their
+  jobs, logins or groups); already asked for. The request is emailed to
+  <code>notify</code>; ARC closes each account, made or not made and why, and the PI
+  is emailed (review_to while set). Every request and close is kept, with
+  who and when: the record ARC has no ticket system for. nomad makes no
+  account itself. The Console's part is fix 102.</li>
+<li><strong>The campus directory, as a service account</strong> (<code>nomad.directory</code>;
+  <code>[directory]</code>). Through <code>ldapsearch</code>, over ldaps only, with the password
+  in the nomad account's own file and handed over in a file deleted after,
+  never on a command line. Only a person's NetID and name are read, and only
+  of what a PI typed.</li>
+</ul>
+<h2 id="v1410-november-2026">v1.41.0 (November 2026)<a class="headerlink" href="#v1410-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>One node over a window</strong> (<code>nomad.facts.node</code>; <code>nomad facts node SITE
+  NODE</code>). What Grafana answers with a query, answered once: a node's cores
+  allocated and load, memory allocated and held, GPUs busy (DCGM), GPU
+  memory and temperature, the hottest CPU or board sensor, the CPU clock as a
+  share of its top speed and the fullest local disk, at one step for the
+  whole window; and what happened on it: drained, draining, down and back
+  (Slurm's reason for staff), gaps in the readings, jobs started and ended,
+  out-of-memory kills, power events, alerts and declared maintenance, with
+  a summary in sentences. Staff see every job on the node and whose; anyone
+  else their own, the others counted. The Console's node timeline (fix 101)
+  reads it, and a local AI model will.</li>
+</ul>
+<h2 id="v1400-november-2026">v1.40.0 (November 2026)<a class="headerlink" href="#v1400-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The gate through another host</strong> (<code>gate_jump</code> in a site's
+  <code>[[hub.sites]]</code>; <code>nomad gate jump-key</code>). A cluster the hub reaches only
+  through another host (vadur, through jonimitchell) can have the Console's
+  Submit page and live jobs too: the gate's own key, with the same strict
+  settings, opens a forwarded connection to the cluster's ssh on that host
+  (<code>ssh -W</code>), and its line there allows nothing else (no terminal, no
+  command, forwarding only to the cluster's address, from the hub's). The
+  hub's own ssh settings are still never used. Tried against real sshd: the
+  gate answers through the jump; the jump key gets no shell and can forward
+  nowhere else.</li>
+<li><strong>How often the hub reads the sites, from nomad.toml</strong> (<code>[hub]
+  sync_interval_minutes</code>; <code>nomad sync timer</code>). <code>--apply</code> writes a drop-in
+  for nomad-sync.timer: every that many minutes, two minutes after the
+  five-minute marks the sites read themselves on. <code>nomad config check</code> says
+  when the value isn't minutes that divide an hour. Five minutes (from
+  twenty) costs no storage and about 2% of one of the hub's cores; a job that
+  started shows as running in the Console within minutes.</li>
+</ul>
+<h2 id="v1391-november-2026">v1.39.1 (November 2026)<a class="headerlink" href="#v1391-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The weekly email, as people read it.</strong> What is alike is one note: the
+  times of one kind of login-node use (five shown, the rest on My
+  activity), or one kind of asking for too much over a person's partitions
+  with an <code>#SBATCH</code> line each; why it matters and the better way are said
+  once a note, not under every entry (a week's email had the same paragraph
+  eight times). Sizes and times in words ("asked for 1 day; they used about
+  50 min", "32 GB", "8 cores") instead of "2988.5 seconds" and "4903.61 MB";
+  the reason lines are the email's own, without contractions. The subject
+  counts notes.</li>
+<li><strong>sshd-session is what a login node is for.</strong> Newer OpenSSH (9.8+) runs
+  each login and transfer as <code>sshd-session</code> (and <code>sshd-auth</code>): skipped like
+  <code>sshd</code> and <code>scp</code>, on My activity and in the email.</li>
+</ul>
+<h2 id="v1390-november-2026">v1.39.0 (November 2026)<a class="headerlink" href="#v1390-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A weekly email to each person about their own use</strong> (<code>nomad notices</code>,
+  docs/notices.md). Once a week at most, and only with something new: what
+  of theirs a login node's monitoring caught (1.38.0), and a pattern of jobs
+  asking for far more than they use (most of at least 5 jobs on a
+  partition, high or critical), with the better way and a link to My
+  activity. Never the same thing twice (a jobs pattern again after 30 days
+  if it still holds). On for everyone by default: a person turns it off on
+  My activity in the Console (Console fix 96), an admin for them with
+  <code>nomad notices set NETID off --apply</code>. Accounts only for a course are left
+  out (<code>courses = true</code> includes them). Review first: while <code>review_to</code> is
+  set every email goes there; people get them only once <code>[notices]
+  review_to = []</code> (report.toml's review_to holds them until then; the lab
+  check's never decides them). <code>nomad notices mail [--send]</code>, <code>nomad
+  notices timer [--apply]</code> (Mondays 09:10 from systemd). The record is
+  <code>notices.db</code> beside the combined database.</li>
+</ul>
+<h2 id="v1380-november-2026">v1.38.0 (November 2026)<a class="headerlink" href="#v1380-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Heavy use of a login node, told to the person.</strong> What the per_user
+  collector flags on a login node was read only by the admins' insights
+  brief; the person who ran the work never heard of it. <code>nomad edu me</code> now
+  ends with "On the login nodes": what ran, on which cluster, when, for how
+  long and how much, why it matters on a machine everyone logs in to, and
+  the better way (Submit a job, an <code>srun</code> session, a build or an archive
+  inside a job), without blame. The Console's My activity and Home show the
+  same (Console fix 95). What is told is set in <code>[notices.login_node]</code>: one
+  program holding half a core or more for 15 minutes, someone's programs
+  together keeping two cores busy or holding 32 GB, one program holding
+  16 GB, a large transfer; never the 10%-for-5-minutes rule (a <code>pip
+  install</code> reaches it), and never programs that move data in or out (<code>scp</code>,
+  <code>sftp-server</code>, <code>rsync</code>, <code>sshd</code>). One entry per program run, the last 30
+  days, local time. <code>nomad config check</code> says what is wrong in the section.</li>
+</ul>
+<h2 id="v1370-november-2026">v1.37.0 (November 2026)<a class="headerlink" href="#v1370-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A site watches its hub.</strong> The hub said so when a site stopped
+  answering; nothing said so when the hub itself stopped (its disk died one
+  night, and every page showed that evening's data until someone looked).
+  Each time the hub reads a site it now leaves a note there (its name, when
+  it read), and after each collection the site's own nomad checks: a hub
+  that read it regularly (twenty times over a day) and has not for
+  <code>[alerts.hub] after_minutes</code> (60; three of its usual intervals when that
+  is longer) is said so through the site's own alert backends, source
+  <code>hub</code>: a warning, critical after a day, once, again when worse, then
+  every <code>reminder_hours</code>. Only silence the site saw counts: after its own
+  outage the hub has the time again. A hub silent for a week is taken as
+  retired. Starts a day after the hub and the site are on 1.37.</li>
+<li><strong>Declared maintenance</strong>: <code>nomad maintenance start SITE --until WHEN
+  --reason WHY [--from WHEN]</code>, <code>nomad maintenance end SITE</code> (both show what
+  they would do; <code>--apply</code> does it), <code>nomad maintenance</code> (now, coming,
+  lately). SITE is one of the hub's sites, <code>all</code>, or <code>hub</code>. While a site's
+  window lasts, and <code>[hub] maintenance_grace_minutes</code> (60) after it, the hub
+  holds every alert it raises about that site, and the site's own nomad
+  holds its alerts too (the hub tells it at once, and with each read;
+  <code>[alerts] maintenance_hold = false</code> at a site keeps them coming; the hold
+  lapses a day after the hub's last read). What still holds afterwards is
+  raised then, as news, with when the window ended; what came and went
+  during the window is not sent afterwards. For <code>hub</code>, the sites don't
+  report the hub as silent. A window always ends (<code>--until</code>, at most <code>[hub]
+  maintenance_max_days</code>, 14); one per site at a time. The windows are kept
+  in <code>maintenance.json</code> beside the hub's combined database.</li>
+<li><code>nomad sync</code> says what is in maintenance; its "not synced" alerts name
+  their site, so one in maintenance is held.</li>
+<li>The Console may ask for them: actions <code>maintenance</code> (what is declared),
+  <code>maintenance.start</code> and <code>maintenance.end</code> (a dry run unless applied, as a
+  node's drain).</li>
+</ul>
+<h2 id="v1360-november-2026">v1.36.0 (November 2026)<a class="headerlink" href="#v1360-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>nomad lab check names --set</code></strong>: the PIs' names for the lab check's
+  email, found and asked for in one command. nomad looks for each missing
+  name on the system, read-only: the account's full name, then the
+  directory without a login (<code>[console.labs.check] directory</code>, else the
+  system's ldap.conf; an anonymous <code>ldapsearch -x</code>, never a password). It
+  shows what it found for you to keep, asks for the rest one at a time (a
+  name, Enter for later, or <code>-</code> when the group is not a lab: it goes to
+  <code>[console.labs] not_labs</code>), shows the change, and writes it only when you
+  say so, with nomad's careful edit of nomad.toml (a backup, owner and mode
+  kept, nothing else changed, never over someone else's edit). It also
+  says when nomad.toml can be read by anyone on the machine.</li>
+<li><code>--from FILE [--apply]</code>: the answers from a file (the names table, or
+  lines <code>NETID,First Last</code>); <code>--no-lookup</code>: ask only.</li>
+<li><strong><code>nomad lab check name NETID First Last [--apply]</code></strong> for one PI later
+  (<code>First | Last</code> for a last name of more than one word; <code>--remove</code>).</li>
+<li>New setting: <code>[console.labs.check] directory</code> (<code>"auto"</code>, <code>false</code>, or
+  <code>{ uri, base, id }</code>).</li>
+<li>nomad.toml edits can write inline tables (<code>{ first = "Maria", last = "de la Cruz" }</code>).</li>
+</ul>
+<h2 id="v1355-november-2026">v1.35.5 (November 2026)<a class="headerlink" href="#v1355-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The lab check's email: "Nothing happens automatically. Our team reviews
+  your answers before making any change." (was "Nothing changes
+  automatically: we make only the changes your answers ask for.").</li>
+<li><code>names</code> in <code>[console.labs.check]</code>: a name left empty (<code>netid = ""</code>, a
+  list not filled in yet) is as if not there, without a note; <code>nomad lab
+  check names --missing</code> lists it.</li>
+</ul>
+<h2 id="v1354-november-2026">v1.35.4 (November 2026)<a class="headerlink" href="#v1354-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The lab check's email reads as a letter</strong> to the lab's PI: "Dear Dr.
+  Parish," (the name from <code>names</code> in <code>[console.labs.check]</code>, else the
+  account's full name; "Dear colleague," without one), who asks and why,
+  what about (a line for the members, one for condo users outside the
+  group), where to answer and until when ("Monday, December 14, 2026"),
+  and that nothing changes automatically. No contractions, no word said
+  twice where once will do. It ends with the Console's <code>[console.branding]</code>
+  lines (e.g. Academic Research Computing, Office of the Provost, the
+  university), as the sign-in page and the condo reports do.</li>
+<li>Subject: "Please confirm the members of the Parish Lab (cparish$)";
+  reminders start "Reminder:".</li>
+<li>New settings in <code>[console.labs.check]</code>: <code>salutation</code> ("Dr. {last}"),
+  <code>names</code>, <code>signature</code>, <code>contact</code>, <code>date_format</code>.</li>
+<li><code>nomad lab check names [--missing]</code>: how each lab's email greets its
+  PIs, and where each name came from; <code>nomad lab check email LAB
+  [--reminder]</code>: a lab's email as its PIs would get it now, whatever has
+  been sent (nothing is sent).</li>
+</ul>
+<h2 id="v1353-november-2026">v1.35.3 (November 2026)<a class="headerlink" href="#v1353-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>columbus-water</code> keeps its first run on spydur (9 November, job 89551:
+  condos, 1 CPU, 1 s, 121 MB) and what it wrote: the SCF energy
+  -76.0253553484, the CI energy -76.2305400880 and the dipole moment
+  1.98007125 D, exactly as COLUMBUS's own example has them.</li>
+<li>Its log entry reads what runc 7.2.2 writes (when it started, and the
+  energies along the way); its timings list names the programs only.</li>
+</ul>
+<h2 id="v1352-november-2026">v1.35.2 (November 2026)<a class="headerlink" href="#v1352-november-2026" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A memory request of 2 GB or less isn't judged</strong> ("not judged", with
+  why; no advice): asking 1 or 2 GB is the least anyone usually asks, and
+  what it leaves unused is too little to matter on a node. A 2 GB job that
+  peaked at 92 MB scored 11 ("Needs Work") before. <code>[edu] memory_floor_gb</code>
+  sets the floor (0 turns it off).</li>
+<li>Unused memory is said to a tenth of a GB under 10 GB ("3.9GB was unused",
+  not "4GB").</li>
+<li><strong>A Columbus practice run</strong> (<code>columbus-water</code>): COLUMBUS 7.2.2's own water
+  example (EXAMPLES/FFIELD/h2o-srci, LGPL-3): Hartree-Fock, then a
+  single-reference CI with a weak electric field, and their dipole moments,
+  in seconds on one core. The folder is the input, as the Columbus template
+  takes it; what to look at is in LISTINGS/ and runls.</li>
+</ul>
+<h2 id="v1351-november-2026">v1.35.1 (November 2026)<a class="headerlink" href="#v1351-november-2026" title="Permanent link">&para;</a></h2>
+<p>A practice run is known for what it is (with Console fix 92):</p>
+<ul>
+<li>Its job is named <code>practice-KIT</code> (<code>nomad.demos.kits.mark</code>): squeue, sacct,
+  the hub's records and the Console say what it is. Each copy's
+  <code>README-practice.txt</code> names its kit (<code>Kit: NAME</code>, and <code>Kit folder:</code> for a
+  site's own).</li>
+<li>The hub tells one from its records (<code>practice_names</code>, <code>practice_label</code>,
+  <code>practice_row</code>): a folder named after a kit (<code>KIT</code>, <code>KIT-2</code>,
+  <code>KIT-YYYYMMDD-HHMMSS</code>; the hub keeps a job's folder's last two parts only)
+  and its job named <code>practice-KIT</code> or, before 1.35.1, as the kit's script
+  names it. A practice script copied into real work is not one.</li>
+<li>Scores and advice leave practice runs out (<code>nomad.edu.population</code>,
+  <code>progress</code>): they say nothing of anyone's work.</li>
+<li>The gate's answer for one of the person's jobs (<code>job</code>) carries <code>practice</code>:
+  for a job that ran in a practice copy, its kit (a site's own from the
+  folder the copy names, once checked as <code>kits</code> checks it), what to look at
+  in its folder now -- that job's own files first, else the newest -- and
+  the kit's recorded run (<code>practice_of</code>); <code>null</code> for any other job.</li>
+<li><code>look()</code> reads the last 4 MB of a file and 2,000 entries of a folder (a
+  named file directly), shows 6 files a pattern and 400 characters of a
+  line, and opens only plain files, never through a link.</li>
+</ul>
+<h2 id="v1350-november-2026">v1.35.0 (November 2026)<a class="headerlink" href="#v1350-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="new">New<a class="headerlink" href="#new" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Practice runs from the Console</strong> (with Console fix 91): the gate's
+  <code>kits</code> (the kits ready at the cluster, with <code>--kits-dir</code>), <code>practice</code>
+  (copy one, as the person, into a new or empty folder of theirs) and
+  <code>mkdir</code> (a new folder of theirs). <code>practice</code> and <code>mkdir</code> write: audited,
+  and only with the gate's editing on. <code>[submit.demos] site_dirs</code> (the
+  hub's): each cluster's built kits; <code>kits</code> names a site's own kit's folder
+  (<code>from</code>), for <code>nomad demos copy --from</code> where copying from the Console is
+  off.</li>
+<li>A kit's job script (<code>nomad.demos.kits.kit_values</code>, <code>job_values</code>, <code>mark</code>):
+  the kit's own size, the partition practice runs go to, its choices, and
+  two lines under <code>#!</code> saying it is a practice run. A choice of the person's
+  own is sized as the template sizes it (R's 8 cores; AMBER's one CPU core:
+  no GPU, not the GPU nodes); choosing an option's first choice changes
+  nothing. A kit may be a gate's description of one (the hub may not have a
+  site's own kit). <code>nomad demos scripts</code> writes them so too.</li>
+<li>The gate's <code>practice</code> and <code>mkdir</code> write in no hidden folder; a copy is made
+  through folder descriptors and never follows a link; a site's kit folder
+  is used only when no one but root, nomad's installer, the person or Slurm
+  could have changed it (<code>kits</code> says why not, in <code>problems</code>); <code>nomad demos
+  build</code> leaves what it makes writable by no one else.</li>
+<li><strong>Recorded runs</strong>: a kit's <code>[recorded]</code> table keeps one real run of it
+  (site, date, module, partition, CPUs, GPUs, run time, CPU time, cores
+  busy, peak memory) and, in its <code>recorded/</code> folder, what it wrote.
+  <code>nomad demos show</code>, <code>look</code> (and <code>look NAME --recorded</code>), each copy's
+  README and the Console show it. cp2k-water, gromacs-water, amber-peptide
+  (numbers only), r-bootstrap and rfdiffusion-backbone carry their spydur
+  runs of 9 November. A built kit with none takes nomad's; <code>nomad demos
+  build</code> carries it along.</li>
+</ul>
+<h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Submit's "jobs like this one" leave out practice runs (a folder holding
+  <code>README-practice.txt</code>), unless it is the same folder or script: a
+  practice run's size says nothing about real work.</li>
+<li>The kits' "about N minutes" from their recorded runs (CP2K, R, AMBER: 1;
+  GROMACS, RFdiffusion: 2). AMBER's look says the last two lines are the
+  run's average and how much it varied.</li>
+</ul>
+<h2 id="v1341-november-2026">v1.34.1 (November 2026)<a class="headerlink" href="#v1341-november-2026" title="Permanent link">&para;</a></h2>
+<p>From the practice runs' first runs on spydur (9 Nov):</p>
+<ul>
+<li><code>[submit.demos] partition</code> and <code>gpu_partition</code> (a name, or <code>{ site =
+  partition }</code>): where practice runs are sent, so they don't wait behind
+  long research jobs (spydur: the condo guest queue).</li>
+<li>amber-peptide: a box pmemd.cuda accepts (16 A of water around the
+  peptide; the GPU code refused a smaller one), and 100 ps.</li>
+<li>gromacs-water: 2 ns, about a minute and a half on an A40 (100 ps took 7 s).</li>
+<li>rfdiffusion-backbone: RFdiffusion keeps its noise schedules in the job's
+  folder (<code>inference.schedule_directory_path</code>); its own folder in the
+  container is read-only, so a run without it fails. The template's run line
+  needs the same for everyone's jobs (docs/demos.md).</li>
+</ul>
+<h2 id="v1340-november-2026">v1.34.0 (November 2026)<a class="headerlink" href="#v1340-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="new_1">New<a class="headerlink" href="#new_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Practice runs</strong> (<code>nomad demos</code>, docs/demos.md): kits of small inputs,
+  known to work, that show a newcomer how a job runs: how it is sent, waits
+  and runs, what it writes, and where its time, memory and cores are read.
+  Their results mean nothing for research, and their size says nothing about
+  what a real calculation needs: every kit and every copy says so.</li>
+<li>Kits that come with nomad, fitted to UR's job-script templates: Gaussian,
+  Q-Chem and ORCA (benzene), Molcas and CP2K (water), NAMD on CPUs and on a
+  GPU (a box of water, made by scripts/demos/make_namd_water.py and checked
+  with OpenMM), R (a bootstrap), Python (pi from random points), RFdiffusion
+  (one backbone); GROMACS (a box of water) and AMBER (a peptide in water),
+  whose inputs a site makes once with <code>nomad demos build</code>.</li>
+<li>Each kit is labelled: open source, free for academic use, or needs a
+  licence (it runs only where the HPC has one). A kit's input is the
+  template's, so a practice run runs the way real work will.</li>
+<li><code>nomad demos list | show | copy | look | build | check | scripts</code>; <code>[submit.demos]</code> dirs,
+  bundled, into. A copy is made as the person, in a new folder, and never
+  writes over a file.</li>
+</ul>
+<h2 id="v1331-november-2026">v1.33.1 (November 2026)<a class="headerlink" href="#v1331-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes">Fixes<a class="headerlink" href="#fixes" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Lab membership check:</strong> a condo two labs share made each lab's PI one
+  of the other's too (yangnolin: knolin answered for myang<span class="arithmatex">\(, and myang for
+  knolin\)</span>). A condo's owners now answer only for a group with no PI of its
+  own (<code>members = "group:chemlab$"</code>).</li>
+</ul>
+<h3 id="new_2">New<a class="headerlink" href="#new_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>[console.labs.check] not_sites</code>: sites whose groups the check leaves out,
+  members, condos, jobs and to-do alike. On a teaching server an
+  instructor's group holds their course's students, which a PI is not the
+  one to answer for (UR: <code>not_sites = ["spiderweb"]</code>).</li>
+<li>Each person's last job on any cluster, beside the question, most recent
+  first, on My lab and in <code>nomad lab check show</code>. Members with no job in a
+  year who were in the group before that can be marked as having left at
+  once, with what to do with their data (<code>nomad.lab_check.record_many</code>; the
+  Console's fix 90); each answer can still be changed after.</li>
+</ul>
+<h2 id="v1330-november-2026">v1.33.0 (November 2026)<a class="headerlink" href="#v1330-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="new_3">New<a class="headerlink" href="#new_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Lab membership check</strong> (<code>nomad lab check</code>, docs/lab-check.md). Once a
+  term, on dates <code>[console.labs.check] opens</code> sets, each lab's PI is asked on
+  My lab who is still in the lab: each member of its group (still here, has
+  left with what to do with their data, or not in the lab), and each person
+  who used its condo without being in its group (in the lab, or a guest).
+  The answers become ARC's to-do a cluster at a time: take someone out of a
+  group, put someone in one, a leaver's data with where it is and how big,
+  labs that didn't answer. A group change is done once nomad's groups
+  reading shows it; the rest is marked done with a note. Emails when the
+  check opens and reminders, to review_to while it is set
+  (<code>nomad lab check mail --send</code>, <code>nomad lab check timer</code>). The answers are
+  kept in lab_check.db beside combined.db, with a log of every change.
+  nomad changes no group, account or file itself. A condo's owners answer
+  for its group; a Console administrator may answer for a PI (kept as
+  such). Off until <code>opens</code> is set. The Console's pages come with its fix 89.</li>
+</ul>
+<h2 id="v1322-november-2026">v1.32.2 (November 2026)<a class="headerlink" href="#v1322-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_1">Fixes<a class="headerlink" href="#fixes_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A job's memory peak for a job of many tasks at once. Slurm's MaxRSS is the
+  peak of a job's largest task, not of the job: a 40-task MPI job whose
+  tasks each held 2 GB of the 100 GB it asked read 2 GB, while it held 80.
+  <code>job_live</code> now keeps, since each run of a job started, the most all its
+  tasks held together at any of nomad's readings (<code>held_most_mb</code>) and the
+  most its running steps' tasks' own peaks came to, added up
+  (<code>peaks_sum_mb</code>: while no step has gone unseen, never less than what they
+  held at once, wherever Slurm placed them), and whether a step ended or
+  came and went between readings (<code>steps_unseen</code>). Both figures outlast the
+  steps that set them, and count the extern step's memory (processes started
+  by ssh into the job's node). Tables made by 1.32.0 and 1.32.1 gain the
+  columns.</li>
+<li>An ended job's <code>max_tasks</code> is now the most tasks that ran at once: steps
+  run side by side (<code>srun -n1 ... &amp;</code>) added up, the batch step's shell left
+  out while they run unless it held more than 1 GB. Before, it was the most one step ran, so twenty
+  one-task steps at once read as one task, and their memory peak (one
+  task's) was scored as the job's. Such a job's memory isn't scored now.</li>
+</ul>
+<h2 id="v1321-november-2026">v1.32.1 (November 2026)<a class="headerlink" href="#v1321-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_2">Fixes<a class="headerlink" href="#fixes_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>job_live</code>: each step of a job counted once. Asked for an array's own id,
+  sstat also answers for its other running tasks, so a task asked for by
+  its own id as well came back twice: on vadur, 12266_48 and 12266_81 read
+  10.7 and 10.5 cores busy of the 6 asked, twice their 5.3.</li>
+<li><code>job_live</code>: when nothing runs, its table is emptied (a collector that
+  collects nothing isn't stored, so rows of jobs that had ended stayed), and
+  it is there from the first run.</li>
+<li><code>job_live</code>: the cores kept busy since the last run are no longer held to
+  the cores asked for: a cluster that doesn't keep jobs to them shows.</li>
+<li>nomad.toml.example: <code>[actions]</code> (agent_key, allow_unrestricted, slurm_as,
+  with the sudo lines a site needs) and <code>[collectors.job_live]</code> (enabled,
+  interval, sstat_as); preemptions, clock, modules and job_live among the
+  collectors off unless turned on.</li>
+</ul>
+<h2 id="v1320-november-2026">v1.32.0 (November 2026)<a class="headerlink" href="#v1320-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>What running jobs use now</strong> (the <code>job_live</code> collector, off unless
+  enabled): per running job, the cores it keeps busy (now, since the last
+  run, and on average) and the memory it holds (now, and its peak so far),
+  from <code>sstat</code>, run as Slurm's account through sudo (<code>sstat_as</code>, by default
+  <code>[actions] slurm_as</code>). One row per running job (<code>job_live</code>), gone when the
+  job ends; synced to the hub like any table. For the Console's running jobs.
+  On spydur, bchen's 87790 asked for 350 GB and held 31 GB (<code>sstat</code>), while
+  Slurm's free memory for its node (the file cache counted as used) said
+  726 GB in use.</li>
+</ul>
+<h2 id="v1312-november-2026">v1.31.2 (November 2026)<a class="headerlink" href="#v1312-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_3">Fixes<a class="headerlink" href="#fixes_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad node drain|resume</code>: where sudo insists on a terminal (<code>Defaults
+  requiretty</code>, as on RHEL 7), the dry run says so, with the line that lets
+  the account's agent through (<code>Defaults:ACCOUNT !requiretty</code>); it said "sudo
+  would not let ACCOUNT run this ... without a password". Slurm's programs
+  and sudo now run without a terminal by hand too (a session of their own),
+  so a dry run in a terminal meets what the Console's agent meets.</li>
+</ul>
+<h2 id="v1311-november-2026">v1.31.1 (November 2026)<a class="headerlink" href="#v1311-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_4">Fixes<a class="headerlink" href="#fixes_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad node drain|resume</code>: the check of the nomad running here no longer
+  refuses what lies below a folder only its owner can pass through: arachne's
+  <code>~/.local</code> (700) over <code>~/.local/lib</code> (775, its group zeus's primary group
+  with others in it), as pip leaves it under umask 002. Such a folder must
+  itself be safe; files below it must still be root's or the account's.</li>
+<li>When sudo wants a password for the change (<code>sudo -n -l</code> can't tell
+  beforehand), the answer says so, with the NOPASSWD line that would do.</li>
+</ul>
+<h2 id="v1310-november-2026">v1.31.0 (November 2026)<a class="headerlink" href="#v1310-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_1">Features<a class="headerlink" href="#features_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Draining a node and resuming it</strong> (<code>nomad node drain NODE --reason TEXT</code>,
+  <code>nomad node resume NODE</code>; the actions <code>node.drain</code> and <code>node.resume</code>, for
+  the Console's Nodes page): a dry run unless <code>--apply</code>, showing the node's
+  state as Slurm has it, the jobs running there, the scontrol command that
+  would run and whether sudo would let it. Applied, the node is read again:
+  Slurm's state decides whether it was done. scontrol runs as Slurm's own
+  account through sudo (<code>[actions] slurm_as = "slurm"</code> and one sudo line
+  that allows these two commands only) or as an account that is a Slurm
+  administrator (<code>"self"</code>); off until set. Nothing runs when someone else
+  could change the nomad that would run it. Slurm keeps the reason with who
+  asked ("TEXT (NETID via nomad)"); each change, and each refusal, goes to
+  syslog and <code>~/.local/share/nomad/nodes.log</code>.</li>
+<li><strong>Actions that change something:</strong> the catalog's first two. Each is a dry
+  run unless its <code>apply</code> flag is true (<code>read_only: false</code> and <code>apply</code> in the
+  catalog). New parameter kinds: <code>text</code> (a note, passed as one word),
+  <code>caller</code> (who asked, filled in by the Console or <code>nomad actions run</code>) and
+  <code>flag</code>. The catalog also says <code>hub_db</code> and <code>notes</code>.</li>
+</ul>
+<h3 id="fixes_5">Fixes<a class="headerlink" href="#fixes_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad facts share</code>: when every day of other people's use is left out, the
+  lab's part of everyone's use is not given (it said "at most 100%"); what
+  others held while people waited is said "on the days that can be shown"
+  when some are left out.</li>
+</ul>
+<h2 id="v1301-november-2026">v1.30.1 (November 2026)<a class="headerlink" href="#v1301-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_2">Features<a class="headerlink" href="#features_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A lab's quiet condo, said</strong> (<code>condo_notes</code>; <code>nomad facts share</code>, the
+  Console's Cluster use): where a lab's own condo was under 25% busy while its
+  jobs that could have run there (no more cores than it has, no GPUs where it
+  has none) waited a median of an hour or more elsewhere: the condo, how busy,
+  where they waited, and the partition that would have run them.</li>
+</ul>
+<h3 id="fixes_6">Fixes<a class="headerlink" href="#fixes_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad facts share</code>: "off its condo" only where the lab has one; a cluster
+  the lab didn't use is one line ("didn't run on: ...").</li>
+</ul>
+<h2 id="v1300-november-2026">v1.30.0 (November 2026)<a class="headerlink" href="#v1300-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_3">Features<a class="headerlink" href="#features_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A lab's share of each cluster</strong> (<code>nomad facts share NETID</code>, the Console's
+  My Lab &gt; Clusters): over the last days, the lab's core-hours and GPU-hours
+  on its own condo, the shared nodes and other labs' condos, against
+  everyone else's and what the nodes could have run (their hours in
+  service), and what was left idle; how full it kept its own condo; on a
+  condo two labs share, the partner lab's part. Who waited for room while
+  the lab's jobs ran on the nodes they could use (off its own condo), and the
+  share of the busy cores the lab held then; the lab's own waits, and what
+  others held then. A trend by day, week or four weeks, against its own
+  condo's capacity when it has one. With <code>--min-others</code>, every figure about
+  people outside the lab is a sum of days, a day resting on fewer of them is
+  left out (and counted), and the window ends at the last midnight.</li>
+<li><strong>My Lab counts a member's jobs from the day they joined</strong> (<code>nomad facts
+  lab</code>, the Console's Members): the groups collector's first sight of them in
+  the group (first_seen, since 1.11); a new student's earlier jobs are not the
+  lab's, here as in its share of the clusters.</li>
+<li><strong>Node hours over any days</strong> (<code>nomad.condo.figures.node_hours</code>): what the
+  condo reports count by month, by spans of whole days (node_months is it
+  by month, the same figures as before).</li>
+</ul>
+<h2 id="v1290-november-2026">v1.29.0 (November 2026)<a class="headerlink" href="#v1290-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_4">Features<a class="headerlink" href="#features_4" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A template's options.</strong> A job-script template may offer a few choices
+  (<code>[[submit.templates.options]]</code>: at most four, two to six choices each, the
+  first chosen unless the person picks another): how it runs in parallel
+  (threads, MPI, or MPI processes of several threads: <code>parallel = "hybrid"</code>
+  with <code>threads_per_task</code>), which program of a suite, what it does when it
+  is put back in the queue. A choice changes only what it names (the run
+  line, setup and after lines, outputs, sizes, #SBATCH options). <code>{tasks}</code> and
+  <code>{threads}</code> in a template's lines; <code>omp = true</code> exports <code>OMP_NUM_THREADS</code>.
+  <code>nomad templates --site S</code> lists them; <code>--make ... --choose NAME=N</code>.</li>
+<li><strong>Made scripts keep what they printed when requeued</strong> (<code>--open-mode=append</code>),
+  name the choices made in their heading, read their counts as the job has
+  them (<code>{tasks}</code> is <code>${SLURM_NTASKS:-N}</code>: a job resized when sent runs as many
+  processes as it has), and export <code>SRUN_CPUS_PER_TASK</code> where threads and
+  <code>srun</code> meet (a step would otherwise get one CPU). <code>{mem_mb_each}</code> is each
+  process's share: all of it for one process of threads.</li>
+<li><strong><code>nomad templates --site S --hub --check</code></strong>: every script each template can
+  make, made; a template that can't be read fails it. One program may have
+  one template a site (CP2K: <code>mpirun</code> at one cluster, <code>srun</code> at another).</li>
+</ul>
+<h2 id="v1281-november-2026">v1.28.1 (November 2026)<a class="headerlink" href="#v1281-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_5">Features<a class="headerlink" href="#features_5" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A condo two labs share</strong> (or whose lab is in two groups): report.toml's
+  <code>members</code> names several groups, <code>members = "group:myang$,knolin$"</code>, anyone
+  in any of them its lab's. <code>nomad partitions --condos</code> proposes
+  <code>AllowGroups=myang$,knolin$</code> (Slurm admits anyone in either), the condo
+  reports count both groups' members as the lab's, and the condo is on each
+  group's My lab page. A group named twice, or an empty name, is refused.
+  Before, a second group could only be added in the directory, which also
+  gives its people the first lab's files.</li>
+</ul>
+<h2 id="v1280-november-2026">v1.28.0 (November 2026)<a class="headerlink" href="#v1280-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_6">Features<a class="headerlink" href="#features_6" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Guests on condos, and the owners' first claim.</strong> A condo's owners get
+  their nodes back from a guest's job through Slurm's own preemption (the
+  owners' partition at a higher PriorityTier admitting their lab; a guests'
+  partition, <code>condo_overflow</code>, with PreemptMode=REQUEUE and a GraceTime:
+  SIGTERM, the grace, then back in the queue). Slurm's configuration is the
+  switch; nomad follows it. <code>nomad partitions --site S --condos</code> checks each
+  condo of report.toml against Slurm (the owners' tier and group, every
+  other partition on their nodes) and prints the slurm.conf lines that turn
+  it on, and the same lines as they are now. Slurm's preemption settings are
+  read with the partitions (<code>slurm_settings</code>).</li>
+<li><strong>Whether a job survives a requeue</strong>: <code>nomad size --requeue job.sh</code>
+  (<code>--no-requeue</code>, a log written anew, a program that starts over instead of
+  resuming from its checkpoint, steps that fail the second time, files on the
+  node's own disk), each with what to change.</li>
+<li><strong>Where it starts soonest</strong> tells a guest what happens when the owners need
+  their nodes, where Slurm preempts.</li>
+<li><strong>A message when it happens</strong> (<code>[submit.preemption] notices = true</code>): the
+  <code>preemptions</code> collector keeps each preempted job instance and whether it
+  came back; the hub emails the person, one message a person a run, each job
+  once, only where Slurm preempts that partition.</li>
+</ul>
+<h2 id="v1270-november-2026">v1.27.0 (November 2026)<a class="headerlink" href="#v1270-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_7">Features<a class="headerlink" href="#features_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>How fast each CPU really runs when busy</strong> (the <code>clock</code> collector,
+  <code>[alerts.clock]</code>, <code>nomad clock</code>). arachne's node01-03 lost a power
+  supply's input on 4 October 2026 and their boards braked the CPUs to about
+  400 MHz instead of 3,700: no failure, healthy in Slurm, every job ten times
+  slower for a month. Each host runs a short busy loop and reads its CPU's
+  cycle counter (no root: perf for that process only; its sha256 rate where
+  there is no counter); a reading below half of what it should give (its
+  usual clock, hosts with the same CPU, the CPU's top clock), twice in a row,
+  is alerted: critical when its power readings show a supply problem too.
+  On arachne, 5 Nov: node02 396 MHz, node51 3,730.</li>
+<li><strong>Where a job starts soonest</strong> leaves out partitions whose nodes are all
+  throttled, says which nodes run slow in the others, and never picks one
+  with slow nodes while another has none.</li>
+<li><strong>A board that can't be read in-band</strong> (no /dev/ipmi0) is NOT WATCHED in
+  <code>nomad power</code>, not shown as if healthy; the clock alert says its supplies
+  can't be seen. Sites whose alerts the hub sends get the clock alerts from
+  the hub.</li>
+</ul>
+<h2 id="v1260-november-2026">v1.26.0 (November 2026)<a class="headerlink" href="#v1260-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_8">Features<a class="headerlink" href="#features_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Job scripts for people with none</strong> (<code>[[submit.templates]]</code>, the
+  <code>modules</code> collector, <code>nomad templates</code>; the Console's "No script yet? Make
+  one", Console fix 81). A template for each program, written once by a site's
+  staff in the hub's nomad.toml, says how the site runs it (its modules,
+  setup, run line, outputs; Gaussian, Q-Chem, ORCA, Columbus, GROMACS,
+  VASP...); the person picks the program, the version and their input (a
+  file, or a folder of inputs), and nomad writes the script: text only,
+  shown in full, saved as a new file beside the input as them. The versions
+  are the modules the cluster really has: the new <code>modules</code> collector reads
+  <code>module -t avail</code> once a day (after <code>module use</code> for folders a login
+  doesn't add: spydur's <code>/usr/local/sw/modulefiles</code>), copies kept aside
+  (<code>.bak</code>) left out; chosen first, the template's default, else the
+  cluster's, else the highest. A version that runs otherwise (g09, g16)
+  gets its own run line. A script with a scratch folder stops at once
+  outside Slurm (its <code>rm -rf</code> would take the whole scratch folder), and a
+  name with a control character, or one that looks like an option, never
+  reaches a command. <code>nomad templates --site S</code> lists what a site offers
+  and what is wrong in a template; <code>--make P --input PATH</code> writes one.</li>
+</ul>
+<h3 id="fixes_7">Fixes<a class="headerlink" href="#fixes_7" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A fan header with no fan isn't a stopped fan.</strong> vadur's CPU nodes have
+  four fan headers at 0 RPM on every board, and 1.25.8 alerted them (mingus
+  had them in <code>[alerts.power] ignore</code>). A fan nomad has never seen turning
+  is now said in the host's notes, not alerted; one that turned and stops
+  still is, also after a read with no reading and across the upgrade
+  (1.25.8's rows are judged by their own history). <code>nomad power</code>'s label
+  for a host is its worst problem after <code>ignore</code> and <code>fans</code>, not as stored.</li>
+</ul>
+<h2 id="v1258-november-2026">v1.25.8 (November 2026)<a class="headerlink" href="#v1258-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_9">Features<a class="headerlink" href="#features_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Power supplies, voltages and fans</strong> (the <code>power</code> collector,
+  <code>[alerts.power]</code>, <code>nomad power</code>): what each server's board controller
+  knows, through <code>ipmitool</code>: each supply's state and power, the voltages, the
+  fans, the board's event log. vadur's gpu09 ran on one supply from February
+  to November with nothing saying so. Root reads the boards (a small
+  read-only helper, <code>scripts/power_root_probe.py</code>, by root's cron: on a head
+  node, itself and every Slurm node over root's ssh); nomad reads its file.
+  Alerts for a supply with no input power, failed or failing, redundancy
+  lost, one supply carrying the node, a voltage past its thresholds, a fan
+  stopped, and new problem entries in a board's log; a threshold of 0 isn't
+  one (vadur's CPU nodes log "0 W below 0 W" at every start). Sites whose
+  alerts the hub sends (<code>alerts = "hub"</code>) get them from the hub.</li>
+</ul>
+<h2 id="v1257-november-2026">v1.25.7 (November 2026)<a class="headerlink" href="#v1257-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_8">Fixes<a class="headerlink" href="#fixes_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A CPU's cores are one temperature: their hottest.</strong> Intel's coretemp
+  gives each core its own reading (26 a socket on spydur's Xeons: 1,674
+  rows a round, and their hours kept for good). Now one row a chip, <code>cores</code>
+  ("Cores (hottest)"); migration 29 takes out the per-core rows already
+  kept. The package's own reading is still the alert's.</li>
+<li><strong>An alert with nowhere to go isn't counted as sent.</strong> Raised with no
+  alert backend (mingus's <code>[alerts.email]</code> was off), it counted as raised,
+  so once email was set up it waited for its daily reminder. Now it is
+  tried again as a failed send is: 15 minutes later, then 30, an hour...</li>
+<li><strong><code>nomad temps --check --send</code> always sends</strong> (a test, never counted as
+  raised), and says why when it can't: no alert backends, or below
+  <code>[alerts] min_severity</code>.</li>
+<li><strong>The GPU collector over ssh</strong> skips what a login prints first (a
+  workstation's banner) and logs in as ssh's own settings say unless
+  <code>ssh_user</code> is set (it forced <code>$USER</code>).</li>
+</ul>
+<h2 id="v1256-november-2026">v1.25.6 (November 2026)<a class="headerlink" href="#v1256-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_10">Features<a class="headerlink" href="#features_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Hardware temperatures</strong> (the <code>temps</code> collector, <code>[alerts.temps]</code>, <code>nomad
+  temps</code>): what the kernel's sensors read (<code>/sys/class/hwmon</code>: CPU, drives,
+  integrated GPU), on this host or over ssh: the hosts listed, the
+  workstations the workstation collector reads (<code>workstations = true</code>), a
+  head node's Slurm nodes that answer (<code>slurm_nodes = true</code>); each reading
+  kept 30 days and each hour's lowest, mean and highest for good.
+  The CPU package's own sensor (k10temp Tctl, coretemp Package id) alerts
+  when every reading for <code>sustain_minutes</code> (3) is at or above <code>warning</code> (90
+  °C) or <code>critical</code> (95), a host's own limits in its own table; sent through
+  the collecting host's alerts. <code>nomad temps</code> shows each host's sensors now
+  and the CPU's last hours, day and night; <code>--check --warning N --send</code>
+  tests the alert. For peterslabworkstation, whose CPU cooler's fan died.</li>
+</ul>
+<h3 id="fixes_9">Fixes<a class="headerlink" href="#fixes_9" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>[alerts.node_state]</code> and <code>[alerts.node_jobs]</code> now apply.</strong> The
+  node_state collector read them from its own <code>[collectors.node_state]</code>
+  table, where nobody puts them, so the defaults always applied.</li>
+<li><strong>"Your lab's condo" only for its owners and the members report.toml
+  names.</strong> Without <code>members</code>, nomad took the owners' lab groups, as the
+  condo reports do; spydur's myang$ holds some 170 people (staff, other
+  PIs, a demo account), and all of them saw yang1, yang2 and yangnolin as
+  their own, with no guest limit, for "Fastest start" to take. Now a condo
+  without <code>members</code> is its owners' own, a guest's for everyone else.
+  <code>nomad partitions --site S --sorted</code> lists the condos without <code>members</code>.</li>
+</ul>
+<h2 id="v1255-november-2026">v1.25.5 (November 2026)<a class="headerlink" href="#v1255-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_10">Fixes<a class="headerlink" href="#fixes_10" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Where a job starts soonest showed no estimate on spydur</strong>: its sbatch
+  (Slurm 25.11) says a word between the start time and "using" ("to start
+  at 2026-11-03T09:49:39 a using 1 processors ..."), which nomad didn't
+  expect, so every partition's row came back as an error with Slurm's line
+  in it. nomad now reads whatever Slurm puts there.</li>
+</ul>
+<h2 id="v1254-november-2026">v1.25.4 (November 2026)<a class="headerlink" href="#v1254-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_11">Features<a class="headerlink" href="#features_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Where a job starts soonest</strong> (the Console's Submit page; <code>nomad.submit.where</code>,
+  <code>nomad-gate starts</code>, <code>nomad submit --starts</code>): the partitions a person may
+  send a job to, in the site's order, each with Slurm's own estimate of when
+  it would start there (<code>sbatch --test-only</code> on the very text shown, as nomad
+  would send it; nothing submitted), the usual wait from nomad's records, and
+  why any can't be suggested. The order: the person's lab's condo (its
+  owners and members, from report.toml), the shared nodes, other labs'
+  condos as a guest (a job within the condo policy's guest limit), and the
+  few big-memory nodes last (a job that doesn't need them only with a time
+  limit of at most <code>overflow_max_hours</code>, and only while more than
+  <code>reserve_nodes</code> of them are idle). Partitions with the same nodes count as
+  one; one that spans nodes of several kinds isn't suggested; the default
+  partition always is. Whose condo it is: as the condo reports read
+  <code>members</code>. What nomad doesn't know it doesn't offer: a node without a
+  memory reading, a condo not yet confirmed, a guest partition's nodes
+  report.toml lists no condo for (to guests only), a site with no condos
+  table in report.toml or a condo whose nodes can't be found (then only the
+  default partition, and why). A start
+  Slurm puts 7 days or more away (where jobs have no time limits) is "later",
+  not ranked by. "Fastest start" takes nomad's pick, never another lab's
+  condo unless <code>fastest_guests</code>, and never over a partition the person
+  chose meanwhile. Run it again asks too (<code>starts --job N</code>). Up to 12
+  partitions, four at a time, each at most 60 s; an estimate for another
+  partition than the one asked isn't taken; the gate answers two at once
+  at most (<code>STARTS_HERE</code>), so sending is never held up. <code>[submit.where]</code> in the
+  hub's nomad.toml; <code>nomad partitions --site S --sorted</code> shows the sort.</li>
+<li><strong>Text files edited from the Console</strong>, besides job scripts: a person's
+  own <code>.py .R .m .jl .sh .in .inp .com .gjf .yaml .yml .json .toml .cfg .conf
+  .txt .md</code> (<code>TEXT_EXTENSIONS</code>), UTF-8, at most 256 KB, never hidden, no NUL.
+  <code>nomad-gate read --path PATH</code> gives one (only with <code>serve --edit</code>, as
+  <code>save</code>); <code>save</code> takes them too, with every safeguard it has for scripts
+  (the text opened, the earlier text kept, the group and access lists, the
+  folder as it really is). A file with another name (a hard link) is
+  neither read nor saved. <code>ls</code> marks them (<code>text</code>).</li>
+<li><strong>A node that fails every job at start</strong> (<code>[alerts.node_jobs]</code>, raised by
+  the node_state collector): one where, among the jobs that started there in
+  the last hour, at least 5 failed within a minute and they are at least 80%
+  of them, while the very same work (the array's other tasks, the person's
+  jobs of the same name) ran on other nodes and hardly failed there. A node
+  that looks idle and healthy to Slurm can take a whole array this way in
+  minutes. The alert names a job to look at before draining (an array's last
+  tasks without input fail the same way) and how many different works
+  failed there. A node already drained or down is left out; the alert names
+  no one. A new index on jobs(start_time) (migration 28) keeps the
+  minute's look cheap.</li>
+</ul>
+<h3 id="changes">Changes<a class="headerlink" href="#changes" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>nomad config check</code> says a switch written as text</strong> (<code>edit = "true"</code>
+  is the word true, which nomad never takes for a yes), with the line, the
+  table it is in and the fix.</li>
+<li><strong><code>nomad-gate versions</code> and <code>recall</code></strong> (the earlier texts saving kept) are
+  served only with <code>serve --edit</code>, as <code>save</code> and <code>read</code>.</li>
+</ul>
+<h2 id="v1253-november-2026">v1.25.3 (November 2026)<a class="headerlink" href="#v1253-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="changes_1">Changes<a class="headerlink" href="#changes_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>A job's scores hold against the person only what they could have asked
+  less of.</strong> One core is the least a job can ask, and a memory request
+  already as small as nomad would suggest can't be smaller: neither is
+  "Needs Work" any more ("not judged", with why), and no recommendation is
+  the value already asked (a one-minute test job asking 1 CPU and 1G was
+  told to ask for 1 CPU and 1G). A job that ran under five minutes isn't
+  judged on its CPU use or its time limit (one that ran out of time still
+  is). A job with nothing to judge has no overall score (<code>overall_score</code>
+  null, "Not scored"), isn't stored as a score, and isn't told "all good".</li>
+<li><strong>Sync alerts count hours by the clock.</strong> How long a site hasn't synced,
+  or the combined database hasn't been replaced, was an hour off across a
+  change of daylight saving time (45 hours said as 44).</li>
+</ul>
+<h3 id="features_12">Features<a class="headerlink" href="#features_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>nomad-gate save</strong>: a job script written as the person, for the
+  Console's editor. Off unless both sides say so: the hub (<code>edit = true</code> in
+  the site's <code>[[hub.sites]]</code>) and the cluster (<code>nomad gate install-key
+  --edit</code>, so sshd runs <code>nomad-gate serve --edit</code> for the hub's key: with
+  it, that key could run code as anyone the gate acts for, so it is the
+  cluster's own choice). Only their own job script (a regular file they
+  own, not a link, beginning with <code>#!</code>, as the new text must; no hidden
+  part in its path as given nor in its folder as it really is), only over
+  the very text they opened (<code>--sha256</code>, checked again just before it is
+  replaced) or as a new file (<code>--new</code>, never over one that is there; it is
+  the person's alone, mode 600, since the gate can't know the umask their
+  login sets). A script that isn't UTF-8 isn't saved over (the editor would
+  change it where it wasn't edited; <code>show</code> says <code>utf8</code>). The text comes on
+  standard input (<code>--body-sha256</code> its sha256, at most 256 KB of UTF-8); it
+  is written beside the file and put in its place in one step, with the
+  file's permissions, group and access lists (POSIX and NFSv4; none taken
+  from the folder's default list); the text before is kept first, private,
+  in <code>~/.local/share/nomad/versions</code> (the last 20 of each script, ids in
+  UTC; never through a link nor a folder someone else owns):
+  <code>versions</code> lists them, <code>recall</code> gives one back. Each save is in the
+  gate's syslog with the sha256 before and after. <code>nomad gate test</code> says
+  whether saving is on, on each side.</li>
+<li><strong>Pressure stall information</strong> (<code>pressure</code> collector, on by default):
+  how much of the time work on a host waited for CPU, memory or I/O
+  (/proc/pressure: "some" and "full", over 10 s, 1 and 5 minutes). Where
+  the kernel has it off (RHEL and Rocky leave it off: boot with <code>psi=1</code>),
+  it says so (<code>pressure_status</code>) and records nothing, until the host is
+  booted with it.</li>
+</ul>
+<h2 id="v1252-november-2026">v1.25.2 (November 2026)<a class="headerlink" href="#v1252-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="changes_2">Changes<a class="headerlink" href="#changes_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>sbatch reads what nomad sends on its standard input.</strong> The text the
+  Console showed (or nomad's local-scratch script, which carries a script's
+  text) goes to sbatch itself, never as a file of nomad's that someone could
+  change before sbatch reads it (<code>/dev/stdin</code> before the job's arguments when
+  it has some). So the Console sends from accounts set up as they are on
+  spydur, where <code>~/.local</code> is writable by everyone's group: 1.25.1 refused
+  them. nomad still keeps its record of what it sent (private, in
+  <code>~/.local/share/nomad/staged/</code>) and notes which record each job came from
+  by its cluster and number (<code>staged/jobs/CLUSTER.JOBID</code>, with the job's
+  folder and when it was sent, checked against Slurm's record of the job),
+  for <code>--again</code> and past runs: Slurm keeps no file name for a script it read
+  on its standard input. A record it can't keep is said, not a reason not to
+  send.</li>
+<li><strong>Who else could run programs as the person</strong> is said when the Console
+  shows a script (<code>show</code>'s <code>warning</code>, after the script's own): the first of
+  their home folder, their login files and <code>~/.local</code> that others could
+  change, with the <code>chmod</code> that closes it. Not refused: it is open with or
+  without the Console, and nothing is said once it is closed.</li>
+<li>From the Console, Slurm's programs (<code>sbatch</code>, <code>scontrol</code>, <code>sinfo</code>, <code>sacct</code>,
+  <code>sacctmgr</code>, <code>squeue</code>, <code>scancel</code>) are found once on the person's login PATH,
+  before any runs, and run by their full paths; nothing runs when one could
+  have been put there by someone else (it, a folder above it or a link on the
+  way to it is another account's -- not root's, the person's, nomad's
+  installer's or Slurm's -- or others may write it). <code>nomad size</code> takes the gate's <code>--via console</code> too, and the gate's
+  own steps go through <code>nomad-gate exec</code>. By hand, as before.</li>
+</ul>
+<h2 id="v1251-november-2026">v1.25.1 (November 2026)<a class="headerlink" href="#v1251-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="changes_3">Changes<a class="headerlink" href="#changes_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>What the Console shows is what it sends.</strong> A job sent from the Console
+  carries the sha256 of the script text the person was shown (<code>--sha256</code>);
+  the gate refuses a script that has changed since ("look at it again"),
+  <code>nomad submit</code> checks it once more, and sbatch is given nomad's own copy of
+  that text, never the path: the local-scratch script, else a private copy in
+  <code>~/.local/share/nomad/staged/</code> that knows the person's own script (so the
+  job is sent again from theirs). A folder others can change no longer stops
+  a job being sent from the Console (on spydur every <code>/scratch/USER</code> is
+  writable by everyone's group): the gate says so instead (<code>show</code>'s
+  <code>warning</code>), with the <code>chmod</code> that closes it. The script is read once and
+  that text is what is sized, staged and sent; nomad's own folder for its
+  copies is made private, and a send is refused while a folder above it
+  (<code>~/.local</code>, the home folder) can be changed by others. <code>keep()</code> always
+  writes its copy anew.</li>
+</ul>
+<h3 id="features_13">Features<a class="headerlink" href="#features_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad-gate job --job N</code>: one of the person's jobs -- Slurm's view of it
+  now (<code>scontrol</code>), its accounting (<code>sacct</code>: steps, memory, CPU time) and the
+  end of its output, read as them; someone else's job is refused. For the
+  Console's job details.</li>
+</ul>
+<h2 id="v1250-november-2026">v1.25.0 (November 2026)<a class="headerlink" href="#v1250-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_14">Features<a class="headerlink" href="#features_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>nomad-gate</strong>: the one way the hub acts on a cluster as a person, for the
+  Console's Submit page and Run it again. The hub's own gate key (<code>nomad gate
+  key</code>) can run nothing but <code>nomad-gate serve</code> on the cluster (<code>nomad gate
+  install-key</code>: <code>restrict</code>, <code>from=</code> the hub, <code>command=</code>); the gate takes a
+  short list (<code>version</code>, <code>size</code>, <code>submit</code>, <code>again</code>, <code>jobs</code>, <code>cancel</code>, <code>ls</code>,
+  <code>show</code>), checks every value on the hub, as the cluster's account and again
+  as the person, and acts as the person with that account's sudo (<code>sudo -n -u
+  PERSON</code>), never as root or a system account. nomad runs in the person's
+  login environment, from the script's folder; the script must be their own
+  file, in folders no one else can change (checked again just before sbatch).
+  Each request is logged to syslog; each answer is one line of JSON; at most
+  four are served at once. It refuses to serve when anything in its release
+  could be changed by anyone but its owner or root (<code>nomad-gate check</code>).</li>
+<li><code>scripts/install_nomad_for_users.sh</code> installs <code>bin/nomad-gate</code> beside
+  <code>bin/nomad</code> (same release, switched with it, kept as <code>.before</code>).</li>
+<li><code>nomad gate test --site S --user U</code> (is it there, may it act as U) and
+  <code>nomad gate ask --site S --user U OP ...</code> (one request, its JSON answer), on
+  the hub; <code>submit = "gate"</code> in a site's <code>[[hub.sites]]</code> turns it on for the
+  Console.</li>
+<li><code>nomad submit --via console</code> (hidden): the tag says where the job was sent
+  from (<code>via=console</code>).</li>
+</ul>
+<h2 id="v1241-november-2026">v1.24.1 (November 2026)<a class="headerlink" href="#v1241-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_11">Fixes<a class="headerlink" href="#fixes_11" title="Permanent link">&para;</a></h3>
+<ul>
+<li>A job sent through local scratch runs nomad's own steps on the node (the
+  copy in and back, the checks, Slurm's commands, the node's <code>python3</code> and
+  <code>rsync</code>) without the job's <code>LD_LIBRARY_PATH</code> and <code>LD_PRELOAD</code>: a cluster's
+  login environment can point those at libraries that break system tools (on
+  spydur, <code>ssh</code> fails with <code>undefined symbol: EVP_KDF_ctrl</code>). The person's
+  script gets them back exactly as they were, and so does a job it sends
+  through nomad's <code>sbatch</code> stand-in.</li>
+</ul>
+<h2 id="v1240-november-2026">v1.24.0 (November 2026)<a class="headerlink" href="#v1240-november-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_15">Features<a class="headerlink" href="#features_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>nomad submit</code> runs a job on one node <strong>through its node's local scratch</strong>,
+  by default. nomad sends its own small script in place of the person's; on
+  the node the job copies its folder to <code>/localscratch/USER/job_JOBID</code>
+  (private, locked while the job lives; after checking the node keeps room),
+  runs the person's script there, then copies <strong>only what is new or changed</strong>
+  back to the folder it ran from (as if it had run there), checks every file it
+  copied (sha256 on both sides, read back from the server), and only then
+  removes the local copy. What doesn't check out stays on the node, the <code>.out</code>
+  says so, and a job that had succeeded ends with exit 75. What changed in the
+  folder while the job ran is never undone: the job's version of such a file
+  goes in <code>nomad-conflicts-JOBID/</code> (exit 75), and a file both only added to
+  (a log, a table of rows) gets the job's new lines after the others'.</li>
+<li>Before the time limit (<code>--signal=B:USR1</code>, 10 minutes, less for limits under
+    an hour) the job stops the program, copies back, then waits for the limit
+    so Slurm still records <code>TIMEOUT</code>; <code>scancel -b -s USR1 JOB</code> stops it the same
+    way any time. Cancelled or preempted jobs keep part of <code>KillWait</code> for the
+    program, the rest for the copy back.</li>
+<li>What a stopped job leaves on a node is brought back by a small job it sends
+    pinned to that node (<code>nomad-recover-JOBID</code>, after it ends) or by the
+    person's next staged job there, only once its lock is free, and always into
+    a folder of its own (<code>nomad-recovered-NODE-TIME/</code> in the job's folder):
+    nothing recovered overwrites anything.</li>
+<li>Sent as it is, saying why: jobs on several nodes, arrays (unless
+    <code>--localscratch</code>), limits under 30 minutes, scripts that <code>cd</code> out of their
+    folder or send jobs themselves (sbatch, workflow tools), folders over 50 GB
+    (<code>NOMAD_STAGE_MAX</code>), the home folder itself, no <code>#!</code> or DOS line breaks,
+    <code>--wrap</code>/<code>--test-only</code>/heterogeneous jobs; on the node, no <code>/localscratch</code>,
+    no <code>python3</code> or no room: it runs where it is.</li>
+<li><code>--no-localscratch</code> / <code>--localscratch</code>; <code>NOMAD_LOCALSCRATCH=off</code> (a site or
+    a person), or another folder with <code>{user}</code>. The node needs only its own
+    <code>python3</code> (and uses <code>rsync</code> where there is one): the script carries
+    <code>nomad/submit/stage_helper.py</code> (stdlib, Python 3.6+).</li>
+<li>nomad's copy of the script is kept in <code>~/.local/share/nomad/staged/</code> and
+    names the person's own, so <code>nomad submit --again</code> and past-run comparison
+    still use the person's script; the tag gains <code>stage=l</code>. See
+    docs/submit.md, "Through local scratch". No database change.</li>
+</ul>
+<h2 id="v1230-october-2026">v1.23.0 (October 2026)<a class="headerlink" href="#v1230-october-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_16">Features<a class="headerlink" href="#features_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The <code>auth_failures</code> and <code>setuid_new</code> signals (failed <code>sudo</code>/<code>su</code> per account,
+  and a person's setuid/setgid files) can now be read <strong>unprivileged</strong>, by the
+  probe itself, with no root helper and no cron — retiring the only part of the
+  watch that needed root:</li>
+<li><strong><code>watch_auth</code> (on by default):</strong> failed <code>sudo</code>/<code>su</code> in the last
+    <code>auth_window_hours</code> (24), counted per account, read straight from the auth
+    log (<code>/var/log/secure</code> or <code>auth_log</code>) <strong>wherever the collector's account may
+    read it</strong> — e.g. where it's group-readable (<code>installer</code> is in <code>securegrp</code> on
+    spydur). A no-op, with no error, where the log is root-only. The actor is
+    taken from the log's structured fields, matched on the line's head before any
+    <code>COMMAND=</code> so a command string can't inject a fake account, and <code>su</code> to root
+    is counted against whoever ran it.</li>
+<li><strong><code>setuid_roots</code> (off until set):</strong> the probe scans the directories listed
+    (e.g. <code>["/localscratch"]</code>) for a person's setuid/setgid files (basename
+    only), staying on each root's own filesystem, following no symlink, bounded.
+    "New" comes from the finding's first-seen — a file that appears alerts once.</li>
+<li>The kinds, folding, severities and Console labels already existed (1.20), so
+    these just add an unprivileged source. The root helper
+    (<code>scripts/watch_root_probe.py</code> + <code>root_report</code>) still works where root is
+    available instead. No database change.</li>
+</ul>
+<h2 id="v1220-october-2026">v1.22.0 (October 2026)<a class="headerlink" href="#v1220-october-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_17">Features<a class="headerlink" href="#features_17" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The policy watch gains behaviour signals: the tells an AI agent (or a
+  careless script) driving the cluster over the user's <em>own</em> ssh leaves — which
+  look like the user typing to the /proc watch, so the watch reads what was
+  done, not who typed it. All read-only, thresholds in the TOML, info/warning
+  only.</li>
+<li><strong><code>heavy</code> (warning):</strong> a user process holding real CPU — by lifetime
+    average (its whole CPU time / its age), so a steady computation shows and a
+    brief spike doesn't — of at least <code>heavy_cpu</code> cores (default 2), on a
+    <strong>login</strong> node only (a compute node is where jobs are meant to be heavy).
+    The long-standing "work running on the head node" catch; no root needed.</li>
+<li><strong><code>job_burst</code> (listed, not alerted):</strong> at least <code>burst_jobs</code> sbatches by
+    one user within <code>burst_minutes</code>. An array counts as one, so a big array
+    isn't a burst; listed rather than alerted because a parameter sweep bursts
+    the same way.</li>
+<li><strong><code>fail_fast</code> (warning):</strong> at least <code>fail_fast_jobs</code> of a user's jobs that
+    FAILED within <code>fail_fast_seconds</code> — an agent resubmitting what it doesn't
+    understand (node failures don't count).</li>
+<li><strong><code>job_churn</code> (warning):</strong> the same job name resubmitted <code>churn_repeats</code>
+    times with cancellations between — a cancel/resubmit loop.</li>
+<li>Config: <code>watch_heavy</code>, <code>heavy_cpu</code>, <code>heavy_min_seconds</code>, <code>watch_jobs</code>,
+    <code>job_window_hours</code>, <code>burst_jobs</code>, <code>burst_minutes</code>, <code>fail_fast_jobs</code>,
+    <code>fail_fast_seconds</code>, <code>churn_repeats</code> in <code>[collectors.policy_watch]</code> (both
+    watches on by default; each no-ops where there's nothing to see). The job
+    signals read this site's <code>jobs</code> table; <code>heavy</code> adds <code>--heavy</code> to the probe.
+    No database change — new <code>kind</code> values in <code>policy_findings</code>, already synced.</li>
+<li>Console: the Policy watch page labels the four new kinds and names them in
+  its intro (nomad_fix_73.py). No new route or scoping change.</li>
+</ul>
+<h2 id="v1210-october-2026">v1.21.0 (October 2026)<a class="headerlink" href="#v1210-october-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_18">Features<a class="headerlink" href="#features_18" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The policy watch reaches GPU workstations and keys on the GPU. <code>workstations</code>
+  lists GPU boxes to probe over ssh (role "workstation"); the findings travel
+  the same pipeline to the hub and the Console. With <code>watch_gpu</code> (on by
+  default; nothing where there is no GPU), the probe reads GPU <strong>compute</strong>
+  processes with <code>nvidia-smi</code> — unprivileged, and never graphics (Xorg, a
+  browser), so a desktop's ordinary GPU use doesn't show:</li>
+<li><code>gpu</code> (listed, not alerted): a GPU compute process, with the memory held,
+    whether it is detached (no terminal — the shape of an unattended job) and
+    whether it is an AI agent.</li>
+<li><code>gpu_served</code> (warning): a GPU reachable from the network — it listens on a
+    port open to the network, or its account also runs a tunnel/relay/forward.
+    The shape of reselling or an open inference server.</li>
+<li><code>gpu_min_mem</code> (256 MiB) drops a trivial compute context; <code>gpu_serve_hosts</code>
+    names boxes where serving a GPU is sanctioned (then listed, not alerted);
+    <code>ignore_programs</code>/<code>ignore_users</code> apply as everywhere.</li>
+<li>Under-claim by design: detached only annotates, never alerts on its own;
+    per-process GPU attribution is opaque under MIG or in containers, and a
+    GPU another account serves is caught through its account's exposure unless
+    the probe runs as root. See docs/policy_watch.md.</li>
+<li>Console: the Policy watch page labels the two new kinds (<code>gpu</code>, <code>gpu_served</code>)
+  and names the workstations in its intro. No new route or scoping change.</li>
+</ul>
+<h2 id="v1201-october-2026">v1.20.1 (October 2026)<a class="headerlink" href="#v1201-october-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_12">Fixes<a class="headerlink" href="#fixes_12" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Signals place an alert by what it is <em>about</em>, not where it was stored. A
+  hub that raises a site's node alerts on its behalf (<code>alerts = "hub"</code>, 1.17.3)
+  stores them in its own rows (<code>source_site</code> = the hub) while naming the site
+  in <code>details.site</code>; the Insight engine attributed them by <code>source_site</code>, so
+  the hub's Signals (e.g. mingus) showed another site's "node down" and that
+  site's own Signals (e.g. vadur) hid it. The alert signal now reads unscoped
+  and places each alert by <code>details.site</code>, falling back to <code>source_site</code>. No
+  database change; the Console picks it up once nomad is upgraded on the hub.</li>
+</ul>
+<h2 id="v131-april-2026">v1.3.1 (April 2026)<a class="headerlink" href="#v131-april-2026" title="Permanent link">&para;</a></h2>
+<h3 id="fixes_13">Fixes<a class="headerlink" href="#fixes_13" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Dashboard blank page regression from NumPy 2.x ABI incompatibility</li>
+<li>Metadata-based probe guards torch_geometric import against C-extension crashes</li>
+<li>Broadened exception handling in ML modules for non-ImportError failures</li>
+</ul>
+<h3 id="features_19">Features<a class="headerlink" href="#features_19" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Integrated issue reporting system (<code>nomad issue report/search/info</code>)</li>
+<li>Dashboard "Report Issue" tab with structured form and duplicate detection</li>
+<li>GitHub issue templates (bug report, feature request, question)</li>
+<li>Auto-acknowledgment bot via GitHub Actions</li>
+<li>Auto-labeling by source, component, version, and institution</li>
+<li><code>nomad ref</code> entries for issue module and configuration</li>
+</ul>
+<h2 id="v130-april-2026">v1.3.0 (April 2026)<a class="headerlink" href="#v130-april-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_20">Features<a class="headerlink" href="#features_20" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Reference system (<code>nomad ref</code>) with 60+ searchable topics</li>
+<li><code>nomad ref search</code> for full-text documentation search</li>
+<li>Reference entries for all commands, configuration, and concepts</li>
+</ul>
+<h3 id="improvements">Improvements<a class="headerlink" href="#improvements" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Ruff linting fixes across reference module</li>
+<li>CI configuration excludes generated snippet files</li>
+</ul>
+<h2 id="v126-march-2026">v1.2.6 (March 2026)<a class="headerlink" href="#v126-march-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_21">Features<a class="headerlink" href="#features_21" title="Permanent link">&para;</a></h3>
+<ul>
+<li>System Dynamics module (<code>nomad dyn</code>) with 5 ecological/economic metrics</li>
+<li>Insight Engine (<code>nomad insights</code>) with multi-signal analysis and narratives</li>
+<li>Cloud monitoring (<code>nomad cloud</code>) for AWS, Azure, and GCP</li>
+<li>Dashboard tabs for Insights, Dynamics, and Cloud</li>
+<li>Alert enrichment with insight narratives and recommendations</li>
+</ul>
+<h3 id="improvements_1">Improvements<a class="headerlink" href="#improvements_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Console backend routes for insights and dynamics</li>
+<li>Demo data generator includes stress scenarios for insights</li>
+<li>MkDocs documentation for dynamics, insights, cloud, and reference</li>
+</ul>
+<h2 id="v121-february-2026">v1.2.1 (February 2026)<a class="headerlink" href="#v121-february-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_22">Features<a class="headerlink" href="#features_22" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Proficiency score persistence to database</li>
+<li>Light/dark theme toggle in dashboard</li>
+<li>Combined edu figure in documentation</li>
+</ul>
+<h3 id="bug-fixes">Bug Fixes<a class="headerlink" href="#bug-fixes" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Fixed <code>_resolve_db_path</code> error in edu commands</li>
+<li>Text wrapping for recommendations output</li>
+</ul>
+<h3 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Expanded Educational Analytics section in paper</li>
+<li>Added Community Data Sharing details</li>
+<li>Reordered bibliography to match citation order</li>
+</ul>
+<h2 id="v120-january-2026">v1.2.0 (January 2026)<a class="headerlink" href="#v120-january-2026" title="Permanent link">&para;</a></h2>
+<h3 id="features_23">Features<a class="headerlink" href="#features_23" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Educational Analytics module (<code>nomad edu</code>)</li>
+<li>Community dataset export (<code>nomad community</code>)</li>
+<li>Multi-cluster dashboard tabs</li>
+<li>Interactive session monitoring</li>
+<li>3D force-directed network visualization</li>
+</ul>
+<h3 id="improvements_2">Improvements<a class="headerlink" href="#improvements_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Partition-specific dashboard views</li>
+<li>Node health reflects CPU/memory pressure</li>
+<li>Failed jobs modal with categories</li>
+</ul>
+<h2 id="v110-december-2025">v1.1.0 (December 2025)<a class="headerlink" href="#v110-december-2025" title="Permanent link">&para;</a></h2>
+<h3 id="features_24">Features<a class="headerlink" href="#features_24" title="Permanent link">&para;</a></h3>
+<ul>
+<li>ML prediction ensemble (GNN, LSTM, Autoencoder)</li>
+<li>Derivative analysis for trend detection</li>
+<li>Slack and webhook alert backends</li>
+</ul>
+<h2 id="v100-november-2025">v1.0.0 (November 2025)<a class="headerlink" href="#v100-november-2025" title="Permanent link">&para;</a></h2>
+<p>Initial release.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
