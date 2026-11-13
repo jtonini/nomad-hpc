@@ -22,10 +22,18 @@ On the hub::
     stale_minutes = 360              # a run not heard from this long is given up
     key_file = "~/.config/nomad/ml_worker_key"   # the worker's key (the nomad account's, 600)
     # db = "ml.db"                   # default: beside lab_check.db
+    compare = true                   # also each model without partition and cluster, and the
+                                     # logistic regression with them alone: what they carry
     [ml.train.epochs]
     gnn = 100
     lstm = 60
     ae = 60
+    [ml.train.tessera]
+    similarity = "euclidean"         # how alike two jobs are: euclidean, cosine, mahalanobis,
+                                     # pearson, bray_curtis (on scaled features), or simpson,
+                                     # jaccard (on n_bins equal-width bins of each feature)
+    n_bins = 3                       # simpson and jaccard only
+    k_neighbors = 10                 # each job's nearest neighbours in the network
 
 On the worker::
 
@@ -45,6 +53,7 @@ from pathlib import Path
 ENGINES = ("tessera", "baseline")
 TARGETS = ("failure", "waste")
 DEVICES = ("cuda", "cpu", "auto")
+SIMILARITIES = ("euclidean", "cosine", "mahalanobis", "pearson", "bray_curtis", "simpson", "jaccard")
 KEY_MIN = 32
 
 
@@ -63,6 +72,8 @@ class Settings:
     key_file: str = "~/.config/nomad/ml_worker_key"
     db: Path | None = None
     epochs: dict = field(default_factory=lambda: {"gnn": 100, "lstm": 60, "ae": 60})
+    compare: bool = True
+    tessera: dict = field(default_factory=lambda: {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10})
     problems: tuple = field(default_factory=tuple)
 
     def plan(self) -> dict:
@@ -70,7 +81,8 @@ class Settings:
         nomad.toml doesn't change a request already asked)."""
         return {"engine": self.engine, "predicts": list(self.predicts), "jobs_days": self.jobs_days,
                 "max_jobs": self.max_jobs, "waste_threshold": self.waste_threshold,
-                "holdout_share": self.holdout_share, "epochs": dict(self.epochs)}
+                "holdout_share": self.holdout_share, "epochs": dict(self.epochs), "compare": self.compare,
+                "tessera": dict(self.tessera)}
 
 
 def _num(raw, key, default, lo, hi, problems, kind=float, where="[ml.train]"):
@@ -114,8 +126,21 @@ def settings(config: dict | None) -> Settings:
     epochs_raw = raw.get("epochs") if isinstance(raw.get("epochs"), dict) else {}
     epochs = {k: _num(epochs_raw, k, d, 1, 2000, p, int, "[ml.train.epochs]")
               for k, d in (("gnn", 100), ("lstm", 60), ("ae", 60))}
+    compare = raw.get("compare", True)
+    if not isinstance(compare, bool):
+        p.append("[ml.train] compare should be true or false")
+        compare = True
+    t_raw = raw.get("tessera") if isinstance(raw.get("tessera"), dict) else {}
+    similarity = t_raw.get("similarity", "euclidean")
+    if similarity not in SIMILARITIES:
+        p.append(f"[ml.train.tessera] similarity should be one of {', '.join(SIMILARITIES)}")
+        similarity = "euclidean"
+    tessera = {"similarity": similarity,
+               "n_bins": _num(t_raw, "n_bins", 3, 2, 50, p, int, "[ml.train.tessera]"),
+               "k_neighbors": _num(t_raw, "k_neighbors", 10, 2, 200, p, int, "[ml.train.tessera]")}
     return Settings(
         enabled=enabled, engine=engine, predicts=tuple(dict.fromkeys(predicts)), trainer=trainer.strip(),
+        compare=compare, tessera=tessera,
         jobs_days=_num(raw, "jobs_days", 365, 7, 3650, p, int),
         max_jobs=_num(raw, "max_jobs", 50000, 0, 5_000_000, p, int),
         waste_threshold=_num(raw, "waste_threshold", 0.6, 0.05, 0.95, p),
@@ -172,4 +197,5 @@ def worker_settings(config: dict | None) -> WorkerSettings:
                           ca_file=str(Path(ca).expanduser()) if ca else None, name=name, problems=tuple(p))
 
 
-__all__ = ["Settings", "settings", "WorkerSettings", "worker_settings", "read_key", "ENGINES", "TARGETS"]
+__all__ = ["Settings", "settings", "WorkerSettings", "worker_settings", "read_key", "ENGINES", "TARGETS",
+           "SIMILARITIES"]

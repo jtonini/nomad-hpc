@@ -356,6 +356,11 @@ def node(conn: sqlite3.Connection, site, name: str, since: datetime, until: date
         info_series["temp_c"]["critical"] = min(crit)
     if "disk_used_pct" in info_series:
         info_series["disk_used_pct"]["paths"] = sorted(p for p in disks if p)
+    if not mem_tracked and "mem_held_pct" in info_series:
+        # Why there is no "Memory allocated" line (1.45.1): said, not left to be guessed.
+        info_series["mem_held_pct"]["note"] = ("Slurm here doesn't allocate memory (its jobs aren't given a share "
+                                               "of it: SelectTypeParameters without _Memory), so there is no line "
+                                               "for memory allocated.")
     result["series"] = series
     result["series_info"] = info_series
 

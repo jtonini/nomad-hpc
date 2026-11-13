@@ -50,7 +50,15 @@ older jobs. Data readiness shows, per target:
 - **of the tenth ranked riskiest**, how many did, against how many of all
   held-out jobs did;
 - TESSERA's blend: how much each of its parts (GNN, LSTM, autoencoders)
-  counted, by how well each did on its own validation jobs.
+  counted, by how well each did on its own validation jobs;
+- with `compare` (1.45.1), each model's AUC without partition and cluster,
+  and the logistic regression's with them alone: how much of what a model
+  knows is where a job ran, rather than what it asked for;
+- for waste, how much of the time they asked for the completed jobs used (at
+  the tenth, quarter, half, three quarters and nine tenths of them) and how
+  many would count as wasted at a few thresholds: the counts to choose
+  `waste_threshold` by. When nearly every job counts as wasted, the AUCs say
+  little.
 
 When the logistic regression does as well or better, it says so.
 
@@ -74,12 +82,28 @@ keep_runs = 20                   # runs kept with their scores
 stale_minutes = 360              # a run not heard from this long is given up
 key_file = "~/.config/nomad/ml_worker_key"   # the nomad account's (600)
 # db = "ml.db"                   # default: beside lab_check.db
+compare = true                   # also each model without partition and cluster, and the
+                                 # logistic regression with them alone (1.45.1)
 
 [ml.train.epochs]
 gnn = 100
 lstm = 60
 ae = 60
+
+[ml.train.tessera]               # (1.45.1)
+similarity = "euclidean"         # or cosine, mahalanobis, pearson, bray_curtis (on scaled
+                                 # features); simpson, jaccard (on n_bins equal-width bins)
+n_bins = 3                       # simpson and jaccard only
+k_neighbors = 10                 # each job's nearest neighbours in the network
 ```
+
+Both models get the same columns: what was asked, as numbers (cores, GPUs,
+memory and time on a log scale; the hour and day it was submitted), and
+partition and cluster as one column per value. In 1.45.0 TESSERA had
+partition and cluster as plain numbers, and its default similarity
+(simpson) cuts each feature into three equal-width bins between its smallest
+and largest value, so a partition, or a memory or time asked, was only low,
+middle or high. Each run keeps the settings it was asked with.
 
 On the worker:
 
@@ -105,12 +129,22 @@ CUDA comes with them from PyPI), the key copied from the hub (never pasted
 anywhere else), its settings, a check, and the timer:
 
 ```
-python3 -m venv ~/nomad-ml && ~/nomad-ml/bin/pip install 'nomad-hpc[predict]'
+sudo install -d -o "$USER" -g "$(id -gn)" -m 755 /opt/nomad-ml
+python3 -m venv /opt/nomad-ml && /opt/nomad-ml/bin/pip install 'nomad-hpc[predict]'
+sudo restorecon -R /opt/nomad-ml     # where SELinux is on: the default labels (bin/ is bin_t)
 umask 077 && mkdir -p ~/.config/nomad && ssh you@hub 'sudo -n -u nomad cat /home/nomad/.config/nomad/ml_worker_key' > ~/.config/nomad/ml_worker_key
-~/nomad-ml/bin/nomad ml key          # the same fingerprint as on the hub
-~/nomad-ml/bin/nomad ml check        # reaches the Console with the key; can it train here
-sudo ~/nomad-ml/bin/nomad ml timer --user $USER --apply
+/opt/nomad-ml/bin/nomad -c ~/.config/nomad/ml_worker.toml ml key      # the same fingerprint as on the hub
+/opt/nomad-ml/bin/nomad -c ~/.config/nomad/ml_worker.toml ml check    # reaches the Console; can it train here
+sudo /opt/nomad-ml/bin/nomad -c ~/.config/nomad/ml_worker.toml ml timer --user $USER --apply
 ```
+
+The environment goes in `/opt`, not in a home folder: the timer runs it as a
+system service, and where SELinux is enforcing (Rocky, RHEL) a system
+service may not run programs from a home folder (`user_home_t`). It fails
+at once with status 203/EXEC and an AVC denial ("denied { execute }",
+`init_t`); `/opt/*/bin` has the label of system programs (`bin_t`). The
+key and the settings can stay in the home folder: the service only reads
+them.
 
 `nomad ml check` says what the Console answered (on or off, what is queued)
 and whether TESSERA can train on this machine: its version, PyTorch's, and

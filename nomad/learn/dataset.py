@@ -98,8 +98,28 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
     counts = {p: parts.count(p) for p in PARTS}
     data = {"features": list(FEATURES), "rows": out_rows, "window": windows, "part": parts,
             "labels": {"failure": failure, "waste": waste}, "plan": plan, "counts": counts,
-            "partitions": len(partitions), "clusters": len(sites)}
+            "partitions": len(partitions), "clusters": len(sites),
+            "spread": {"waste": used_spread(ended)}}
     return data, mapping
 
 
-__all__ = ["build", "FEATURES", "ENDED", "NOW", "PARTS"]
+SHARES = (0.1, 0.25, 0.5, 0.75, 0.9)
+THRESHOLDS = (0.5, 0.6, 0.75, 0.9)
+
+
+def used_spread(ended) -> dict | None:
+    """How much of the time they asked for the completed jobs used (1.45.1), as a whole:
+    the share used at the tenth, quarter, half, three quarters and nine tenths of
+    them, and how many would count as wasted at a few thresholds. No job's own figure."""
+    used = sorted(min(1.0, (r["runtime_seconds"] or 0) / r["req_time_seconds"])
+                  for _, _, st, r in ended
+                  if st == "COMPLETED" and (r["req_time_seconds"] or 0) > 0 and (r["runtime_seconds"] or 0) > 0)
+    if len(used) < 20:
+        return None
+    n = len(used)
+    at = {f"{q:g}": round(used[min(n - 1, int(q * n))], 4) for q in SHARES}
+    wasted = {f"{t:g}": round(sum(1 for u in used if 1.0 - u > t) / n, 4) for t in THRESHOLDS}
+    return {"jobs": n, "used_at": at, "wasted_at": wasted}
+
+
+__all__ = ["build", "used_spread", "FEATURES", "ENDED", "NOW", "PARTS"]

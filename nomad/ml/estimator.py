@@ -332,7 +332,8 @@ def generate_recommendations(report: ReadinessReport) -> list:
     if report.recency_score < 60:
         recs.append("[*] Data is stale - recent patterns may differ from historical data")
     if report.ready_for_training:
-        recs.append("[ok] Data is ready for ML training - run: nomad train")
+        recs.append("[ok] Data is ready for ML training: Train… under The model on Data readiness "
+                    "(nomad ml ask), or nomad train on this machine")
     else:
         recs.append("[..] Continue collecting data before training ML models")
     return recs

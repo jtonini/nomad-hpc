@@ -230,6 +230,15 @@ def ml_work(ctx):
     trains, and sends back the result (or why it failed)."""
     from nomad.learn.train import TrainError
     from nomad.learn.worker import WorkerError, work_once
+    import logging
+    import sys
+    for name in ("matplotlib", "PIL"):          # their INFO lines (a font cache built once) aren't the worker's
+        logging.getLogger(name).setLevel(logging.WARNING)
+    for stream in (sys.stdout, sys.stderr):    # under systemd, each line to the journal as it is said (1.45.1)
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
     config, _ = _config(ctx)
     ws = worker_settings(config)
     for p in ws.problems:

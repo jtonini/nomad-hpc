@@ -132,6 +132,7 @@ def test_readings_in_service_only(conn):
     assert ts(SINCE + timedelta(hours=11))[:16] not in cpu
     assert r["series"]["load_pct"][0][1] == 62.5
     assert "mem_alloc_pct" not in r["series"]             # never allocated here: not tracked
+    assert "doesn't allocate memory" in r["series_info"]["mem_held_pct"]["note"]   # and said why (1.45.1)
     assert r["series"]["mem_held_pct"][0][1] == 50.0
     assert r["series"]["gpu_busy_pct"][0][1] == 50.0      # DCGM, averaged over the GPUs
     assert max(v for _, v in r["series"]["temp_c"]) == 81.0
@@ -208,3 +209,13 @@ def test_the_command(conn, tmp_path):
     assert out.exit_code != 0 and "no readings of n999" in out.output
     out = CliRunner().invoke(cli, ["facts", "node", "spydur", "--db", str(db)])
     assert out.exit_code == 0 and "spydur's nodes in its latest reading (2):\n  n012 n013" in out.output
+
+
+def test_memory_allocated_where_slurm_allocates_it(conn, tmp_path):
+    """Where Slurm does hand out memory, its line is there and there is no note (1.45.1)."""
+    w = sqlite3.connect(tmp_path / "combined.db")
+    w.execute("UPDATE node_state SET memory_alloc_mb = memory_total_mb / 4")
+    w.commit()
+    w.close()
+    r = ask(conn, staff=True)
+    assert "mem_alloc_pct" in r["series"] and "note" not in r["series_info"]["mem_held_pct"]

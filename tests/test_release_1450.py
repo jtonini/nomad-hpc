@@ -39,7 +39,8 @@ def test_settings_and_their_problems():
     assert (on.enabled, on.engine, on.predicts, on.trainer, on.jobs_days, on.max_jobs, on.epochs["gnn"]) == (
         True, "baseline", ("waste",), "badenpowell", 90, 50000, 20)
     assert on.plan() == {"engine": "baseline", "predicts": ["waste"], "jobs_days": 90, "max_jobs": 50000,
-                         "waste_threshold": 0.6, "holdout_share": 0.2, "epochs": {"gnn": 20, "lstm": 60, "ae": 60}}
+                         "waste_threshold": 0.6, "holdout_share": 0.2, "epochs": {"gnn": 20, "lstm": 60, "ae": 60},
+                         "compare": True, "tessera": {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10}}
     bad = settings({"ml": {"train": {"enabled": "yes", "engine": "magic", "predicts": ["luck"], "holdout_share": 0.9,
                                      "jobs_days": 1, "epochs": {"ae": 0}}}})
     assert (bad.enabled, bad.engine, bad.predicts, bad.holdout_share, bad.jobs_days, bad.epochs["ae"]) == (
@@ -409,6 +410,35 @@ def test_account_requests_table_is_a_known_setting():
     got = access_from({"console": {"labs": {"accounts": {"notify": "hpc@example.edu"}, "nonsense": 1}}}, log=False)
     said = " ".join(got.problems)
     assert "accounts: unknown" not in said and "[console.labs] nonsense: unknown setting; ignored" in said
+
+
+def test_two_passes_never_take_the_same_request(tmp_path, monkeypatch):
+    """The second of two passes asking at once finds the request taken (1.45.1)."""
+    monkeypatch.setattr(R.os, "geteuid", lambda: 1000)
+    s = settings({"ml": {"train": {"enabled": True, "db": str(tmp_path / "ml.db")}}})
+    a = R.open_records(tmp_path / "ml.db", write=True)
+    b = R.open_records(tmp_path / "ml.db", write=True)
+    R.ask(a, s, "adam", None)
+    real = b.execute
+
+    class Racing:                          # b reads "queued", then a takes it before b's update
+        def __getattr__(self, name):
+            return getattr(b, name)
+
+        def __enter__(self):
+            return b.__enter__()
+
+        def __exit__(self, *e):
+            return b.__exit__(*e)
+
+        def execute(self, sql, *args):
+            got = real(sql, *args)
+            if sql.startswith("SELECT id FROM ml_requests WHERE state = 'queued'"):
+                row = got.fetchone()
+                assert R.claim(a, s, "badenpowell")["state"] == "running"
+                return type("C", (), {"fetchone": lambda self: row})()
+            return got
+    assert R.claim(Racing(), s, "badenpowell") is None
 
 
 def test_lab_check_untouched():

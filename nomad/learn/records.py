@@ -154,9 +154,11 @@ def claim(rec, s: Settings, worker: str) -> dict | None:
         if got is None:
             return None
         now = _now()
-        rec.execute("UPDATE ml_requests SET state = 'running', worker = ?, claimed_at = ?, progress = ?, "
-                    "progress_at = ? WHERE id = ? AND state = 'queued'",
-                    (worker[:64], now, "taken", now, got[0]))
+        took = rec.execute("UPDATE ml_requests SET state = 'running', worker = ?, claimed_at = ?, progress = ?, "
+                           "progress_at = ? WHERE id = ? AND state = 'queued'",
+                           (worker[:64], now, "taken", now, got[0])).rowcount
+    if took != 1:
+        return None                      # another pass took it between the two (1.45.1): not this one's
     return request_of(rec, got[0])
 
 
@@ -196,8 +198,12 @@ def fail(rec, rid: int, worker: str, why: str) -> dict:
     return request_of(rec, rid)
 
 
+DEPTH = 6
+
+
 def _clean_summary(summary: dict) -> dict:
-    """The summary as stored: only numbers and short words (it is shown)."""
+    """The summary as stored: only numbers and short words (it is shown), at most
+    DEPTH levels deep (targets > failure > without_place > auc > tessera: 1.45.1)."""
     def clean(v, depth=0):
         if isinstance(v, bool) or v is None:
             return v
@@ -205,9 +211,9 @@ def _clean_summary(summary: dict) -> dict:
             return v if v == v else None
         if isinstance(v, str):
             return v[:200]
-        if isinstance(v, dict) and depth < 4:
+        if isinstance(v, dict) and depth < DEPTH:
             return {str(k)[:40]: clean(x, depth + 1) for k, x in list(v.items())[:40]}
-        if isinstance(v, list) and depth < 4:
+        if isinstance(v, list) and depth < DEPTH:
             return [clean(x, depth + 1) for x in v[:40]]
         return None
     return clean(summary)

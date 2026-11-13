@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.45.1 (November 2026)
+
+- **A fair comparison.** The first run on real jobs had the logistic
+  regression ahead of TESSERA for failure (AUC 0.87 against 0.59). TESSERA
+  had been handicapped: partition and cluster reached it as plain numbers,
+  and its default similarity (simpson) cuts each feature into three
+  equal-width bins. Both models now get partition and cluster as one column
+  per value, and TESSERA's similarity is set in `[ml.train.tessera]`
+  (`similarity`, default `euclidean` on scaled features; `n_bins`;
+  `k_neighbors`). On made-up jobs where partition decides failure, TESSERA
+  went from 0.70–0.81 to 0.92–0.96, level with the logistic regression.
+- **What partition and cluster carry** (`[ml.train] compare`, default true):
+  each model is also measured without them, and the logistic regression with
+  them alone.
+- **The spread of used time**, for choosing `waste_threshold`: how much of
+  their asked time the completed jobs used, at the tenth to nine tenths of
+  them, and how many count as wasted at 0.5, 0.6, 0.75 and 0.9 (counts only).
+  On the first run 99% counted as wasted at 0.6, so waste's AUCs meant little.
+- Training worker: two passes asking at the same instant never both take the
+  same request; `nomad ml work`'s lines reach the journal as they are said
+  (line-buffered under systemd), without matplotlib's font-cache notices;
+  docs/ml-training.md puts the worker's environment in `/opt/nomad-ml`,
+  since SELinux keeps a system service from running programs in a home
+  folder.
+- Data readiness's recommendation points to Train… (or `nomad ml ask`)
+  rather than only `nomad train`.
+- `nomad facts node`: on a cluster whose Slurm doesn't allocate memory
+  (SelectTypeParameters without `_Memory`), the memory series carries a note
+  saying so, which the Console's node timeline shows, instead of the
+  "Memory allocated" line simply being absent.
+- The hub keeps a training result's summary six levels deep (it kept four,
+  which would have dropped 1.45.1's comparisons).
+
 ## v1.45.0 (November 2026)
 
 - **Training the model from the Console** (`nomad.learn`; `nomad ml`;
