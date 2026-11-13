@@ -36,9 +36,11 @@ from typing import Any, Optional
 from nomad.edu.population import score_person, trend
 from nomad.edu.progress import _count_user_jobs, _load_user_jobs, _load_user_sessions, _score_sessions
 from nomad.edu.scoring import (
+    DimensionScore,
     JobFingerprint,
     SessionFingerprint,
     Suggestion,
+    dimension_weights,
     format_duration_human,
     format_memory,
     format_time_slurm,
@@ -77,7 +79,7 @@ USAGE_QUANTILE = 0.95  # use p95 of usage (covers most of the user's jobs)
 KEY_TO_DISPLAY = {
     "cpu":             "CPU Efficiency",
     "memory":          "Memory Efficiency",
-    "time":            "Time Estimation",
+    "time":            "Time Limit",
     "io":              "Filesystem I/O",
     "gpu":             "GPU Utilization",
     "memory_pressure": "Workstation Memory Pressure",
@@ -183,6 +185,12 @@ class Issue:
     # a job that failed at setup never reached its real work, so it looks like it needed little.
     completed_jobs: int = 0
     failed_jobs: int = 0              # FAILED (and, for advice they don't inform, TIMEOUT / OUT_OF_MEMORY)
+    # 1.47.0: the jobs this was found in (a "failed" card: the jobs that failed), newest first,
+    # at most FLAGGED_JOBS_MAX: each {job_id, site, partition, name, ended, state} and, for a
+    # dimension, its score, what was asked and used (asked, used, unit; GPUs: busy_pct) where
+    # the score says, and its detail. How much this dimension counts in the overall: weight.
+    jobs: list[dict[str, Any]] = field(default_factory=list)
+    weight: float = 1.0
 
     @property
     def affected_ratio(self) -> float:
@@ -211,6 +219,7 @@ class UserInsights:
     # too_few_weeks when there aren't two weeks with measured jobs
     overall_trajectory: str = "too_few_weeks"
     overall_score: float | None = None    # None: nothing measured to score
+    weights: dict[str, float] = field(default_factory=dict)   # [edu.weights] the overall used (1.47.0)
     finished_job_count: int = 0           # COMPLETED/FAILED/TIMEOUT/OUT_OF_MEMORY in the window;
                                           # job_count of these were measured
     overall_change: float | None = None   # last week with jobs minus the first
@@ -752,6 +761,35 @@ def _classify_severity(avg_score: float, affected_ratio: float) -> str:
     return "medium"
 
 
+FLAGGED_JOBS_MAX = 50       # the jobs a card lists, newest first (1.47.0)
+
+
+def _job_entry(fp, d: DimensionScore | None = None) -> dict[str, Any]:
+    """One job a card was found in, as the card lists it."""
+    e: dict[str, Any] = {
+        "job_id": getattr(fp, "job_id", None),
+        "site": getattr(fp, "_site", None) or getattr(fp, "cluster", None),
+        "partition": getattr(fp, "partition", None),
+        "name": getattr(fp, "_name", None),
+        "ended": getattr(fp, "_end_time", None) or None,
+        "state": _state_of(fp),
+    }
+    if d is not None:
+        e["score"] = round(d.score, 1)
+        sg = d.suggestion
+        if sg is not None and sg.current_value:
+            if sg.directive == "gres":                  # what a GPU score says is how busy they were
+                e.update(asked=sg.current_value, unit="GPUs", busy_pct=sg.actual_usage)
+            else:
+                e.update(asked=sg.current_value, used=sg.actual_usage, unit=sg.unit)
+        e["detail"] = d.detail
+    return e
+
+
+def _newest(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(entries, key=lambda e: e.get("ended") or "", reverse=True)[:FLAGGED_JOBS_MAX]
+
+
 def _aggregate_dimension(
     dim_key: str,
     fingerprints: list[JobFingerprint] | list[SessionFingerprint],
@@ -763,6 +801,8 @@ def _aggregate_dimension(
     affected_suggestions: list[Suggestion] = []
     total_applicable = 0
 
+    flagged: list[dict[str, Any]] = []
+
     for fp in fingerprints:
         d = fp.dimensions.get(dim_key)
         if d is None or not d.applicable:
@@ -770,6 +810,7 @@ def _aggregate_dimension(
         total_applicable += 1
         if d.score < threshold:
             affected_scores.append(d.score)
+            flagged.append(_job_entry(fp, d))
             if d.suggestion is not None:
                 affected_suggestions.append(d.suggestion)
 
@@ -801,6 +842,8 @@ def _aggregate_dimension(
         severity=severity,
         trajectory=trajectory,
         rationale=rationale,
+        jobs=_newest(flagged),
+        weight=dimension_weights().get(dim_key, 1.0),
     )
 
     # If we have no structured suggestions to aggregate, return the issue
@@ -1439,6 +1482,7 @@ def user_insights(
 
     if fingerprints:
         insights.overall_score = person.overall
+        insights.weights = dimension_weights()
         insights.overall_change = person.change
         insights.dimensions = person.dimensions
         insights.overall_trajectory = trend(person.change)
@@ -1483,10 +1527,13 @@ def user_insights(
         # Location first (cluster, partition), then severity within — reads
         # as "what's wrong on hpc1/compute, then hpc2/gpu".
         # Within a place, a "these jobs failed" card leads (1.45.0): fixing
-        # that comes before any advice about size.
+        # that comes before any advice about size. Then (1.47.0) the
+        # dimensions that count fully in the overall (cores, memory, GPUs),
+        # before those that count less (I/O, the time limit).
         issues.sort(key=lambda i: (
             i.cluster or "", i.partition or "",
             i.dimension_key != "failed",
+            i.weight < 1.0,
             severity_rank[i.severity], i.avg_score,
         ))
 
@@ -1536,7 +1583,8 @@ def _failed_issue(group, states, cluster, partition) -> Issue | None:
         total_applicable=len(group), avg_score=round(100 * (1 - share), 1),
         severity="high" if share >= 0.75 else "medium", trajectory="stable",
         rationale=FAILED_RATIONALE, cluster=cluster or None, partition=partition or None,
-        completed_jobs=sum(1 for s in states if s == "COMPLETED"), failed_jobs=failed)
+        completed_jobs=sum(1 for s in states if s == "COMPLETED"), failed_jobs=failed,
+        jobs=_newest([_job_entry(fp) for fp, s in zip(group, states) if s == "FAILED"]))
 
 
 # ── Formatting ───────────────────────────────────────────────────────
@@ -1546,8 +1594,9 @@ DIMENSION_FRAMING = {
     "cpu": ("You allocated cores but didn't use them; jobs that could "
             "have used them waited."),
     "memory": ("Memory you don't use is unavailable to other jobs on the node."),
-    "time": ("Over-requesting walltime delays your jobs in the queue and "
-             "blocks backfill scheduling for everyone."),
+    "time": ("Your jobs finished well before the time limit they asked for. A "
+             "limit closer to how long they run lets Slurm start them sooner, in "
+             "gaps between other jobs; it doesn't change how fast they run."),
     "io": ("Heavy NFS use slows your job and saturates shared storage "
            "for other users."),
     "gpu": ("GPUs are scarce; reserving them without using them blocks "
@@ -1565,7 +1614,7 @@ DIMENSION_FRAMING = {
 # (written for asking too much) would contradict it. Chosen by the direction
 # of the aggregated suggestion.
 DIMENSION_FRAMING_UNDER = {
-    "time": ("Your jobs ran out of walltime or came close to it; a job "
+    "time": ("Your jobs reached their time limit or came close to it; a job "
              "stopped at its limit loses the work since its last checkpoint."),
     "memory": ("Your jobs ran out of memory, or used as much as they asked "
                "for or more; a job killed for memory loses its work."),
@@ -1607,6 +1656,20 @@ def _trend_words(insights: UserInsights) -> str:
     }.get(insights.overall_trajectory, "not enough weeks to compare yet")
 
 
+def weights_words(weights: dict[str, float]) -> str:
+    """'CPU 1, memory 1, GPU 1, I/O 0.5, time limit 0.25'."""
+    names = {"cpu": "CPU", "memory": "memory", "gpu": "GPU", "io": "I/O", "time": "time limit"}
+    return ", ".join(f"{names.get(k, k)} {v:g}" for k, v in weights.items())
+
+
+def _job_ids(issue: Issue, shown: int = 5) -> str:
+    """'Jobs: 4521, 4519, 4502 and 3 more (newest first; nomad edu explain JOB)'."""
+    ids = [str(j["job_id"]) for j in issue.jobs[:shown]]
+    more = max(len(issue.jobs), issue.affected_jobs) - len(ids)
+    return ("Jobs: " + ", ".join(ids) + (f" and {more} more" if more > 0 else "")
+            + " (newest first; nomad edu explain JOB for one)")
+
+
 def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
     """Render UserInsights as text suitable for terminal output."""
     lines: list[str] = []
@@ -1635,6 +1698,8 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
             dims = ", ".join(f"{_DIMENSION_SHORT.get(d, d)} {s:.0f}"
                              for d, s in insights.dimensions.items())
             lines.append(f"  By dimension (average over measured jobs): {dims}")
+            if insights.weights:
+                lines.append(f"  The overall counts each by its weight: {weights_words(insights.weights)}")
     else:
         lines.append("  Based on your recent workstation sessions")
     lines.append("")
@@ -1687,6 +1752,8 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
             lines.append(f"  {sev_marker} {issue.dimension}{scope}")
             lines.append(f"    {issue.failed_jobs} of {issue.total_applicable} measured jobs failed"
                          + (f" ({issue.completed_jobs} completed)" if issue.completed_jobs else ""))
+            if issue.jobs:
+                lines.append(f"    {_job_ids(issue)}")
             lines.append("")
             lines.extend(f"    {line}" for line in textwrap.wrap(issue.rationale, width=72))
             continue
@@ -1697,6 +1764,8 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
         )
         if issue.dimension_key in SIZED_FROM and issue.failed_jobs:
             lines.append(f"    (from the jobs that completed; {issue.failed_jobs} that didn't aren't counted)")
+        if issue.jobs:
+            lines.append(f"    {_job_ids(issue)}")
 
         # Show usage context if we have it
         if issue.usage_stats and issue.current_display:

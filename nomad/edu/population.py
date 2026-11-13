@@ -36,7 +36,7 @@ from datetime import datetime, timedelta
 from nomad.edu.progress import (
     _split_job_fields, memory_ceiling, memory_ceilings, summary_columns, summary_join,
 )
-from nomad.edu.scoring import JobFingerprint, score_job
+from nomad.edu.scoring import JobFingerprint, dimension_weights, score_job, weighted_mean
 
 # A job that ran out of memory finished too: it is the clearest memory
 # lesson there is (scored 15 on memory, with a request that fits). 1.13.
@@ -56,7 +56,7 @@ class PersonSummary:
     jobs: int                        # finished jobs in the window
     scored_jobs: int                 # of those, measured and scored
     sites: list[str]
-    overall: float | None            # mean of the dimension averages
+    overall: float | None            # the dimension averages, weighed ([edu.weights])
     dimensions: dict[str, float]     # dimension -> average over scored jobs
     change: float | None             # overall, last weekly window minus first
     first_job: str | None
@@ -166,9 +166,11 @@ class _Acc:
 
 
 def _mean_of_dims(sums: dict, counts: dict) -> tuple[dict, float | None]:
+    """Each dimension's average, and the overall: those averages, each
+    counting its weight ([edu.weights], 1.47.0)."""
     dims = {d: round(sums[d] / counts[d], 1) for d in sums if counts.get(d)}
-    overall = round(sum(dims.values()) / len(dims), 1) if dims else None
-    return dims, overall
+    overall = weighted_mean(dims)
+    return dims, (None if overall is None else round(overall, 1))
 
 
 def _compute(db_path: str, days: int, window_size: int) -> Population:
@@ -229,6 +231,8 @@ def _add(a: _Acc, row: dict, start: datetime, window_size: int) -> JobFingerprin
         return None
     fp._end_time = end
     fp._state = str(row.get("state") or "").split()[0].upper() if row.get("state") else ""
+    fp._site = site                              # for a link to the job's page (1.47.0)
+    fp._name = row.get("job_name")
     a.scored += 1
     window = _window_index(end, start, window_size)
     for name, dim in fp.dimensions.items():
@@ -319,7 +323,8 @@ def population(db_path: str, days: int = 90, window_size: int = 7) -> Population
     (about a second for fifty thousand jobs) and the rest are free.
     """
     st = os.stat(db_path)
-    key = (os.path.realpath(db_path), st.st_ino, st.st_mtime_ns, st.st_size, days, window_size)
+    key = (os.path.realpath(db_path), st.st_ino, st.st_mtime_ns, st.st_size, days, window_size,
+           tuple(sorted(dimension_weights().items())))
     with _CACHE_LOCK:
         hit = _CACHE.get(key)
     if hit is not None:

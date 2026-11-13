@@ -6,11 +6,13 @@ NØMAÐ Edu — Proficiency Scoring Engine
 Scores each job across five dimensions of computational proficiency:
     1. CPU Efficiency      — how well CPU resources were utilized
     2. Memory Efficiency   — how well memory was sized
-    3. Time Estimation     — how accurately walltime was estimated
+    3. Time Limit          — how close the time limit asked was to how long the job ran
     4. I/O Awareness       — appropriate use of local vs network storage
     5. GPU Utilization     — effective use of GPU resources (when applicable)
 
-Each dimension produces a score from 0-100 and a proficiency level:
+Each dimension produces a score from 0-100 and a proficiency level. A job's
+overall score, and a person's, weighs them by [edu.weights] (1.47.0: CPU,
+memory and GPU fully, I/O half, the time limit a quarter):
     Excellent  (85-100)  — demonstrates strong HPC understanding
     Good       (65-84)   — reasonable usage with minor waste
     Developing (40-64)   — learning, with clear room for improvement
@@ -63,6 +65,66 @@ _FLOOR: dict = {}
 def _gb(x: float) -> str:
     """GB as said: 3.9, not 4 (under 10, one decimal)."""
     return f"{x:.1f}" if x < 10 else f"{x:.0f}"
+
+
+# How much each dimension counts in an overall score (1.47.0). The cores and
+# memory a job holds are what keeps others waiting; a generous time limit
+# mostly costs the job itself a later start, so it counts least. [edu.weights]
+# in nomad.toml changes them; a dimension not named here (a workstation
+# session's) counts 1.
+DIMENSION_WEIGHTS = {"cpu": 1.0, "memory": 1.0, "gpu": 1.0, "io": 0.5, "time": 0.25}
+_WEIGHTS: dict = {}
+
+
+def dimension_weights() -> dict[str, float]:
+    """[edu.weights] (read once), over DIMENSION_WEIGHTS: numbers from 0 to 10."""
+    if "w" not in _WEIGHTS:
+        w = dict(DIMENSION_WEIGHTS)
+        try:
+            from nomad.config import load_config
+            w.update(read_weights((load_config() or {}).get("edu", {}).get("weights"))[0])
+        except Exception:                                  # noqa: BLE001 -- no settings: the defaults
+            pass
+        _WEIGHTS["w"] = w
+    return dict(_WEIGHTS["w"])
+
+
+def read_weights(table) -> tuple[dict[str, float], list[str]]:
+    """The weights an [edu.weights] table sets, and what's wrong with it."""
+    out: dict[str, float] = {}
+    problems: list[str] = []
+    if table is None:
+        return out, problems
+    if not isinstance(table, dict):
+        return out, ["[edu.weights] is a table: cpu = 1.0, memory = 1.0, gpu = 1.0, io = 0.5, time = 0.25"]
+    for k, v in table.items():
+        if k not in DIMENSION_WEIGHTS:
+            problems.append(f"[edu.weights] {k}: not a dimension (cpu, memory, gpu, io, time)")
+        elif isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 10:
+            problems.append(f"[edu.weights] {k} = {v!r}: a number from 0 to 10; "
+                            f"{DIMENSION_WEIGHTS[k]} is used")
+        else:
+            out[k] = float(v)
+    return out, problems
+
+
+def set_dimension_weights(weights: dict[str, float] | None) -> None:
+    """Use these weights from now on (None: read [edu.weights] again)."""
+    _WEIGHTS.clear()
+    if weights is not None:
+        _WEIGHTS["w"] = {**DIMENSION_WEIGHTS, **weights}
+
+
+def weighted_mean(scores: dict[str, float]) -> float | None:
+    """The overall of some dimension scores, each counting its weight. None
+    with none; the plain mean when every one there weighs 0."""
+    if not scores:
+        return None
+    w = dimension_weights()
+    total = sum(w.get(k, 1.0) for k in scores)
+    if total <= 0:
+        return sum(scores.values()) / len(scores)
+    return sum(v * w.get(k, 1.0) for k, v in scores.items()) / total
 
 
 def memory_floor_mb() -> int:
@@ -277,11 +339,9 @@ class JobFingerprint:
 
     @property
     def overall(self) -> float:
-        """Weighted average of applicable dimensions."""
-        applicable = [d for d in self.dimensions.values() if d.applicable]
-        if not applicable:
-            return 0.0
-        return sum(d.score for d in applicable) / len(applicable)
+        """The applicable dimensions' scores, each counting its weight (1.47.0)."""
+        got = weighted_mean({k: d.score for k, d in self.dimensions.items() if d.applicable})
+        return 0.0 if got is None else got
 
     @property
     def scored(self) -> bool:
@@ -613,11 +673,12 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
         req_time = job.get("req_time_seconds", 0)
         suggested_sec = round_time_up(req_time * 1.5 if req_time else 7200)
         return DimensionScore(
-            name="Time Estimation",
+            name="Time Limit",
             score=20,
             level="Needs Work",
-            detail=("Job was killed for exceeding walltime. "
-                    "Your job needed more time than the requested limit."),
+            detail=(f"Stopped at its time limit ({format_duration_human(req_time)}) before it "
+                    "finished: it needed more time than it asked for." if req_time else
+                    "Stopped at its time limit before it finished: it needed more time than it asked for."),
             suggestion=Suggestion(
                 directive="time",
                 suggested_value=suggested_sec,
@@ -632,14 +693,14 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
     req_time = job.get("req_time_seconds", 0)
     if not runtime or not req_time:
         return DimensionScore(
-            name="Time Estimation",
+            name="Time Limit",
             score=50,
             level="Unknown",
             detail="No runtime data available.",
             applicable=False,
         )
     if _short(job):
-        return _not_judged("Time Estimation",
+        return _not_judged("Time Limit",
                            f"Ran {format_duration_human(runtime)} of {format_duration_human(req_time)}: under "
                            f"{SHORT_JOB_SECONDS // 60} minutes, too short to judge a time limit by (a test, or a "
                            "job that stopped early: its outcome says which).")
@@ -668,12 +729,12 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
     suggested_sec = round_time_up(runtime * 1.5)
 
     if score >= 85:
-        detail = (f"Good time estimate. Job ran {runtime_str} of "
-                  f"{req_str} requested ({ratio:.0%} utilization).")
+        detail = (f"Ran {runtime_str} of the {req_str} it asked for ({ratio:.0%}): a limit "
+                  f"close to how long it runs, with room to spare.")
         suggestion = None
     elif ratio > 0.95:
-        detail = (f"Job ran {runtime_str} of {req_str} requested — "
-                  f"very close to the limit. Risk of walltime kill.")
+        detail = (f"Ran {runtime_str} of the {req_str} it asked for: very close to its "
+                  f"limit, where Slurm stops a job. A little more room is safer.")
         suggestion = Suggestion(
             directive="time",
             suggested_value=suggested_sec,
@@ -683,10 +744,9 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
             rationale="add buffer to avoid walltime kill",
         )
     else:
-        detail = (f"Job ran {runtime_str} but {req_str} was requested "
-                  f"({ratio:.0%} used). Over-requesting walltime delays "
-                  f"your jobs in the queue (backfill scheduler can't fit "
-                  f"them into gaps).")
+        detail = (f"Ran {runtime_str} of the {req_str} it asked for ({ratio:.0%}). A limit "
+                  f"closer to how long it runs lets Slurm start it sooner, in a gap "
+                  f"between other jobs; the limit doesn't change how fast it runs.")
         suggestion = Suggestion(
             directive="time",
             suggested_value=suggested_sec,
@@ -697,7 +757,7 @@ def score_time(job: dict, summary: dict) -> DimensionScore:
         )
 
     return DimensionScore(
-        name="Time Estimation",
+        name="Time Limit",
         score=round(score, 1),
         level=proficiency_level(score),
         detail=detail,

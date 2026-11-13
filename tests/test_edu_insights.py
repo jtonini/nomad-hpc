@@ -204,14 +204,14 @@ class TestFramingFollowsTheSuggestion:
         issue = self._issue("time", "time", [(10800, 7200, 7100)] * 4)
         assert issue.direction == "raise"
         assert issue.suggested_value > issue.current_value_typical
-        assert "ran out of walltime" in issue.rationale
-        assert "Over-requesting" not in issue.rationale
+        assert "reached their time limit" in issue.rationale          # 1.47.0 wording
+        assert "finished well before" not in issue.rationale
 
     def test_walltime_too_long_says_so(self):
         issue = self._issue("time", "time", [(900, 36000, 600)] * 4)
         assert issue.direction == "lower"
         assert issue.suggested_value < issue.current_value_typical
-        assert issue.rationale.startswith("Over-requesting walltime")
+        assert issue.rationale.startswith("Your jobs finished well before the time limit")
 
     def test_memory_too_little_says_so(self):
         issue = self._issue("memory", "mem", [(16384, 8192, 9000)] * 4)
@@ -227,7 +227,7 @@ class TestFramingFollowsTheSuggestion:
                           overall_score=30.0)
         ui.issues = [self._issue("time", "time", [(10800, 7200, 7100)] * 4)]
         text = format_user_insights(ui)
-        assert "ran out of walltime" in text and "Over-requesting" not in text
+        assert "reached their time limit" in text and "finished well before" not in text
 
     def test_mixed_requests_advise_for_the_usual_one(self):
         # Seen on spydur: most jobs ask 160G and use ~10G, a few ask 4G and

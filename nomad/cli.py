@@ -8553,6 +8553,10 @@ def config_check(ctx):
     from nomad.sync_timer import config_problems as _sync_timer_problems
     for problem in _sync_timer_problems(data):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.edu.scoring import read_weights
+    edu = data.get('edu') if isinstance(data.get('edu'), dict) else {}
+    for problem in read_weights(edu.get('weights'))[1]:
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
     _config_check_policy_watch(data)
     _config_check_condos(ctx)
 

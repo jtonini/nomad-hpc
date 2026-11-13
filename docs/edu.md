@@ -56,7 +56,7 @@ nomad edu explain <job_id> [options]
   ────────────────────────────────────────────────────────
     CPU Efficiency       ██░░░░░░░░   22.6%   Needs Work
     Memory Efficiency    █████████░   90.4%   Excellent
-    Time Estimation      ██████████   97.4%   Excellent
+    Time Limit           ██████████   97.4%   Excellent
     I/O Awareness        ███████░░░   68.8%   Good
     ────────────────────────────────────────────────────
     Overall Score        ███████░░░   69.8%   Good
@@ -74,7 +74,7 @@ nomad edu explain <job_id> [options]
   ────────────────────────────────────────────────────────
     CPU Efficiency        53.7% →  22.6%  ↓ declining
     Memory Efficiency     90.0% →  90.4%  → stable
-    Time Estimation       88.4% →  97.4%  ↑ improving
+    Time Limit            88.4% →  97.4%  ↑ improving
     I/O Awareness         91.8% →  68.8%  ↓ declining
 ```
 
@@ -111,7 +111,7 @@ nomad edu trajectory <username> [options]
     Memory Efficiency     85.9%  → +0.2%
     GPU Utilization       85.0%  → +0.0%
     CPU Efficiency        51.9%  → -1.2%
-    Time Estimation       81.3%  → -2.1%
+    Time Limit            81.3%  → -2.1%
 ```
 
 ### `nomad edu report`
@@ -171,7 +171,9 @@ Groups.
 
 Your own jobs over the last 90 days (`--days N`), scored by the same rules as
 `nomad edu report`: every finished job is counted, only jobs NØMAÐ measured
-are scored, the overall score is the mean of your dimension averages, and the
+are scored, the overall score is your dimension averages counted by their
+weights (CPU, memory and GPU fully, I/O half, the time limit a quarter, 1.47.0;
+[proficiency.md](proficiency.md#overall-score)), and the
 trend compares your first and last week with measured jobs. Your line in a
 group report and this page therefore show the same numbers, and so do the
 Console's Trajectory and My Activity pages. With `--detailed`:
@@ -182,12 +184,14 @@ Console's Trajectory and My Activity pages. With `--detailed`:
   25 jobs in the last 90 days, 15 measured and scored
   Overall score: 52 / 100  (improving, +6 since your first week)
   By dimension (average over measured jobs): CPU 43, memory 62, time 50
+  The overall counts each by its weight: CPU 1, memory 1, GPU 1, I/O 0.5, time limit 0.25
 
   Top issues across your measured jobs:
   ────────────────────────────────────────────────────────
 
   [HIGH]     CPU Efficiency (spydur/basic) — ↑ improving
     5/7 jobs scored below threshold (avg score: 21.8)
+    Jobs: 4521, 4519, 4502, 4498, 4470 (newest first; nomad edu explain JOB for one)
 
     Your jobs:    request 8 (typical)
                   use 2.0 median (range 1.0–3.0 cores)
@@ -214,8 +218,20 @@ reason to ask for less; the card says how many were left out ("from the jobs
 that completed; 3 that didn't aren't counted"). Where at least 2 of the
 measured jobs on a cluster and partition failed, and they are half of them or
 more, a "Jobs that failed" card leads that place's cards: what made them fail
-comes first. `--detailed` adds the line with
-your score in each dimension; `--json` gives everything as JSON; admins can
+comes first.
+
+Each issue names the jobs it was found in, newest first (1.47.0): the line
+"Jobs: …" here, the first five and how many more; in `--json`, each issue's
+`jobs` (at most 50), each with its ID, site, partition, name, when it ended
+and how, its score, and what it asked and used for that dimension (`asked`,
+`used`, `unit`; for GPUs, `busy_pct`); a "Jobs that failed" card lists the
+jobs that failed. On the Console's Recommendations and My Activity, the
+count on each card ("3 of 4 jobs") opens that list under the card, each job
+linking to its page. Within a cluster and partition, the cards of the
+dimensions that count fully (CPU, memory, GPU) come before those that count
+less (I/O, the time limit); the Console shows the latter under "Also worth a
+look". `--detailed` adds the line with
+your score in each dimension and the weights; `--json` gives everything as JSON; admins can
 pass `--user`. With jobs but none measured, it says so instead of showing a
 score.
 

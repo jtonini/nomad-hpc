@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.47.0 (November 2026)
+
+- **Which jobs** (`nomad edu me`, the Console's Recommendations and My
+  Activity): each recommendation carries the jobs it was found in, newest
+  first, at most 50 (`jobs`): each one's ID, site, partition, name, when it
+  ended and how, its score, and what it asked and used for that dimension
+  (`asked`, `used`, `unit`; for GPUs `busy_pct`). A "Jobs that failed" card
+  lists the jobs that failed. The text output names the first five ("Jobs:
+  4521, 4519 … and 3 more"). From a user meeting: people wanted to know
+  which of their jobs a card meant.
+- **The time limit counts a quarter** (`[edu.weights]`): an overall score (a
+  job's, a person's, a week's, a group's) is the dimensions counted by their
+  weights, CPU, memory and GPU 1, I/O 0.5, the time limit 0.25. Before, all
+  counted the same, and a generous limit, which mostly makes the job itself
+  start later, pulled the overall down as much as idle cores or memory, which
+  keep others waiting. Every overall is worked out when it's shown, so the
+  history moves with the weights. `nomad config check` says what's wrong
+  with an `[edu.weights]` table. Each issue carries its dimension's `weight`;
+  `nomad edu me --json` has `weights`.
+- **Time Limit** (was Time Estimation): "Ran 1h of the 1d 0h it asked for
+  (4%). A limit closer to how long it runs lets Slurm start it sooner, in a
+  gap between other jobs; the limit doesn't change how fast it runs." A
+  job stopped at its limit: "Stopped at its time limit (1h) before it
+  finished". docs/proficiency.md had the time score's old formula; it now
+  has the bands the code uses.
+- **Cores and memory first**: within a cluster and partition, a "Jobs that
+  failed" card, then the dimensions that count fully, then those that count
+  less (I/O, the time limit), each by severity.
+
+The Console's part is fix 114 (the jobs under each card, linked to their
+pages; the cards that count less under "Also worth a look"; the weights said
+wherever an overall is explained).
+
 ## v1.46.0 (November 2026)
 
 - **Cores left idle** (`idle`, now asked by default with failure): a

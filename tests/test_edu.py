@@ -97,7 +97,7 @@ class TestProficiencyScoring:
 
         # TIMEOUT should score poorly on time
         assert fp.dimensions["time"].score <= 25
-        assert "TIMEOUT" in fp.dimensions["time"].detail or "walltime" in fp.dimensions["time"].detail.lower()
+        assert "time limit" in fp.dimensions["time"].detail.lower()  # 1.47.0: worded as the limit asked
 
     def test_score_gpu_unused(self):
         """Test that requesting but not using GPU scores poorly."""

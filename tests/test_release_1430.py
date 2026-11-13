@@ -165,10 +165,20 @@ class World:
         return out
 
 
+class _AtT0(datetime):
+    """The clock these sessions were written for (1.47.0: the tests had read
+    the real one, and bob's kernel, idle an hour at T0, passed 24 hours a day
+    later)."""
+    @classmethod
+    def now(cls, tz=None):
+        return T0
+
+
 @pytest.fixture
 def w(monkeypatch, tmp_path):
     world = World()
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(ia, "datetime", _AtT0)
     monkeypatch.setattr(ia, "proc", lambda pid: dict(world.procs[pid]) if pid in world.procs else None)
     monkeypatch.setattr(ia, "_which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(ia, "rstudio_server", lambda s: "/usr/sbin/rstudio-server")

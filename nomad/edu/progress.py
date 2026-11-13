@@ -27,6 +27,7 @@ from nomad.edu.scoring import (
     bar,
     score_job,
     score_session,
+    weighted_mean,
 )
 
 logger = logging.getLogger(__name__)
@@ -465,8 +466,7 @@ def user_trajectory(
                 for name, s in dim_scores.items()
                 if s
             }
-            overall = (sum(avg_scores.values()) / len(avg_scores)
-                       if avg_scores else 0)
+            overall = weighted_mean(avg_scores) or 0          # weighed (1.47.0)
 
             windows.append(WindowStats(
                 start=current_window_start.strftime("%Y-%m-%d"),
@@ -604,10 +604,10 @@ def group_summary(
     weakest = min(dim_avgs, key=dim_avgs.get) if dim_avgs else "unknown"
     strongest = max(dim_avgs, key=dim_avgs.get) if dim_avgs else "unknown"
 
-    # Each person's overall is the mean of the dimensions that applied to
-    # them (before 1.7.5 this was cpu + memory + time over 3, counting a
-    # dimension with no data as zero).
-    person_overall = [sum(t.current_scores.values()) / len(t.current_scores)
+    # Each person's overall is the dimensions that applied to them, each
+    # counting its weight (1.47.0; before 1.7.5 this was cpu + memory + time
+    # over 3, counting a dimension with no data as zero).
+    person_overall = [weighted_mean(t.current_scores)
                       for t in trajectories if t.current_scores]
     avg_overall = (sum(person_overall) / len(person_overall)) if person_overall else 0
 
@@ -672,7 +672,7 @@ def format_trajectory(traj: UserTrajectory) -> str:
             dim_label = {
                 "cpu": "CPU Efficiency",
                 "memory": "Memory Efficiency",
-                "time": "Time Estimation",
+                "time": "Time Limit",
                 "io": "I/O Awareness",
                 "gpu": "GPU Utilization",
             }.get(dim, dim)
@@ -716,7 +716,7 @@ def format_group_summary(gs: GroupSummary) -> str:
         dim_label = {
             "cpu": "CPU Efficiency",
             "memory": "Memory Efficiency",
-            "time": "Time Estimation",
+            "time": "Time Limit",
             "io": "I/O Awareness",
             "gpu": "GPU Utilization",
         }.get(dim, dim)

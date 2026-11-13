@@ -131,32 +131,31 @@ on Slurm 22.05 with cgroup v2 it counts transparent huge pages twice: arachne
 reported 2.0 GB for a job the kernel measured at 1.0 GB. With `UsePss` the
 same job read 1.0 GB.)
 
-### 3. Time Estimation
+### 3. Time Limit
 
-**What it measures**: How accurately did the user estimate walltime?
+**What it measures**: How close the time limit a job asked for (`--time`) was
+to how long it ran.
 
-**Formula**:
-$$\text{Time Score} = \begin{cases}
-95 + 5 \times (1 - \frac{\text{Runtime}}{\text{Requested}}) & \text{if ratio} \geq 0.7 \\
-70 \times \frac{\text{Runtime}}{\text{Requested}} & \text{if ratio} < 0.7
-\end{cases}$$
+**Scoring** (runtime as a share of the limit asked):
 
-Using close to requested time (without exceeding) is optimal.
+| Runtime/Limit | Score | Level | Interpretation |
+|---------------|-------|-------|----------------|
+| 50-85% | 85-100 | Excellent | Close to how long it runs, with room to spare (about two thirds scores 100) |
+| 85-100% | 75 | Good | Close to the limit, where Slurm stops a job |
+| 25-49% | 50-84 | Developing–Good | A generous limit |
+| 5-24% | 25-49 | Needs Work–Developing | A limit several times what it needs |
+| < 5% | 5-24 | Needs Work | A limit far above what it needs |
+| TIMEOUT | 20 | Needs Work | Stopped at its limit before it finished |
 
-**Scoring rubric**:
+A job that ran under 5 minutes isn't judged on its limit (a test, or a job
+that stopped early).
 
-| Runtime/Requested | Score | Level | Interpretation |
-|-------------------|-------|-------|----------------|
-| 70-100% | 85-100 | Excellent | Accurate estimation |
-| 40-69% | 65-84 | Good | Conservative but reasonable |
-| 20-39% | 40-64 | Developing | Significant overestimation |
-| < 20% | 0-39 | Needs Work | Gross overestimation |
-
-**Why it matters**:
-
-- Backfill scheduling depends on accurate time estimates
-- Over-requesting blocks resources from others
-- Under-requesting causes job kills
+**Why it matters**: a limit far above what a job needs makes it wait longer
+to start, since Slurm can't fit it into a gap between other jobs (backfill);
+the limit doesn't change how fast it runs. A limit too short stops the job and
+loses the work since its last checkpoint. Because a generous limit mostly
+costs the job itself a later start, it counts a quarter in the overall score
+(see below).
 
 ### 4. I/O Awareness
 
@@ -239,14 +238,40 @@ Scores map to four proficiency levels:
 
 ## Overall Score
 
-The overall score is the plain mean of the dimensions that apply to the job
-and were measured:
+The overall score is the mean of the dimensions that apply to the job and
+were measured, each counting by its weight (1.47.0; before, all counted the
+same):
 
-$$\text{Overall} = \frac{1}{|A|}\sum_{d \in A} s_d \qquad A = \text{applicable, measured dimensions}$$
+$$\text{Overall} = \frac{\sum_{d \in A} w_d\, s_d}{\sum_{d \in A} w_d} \qquad A = \text{applicable, measured dimensions}$$
+
+| Dimension | Weight |
+|-----------|--------|
+| CPU | 1 |
+| Memory | 1 |
+| GPU | 1 |
+| I/O | 0.5 |
+| Time limit | 0.25 |
+
+The cores, memory and GPUs a job holds are what keep other jobs waiting; a
+generous time limit mostly makes the job itself start later. A site changes
+the weights in nomad.toml (numbers from 0 to 10; `nomad config check` says
+when one isn't):
+
+```toml
+[edu.weights]
+cpu = 1.0
+memory = 1.0
+gpu = 1.0
+io = 0.5
+time = 0.25
+```
 
 A dimension that was not measured is left out, never counted as zero or as a
 default. For a person or a period, dimensions are averaged over their measured
-jobs first, and the overall is the mean of those averages. Only jobs NØMAÐ
+jobs first, and the overall is those averages, weighed the same way. Every
+page and report that shows an overall (My Activity, Recommendations, Over
+time, People, Groups' reports, a job's page) works it out when it's shown, so
+changing the weights changes the history too, with no step at the change. Only jobs NØMAÐ
 measured (with a `job_summary` row) are scored; the rest are counted, not scored.
 
 ## Trajectory Tracking
@@ -269,7 +294,7 @@ Beyond single jobs, NØMAÐ tracks proficiency development over time:
 │                                                            │
 │   CPU Efficiency      48.3% → 71.2%   ↑ +22.9%            │
 │   Memory Efficiency   84.0% → 89.9%   ↑ +5.9%             │
-│   Time Estimation     72.1% → 85.4%   ↑ +13.3%            │
+│   Time Limit          72.1% → 85.4%   ↑ +13.3%            │
 │   I/O Awareness       81.5% → 88.2%   ↑ +6.7%             │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -299,7 +324,7 @@ nomad edu report cs301
 │                                                            │
 │ Group Proficiency                                          │
 │   Memory Efficiency    ███████████░   92.1%  → +3.2%      │
-│   Time Estimation      █████████░░░   84.7%  → +8.1%      │
+│   Time Limit           █████████░░░   84.7%  → +8.1%      │
 │   I/O Awareness        ████████░░░░   79.3%  → +5.4%      │
 │   CPU Efficiency       ██████░░░░░░   58.2%  → +12.1%     │
 │                                                            │
