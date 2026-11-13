@@ -184,7 +184,7 @@ def test_a_node_answering_in_another_encoding_is_read(tmp_path, monkeypatch):
     ensure_database(db)
     r = ND.NodeDisksCollector({"nodes": ["cn01", "cn02"], "paths": ["/"], "owners": False,
                                "alerts_enabled": False}, db).run()
-    assert r.success and r.records_collected == 1, r.error_message
+    assert r.success and r.records_collected == 2, r.error_message       # its disk, and its memory (1.47.1)
     assert "cn02 (Bienvenue" in r.note
 
 

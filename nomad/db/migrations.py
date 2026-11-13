@@ -470,6 +470,20 @@ MIGRATIONS: list[tuple[int, str, object]] = [
     (28, "Index jobs by start_time", _jobs_start_index),
     # Each core's temperature, one row a core, taken out: the hottest core a chip is kept (1.25.7).
     (29, "Temperatures: a chip's cores as one", _temps_cores_as_one),
+    # What each compute node's memory holds, from /proc/meminfo (1.47.1):
+    # Slurm's FreeMem counts the file cache as used.
+    (30, "Create node_memory", """
+        CREATE TABLE IF NOT EXISTS node_memory (
+            timestamp TEXT NOT NULL,
+            node TEXT NOT NULL,
+            total_mb INTEGER,
+            available_mb INTEGER,
+            free_mb INTEGER,
+            cache_mb INTEGER,
+            used_mb INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_memory_node_time ON node_memory(node, timestamp);
+    """),
 ]
 
 

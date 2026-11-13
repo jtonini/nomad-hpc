@@ -5525,6 +5525,8 @@ SYNC_INDEXES = [
         ("node_disks", "source_site, node, timestamp"),
         ("node_disk_owner_counts", "source_site, node, path, timestamp"),
         ("node_disk_owners", "source_site, node, path, timestamp"),
+        # What each node's memory holds (1.47.1): each node's latest.
+        ("node_memory", "source_site, node, timestamp"),
         # Who uses each storage server's space (1.16).
         ("storage_owners", "source_site, server, path, kind, timestamp"),
         ("storage_owners", "name, timestamp"),

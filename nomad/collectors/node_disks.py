@@ -50,6 +50,16 @@ not repeated at every cron run, nor retried within one.
     # owners_top = 5               # owners kept per node and path
     # owners_per_sweep = 8         # nodes counted per sweep (at most parallel)
     # owners_in_alerts = true      # name the largest owners in alerts
+    # memory = true                # also what each node's memory holds (1.47.1)
+
+What the node's memory holds (1.47.1, ``memory = true``, the default): the
+same login reads /proc/meminfo. Slurm's FreeMem is MemFree, which counts the
+file cache as used: a node left idle after a long job read as nearly full.
+MemAvailable leaves out what the kernel gives back on demand, so total less
+available is what programs hold. Table ``node_memory``: timestamp, node,
+total_mb, available_mb, free_mb, cache_mb (buffers, page cache and
+reclaimable kernel memory, less shared memory), used_mb (total less
+available; None on a kernel without MemAvailable).
 
 Table ``node_disks``: timestamp, node, path, mount, device, total_bytes,
 used_bytes, available_bytes, used_percent. Table ``node_disks_sweeps``: when
@@ -78,6 +88,8 @@ from nomad.collectors.base import (BaseCollector, CollectionError, MissingToolEr
 logger = logging.getLogger(__name__)
 
 OUTPUT_MARK = "__NOMAD_OUTPUT_BEGINS__"
+MEMORY_MARK = "__NOMAD_MEMINFO__"
+MEMINFO_KEYS = ("MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached", "SReclaimable", "Shmem")
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$")
 # Slurm states of a node that won't answer (sinfo %t): down, powered down or
 # powering, rebooting, configured for the future but not there. A node that
@@ -129,6 +141,16 @@ CREATE TABLE IF NOT EXISTS node_disk_owners (
     unreadable INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_node_disk_owners ON node_disk_owners(node, path, timestamp);
+CREATE TABLE IF NOT EXISTS node_memory (
+    timestamp TEXT NOT NULL,
+    node TEXT NOT NULL,
+    total_mb INTEGER,
+    available_mb INTEGER,
+    free_mb INTEGER,
+    cache_mb INTEGER,
+    used_mb INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_node_memory_node_time ON node_memory(node, timestamp);
 """
 
 # Totals a path by owner on the node, after a C line naming the path: an O
@@ -181,14 +203,18 @@ def paths_from(config: dict) -> list[str]:
     return out
 
 
-def remote_command(paths: list[str]) -> str:
+def remote_command(paths: list[str], memory: bool = False) -> str:
     """One line per path: the path, a tab, then df's line for it (empty when
     the path isn't there). Printed after OUTPUT_MARK, so a login banner is
-    never read as a reading."""
+    never read as a reading. With memory (1.47.1): then MEMORY_MARK and the
+    node's /proc/meminfo lines of MEMINFO_KEYS."""
     quoted = " ".join(shlex.quote(p) for p in paths)
     script = (f"echo {OUTPUT_MARK}; for p in {quoted}; do "
               "r=$(df -P -B1 -- \"$p\" 2>/dev/null | tail -n 1); "
               "printf '%s\\t%s\\n' \"$p\" \"$r\"; done")
+    if memory:
+        keys = "|".join(MEMINFO_KEYS)
+        script += f"; echo {MEMORY_MARK}; grep -E '^({keys}):' /proc/meminfo 2>/dev/null; true"
     # In sh whatever the account's login shell (csh has no $(...)).
     return "sh -c " + shlex.quote(script)
 
@@ -276,10 +302,32 @@ def owners_summary(got: dict, top: int, names: dict) -> dict:
                     for u in kept]}
 
 
+def parse_memory(node: str, text: str, when: str) -> dict[str, Any] | None:
+    """A node's memory from its /proc/meminfo lines (kB), or None without MemTotal."""
+    kb = {}
+    for line in text.splitlines():
+        key, _colon, rest = line.partition(":")
+        f = rest.split()
+        if key in MEMINFO_KEYS and f and f[0].isdigit():
+            kb[key] = int(f[0])
+    total = kb.get("MemTotal")
+    if not total:
+        return None
+    mb = lambda k: None if kb.get(k) is None else round(kb[k] / 1024)   # noqa: E731
+    cache = sum(kb.get(k, 0) for k in ("Buffers", "Cached", "SReclaimable")) - kb.get("Shmem", 0)
+    avail = kb.get("MemAvailable")
+    return {"type": "node_memory", "timestamp": when, "node": node, "total_mb": mb("MemTotal"),
+            "available_mb": mb("MemAvailable"), "free_mb": mb("MemFree"),
+            "cache_mb": round(max(0, cache) / 1024),
+            "used_mb": None if avail is None else round(max(0, total - avail) / 1024)}
+
+
 def parse(node: str, output: str, when: str) -> list[dict[str, Any]]:
-    """Readings from one node's answer to remote_command."""
+    """Readings from one node's answer to remote_command: its disks, and its
+    memory when it was asked for (one node_memory record, last)."""
     head, mark, rest = output.partition(OUTPUT_MARK + "\n")
     text = rest if mark else output
+    text, mem_mark, meminfo = text.partition(MEMORY_MARK + "\n")
     out = []
     for line in text.splitlines():
         path, _tab, df = line.partition("\t")
@@ -295,6 +343,10 @@ def parse(node: str, output: str, when: str) -> list[dict[str, Any]]:
         out.append({"type": "node_disk", "timestamp": when, "node": node, "path": path,
                     "mount": " ".join(f[5:]), "device": f[0], "total_bytes": total,
                     "used_bytes": used, "available_bytes": avail, "used_percent": pct})
+    if mem_mark:
+        m = parse_memory(node, meminfo, when)
+        if m:
+            out.append(m)
     return out
 
 
@@ -345,6 +397,7 @@ class NodeDisksCollector(BaseCollector):
         self.owners_per_sweep = max(1, min(self.parallel, int(
             c.get("owners_per_sweep", self.parallel) or self.parallel)))
         self.owners_in_alerts = c.get("owners_in_alerts", True) is not False
+        self.memory = c.get("memory", True) is not False
 
     # -- when ---------------------------------------------------------------------
 
@@ -470,7 +523,7 @@ class NodeDisksCollector(BaseCollector):
         try:
             # errors="replace": a banner in another encoding is one node's
             # oddity, not a reason to lose every node's readings.
-            r = subprocess.run(self._argv(ssh, host, remote_command(self.paths)),
+            r = subprocess.run(self._argv(ssh, host, remote_command(self.paths, self.memory)),
                                capture_output=True, text=True, errors="replace",
                                timeout=self.timeout + 10)
         except subprocess.TimeoutExpired:
@@ -552,7 +605,7 @@ class NodeDisksCollector(BaseCollector):
         finally:
             # Those already asking end within their own timeout, and count.
             pool.shutdown(wait=True, cancel_futures=True)
-        records, failed, missing, answered = [], [], 0, 0
+        records, memory, failed, missing, answered = [], [], [], 0, 0
         for (n, _h), f in zip(nodes, futures):
             if f.cancelled():
                 continue
@@ -564,8 +617,10 @@ class NodeDisksCollector(BaseCollector):
                 failed.append(f"{node} ({why})")
                 continue
             answered += 1
-            missing += len(self.paths) - len(got)
-            records.extend(got)
+            disks = [g for g in got if g.get("type") == "node_disk"]
+            memory.extend(g for g in got if g.get("type") == "node_memory")
+            missing += len(self.paths) - len(disks)
+            records.extend(disks)
         self._sweep(when, len(nodes), answered, len(records))
         notes = []
         if failed:
@@ -590,14 +645,23 @@ class NodeDisksCollector(BaseCollector):
         for r in records:
             # For the alerts: how often a full disk is seen (see _check_node_disk).
             r["every_minutes"] = every
-        return records
+        if self.memory and answered and not memory:
+            notes.append("no node said what its memory holds (/proc/meminfo)")
+            self.note = "; ".join(notes)
+        return records + memory
 
     def store(self, data: list[dict[str, Any]]) -> None:
         rows = [d for d in data if d.get("type") == "node_disk"]
-        if not rows:
+        mem = [d for d in data if d.get("type") == "node_memory"]
+        if not rows and not mem:
             return
         with self.get_db_connection() as conn:
             conn.executescript(SCHEMA)
+            conn.executemany(
+                "INSERT INTO node_memory (timestamp, node, total_mb, available_mb, free_mb, cache_mb, "
+                "used_mb) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(d["timestamp"], d["node"], d["total_mb"], d["available_mb"], d["free_mb"],
+                  d["cache_mb"], d["used_mb"]) for d in mem])
             conn.executemany(
                 "INSERT INTO node_disks (timestamp, node, path, mount, device, total_bytes, "
                 "used_bytes, available_bytes, used_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

@@ -62,6 +62,9 @@ SERIES = {
     "load_pct": {"label": "Load, of its cores", "unit": "%", "group": "cpu"},
     "mem_alloc_pct": {"label": "Memory allocated", "unit": "%", "group": "memory"},
     "mem_held_pct": {"label": "Memory held, file cache counted", "unit": "%", "group": "memory"},
+    # What programs hold (1.47.1, node_memory: total less MemAvailable), read
+    # every half hour where the node_disks collector logs in to the nodes.
+    "mem_used_pct": {"label": "Memory in use by programs", "unit": "%", "group": "memory"},
     "gpu_busy_pct": {"label": "GPUs busy (DCGM)", "unit": "%", "group": "gpu"},
     "gpu_mem_pct": {"label": "GPU memory in use", "unit": "%", "group": "gpu"},
     "gpu_temp_c": {"label": "Hottest GPU", "unit": "°C", "group": "temperature"},
@@ -341,6 +344,11 @@ def node(conn: sqlite3.Connection, site, name: str, since: datetime, until: date
         if mhz and top:
             b["clock_pct"].add(parse_time(r["t"]), 100 * mhz / top)
 
+    for r in _rows(conn, "node_memory", "node", name, "timestamp", since, until, site, ("used_mb", "total_mb")):
+        used, tot = num(r.get("used_mb")), num(r.get("total_mb"))
+        if used is not None and tot:
+            b["mem_used_pct"].add(parse_time(r["t"]), 100 * used / tot)
+
     disks = set()
     for r in _rows(conn, "node_disks", "node", name, "timestamp", since, until, site, ("path", "used_percent")):
         b["disk_used_pct"].add(parse_time(r["t"]), num(r.get("used_percent")))
@@ -356,6 +364,14 @@ def node(conn: sqlite3.Connection, site, name: str, since: datetime, until: date
         info_series["temp_c"]["critical"] = min(crit)
     if "disk_used_pct" in info_series:
         info_series["disk_used_pct"]["paths"] = sorted(p for p in disks if p)
+    if "mem_used_pct" in info_series:
+        # Programs' memory read here (1.47.1): the cache-counted line isn't drawn beside it.
+        series.pop("mem_held_pct", None)
+        info_series.pop("mem_held_pct", None)
+    if not mem_tracked and "mem_used_pct" in info_series:
+        info_series["mem_used_pct"]["note"] = ("Slurm here doesn't allocate memory (its jobs aren't given a share "
+                                               "of it: SelectTypeParameters without _Memory), so there is no line "
+                                               "for memory allocated.")
     if not mem_tracked and "mem_held_pct" in info_series:
         # Why there is no "Memory allocated" line (1.45.1): said, not left to be guessed.
         info_series["mem_held_pct"]["note"] = ("Slurm here doesn't allocate memory (its jobs aren't given a share "

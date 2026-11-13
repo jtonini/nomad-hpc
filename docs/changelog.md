@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.47.1 (November 2026)
+
+- **What each compute node's memory holds** (`node_disks`, `memory = true`
+  by default; table `node_memory`): the collector's login to each node, every
+  half hour, also reads `/proc/meminfo`. Slurm's `FreeMem` is MemFree, which
+  counts the file cache as used, so a node left idle after a long job read as
+  nearly full: spdr01 showed 82% in use with nothing allocated and a load of
+  0.2. Total less MemAvailable is what programs hold; the cache is kept
+  apart. A node's timeline draws "Memory in use by programs" from it, in
+  place of the cache-counted line, where it is read. The Console's Nodes page
+  uses it in fix 116.
+- tests/test_node_disks.py: a node answering here now gives its memory too.
+
 ## v1.47.0 (November 2026)
 
 - **Which jobs** (`nomad edu me`, the Console's Recommendations and My

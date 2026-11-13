@@ -338,6 +338,25 @@ account reads what it counts: a folder it can't read is not counted, and its
 owner is named instead ("folders of X could not be read"), so an incomplete
 count never passes for the full picture.
 
+### What each node's memory holds
+
+Since 1.47.1 the same login also reads the node's `/proc/meminfo`. Slurm's
+`FreeMem` is the kernel's MemFree, which counts the file cache as used: a node
+left idle after a long job reads as nearly full (spdr01: 82% "in use", 0 GB
+allocated, load 0.2), though the kernel gives that memory back as soon as a
+job asks. MemAvailable leaves it out, so total less available is what
+programs hold. Each sweep adds one `node_memory` row per node that answered:
+total, available, free (MemFree), cache (buffers, page cache and reclaimable
+kernel memory, less shared memory), and used (total less available; empty on
+a kernel too old to have MemAvailable). The Console's Nodes page and a node's
+timeline show "in use" from it where there is one; elsewhere they say the
+figure counts the file cache.
+
+```toml
+[collectors.node_disks]
+# memory = true                # false: disks only
+```
+
 A disk's alert names its three largest owners and their sizes. Alerts also
 go to Slack and webhooks when those are set up: `owners_in_alerts = false`
 keeps names out of every alert (the counts are still kept). The NØMAÐ

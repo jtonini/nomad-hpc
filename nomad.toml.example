@@ -220,6 +220,8 @@ check_services = ["slurmd", "munge"]
 # owners_top = 5
 # owners_per_sweep = 8           # default and most: parallel
 # owners_in_alerts = true        # false: no names in alerts (Slack, webhooks)
+# memory = true                  # also what each node's memory holds, from /proc/meminfo (1.47.1):
+#                                # Slurm's FreeMem counts the file cache as used
 
 # ============================================
 # LICENSE COLLECTOR
