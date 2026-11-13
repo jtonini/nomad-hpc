@@ -25,6 +25,10 @@ also measured without partition and cluster, and the logistic regression
 with them alone: how much of what each model knows is where a job ran. The
 waste target carries the spread of how much of their time completed jobs
 used (the hub's counts, no job's own figure).
+
+1.46.0: the idle target (most of the cores asked left idle), and with
+[ml.train] bootstrap, 95% ranges of each AUC and of the difference between
+the models, from resamples of the held-out jobs.
 """
 from __future__ import annotations
 
@@ -70,6 +74,33 @@ def _auc(y, p):
         return round(float(roc_auc_score(y, p)), 4) if 0 < y.sum() < len(y) else None
     except ValueError:
         return None
+
+
+def _intervals(y, a, b, resamples: int, seed: int = 0) -> dict | None:
+    """95% ranges of each model's AUC and of their difference (a - b), from ``resamples``
+    resamples of the held-out jobs (1.46.0). Paired: each resample's jobs are the same for
+    both models, so the difference's range is the one that says whether they differ."""
+    import numpy as np
+    from sklearn.metrics import roc_auc_score
+    if not resamples or b is None or len(y) < 20 or not 0 < int(y.sum()) < len(y):
+        return None
+    rng = np.random.default_rng(seed)
+    got_a, got_b, diff = [], [], []
+    for _ in range(int(resamples)):
+        i = rng.integers(0, len(y), len(y))
+        yi = y[i]
+        if yi.min() == yi.max():
+            continue
+        bb = roc_auc_score(yi, b[i])
+        got_b.append(bb)
+        if a is not None:
+            aa = roc_auc_score(yi, a[i])
+            got_a.append(aa)
+            diff.append(aa - bb)
+
+    def q(v):
+        return [round(float(np.percentile(v, 2.5)), 4), round(float(np.percentile(v, 97.5)), 4)] if v else None
+    return {"resamples": len(got_b), "tessera": q(got_a), "baseline": q(got_b), "difference": q(diff)}
 
 
 def _top_tenth(y, p) -> float | None:
@@ -190,6 +221,10 @@ def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
                       "baseline": _auc(yh, base[hold])}
         out["top_tenth"] = {"tessera": _top_tenth(yh, risk[hold]) if engine == "tessera" else None,
                             "baseline": _top_tenth(yh, base[hold])}
+        resamples = int(plan.get("bootstrap") or 0)
+        if resamples:
+            progress(f"{target}: ranges ({resamples:,} resamples)")
+            out["interval"] = _intervals(yh, risk[hold] if engine == "tessera" else None, base[hold], resamples)
         if plan.get("compare"):
             # What partition and cluster carry: each model without them; the logistic regression with them alone.
             progress(f"{target}: without partition and cluster")
@@ -198,7 +233,9 @@ def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
             if engine == "tessera":
                 t2, _ = _tessera(_features(Xp, "without_place"), yp, train, wp, plan, used)
             out["without_place"] = {"auc": {"tessera": _auc(yh, t2[hold]) if t2 is not None else None,
-                                            "baseline": _auc(yh, b2[hold])}}
+                                            "baseline": _auc(yh, b2[hold])},
+                                    "interval": _intervals(yh, t2[hold] if t2 is not None else None, b2[hold],
+                                                           resamples)}
             alone = _features(Xp, "place_alone")
             out["place_alone"] = {"auc": {"baseline": _auc(yh, _logistic(alone, yp, train)[hold])
                                           if alone.shape[1] else None}}

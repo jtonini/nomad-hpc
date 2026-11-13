@@ -31,7 +31,7 @@ NOW = datetime(2026, 11, 12, 12, 0)
 def test_settings_and_their_problems():
     s = settings({})
     assert (s.enabled, s.engine, s.predicts, s.holdout_share, s.keep_runs, s.problems) == (
-        False, "tessera", ("failure", "waste"), 0.2, 20, ())
+        False, "tessera", ("failure", "idle"), 0.2, 20, ())                # idle by default since 1.46.0
     assert s.epochs == {"gnn": 100, "lstm": 60, "ae": 60}
     on = settings({"ml": {"enabled": False, "epochs": 100, "train": {
         "enabled": True, "engine": "baseline", "predicts": "waste", "trainer": "badenpowell",
@@ -40,11 +40,12 @@ def test_settings_and_their_problems():
         True, "baseline", ("waste",), "badenpowell", 90, 50000, 20)
     assert on.plan() == {"engine": "baseline", "predicts": ["waste"], "jobs_days": 90, "max_jobs": 50000,
                          "waste_threshold": 0.6, "holdout_share": 0.2, "epochs": {"gnn": 20, "lstm": 60, "ae": 60},
-                         "compare": True, "tessera": {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10}}
+                         "compare": True, "tessera": {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10},
+                         "idle_threshold": 0.5, "bootstrap": 1000}
     bad = settings({"ml": {"train": {"enabled": "yes", "engine": "magic", "predicts": ["luck"], "holdout_share": 0.9,
                                      "jobs_days": 1, "epochs": {"ae": 0}}}})
     assert (bad.enabled, bad.engine, bad.predicts, bad.holdout_share, bad.jobs_days, bad.epochs["ae"]) == (
-        False, "tessera", ("failure", "waste"), 0.2, 365, 60)
+        False, "tessera", ("failure", "idle"), 0.2, 365, 60)
     assert len(bad.problems) == 6
     w = worker_settings({"ml": {"worker": {"console": "https://nomad.example.edu/", "device": "cpu",
                                            "name": "badenpowell"}}})
@@ -88,7 +89,7 @@ def jobs_db(path, n=400, seed=0):
     return c
 
 
-PLAN = Settings(enabled=True).plan()
+PLAN = Settings(enabled=True, predicts=("failure", "waste")).plan()       # the 1.45.0 outcomes
 
 
 def test_the_dataset_has_numbers_only(tmp_path):

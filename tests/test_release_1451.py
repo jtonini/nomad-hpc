@@ -145,7 +145,7 @@ def test_the_waste_card_carries_the_spread(tmp_path):
         c.execute("INSERT INTO jobs VALUES (?, 'p', 4, 0, 4096, 36000, ?, ?, ?, ?, 's')",
                   (str(i), ran, sub.isoformat(), (sub + timedelta(seconds=ran)).isoformat(),
                    "COMPLETED" if i % 7 else "FAILED"))
-    data, _ = D.build(c, {**Settings(enabled=True, engine="baseline").plan()}, NOW)
+    data, _ = D.build(c, {**Settings(enabled=True, engine="baseline", predicts=("failure", "waste")).plan()}, NOW)
     spread = data["spread"]["waste"]
     assert spread["jobs"] == sum(1 for i in range(300) if i % 7) and set(spread["used_at"]) == {"0.1", "0.25", "0.5",
                                                                                                "0.75", "0.9"}

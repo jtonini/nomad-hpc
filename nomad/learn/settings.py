@@ -10,13 +10,19 @@ On the hub::
     [ml.train]
     enabled = true                   # the Console offers Train… (administrators)
     engine = "tessera"               # or "baseline": logistic regression only
-    predicts = ["failure", "waste"]  # a job failing; most of its reserved time unused
+    predicts = ["failure", "idle"]   # a job failing; most of its cores left idle (1.46.0);
+                                     # also "waste": most of its time asked unused
     trainer = "badenpowell"          # the worker's name, as the Console says it
     jobs_days = 365                  # jobs submitted in the last this many days
     max_jobs = 50000                 # the newest this many ended jobs (0: all; the similarity
                                      # network's time grows as the square: ~12,000 jobs take
                                      # half a minute on a CPU, 50,000 several minutes)
     waste_threshold = 0.6            # "wasted": more than this share of the time asked went unused
+    idle_threshold = 0.5             # "idle": on average, more than this share of the cores asked
+                                     # sat unused (jobs of 2 cores or more that completed, ran 5
+                                     # minutes or more, and were measured: as Recommendations judge)
+    bootstrap = 1000                 # resamples of the held-out jobs for the 95% range of each AUC
+                                     # and of the difference between the models (0: none)
     holdout_share = 0.2              # the newest share, trained on as unknown: how well it did
     keep_runs = 20                   # runs kept with their scores (older ones keep their summary)
     stale_minutes = 360              # a run not heard from this long is given up
@@ -51,7 +57,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ENGINES = ("tessera", "baseline")
-TARGETS = ("failure", "waste")
+TARGETS = ("failure", "waste", "idle")
+DEFAULT_TARGETS = ("failure", "idle")
 DEVICES = ("cuda", "cpu", "auto")
 SIMILARITIES = ("euclidean", "cosine", "mahalanobis", "pearson", "bray_curtis", "simpson", "jaccard")
 KEY_MIN = 32
@@ -61,11 +68,13 @@ KEY_MIN = 32
 class Settings:
     enabled: bool = False
     engine: str = "tessera"
-    predicts: tuple = TARGETS
+    predicts: tuple = DEFAULT_TARGETS
     trainer: str = ""
     jobs_days: int = 365
     max_jobs: int = 50000
     waste_threshold: float = 0.6
+    idle_threshold: float = 0.5
+    bootstrap: int = 1000
     holdout_share: float = 0.2
     keep_runs: int = 20
     stale_minutes: int = 360
@@ -81,6 +90,7 @@ class Settings:
         nomad.toml doesn't change a request already asked)."""
         return {"engine": self.engine, "predicts": list(self.predicts), "jobs_days": self.jobs_days,
                 "max_jobs": self.max_jobs, "waste_threshold": self.waste_threshold,
+                "idle_threshold": self.idle_threshold, "bootstrap": self.bootstrap,
                 "holdout_share": self.holdout_share, "epochs": dict(self.epochs), "compare": self.compare,
                 "tessera": dict(self.tessera)}
 
@@ -105,12 +115,12 @@ def settings(config: dict | None) -> Settings:
     if engine not in ENGINES:
         p.append(f"[ml.train] engine should be one of {', '.join(ENGINES)}")
         engine = "tessera"
-    predicts = raw.get("predicts", list(TARGETS))
+    predicts = raw.get("predicts", list(DEFAULT_TARGETS))
     if isinstance(predicts, str):
         predicts = [predicts]
     if not (isinstance(predicts, list) and predicts and all(t in TARGETS for t in predicts)):
         p.append(f"[ml.train] predicts should be a list of {', '.join(TARGETS)}")
-        predicts = list(TARGETS)
+        predicts = list(DEFAULT_TARGETS)
     trainer = raw.get("trainer", "")
     if not isinstance(trainer, str) or len(trainer) > 64:
         p.append("[ml.train] trainer should be a short name")
@@ -144,6 +154,8 @@ def settings(config: dict | None) -> Settings:
         jobs_days=_num(raw, "jobs_days", 365, 7, 3650, p, int),
         max_jobs=_num(raw, "max_jobs", 50000, 0, 5_000_000, p, int),
         waste_threshold=_num(raw, "waste_threshold", 0.6, 0.05, 0.95, p),
+        idle_threshold=_num(raw, "idle_threshold", 0.5, 0.05, 0.95, p),
+        bootstrap=_num(raw, "bootstrap", 1000, 0, 10000, p, int),
         holdout_share=_num(raw, "holdout_share", 0.2, 0.05, 0.5, p),
         keep_runs=_num(raw, "keep_runs", 20, 1, 500, p, int),
         stale_minutes=_num(raw, "stale_minutes", 360, 10, 10080, p, int),
@@ -198,4 +210,5 @@ def worker_settings(config: dict | None) -> WorkerSettings:
 
 
 __all__ = ["Settings", "settings", "WorkerSettings", "worker_settings", "read_key", "ENGINES", "TARGETS",
+           "DEFAULT_TARGETS",
            "SIMILARITIES"]

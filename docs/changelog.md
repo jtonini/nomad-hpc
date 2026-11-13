@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.46.0 (November 2026)
+
+- **Cores left idle** (`idle`, now asked by default with failure): a
+  completed job of 2 cores or more that ran 5 minutes or more and was
+  measured, which on average left more than `[ml.train] idle_threshold`
+  (0.5) of the cores it asked for unused. These are the jobs the
+  Recommendations judge for cores, judged the same way, matched to
+  job_summary as they match it. Time unused (`waste`) stays available: at the
+  University of Richmond half the completed jobs used under 1% of the time
+  they asked, and 89% counted as wasted even at 0.9, so its AUCs said little.
+  Each of idle and waste carries its spread (what share of the cores or the
+  time the jobs used), counts only.
+- **Ranges** (`[ml.train] bootstrap`, 1000 resamples): the 95% range of each
+  model's AUC and of the difference between them, paired (the same held-out
+  jobs for both in each resample), on all columns and without partition and
+  cluster.
+
 ## v1.45.1 (November 2026)
 
 - **A fair comparison.** The first run on real jobs had the logistic

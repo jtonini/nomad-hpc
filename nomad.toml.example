@@ -973,11 +973,14 @@ min_jobs = 50
 # [ml.train]
 # enabled = true
 # engine = "tessera"                    # or "baseline": a logistic regression only
-# predicts = ["failure", "waste"]
+# predicts = ["failure", "idle"]        # failing; most of the cores left idle (1.46.0); or "waste"
 # trainer = "badenpowell"               # the worker's name, as the Console says it
 # jobs_days = 365
 # max_jobs = 50000                      # the newest ended jobs (0: all; time grows as the square)
 # waste_threshold = 0.6                 # "wasted": more than this share of the time asked unused
+# idle_threshold = 0.5                  # "idle": on average, more than this share of the cores asked
+#                                       # unused (2+ cores, 5+ minutes, completed, measured) (1.46.0)
+# bootstrap = 1000                      # resamples for the 95% ranges of the AUCs (0: none) (1.46.0)
 # holdout_share = 0.2                   # the newest share: kept from it, then used to test it
 # keep_runs = 20
 # stale_minutes = 360

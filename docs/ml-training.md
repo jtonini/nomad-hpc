@@ -34,8 +34,16 @@ not an outcome), at most the newest `max_jobs`; and those running or waiting.
 What it predicts (`predicts`):
 
 - **failure**: an ended job that didn't complete;
+- **idle** (1.46.0, the default with failure): a completed job of 2 cores or
+  more that ran 5 minutes or more and was measured, which on average left
+  more than `idle_threshold` of the cores it asked for unused: the jobs the
+  Recommendations judge for cores, judged as they judge them;
 - **waste**: a completed job that used less than `1 - waste_threshold` of the
-  time it asked for.
+  time it asked for. Where most jobs don't set `--time` and get their
+  partition's default, nearly every job counts (at the University of
+  Richmond, half the completed jobs used under 1% of the time they asked, and
+  89% would count even at 0.9): the question then says little, which is why
+  it is no longer asked by default.
 
 ## How well it did, honestly
 
@@ -54,11 +62,15 @@ older jobs. Data readiness shows, per target:
 - with `compare` (1.45.1), each model's AUC without partition and cluster,
   and the logistic regression's with them alone: how much of what a model
   knows is where a job ran, rather than what it asked for;
-- for waste, how much of the time they asked for the completed jobs used (at
-  the tenth, quarter, half, three quarters and nine tenths of them) and how
-  many would count as wasted at a few thresholds: the counts to choose
-  `waste_threshold` by. When nearly every job counts as wasted, the AUCs say
-  little.
+- for idle and waste, how much of the cores or the time they asked for the
+  jobs used (at the tenth, quarter, half, three quarters and nine tenths of
+  them) and how many would count at a few thresholds: the counts to choose
+  `idle_threshold` and `waste_threshold` by. When nearly every job counts,
+  the AUCs say little, and the card says so;
+- with `bootstrap` (1.46.0), the 95% range of each AUC and of the difference
+  between the two models, from resamples of the held-out jobs (the same jobs
+  for both models in each resample). Where the difference's range spans
+  zero, the card says they do about as well, whatever their AUCs.
 
 When the logistic regression does as well or better, it says so.
 
@@ -71,13 +83,15 @@ thing's):
 [ml.train]
 enabled = true                   # the Console offers Train… (administrators)
 engine = "tessera"               # or "baseline": a logistic regression only
-predicts = ["failure", "waste"]
+predicts = ["failure", "idle"]   # or with "waste"
 trainer = "badenpowell"          # the worker's name, as the Console says it
 jobs_days = 365
 max_jobs = 50000                 # the newest ended jobs (0: all); the similarity
                                  # network's time grows as the square of the jobs
 waste_threshold = 0.6
+idle_threshold = 0.5             # (1.46.0)
 holdout_share = 0.2
+bootstrap = 1000                 # resamples for the ranges (0: none) (1.46.0)
 keep_runs = 20                   # runs kept with their scores
 stale_minutes = 360              # a run not heard from this long is given up
 key_file = "~/.config/nomad/ml_worker_key"   # the nomad account's (600)
