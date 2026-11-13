@@ -28,6 +28,8 @@ def _issue(i) -> dict:
         "why": i.rationale if i.directive_label else (i.suggestion_rationale or ""),
         "jobs_affected": i.affected_jobs,
         "of_jobs": i.total_applicable,
+        "completed_jobs": getattr(i, "completed_jobs", 0),     # 1.45.0: how the place's measured jobs ended
+        "failed_jobs": getattr(i, "failed_jobs", 0),
         "cluster": i.cluster,
         "partition": i.partition,
     }

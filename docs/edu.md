@@ -205,7 +205,16 @@ task, it can't tell, and names `--cpus-per-task` with `--ntasks` as the other
 possibility.
 
 An issue is listed when most of your measured jobs on a cluster and partition
-fall below the threshold for that dimension. `--detailed` adds the line with
+fall below the threshold for that dimension. Advice about size comes only from
+jobs whose use says what they need (1.45.0): cores and GPUs from jobs that
+completed, memory from those that completed or ran out of memory, time from
+those that completed or reached their limit. A job that failed in its first
+minutes used little because it never reached its real work, so it is no
+reason to ask for less; the card says how many were left out ("from the jobs
+that completed; 3 that didn't aren't counted"). Where at least 2 of the
+measured jobs on a cluster and partition failed, and they are half of them or
+more, a "Jobs that failed" card leads that place's cards: what made them fail
+comes first. `--detailed` adds the line with
 your score in each dimension; `--json` gives everything as JSON; admins can
 pass `--user`. With jobs but none measured, it says so instead of showing a
 score.

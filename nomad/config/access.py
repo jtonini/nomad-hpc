@@ -73,7 +73,8 @@ logger = logging.getLogger(__name__)
 ROLES = ("admin", "operator")       # what the file can grant; anyone else is a viewer
 FILE_ROLES = ROLES + ("viewer",)    # the lists [console.roles] may have
 _LABS_KEYS = ("group_pattern", "leads", "resources", "assistants", "attention", "not_labs",
-              "check")                    # the lab membership check (1.33.0, nomad.lab_check)
+              "check",                    # the lab membership check (1.33.0, nomad.lab_check)
+              "accounts")                 # a PI's account requests (1.42.0, nomad.account_requests)
 RESOURCE_KINDS = ("workstations", "storage")
 OTHER_USER = "another user"
 

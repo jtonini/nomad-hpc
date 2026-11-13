@@ -228,6 +228,7 @@ def _add(a: _Acc, row: dict, start: datetime, window_size: int) -> JobFingerprin
     except Exception:
         return None
     fp._end_time = end
+    fp._state = str(row.get("state") or "").split()[0].upper() if row.get("state") else ""
     a.scored += 1
     window = _window_index(end, start, window_size)
     for name, dim in fp.dimensions.items():

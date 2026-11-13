@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.45.0 (November 2026)
+
+- **Training the model from the Console** (`nomad.learn`; `nomad ml`;
+  `[ml.train]`, `[ml.worker]`; docs/ml-training.md). An administrator asks on
+  Data readiness; a worker with a GPU asks the Console every 5 minutes over
+  HTTPS with its own key (`nomad ml work`, `nomad ml timer`), takes the
+  request, trains TESSERA (tessera-ml 0.3) and a logistic regression, and
+  sends back how well each ranked the newest jobs (held out: given to TESSERA
+  as unknown, learned from by nothing) and the scores of those and of the jobs
+  running or waiting. Predicts failure and waste. What leaves the hub: per
+  job, only what Slurm was asked, as numbers, and what became of it; never a
+  person, job name or ID, partition or cluster name. Requests and results in
+  ml.db (beside lab_check.db). One request at a time; a run not heard from in
+  `stale_minutes` is given up. `nomad ml check` on the worker says what the
+  Console answered and whether TESSERA can train there (its version,
+  PyTorch's, the GPU). The worker never follows a redirect, so a sign-in page
+  in front of the Console is said, and never sent the key.
+- **Advice about size from jobs that completed** (`nomad edu me`, the
+  Console's Recommendations and My Activity, the job notices). Cores and GPUs
+  are worked out from jobs that completed, memory from those that completed or
+  ran out of memory, time from those that completed or reached their limit: a
+  job that failed early used little because it never got to its work, and
+  three such jobs had been enough to advise "52 cores → 2" and "12 days →
+  2:30". Each issue carries how many of the place's jobs completed and how
+  many failed (`completed_jobs`, `failed_jobs`). Where most of the measured
+  jobs on a cluster and partition failed (at least 2), a "Jobs that failed"
+  card (`failed`) leads that place's cards instead of advice to ask for less.
+- `nomad config check` no longer calls `[console.labs] accounts` an unknown
+  setting: the account requests' table (1.42.0) was always read.
+
 ## v1.44.0 (November 2026)
 
 - **Request numbers, as a ticket system's** (`nomad.tickets`;

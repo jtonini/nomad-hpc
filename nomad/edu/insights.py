@@ -178,6 +178,11 @@ class Issue:
     direction: str = ""               # "lower" (asked for more than used) / "raise" (ran short)
     other_direction_jobs: int = 0     # flagged jobs pointing the other way
     advice_jobs: int = 0              # flagged jobs the suggested value is worked out from
+    # 1.45.0: the measured jobs where this issue was found, by how they ended. Sizing advice
+    # (cores, memory, time, GPUs) comes only from jobs whose use says what they need (SIZED_FROM):
+    # a job that failed at setup never reached its real work, so it looks like it needed little.
+    completed_jobs: int = 0
+    failed_jobs: int = 0              # FAILED (and, for advice they don't inform, TIMEOUT / OUT_OF_MEMORY)
 
     @property
     def affected_ratio(self) -> float:
@@ -1448,25 +1453,40 @@ def user_insights(
             sorted(fingerprints, key=_group_key), key=_group_key
         ):
             group = list(group_iter)
+            states = [_state_of(fp) for fp in group]
+            completed = sum(1 for s in states if s == "COMPLETED")
             for dim_key in KEY_TO_DISPLAY:
                 # Workstation dimensions live in session fingerprints, not
                 # job fingerprints — skip them; signal surfaces via verdict.
                 if dim_key in ("memory_pressure", "duration_fit"):
                     continue
+                # Sizing advice only from jobs whose use says what they need
+                # (1.45.0): a failed job's cores, memory and time say nothing of it.
+                ends = SIZED_FROM.get(dim_key)
+                source = group if ends is None else [fp for fp, s in zip(group, states) if s in ends]
                 issue = _aggregate_dimension(
-                    dim_key, group,
+                    dim_key, source,
                     threshold=thresholds[dim_key],
                 )
                 if issue is not None:
                     issue.cluster = grp_cluster or None
                     issue.partition = grp_partition or None
+                    issue.completed_jobs = completed
+                    issue.failed_jobs = len(group) - len(source) if ends is not None else \
+                        sum(1 for s in states if s != "COMPLETED")
                     issues.append(issue)
+            failed = _failed_issue(group, states, grp_cluster, grp_partition)
+            if failed is not None:
+                issues.append(failed)
 
         severity_rank = {"critical": 0, "high": 1, "medium": 2}
         # Location first (cluster, partition), then severity within — reads
         # as "what's wrong on hpc1/compute, then hpc2/gpu".
+        # Within a place, a "these jobs failed" card leads (1.45.0): fixing
+        # that comes before any advice about size.
         issues.sort(key=lambda i: (
             i.cluster or "", i.partition or "",
+            i.dimension_key != "failed",
             severity_rank[i.severity], i.avg_score,
         ))
 
@@ -1477,6 +1497,46 @@ def user_insights(
         insights.issues = issues
 
     return insights
+
+
+# ── Jobs that failed (1.45.0) ────────────────────────────────────────
+
+# Which ended jobs each sizing dimension's advice may come from. A job that
+# failed (or was killed for memory, or stopped at its time limit) didn't do
+# its real work, so how little it used says nothing of what the work needs;
+# except that running out of memory says the memory was short, and stopping
+# at the limit says the time was. Dimensions not here (I/O) use every job.
+SIZED_FROM = {
+    "cpu": ("COMPLETED",),
+    "gpu": ("COMPLETED",),
+    "memory": ("COMPLETED", "OUT_OF_MEMORY"),
+    "time": ("COMPLETED", "TIMEOUT"),
+}
+FAILED_MIN_JOBS = 2          # a "these jobs failed" card from this many failed jobs ...
+FAILED_MIN_SHARE = 0.5       # ... when they are at least this share of the place's measured jobs
+FAILED_RATIONALE = ("These jobs failed before they finished, so how much they used says little "
+                    "about what they need: no advice to ask for less is drawn from them. What made "
+                    "them fail comes first; each job's page shows how it ended and its last lines "
+                    "of output.")
+
+
+def _state_of(fp) -> str:
+    """How a scored job ended (population._add keeps it); COMPLETED when not known."""
+    return getattr(fp, "_state", "") or "COMPLETED"
+
+
+def _failed_issue(group, states, cluster, partition) -> Issue | None:
+    """A card for a place where most of the measured jobs failed."""
+    failed = sum(1 for s in states if s == "FAILED")
+    if failed < FAILED_MIN_JOBS or failed < FAILED_MIN_SHARE * len(group):
+        return None
+    share = failed / len(group)
+    return Issue(
+        dimension="Jobs that failed", dimension_key="failed", affected_jobs=failed,
+        total_applicable=len(group), avg_score=round(100 * (1 - share), 1),
+        severity="high" if share >= 0.75 else "medium", trajectory="stable",
+        rationale=FAILED_RATIONALE, cluster=cluster or None, partition=partition or None,
+        completed_jobs=sum(1 for s in states if s == "COMPLETED"), failed_jobs=failed)
 
 
 # ── Formatting ───────────────────────────────────────────────────────
@@ -1622,11 +1682,21 @@ def format_user_insights(insights: UserInsights, detailed: bool = False) -> str:
         if issue.cluster and issue.partition:
             scope = f" ({issue.cluster}/{issue.partition})"
         lines.append("")
+        if issue.dimension_key == "failed":
+            import textwrap
+            lines.append(f"  {sev_marker} {issue.dimension}{scope}")
+            lines.append(f"    {issue.failed_jobs} of {issue.total_applicable} measured jobs failed"
+                         + (f" ({issue.completed_jobs} completed)" if issue.completed_jobs else ""))
+            lines.append("")
+            lines.extend(f"    {line}" for line in textwrap.wrap(issue.rationale, width=72))
+            continue
         lines.append(f"  {sev_marker} {issue.dimension}{scope} — {traj_arrow}")
         lines.append(
             f"    {issue.affected_jobs}/{issue.total_applicable} jobs "
             f"scored below threshold (avg score: {issue.avg_score:.1f})"
         )
+        if issue.dimension_key in SIZED_FROM and issue.failed_jobs:
+            lines.append(f"    (from the jobs that completed; {issue.failed_jobs} that didn't aren't counted)")
 
         # Show usage context if we have it
         if issue.usage_stats and issue.current_display:

@@ -965,6 +965,34 @@ interval_hours = 6
 # Minimum jobs required before training can begin.
 min_jobs = 50
 
+# Training from the Console (1.45.0; docs/ml-training.md): an administrator asks on
+# Data readiness; a worker with a GPU ([ml.worker] there) takes the request,
+# trains TESSERA and a logistic regression, and sends back how well each did on
+# the newest jobs, which neither learned from. Its own table: the keys above are
+# another thing's.
+# [ml.train]
+# enabled = true
+# engine = "tessera"                    # or "baseline": a logistic regression only
+# predicts = ["failure", "waste"]
+# trainer = "badenpowell"               # the worker's name, as the Console says it
+# jobs_days = 365
+# max_jobs = 50000                      # the newest ended jobs (0: all; time grows as the square)
+# waste_threshold = 0.6                 # "wasted": more than this share of the time asked unused
+# holdout_share = 0.2                   # the newest share: kept from it, then used to test it
+# keep_runs = 20
+# stale_minutes = 360
+# key_file = "~/.config/nomad/ml_worker_key"   # the worker's key (the nomad account's, 600)
+# [ml.train.epochs]
+# gnn = 100
+# lstm = 60
+# ae = 60
+#
+# On the worker machine:
+# [ml.worker]
+# console = "https://nomad.example.edu"
+# key_file = "~/.config/nomad/ml_worker_key"   # copied from the hub
+# device = "cuda"                       # or "cpu", "auto"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # [slurm] — Optional integration with SLURM's prolog/epilog hooks for

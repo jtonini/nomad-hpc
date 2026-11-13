@@ -11498,6 +11498,8 @@ from nomad.lab_accounts_cli import accounts_group as lab_accounts_group  # noqa:
 lab.add_command(lab_accounts_group)
 from nomad.storage.cold_cli import cold_group  # noqa: E402
 storage_group.add_command(cold_group)
+from nomad.learn.cli import ml_group  # noqa: E402
+cli.add_command(ml_group)
 # Practice runs: small inputs that show how a job runs (1.34).
 from nomad.demos.cli import demos_group  # noqa: E402
 cli.add_command(demos_group)

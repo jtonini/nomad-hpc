@@ -74,6 +74,7 @@ Read by admins (1.19; [details](policy_watch.md)):
 | Command | Description |
 |---------|-------------|
 | `nomad train` | Train prediction models |
+| `nomad ml ...` | Train the model from the Console: requests on the hub, TESSERA on a worker with a GPU ([Training the model](ml-training.md)) |
 | `nomad predict` | Run predictions |
 | `nomad report` | Generate ML report |
 

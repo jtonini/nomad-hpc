@@ -567,7 +567,9 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
         word = _ASKED.get(i.dimension_key, i.dimension_key or "resources")
         used = _used(i.usage_stats)
         typical = f"typically {_asked_for(i)}" + (f"; they used about {used}" if used else "")
-        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} jobs asked for more {word} "
+        # 1.45.0: size advice comes from the jobs that completed; say so when some didn't
+        kind = "completed jobs" if getattr(i, "failed_jobs", 0) else "jobs"
+        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} {kind} asked for more {word} "
                  f"than they used ({typical}). Ask for this instead:"]
         lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
         why = _WHY.get(i.dimension_key)

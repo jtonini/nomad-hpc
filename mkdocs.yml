@@ -75,6 +75,7 @@ nav:
     - Architecture: ARCHITECTURE.md
     - Network Methodology: network.md
     - ML Framework: ml.md
+    - Training the model: ml-training.md
     - Proficiency Scoring: proficiency.md
     - CLI Reference: cli.md
     - Reference System: reference.md
