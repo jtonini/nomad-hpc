@@ -193,7 +193,10 @@ def plan_mail(owners: list[Built], summary: Built | None, settings: Settings, mo
 
 
 def send(owners: list[Built], summary: Built | None, settings: Settings, nomad_config: dict | None,
-         month: str, out: Path, resend: bool = False) -> list[dict]:
+         month: str, out: Path, resend: bool = False, plan: list[dict] | None = None) -> list[dict]:
+    """Mail each report as plan_mail says (``plan``: another plan, the term
+    reports'). ``month``: what the files and the log of what was sent are
+    named by."""
     from nomad import mail
     cfg = mail.settings(nomad_config)
     sender = settings.delivery.send_from or cfg.get("from")
@@ -206,7 +209,7 @@ def send(owners: list[Built], summary: Built | None, settings: Settings, nomad_c
         log = {}
     by_key = {b.key: b for b in owners + ([summary] if summary is not None else [])}
     results = []
-    for entry in plan_mail(owners, summary, settings, month):
+    for entry in (plan if plan is not None else plan_mail(owners, summary, settings, month)):
         b = by_key[entry["key"]]
         done = log.get(entry["key"])
         if entry["skip"]:

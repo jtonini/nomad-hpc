@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.48.0 (November 2026)
+
+- **Each lab's term report** (`nomad usage-report labs`; docs/lab-reports.md):
+  for the PI who leads each lab, what the lab used over the term that ended,
+  as usage policies promise each sponsor. Core-hours, GPU-hours, jobs and how
+  they ended, the median wait, how much of the cores and memory its jobs
+  asked for they used, by cluster and for each member by NetID; the lab's
+  storage on each server and how it changed; the term before, for
+  comparison. Research computing gets a summary with a row per lab. Labs and
+  members are the lab check's ([console.labs]), a lab of its PI only
+  included; labs that hold condos get the monthly condo report instead
+  (`term_condo_owners = true` adds them). Terms are `[report.labs] terms`
+  (default Fall 08-25, Spring 01-10, Summer 05-10); `--term current` writes
+  the term so far, never sent; `--from`/`--to` any period. Delivery is the
+  condo reports': HTML email with a PDF, JSON kept, review_to first.
+  `nomad usage-report labs timer --apply` makes and mails them on the first
+  day of each term.
+- `nomad.lab_check.labs(..., alone=True)` keeps labs of their PI only.
+- tests/test_term_reports.py.
+
 ## v1.47.1 (November 2026)
 
 - **What each compute node's memory holds** (`node_disks`, `memory = true`

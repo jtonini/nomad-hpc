@@ -701,12 +701,13 @@ class Lab:
 
 
 def labs(conn, config: dict | None, report=None, s: Settings | None = None,
-         now: datetime | None = None, only: set | None = None) -> list[Lab]:
+         now: datetime | None = None, only: set | None = None, alone: bool = False) -> list[Lab]:
     """Every lab with someone to ask about, by nomad's rules for labs
     ([console.labs]: group_pattern, leads, not_labs; not a course this
     term), and a PI to ask: its members now but whoever leads it, and who
     used its condos in the last ``claim_days`` without being in any of its
-    groups. ``only``: these groups."""
+    groups. ``only``: these groups. ``alone``: labs of their PI only too
+    (the term reports: a PI who computes alone sponsors a lab)."""
     from nomad.config.access import access_from
     now = now or datetime.now()
     s = s or settings(config, report)
@@ -763,7 +764,7 @@ def labs(conn, config: dict | None, report=None, s: Settings | None = None,
                         kept[site] = out_of
                 if kept:
                     lab.claims[n] = kept
-        if lab.members or lab.claims:
+        if lab.members or lab.claims or alone:
             out.append(lab)
     return out
 

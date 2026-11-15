@@ -4,6 +4,7 @@ A condo is a set of nodes a lab bought, lent to everyone else through a
 guest partition while the lab isn't using them. `nomad usage-report condos`
 writes each condo's monthly report for its owner, and a summary of every
 condo for research computing, grouped by cluster.
+Every other lab gets a report each term instead: [Lab reports](lab-reports.md).
 
 ```bash
 nomad usage-report condos init               # draft the condos into report.toml

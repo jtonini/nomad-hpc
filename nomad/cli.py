@@ -7949,6 +7949,274 @@ def usage_report_condos(ctx, month, clusters, only, db, report_config, out, form
         click.echo("not mailed (--send mails them)")
 
 
+def _term_span(settings, term, since, until, now):
+    """(t0, t1, name) of the term asked for: --from/--to (the last day
+    included), else the last term that ended (--term last) or the one under
+    way (--term current), by [report.labs] terms."""
+    from nomad.condo import term as cterm
+    if since or until:
+        if not (since and until):
+            raise click.UsageError("--from and --to go together")
+        try:
+            t0 = datetime.strptime(since, "%Y-%m-%d")
+            t1 = datetime.strptime(until, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise click.UsageError("--from and --to are YYYY-MM-DD")
+        if t1 <= t0:
+            raise click.UsageError("--to is before --from")
+        a, b, name = cterm.term_of(settings.delivery.terms, t0)
+        return t0, t1, (name if (a, b) == (t0, t1) else None)
+    if term == "current":
+        return cterm.term_of(settings.delivery.terms, now)
+    return cterm.last_term(settings.delivery.terms, now)
+
+
+@usage_report.group('labs', invoke_without_command=True)
+@click.option('--term', type=click.Choice(['last', 'current']), default='last', show_default=True,
+              help="The last term that ended, or the one under way (its figures so far).")
+@click.option('--from', 'since', metavar='YYYY-MM-DD', help='Another period: its first day (with --to).')
+@click.option('--to', 'until', metavar='YYYY-MM-DD', help='... and its last day.')
+@click.option('--lab', 'only', multiple=True, help='Only this lab, by its group or name (repeat for several).')
+@click.option('--condo-owners', is_flag=True, default=None,
+              help='Labs that hold condos too (default: term_condo_owners; they get a monthly report).')
+@click.option('--db', type=click.Path(dir_okay=False),
+              help="Database (default: the hub's combined.db if there is one, else this host's).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml (default: beside nomad.toml, else ~/.config/nomad, else /etc/nomad).')
+@click.option('--out', type=click.Path(file_okay=False),
+              help="Where to write them (default: [report.labs] term_out_dir, else the data "
+                   "directory's reports/labs).")
+@click.option('--format', 'formats', multiple=True, type=click.Choice(['html', 'pdf', 'json', 'md']),
+              help="Formats to write (default: [report.labs] formats).")
+@click.option('--send', is_flag=True, help='Mail them ([mail] in nomad.toml; review_to while it is set).')
+@click.option('--resend', is_flag=True, help="Mail reports already sent for this term again.")
+@click.option('--mask', is_flag=True, help='Print stand-ins for labs and PIs (for sharing the output).')
+@click.pass_context
+def usage_report_labs(ctx, term, since, until, only, condo_owners, db, report_config, out, formats, send,
+                      resend, mask):
+    """Each lab's term report for its PI, and a summary of every lab.
+
+    \b
+    nomad usage-report labs                       the last term that ended, written
+    nomad usage-report labs --send                ... and mailed (review_to while it is set)
+    nomad usage-report labs --term current --lab smith$
+    nomad usage-report labs --from 2026-08-25 --to 2027-01-09
+    sudo nomad usage-report labs timer --apply    make and mail them as each term begins
+
+    A lab's report has its core-hours, GPU-hours, jobs and how they ended,
+    waits, how much of the cores and memory its jobs asked for they used,
+    and its storage, by cluster and for each member by NetID (name_members);
+    and the term before, for comparison. Labs and their members are the lab
+    check's ([console.labs] in nomad.toml); terms are [report.labs] terms.
+    Labs that hold condos get a monthly report instead (--condo-owners adds
+    them). The files are readable only by you.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    from nomad.condo import branding as cbrand, pdf as cpdf, run as crun, term as cterm
+    from nomad.usage import sources
+    settings = _condo_settings(report_config, ctx.obj.get('config_target'), mask)
+    now = datetime.now()
+    t0, t1, name = _term_span(settings, term, since, until, now)
+    if send and t1 > now:
+        raise click.UsageError(f"{cterm.label(t0, t1, name)} isn't over until {cterm.day(t1)}: "
+                               "its reports are sent once it is (without --send, they are written)")
+    db_path = _usage_db(ctx, db)
+    nomad_config = ctx.obj.get('config') or {}
+    conn = sources.open_db(db_path)
+    try:
+        data = cterm.build(conn, settings, t0, t1, name=name, nomad_config=nomad_config,
+                           only=list(only) or None, condo_owners=condo_owners, now=now)
+    except (sqlite3.DatabaseError, ValueError) as e:
+        if mask:
+            raise click.ClickException("the lab reports couldn't be made (run without --mask to see why)")
+        raise click.ClickException(str(e))
+    finally:
+        conn.close()
+    fmts = list(formats) or settings.delivery.formats
+    if "pdf" in fmts and not cpdf.available():
+        click.echo("  (no PDF: fpdf2 isn't installed here; pip install 'nomad-hpc[report]')")
+    brand = cbrand.read(nomad_config, settings.delivery.branding)
+    for w in brand.warnings:
+        click.echo(f"  (no logo: {w})")
+    labs, summary = cterm.build_all(data, settings, fmts, brand)
+    if data.get("partial"):
+        # A summary of some labs would stand for the term's, and be sent.
+        summary = None
+    target = Path(out).expanduser() if out else cterm.default_out(settings, nomad_config)
+    try:
+        paths = crun.write(target, data["period"]["key"], labs, summary, fmts)
+    except OSError as e:
+        raise click.ClickException(f"{target}: {e.strerror or e}")
+    stand_in: dict = {}
+
+    def shown(lab_name):
+        if not mask:
+            return lab_name
+        return stand_in.setdefault(lab_name, f"lab {len(stand_in) + 1}")
+    per = data["period"]
+    far = " so far" if per["so_far"] else ""
+    head = f"{per['label']}{far} ({per['span']})" if per["name"] else f"{per['span']}{far}"
+    click.echo(f"{head}: lab reports")
+    if not data["reports"]:
+        click.echo("  no lab to report on: none has a PI by [console.labs] in nomad.toml")
+    for f in data["reports"]:
+        t = f["total"]
+        lab = f["lab"]
+
+        def p(x):
+            return "-" if x is None else f"{x:.0f}%"
+        who = "" if mask else f" ({', '.join(lab['leaders'])})"
+        space = sum(x["used_bytes"] for x in f["storage"]["paths"]) if f["storage"]["measured"] else None
+        click.echo(f"  {shown(lab['name'])}{who}: {t['people']} of {f['members']['count']} ran jobs; "
+                   f"{t['core_hours']:,.0f} core-hours, {t['gpu_hours']:,.0f} GPU-hours; "
+                   f"{t['jobs_ended']} jobs ended, {p(t['failed_pct'])} failed; CPU used {p(t['cpu_used_pct'])}, "
+                   f"memory used {p(t['memory_used_pct'])}; storage "
+                   + ("not measured" if space is None else cterm._bytes(space) if space else "none"))
+    condo = [x for x in data["left_out"] if x["why"] == "condo"]
+    if condo:
+        names = "" if mask else ": " + ", ".join(x["name"] for x in condo)
+        click.echo(f"  not here: {len(condo)} lab{'' if len(condo) == 1 else 's'} holding condos{names} "
+                   "(monthly reports; --condo-owners adds them)")
+    quiet = [x for x in data["left_out"] if x["why"] == "quiet"]
+    if quiet:
+        names = "" if mask else ": " + ", ".join(x["name"] for x in quiet)
+        click.echo(f"  no report: {len(quiet)} lab{'' if len(quiet) == 1 else 's'} with no job and no space "
+                   f"all term{names}")
+    click.echo(f"wrote {len(paths)} files under {target} (readable only by you)"
+               + ("; no summary, as --lab leaves labs out" if summary is None else ""))
+    if send:
+        plan = cterm.plan_mail(labs, summary, settings, data)
+        try:
+            results = crun.send(labs, summary, settings, nomad_config, per["key"], target, resend=resend,
+                                plan=plan)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        by_key = {f["lab"]["group"]: f["lab"]["name"] for f in data["reports"]}
+        for r in results:
+            k = "summary" if r["key"] == "summary" else shown(by_key.get(r["key"], r["key"]))
+            if r["status"] == "sent":
+                click.echo(f"  sent {k} to " + ("review" if mask and r["review_of"] is not None
+                                                else "the PI" if mask else ", ".join(r["to"])))
+            elif r["status"] == "skipped":
+                click.echo(f"  not sent {k}: {r['skip']}")
+            elif r["status"] == "already sent":
+                click.echo(f"  {k}: already sent {r.get('when', '')} (--resend sends it again)")
+            else:
+                click.echo(f"  FAILED {k}: {r.get('error')}")
+        if any(r["status"] == "failed" for r in results):
+            raise SystemExit(1)
+    elif per["so_far"]:
+        click.echo("not mailed: the term isn't over")
+    else:
+        click.echo("not mailed (--send mails them)")
+
+
+def _term_timer_units(nomad_exe: str, config: str | None, account: str, terms, at: str) -> tuple[str, str]:
+    """The service and timer of `labs timer`: on the first day of each term,
+    the reports of the term that ended."""
+    run = f"{nomad_exe}" + (f" -c {config}" if config else "") + " usage-report labs --send"
+    service = ("[Unit]\nDescription=NOMAD lab reports, each term\nAfter=network-online.target\n\n"
+               f"[Service]\nType=oneshot\nUser={account}\nExecStart={run}\n")
+    when = "".join(f"OnCalendar=*-{m:02d}-{d:02d} {at}\n" for m, d, _ in terms)
+    days = ", ".join(f"{m:02d}-{d:02d}" for m, d, _ in terms)
+    timer = (f"[Unit]\nDescription=NOMAD lab reports, as each term begins ({days})\n\n"
+             f"[Timer]\n{when}Persistent=true\n\n[Install]\nWantedBy=timers.target\n")
+    return service, timer
+
+
+@usage_report_labs.command('timer')
+@click.option('--user', 'account', help='The account the reports run as (default: nomad, if there is one).')
+@click.option('--at', 'at', default='07:30', show_default=True,
+              help="The time of day, on the first day of each term (after the night's sync).")
+@click.option('--config', 'report_config', type=click.Path(dir_okay=False),
+              help='report.toml, for its terms (default: as `nomad usage-report labs` finds it).')
+@click.option('--apply', is_flag=True, help='Install and start it (as root).')
+@click.option('--force', is_flag=True, help='Replace a timer installed with other settings.')
+@click.pass_context
+def usage_report_labs_timer(ctx, account, at, report_config, apply, force):
+    """A systemd timer that makes and mails each lab's report for the term
+    that ended, on the first day of the next (the days in [report.labs]
+    terms; run it again after changing them).
+
+    It runs `nomad usage-report labs --send` as the nomad account (or
+    --user), with the nomad.toml in use: while review_to is set, everything
+    goes there. Without --apply it prints the two files.
+    """
+    import os
+    import pwd
+    import re
+    import shutil
+    import subprocess
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", at or ""):
+        raise click.UsageError("--at is a time of day, HH:MM")
+    settings = _condo_settings(report_config, ctx.obj.get('config_target'))
+    if account is None:
+        try:
+            pwd.getpwnam("nomad")
+            account = "nomad"
+        except KeyError:
+            if apply:
+                raise click.ClickException("there is no nomad account here: say which account makes "
+                                           "the reports with --user (not root)")
+            account = pwd.getpwuid(os.geteuid()).pw_name
+            click.echo(f"(no nomad account here: written for {account}; --user names another)")
+    else:
+        if any(ch in account for ch in "\n\r"):
+            raise click.UsageError("--user is one line")
+        try:
+            pwd.getpwnam(account)
+        except KeyError:
+            raise click.ClickException(f"no account {account} here")
+    _unit_safe(account, "--user")
+    exe = Path(sys.executable).with_name("nomad")
+    nomad_exe = _unit_safe(str(exe) if exe.exists() else (shutil.which("nomad") or "nomad"), "nomad")
+    target = Path(ctx.obj.get('config_target') or resolve_config_path()).expanduser()
+    config = _unit_safe(str(target.resolve()), "nomad.toml") if target.exists() else None
+    if config and not _readable_by(Path(config), account):
+        msg = f"{account} can't read {config}, so the reports would fail"
+        if apply:
+            raise click.ClickException(msg + " (make it readable by that account, or --user another)")
+        click.echo(f"(note: {msg})")
+    service, timer = _term_timer_units(nomad_exe, config, account, settings.delivery.terms, at)
+    unit_dir = Path("/etc/systemd/system")
+    paths = {unit_dir / "nomad-lab-reports.service": service, unit_dir / "nomad-lab-reports.timer": timer}
+    if not apply:
+        for p, text in paths.items():
+            click.echo(f"# {p}")
+            click.echo(text)
+        click.echo("Install with --apply (as root), or by hand:")
+        click.echo("  sudo systemctl daemon-reload")
+        click.echo("  sudo systemctl enable --now nomad-lab-reports.timer")
+        return
+    if not shutil.which("systemctl"):
+        run = service.split("ExecStart=", 1)[1].strip()
+        hh, mm = at.split(":")
+        lines = "\n".join(f"  {int(mm)} {int(hh)} {d} {m} * {run}" for m, d, _ in settings.delivery.terms)
+        raise click.ClickException(f"no systemctl here: run it from cron instead, as {account}:\n{lines}")
+    if os.geteuid() != 0:
+        raise click.ClickException("--apply writes to /etc/systemd/system: run it as root (sudo)")
+    same = [p for p, text in paths.items() if p.exists() and _unit_settings(p.read_text()) == _unit_settings(text)]
+    other = [p for p, text in paths.items() if p.exists() and p not in same]
+    if other and not force:
+        raise click.ClickException(f"{', '.join(map(str, other))} already there with other settings "
+                                   "(--force replaces it; without --apply this prints the new one)")
+    for p, text in paths.items():
+        if p not in same:
+            p.write_text(text)
+            p.chmod(0o644)
+    for cmd in (["systemctl", "daemon-reload"], ["systemctl", "enable", "--now", "nomad-lab-reports.timer"]):
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise click.ClickException(f"{' '.join(cmd)}: {(r.stderr or r.stdout).strip()}")
+    click.echo("already installed; enabled" if len(same) == len(paths) else "installed and enabled")
+    r = subprocess.run(["systemctl", "list-timers", "nomad-lab-reports.timer", "--no-pager"],
+                       capture_output=True, text=True)
+    lines = r.stdout.strip().splitlines()
+    if lines:
+        click.echo(lines[1] if len(lines) > 1 else lines[0])
+
+
 @usage_report_condos.command('init')
 @click.option('--cluster', 'clusters', multiple=True, help='Only this cluster (repeat for several).')
 @click.option('--db', type=click.Path(dir_okay=False), help="Database (default: as for the reports).")

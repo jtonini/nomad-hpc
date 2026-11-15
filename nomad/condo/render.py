@@ -151,7 +151,7 @@ def text(doc: list) -> str:
             out += ["  " + ", ".join(f"{label} {C.pct(p)}" for label, p, _ in b.segments)
                     + (f"  ({b.caption})" if b.caption else ""), ""]
         elif isinstance(b, C.Tiles):
-            out += [f"- {label}: {value} ({sub})" for label, value, sub, _ in b.tiles] + [""]
+            out += [f"- {label}: {value}" + (f" ({sub})" if sub else "") for label, value, sub, _ in b.tiles] + [""]
         elif isinstance(b, C.Table):
             rows = [b.headers] + [[str(v) for v in r] for r in b.rows]
             widths = [max(len(str(r[i])) for r in rows) for i in range(len(b.headers))]

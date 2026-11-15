@@ -79,6 +79,8 @@ review_to = ["rc@example.edu"]    # while set, every report goes here instead
 name_members = true               # an owner's report names their own lab's members
 formats = ["html", "pdf", "json"]
 contact = "Questions: rc@example.edu"
+terms = { "08-25" = "Fall", "01-10" = "Spring", "05-10" = "Summer" }   # lab reports each term
+term_condo_owners = false         # labs with condos get the monthly report instead
 
 [report.policy]                   # what the reports check against
 owner_start_minutes = 5

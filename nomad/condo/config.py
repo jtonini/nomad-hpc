@@ -16,6 +16,11 @@ might do differently from another.
     out_dir = "/var/lib/nomad/reports/condos"
     institution = "Research Computing"     # the name at the top, without [console.branding]
     branding = true                        # use the Console's [console.branding]: lines and logo
+    terms = { "08-25" = "Fall", "01-10" = "Spring", "05-10" = "Summer" }
+                                           # each term's first day (MM-DD), to the next one's;
+                                           # a term's lab reports are made the day the next begins
+    term_condo_owners = false              # condo owners get a term report too (they get a monthly one)
+    term_out_dir = "/var/lib/nomad/reports/labs"
 
     [report.policy]                        # what the reports check against
     owner_start_minutes = 5
@@ -54,6 +59,8 @@ from pathlib import Path
 from nomad.hostlist import expand_hostlist
 
 FORMATS = ("html", "pdf", "json", "md")
+# The policy's terms: (month, day, name), the day each begins.
+DEFAULT_TERMS = ((1, 10, "Spring"), (5, 10, "Summer"), (8, 25, "Fall"))
 DEFAULT_PATTERNS = ("{name}", "{name}lab", "{name}_lab", "{name}-lab")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$")
 
@@ -104,6 +111,9 @@ class Delivery:
     contact: str | None = None
     out_dir: Path | None = None
     institution: str = "Research Computing"
+    terms: tuple = DEFAULT_TERMS   # (month, day, name or None), in the year's order
+    term_condo_owners: bool = False
+    term_out_dir: Path | None = None
 
     @property
     def reviewing(self) -> bool:
@@ -174,7 +184,8 @@ class Settings:
 # --- reading ---------------------------------------------------------------------
 
 _LABS_KEYS = ("mail_domain", "send_from", "review_to", "summary_to", "name_members", "formats",
-              "owner_patterns", "netid_max_length", "contact", "out_dir", "institution", "branding")
+              "owner_patterns", "netid_max_length", "contact", "out_dir", "institution", "branding",
+              "terms", "term_condo_owners", "term_out_dir")
 _POLICY_KEYS = ("owner_start_minutes", "guest_max_days", "guest_grace_minutes", "home_quota_gb",
                 "lab_scratch_quota_tb", "scratch_path", "use_below")
 _CONDO_KEYS = ("owner", "partition", "nodes", "members", "email", "cc", "confirmed", "account", "label",
@@ -248,6 +259,37 @@ def _patterns(value) -> list[str]:
     return pats
 
 
+def _terms(value) -> tuple:
+    """``{ "08-25" = "Fall", ... }`` or ``["08-25", ...]``: the day each term
+    begins, as (month, day, name), in the year's order. At least two (one
+    term is the whole year: from --from to --to says that better)."""
+    if isinstance(value, dict):
+        items = [(k, v) for k, v in value.items()]
+    elif isinstance(value, list):
+        items = [(k, None) for k in value]
+    else:
+        raise CondoConfigError('terms must be { "08-25" = "Fall", ... } or ["08-25", ...]')
+    out = []
+    for k, name in items:
+        m = re.match(r"^(\d{2})-(\d{2})$", str(k).strip()) if isinstance(k, str) else None
+        if not m:
+            raise CondoConfigError(f"terms: {k!r} is not a day of the year as MM-DD (08-25)")
+        month, day = int(m.group(1)), int(m.group(2))
+        import calendar
+        if (month, day) == (2, 29):
+            raise CondoConfigError("terms: 02-29 isn't a day every year has")
+        if not 1 <= month <= 12 or not 1 <= day <= calendar.monthrange(2023, month)[1]:
+            raise CondoConfigError(f"terms: {k!r} is not a day of the year")
+        if name is not None and (not isinstance(name, str) or not name.strip() or "\n" in name):
+            raise CondoConfigError(f"terms: the name for {k!r} must be one line of text")
+        out.append((month, day, name.strip() if name else None))
+    if len({(m, d) for m, d, _ in out}) != len(out):
+        raise CondoConfigError("terms: a day is listed twice")
+    if len(out) < 2:
+        raise CondoConfigError("terms: at least two days (each term runs to the next one's first day)")
+    return tuple(sorted(out))
+
+
 def _delivery(d: dict) -> Delivery:
     if not isinstance(d, dict):
         raise CondoConfigError("[report.labs] must be a table")
@@ -289,6 +331,14 @@ def _delivery(d: dict) -> Delivery:
         if not isinstance(d["branding"], bool):
             raise CondoConfigError("branding must be true or false")
         out.branding = d["branding"]
+    if d.get("terms") is not None:
+        out.terms = _terms(d["terms"])
+    if "term_condo_owners" in d:
+        if not isinstance(d["term_condo_owners"], bool):
+            raise CondoConfigError("term_condo_owners must be true or false")
+        out.term_condo_owners = d["term_condo_owners"]
+    if d.get("term_out_dir"):
+        out.term_out_dir = Path(str(d["term_out_dir"])).expanduser()
     return out
 
 
