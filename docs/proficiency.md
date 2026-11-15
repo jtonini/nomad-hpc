@@ -200,19 +200,30 @@ Try: export TMPDIR=/scratch/$USER/$SLURM_JOB_ID
 
 ### 5. GPU Utilization
 
-**What it measures**: Did the user effectively utilize requested GPUs?
+**What it measures**: How busy the GPUs were while the job ran.
 
-**Formula**:
-$$\text{GPU Score} = \frac{\text{GPU Utilization} + \text{GPU Memory Utilization}}{2}$$
+**How**: DCGM's real activity (`gpu_stats.real_util_pct`, not nvidia-smi's
+"a kernel ran"), averaged over the GPUs on the job's node(s) while it ran.
+Slurm doesn't say which GPUs a job had, so when its node has more GPUs than it
+asked for, the average covers those too, and the job's page says so ("across
+the 8 GPUs on its node(s) while it ran (it asked for 4 ...)").
 
 **Scoring rubric**:
 
-| GPU Util | Score | Level | Interpretation |
+| Average real activity | Score | Level | Advice |
 |----------|-------|-------|----------------|
-| ≥ 70% | 85-100 | Excellent | Efficient GPU usage |
-| 40-69% | 65-84 | Good | Acceptable |
-| 20-39% | 40-64 | Developing | Under-utilizing expensive resource |
-| < 20% | 0-39 | Needs Work | GPU mostly idle |
+| ≥ 70% | 95 | Excellent | none |
+| 40–69% | 70 | Good | none |
+| 15–39% | 45 | Developing | fewer GPUs (below) |
+| < 15% | 15 | Needs Work | no GPU: a CPU partition, or find why they sit idle |
+
+**Fewer GPUs, how many** (1.48.1): when the average covers only the job's own
+GPUs, their work together (GPUs × average) is what the advice sizes from: the
+fewest GPUs that, kept 70% busy, would do it, and never more than one fewer than
+asked. Four GPUs at 18% did about 0.7 of one GPU's work: the advice is one GPU,
+not three. When the average blends other GPUs, or nomad couldn't count them,
+the advice is one fewer than asked. Each recommendation shows what the job
+asked for beside it (Console fix 128).
 
 **Applicability**: Only scored if the job requested GPUs *and* its GPU
 utilization was measured (DCGM data for its nodes and time window). A GPU job
@@ -221,9 +232,10 @@ how the GPUs were used.
 
 **Common issues**:
 
-- CPU preprocessing starving GPU
+- A program that uses one GPU, asking for several
+- CPU preprocessing starving the GPU
 - Small batch sizes
-- Requesting GPU for CPU-only code
+- Requesting a GPU for CPU-only code
 
 ## Proficiency Levels
 

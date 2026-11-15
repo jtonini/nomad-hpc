@@ -169,6 +169,30 @@ def gpu_util_during(conn: sqlite3.Connection, node_list, start, end, site=None) 
     return row[0] if row and row[0] is not None else None
 
 
+def gpus_during(conn: sqlite3.Connection, node_list, start, end, site=None) -> int | None:
+    """How many GPUs gpu_util_during's average covers (1.48.1): each GPU on the
+    job's nodes with a DCGM reading while it ran. More than the job asked for
+    means the average blends GPUs it didn't have. None: no readings."""
+    from nomad.hostlist import expand_hostlist
+    start, end = norm_time(start), norm_time(end)
+    nodes = expand_hostlist(node_list) if node_list else []
+    if not nodes or not start or not end:
+        return None
+    where = f"node_name IN ({','.join('?' * len(nodes))})"
+    args = [*nodes]
+    if site is not None:
+        where += " AND source_site = ?"
+        args.append(site)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT node_name || ':' || COALESCE(gpu_index, '')) FROM gpu_stats WHERE " + where +
+            " AND data_source = 'dcgm' AND real_util_pct IS NOT NULL"
+            " AND timestamp BETWEEN ? AND ?", (*args, start, end)).fetchone()
+    except sqlite3.OperationalError:
+        return None
+    return int(row[0]) if row and row[0] else None
+
+
 def fix_gpu_summaries(conn: sqlite3.Connection) -> tuple[int, int]:
     """Stored jobs whose GPUs only their request shows -- read from squeue
     while they ran, where Slurm wasn't recording GPUs (AccountingStorageTRES

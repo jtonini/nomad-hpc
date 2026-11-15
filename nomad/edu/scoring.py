@@ -880,6 +880,18 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
             applicable=False,
         )
 
+    # What the average covers (1.48.1): the GPUs with readings on the job's
+    # nodes while it ran (explain counts them). More than the job asked for:
+    # it blends GPUs the job didn't have, as Slurm doesn't say which it had.
+    measured = summary.get("gpus_measured")
+    if isinstance(measured, int) and measured > req_gpus:
+        across = (f"across the {measured} GPUs on its node(s) while it ran (it asked for "
+                  f"{req_gpus}; Slurm doesn't say which it had)")
+        own = False
+    else:
+        across = f"across {req_gpus} GPU(s)"
+        own = measured == req_gpus          # the average is its own GPUs'
+
     # Grade against the DCGM real utilization. Thresholds per the dimension's
     # design: >=70 Excellent, >=40 Good, >=15 Developing, <15 Needs Work.
     if avg_util >= 70:
@@ -888,7 +900,7 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
             score=95,
             level="Excellent",
             detail=(f"Strong GPU utilization: {avg_util:.0f}% average real "
-                    f"activity across {req_gpus} GPU(s)."),
+                    f"activity {across}."),
             suggestion=None,
         )
     if avg_util >= 40:
@@ -897,26 +909,43 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
             score=70,
             level="Good",
             detail=(f"Reasonable GPU utilization: {avg_util:.0f}% average real "
-                    f"activity across {req_gpus} GPU(s)."),
+                    f"activity {across}."),
             suggestion=None,
         )
     if avg_util >= 15:
+        # How many GPUs would do the same work kept busy (1.48.1): when the
+        # average is the job's own GPUs, their work together over 70% (the
+        # "Excellent" line), never more than one fewer than asked; otherwise
+        # one fewer, as before. "Always one fewer" told a job whose 4 GPUs did
+        # less than one GPU's work to ask for 3.
+        work = req_gpus * avg_util / 100.0
+        if own:
+            fewer = max(1, min(req_gpus - 1, int(work / 0.7 + 0.5)))
+            done = (f"about {work:.1f} of one GPU's work" if work < 1
+                    else f"about {work:.1f} GPUs' worth of work")
+            together = (f" Together they did {done}, which {fewer} GPU{'s' if fewer != 1 else ''} "
+                        f"kept busy would do.")
+            why = f"the {req_gpus} GPUs averaged {avg_util:.0f}% real activity, {done}"
+        else:
+            fewer = max(1, req_gpus - 1)
+            together = ""
+            why = (f"GPUs averaged {avg_util:.0f}% real activity; fewer GPUs or more work "
+                   f"per GPU improves efficiency")
         return DimensionScore(
             name="GPU Utilization",
             score=45,
             level="Developing",
             detail=(f"Low GPU utilization: {avg_util:.0f}% average real "
-                    f"activity across {req_gpus} GPU(s). The GPUs are only "
+                    f"activity {across}.{together} The GPUs are only "
                     f"partly used — consider whether fewer GPUs or a larger "
                     f"batch/model would use them more fully."),
             suggestion=Suggestion(
                 directive="gres",
-                suggested_value=max(1, req_gpus - 1),
+                suggested_value=fewer,
                 current_value=req_gpus,
                 actual_usage=round(avg_util, 1),
                 unit="GPUs",
-                rationale=(f"GPUs averaged {avg_util:.0f}% real activity; "
-                           f"fewer GPUs or more work per GPU improves efficiency"),
+                rationale=why,
             ),
         )
     return DimensionScore(
@@ -924,7 +953,7 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
         score=15,
         level="Needs Work",
         detail=(f"Very low GPU utilization: {avg_util:.0f}% average real "
-                f"activity across {req_gpus} requested GPU(s). GPU nodes are a "
+                f"activity {across.replace('GPU(s)', 'requested GPU(s)')}. GPU nodes are a "
                 f"scarce, expensive resource; near-idle GPUs block other users."),
         suggestion=Suggestion(
             directive="gres",

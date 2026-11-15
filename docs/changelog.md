@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.48.1 (November 2026)
+
+- **A GPU job's advice from the work its GPUs did.** When GPUs average 15–40%
+  real activity, the advice was always one GPU fewer than asked: four GPUs
+  that together did less than one GPU's work were told to ask for three. Now,
+  when the average is the job's own GPUs, the advice is the fewest GPUs that,
+  kept 70% busy, would do that work (never more than one fewer than asked),
+  and the job's page says how much work that was. Otherwise one fewer, as
+  before.
+- **What the GPU average covers.** It is every GPU on the job's node(s) while
+  it ran (Slurm doesn't say which GPUs a job had). `nomad edu explain` (and
+  the Console's job page) counts them (`nomad.db.jobkeys.gpus_during`); when
+  the node has more GPUs than the job asked for, the job's page says the
+  average covers them all.
+- docs/proficiency.md: the GPU section as nomad scores it now.
+- tests/test_release_1481.py.
+
 ## v1.48.0 (November 2026)
 
 - **Each lab's term report** (`nomad usage-report labs`; docs/lab-reports.md):

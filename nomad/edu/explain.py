@@ -147,6 +147,21 @@ def load_job(db_path: str, job_id: str, cluster: str = None, submit_time: str | 
         return None
 
 
+def _gpus_measured(db_path: str, job: dict, cluster: str | None) -> int | None:
+    """The GPUs with readings on the job's nodes while it ran (1.48.1)."""
+    from nomad.db.jobkeys import gpus_during
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            site = (job.get("source_site") or cluster) if _site_column(conn, "gpu_stats") else None
+            return gpus_during(conn, job.get("node_list"), job.get("start_time"), job.get("end_time"), site=site)
+        finally:
+            conn.close()
+    except Exception as e:                       # a reading to say more with, never a failure
+        logger.debug(f"GPUs measured for job {job.get('job_id')}: {e}")
+        return None
+
+
 def load_summary(db_path: str, job_id: str, cluster: str = None) -> dict | None:
     """Load a job summary from the database."""
     try:
@@ -511,6 +526,11 @@ def explain_job(
     summary = load_summary(db_path, job_id, cluster)
     if not summary:
         summary = {}
+    # How many GPUs the GPU average covers (1.48.1): the node's, which may be
+    # more than the job had (Slurm doesn't say which GPUs it had).
+    if (job.get("req_gpus") or 0) > 0 and summary.get("avg_gpu_util") is not None \
+            and summary.get("gpus_measured") is None:
+        summary["gpus_measured"] = _gpus_measured(db_path, job, cluster)
 
     # Score the job
     fingerprint = score_job(job, summary)
