@@ -78,7 +78,7 @@ def check_group():
     nomad lab check answer LAB NETID here|left|not_mine|mine|guest [--data keep|remove|ask]
     nomad lab check todo            what ARC is left to do, a cluster at a time
     nomad lab check done LAB NETID remove|add|data|no_answer --note "..."
-    nomad lab check mail [--send] [--lab LAB] [--text]   the emails due today (review_to while set)
+    nomad lab check mail [--send] [--lab LAB] [--text|--counts]   the emails due today (review_to while set)
     nomad lab check email LAB [--reminder]   LAB's email as its PIs would get it now (nothing sent)
     nomad lab check names [--missing]   how each email greets its PIs, and the names nomad has
     nomad lab check names --set [--from FILE [--apply]]   find the missing names, ask for the rest, write them
@@ -486,8 +486,9 @@ def check_done(ctx, lab, netid, kind, site, note, round_id, by):
 @click.option("--send", is_flag=True, help="Send them (otherwise only say what is due).")
 @click.option("--lab", "only", metavar="LAB", help="Only this lab's (its group, e.g. smith$); the others stay due.")
 @click.option("--text", "show_text", is_flag=True, help="Without --send: print each email as it would go.")
+@click.option("--counts", is_flag=True, help="Counts only, no labs or names (to show someone else).")
 @click.pass_context
-def check_mail(ctx, send, only, show_text):
+def check_mail(ctx, send, only, show_text, counts):
     """The emails due today: when the check opens, and each reminder while
     a lab's PI hasn't answered. While review_to is set, they go there."""
     config, report, s, conn, rec_path = _ctx(ctx)
@@ -501,6 +502,19 @@ def check_mail(ctx, send, only, show_text):
     else:
         out = L.send(conn, L.open_records(rec_path), config, report, dry=True,
                      report_problem=_REPORT_PROBLEM.get("why"), only=only)
+    if counts:
+        by: dict = {}
+        kinds = {"opening": 0, "reminder": 0}
+        for e in out:
+            by[e["status"]] = by.get(e["status"], 0) + 1
+            kinds["opening" if e["kind"] == "open" else "reminder"] += 1
+        what = ", ".join(f"{v} {k}{'s' if v != 1 else ''}" for k, v in kinds.items() if v)
+        click.echo(f"Emails today: {', '.join(f'{v} {k}' for k, v in by.items()) or 'none due'}"
+                   + (f" ({what}; " + ("for review" if s.reviewing else "to the labs' PIs") + ")" if out else "")
+                   + ".")
+        if any(e["status"] in ("can't send", "failed") for e in out):
+            sys.exit(1)
+        return
     if not out:
         click.echo(f"Nothing due today{' for ' + only if only else ''}.")
     for e in out:

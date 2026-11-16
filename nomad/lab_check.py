@@ -27,6 +27,7 @@ Settings, in the hub's nomad.toml::
     [console.labs.check]
     opens = ["09-15", "02-01", "06-15"]   # MM-DD: the day each term's check opens; [] (default): off
     remind_days = [14, 28]               # days after it opens: reminders to PIs who haven't answered
+    remind_gap_days = 7                  # a reminder comes at least this long after the lab's last email
     closes_days = 42                     # days after it opens: unanswered, the lab is on ARC's to-do
     claim_days = 120                     # condo users of the last this many days are asked about
     link = "https://nomad.example.edu/lab"   # where PIs answer, in the email
@@ -74,8 +75,8 @@ _NETID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _GROUP = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\$?$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 NOTE_MAX = 300
-_KEYS = ("opens", "remind_days", "closes_days", "claim_days", "link", "mail_domain", "send_from", "review_to",
-         "db", "not_sites", "salutation", "names", "signature", "date_format", "contact", "directory")
+_KEYS = ("opens", "remind_days", "remind_gap_days", "closes_days", "claim_days", "link", "mail_domain",
+         "send_from", "review_to", "db", "not_sites", "salutation", "names", "signature", "date_format", "contact", "directory")
 QUIET_DAYS = 365                         # no job this long, and in the group longer: "no job in a year"
 SALUTATION = "Dr. {last}"                # how the email greets a PI ("Dear Dr. Parish,")
 _FIELDS = {"first", "last", "name"}      # what a salutation may use
@@ -93,6 +94,7 @@ class CheckError(ValueError):
 class Settings:
     opens: tuple = ()                    # "MM-DD", in the year's order
     remind_days: tuple = (14, 28)
+    remind_gap_days: int = 7             # days at least from a lab's last email to a reminder (1.49.1)
     closes_days: int = 42
     claim_days: int = 120
     link: str | None = None
@@ -179,6 +181,7 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
                                                 for d in remind):
         problems.append("[console.labs.check] remind_days: a list of days from 1 to 120")
         remind = [14, 28]
+    gap = _int(raw.get("remind_gap_days"), "remind_gap_days", 1, 60, problems, 7)
     closes = _int(raw.get("closes_days"), "closes_days", 1, 180, problems, 42)
     claim = _int(raw.get("claim_days"), "claim_days", 7, 730, problems, 120)
     link = raw.get("link")
@@ -251,7 +254,8 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
             date_format = None
     contact = _line(text("contact", getattr(delivery, "contact", None)))
     directory = _directory(raw.get("directory", "auto"), problems)
-    return Settings(opens=tuple(opens), remind_days=tuple(sorted(set(remind))), closes_days=closes,
+    return Settings(opens=tuple(opens), remind_days=tuple(sorted(set(remind))), remind_gap_days=gap,
+                    closes_days=closes,
                     claim_days=claim, link=link, mail_domain=mail_domain, send_from=send_from,
                     review_to=tuple(good), review_broken=held,
                     db=Path(db).expanduser() if db else None,
@@ -1083,14 +1087,23 @@ def mail_plan(conn, rec, config: dict | None, report, now: datetime | None = Non
     sent in), until the round closes. One email a lab, to each of its PIs;
     while reviewing, to review_to. What went for review is kept apart
     (kind "review-open", ...): once review_to is cleared, PIs get their own,
-    the opening first."""
+    the opening first. A reminder waits remind_gap_days after the lab's
+    last email (the same way: for review, or to its PIs), so a lab first
+    emailed late in the round -- review_to cleared then, or a new lab -- is
+    not reminded the next day."""
     now = now or datetime.now()
     s = settings(config, report, report_problem)
     rnd = round_of(s, now.date())
     if rnd is None:
         return []
     pre = "review-" if s.reviewing else ""
-    sent = {(r["lab"], r["kind"]) for r in _rows(rec, "SELECT * FROM lab_check_mail WHERE round = ?", (rnd.id,))}
+    rows = _rows(rec, "SELECT * FROM lab_check_mail WHERE round = ?", (rnd.id,))
+    sent = {(r["lab"], r["kind"]) for r in rows}
+    last: dict = {}                        # the day each lab was last emailed, this way (review or its PIs)
+    for r in rows:
+        if r["sent_to"] and r["kind"].startswith("review-") == s.reviewing:
+            day = date.fromisoformat(r["at"][:10])
+            last[r["lab"]] = max(day, last.get(r["lab"], day))
     have = answers(rec, rnd.id)
     done_labs = submitted(rec, rnd.id)
     today = now.date()
@@ -1109,6 +1122,8 @@ def mail_plan(conn, rec, config: dict | None, report, now: datetime | None = Non
             for d in s.remind_days:
                 if today >= rnd.remind_on(d) and (lab.group, f"{pre}remind{d}") not in sent:
                     due.append(f"remind{d}")
+            if lab.group in last and today < last[lab.group] + timedelta(days=s.remind_gap_days):
+                due = []                   # emailed lately: the reminder waits
         if not due:
             continue
         kind = due[-1]                     # one email a day: the latest that is due
@@ -1247,6 +1262,7 @@ def send(conn, rec, config: dict | None, report, now: datetime | None = None, dr
                  "subject": subject_of(e), "text": _body(e, s)} for e in plan]
     cfg = mail.settings(config)
     sender = s.send_from or cfg.get("from")
+    at = now.isoformat(timespec="seconds") if now else _now()   # the day it went: reminders wait from it
     out = []
     for e in plan:
         if e["problem"] or not sender:
@@ -1265,10 +1281,10 @@ def send(conn, rec, config: dict | None, report, now: datetime | None = None, dr
         with rec:
             rec.execute("INSERT OR REPLACE INTO lab_check_mail (round, lab, kind, sent_to, review, at) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
-                        (e["round"], e["lab"], e["record"], ", ".join(e["to"]), int(e["review"]), _now()))
+                        (e["round"], e["lab"], e["record"], ", ".join(e["to"]), int(e["review"]), at))
             for k in e["skipped"]:        # a reminder overtaken by a later one isn't sent after it
                 rec.execute("INSERT OR IGNORE INTO lab_check_mail (round, lab, kind, sent_to, review, at) "
-                            "VALUES (?, ?, ?, '', ?, ?)", (e["round"], e["lab"], k, int(e["review"]), _now()))
+                            "VALUES (?, ?, ?, '', ?, ?)", (e["round"], e["lab"], k, int(e["review"]), at))
             _log(rec, getpass.getuser(), {"mail": {k: e[k] for k in ("round", "lab", "kind", "to", "review")}})
         out.append({**e, "status": "sent"})
     return out

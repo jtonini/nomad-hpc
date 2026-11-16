@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.49.1 (November 2026)
+
+The lab check, ready to go to PIs in the middle of a term.
+
+- **A reminder waits a week after the lab's last email** (`remind_gap_days`,
+  7, in `[console.labs.check]`). Reminders fall on days counted from the
+  check's opening, so a lab first emailed later (once `review_to` is cleared
+  mid-term, or a lab new to the check) got its opening one day and the
+  reminder the next. Now: the opening, a reminder a week later, the next one a
+  week after that or on its own day if later, none after the check closes.
+- **`nomad lab check mail --counts`:** how many emails are due today, openings
+  and reminders, for review or to the PIs, with no lab or name.
+
 ## v1.49.0 (November 2026)
 
 Alerts that say what is real, and are mailed when it matters. spydur, one

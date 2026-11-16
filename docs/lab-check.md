@@ -73,12 +73,16 @@ to each of its PIs (NETID@`mail_domain`), when the term's check opens and at
 each reminder while the lab isn't done, until the check closes. While
 `review_to` is set, every email goes there instead, saying whom it was for;
 those are kept apart, so once `review_to` is cleared each PI gets their own,
-the opening one first. Nothing is sent twice. While report.toml doesn't
+the opening one first. Nothing is sent twice. A reminder comes at least
+`remind_gap_days` (7) after the lab's last email: a lab first emailed late
+in the term (`review_to` cleared then, or a lab new to the check) gets its
+reminders from a week after its opening email, not the next day. While report.toml doesn't
 read, nothing is sent unless `review_to` is set in `[console.labs.check]`
 (report.toml's may be what holds the emails), and its condos are left out.
 
 Without `--send` it only lists what is due; `--text` prints each email as it
-would go. `--lab LAB --send` sends one lab's (to look at one in review); the
+would go; `--counts` only how many, openings and reminders, with no lab or
+name (to show someone else). `--lab LAB --send` sends one lab's (to look at one in review); the
 others stay due.
 
 Each email greets the lab's PIs by name ("Dear Dr. Parish,"; `salutation`
@@ -163,6 +167,7 @@ In the hub's nomad.toml:
 [console.labs.check]
 opens = ["09-15", "02-01", "06-15"]   # MM-DD: the day each term's check opens; [] (default): off
 remind_days = [14, 28]               # days after it opens: reminders to PIs who haven't answered
+remind_gap_days = 7                  # a reminder comes at least this long after the lab's last email
 closes_days = 42                     # days after it opens: unanswered, the lab is on the to-do
 claim_days = 120                     # condo users of the last this many days are asked about
 link = "https://nomad.example.edu/lab"   # where PIs answer, in the email
