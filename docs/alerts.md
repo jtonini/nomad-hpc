@@ -407,6 +407,11 @@ a supply lost its input), after `sustain` low readings in a row, while it
 lasts: once, again when worse, then every reminder. Source `clock`, subject
 `cpu clock`, the host as host; **critical** when the host's power readings
 (the `power` collector, same site) show a supply problem too, else warning.
+A host whose CPUs are busy is judged against what it gives busy (1.49.0): with
+every core at work a CPU runs far below its top clock, and lower still on heavy
+vector code, none of it a brake (spydur's Xeon 6230Rs, one week: 3,970 MHz
+idle, about 2,700 busy, dips to 1,420; 24 alerts at the top-clock bar, none at
+this one). A brake holds the lowest clock at any load and is still found.
 The message says what it runs at, what it should, how much slower jobs run,
 its supplies' state (or that its board can't be read in-band), and what to
 do: drain it, restore the supply, reset the board controller if the brake
@@ -416,6 +421,7 @@ stays on.
 [alerts.clock]
 # enabled = true
 # min_fraction = 0.5               # low below this share of what it should give
+# busy_min_fraction = 0.4          # a busy host (load per CPU 0.5+): of its busy clock
 # sha_min_fraction = 0.25          # judged by the sha256 rate alone (no cycle counter)
 # sustain = 2                      # readings in a row (every_minutes apart)
 # ignore = ["gpu0*"]               # hosts never alerted (shell patterns)
@@ -426,6 +432,21 @@ stays on.
 A site whose alerts the hub sends (`alerts = "hub"`) gets these from the hub
 after each sync; a host read more than 2 hours ago is held as it was. `nomad
 clock --check --send` sends a test.
+
+### What an alert says, and where to see it (1.49.0)
+
+A CPU clock alert names the jobs running on the node, the ones it slows
+("Running there: 3 jobs (4521, 4519, 4502)"); heavy use of a login node says
+how much ("python, ~4 cores, sustained; 2.3 GB"). It names the person only
+with `owners_in_alerts = true` in `[collectors.policy_watch]`: the Console
+shows staff who it is. Each alert ends with the Console's page for it (a
+node's timeline for its CPU clock, Policy watch for its findings, else
+Alerts), when nomad knows the Console's address:
+
+```toml
+[alerts]
+link = "https://nomad.example.edu"   # default: [notices] link (the hub's)
+```
 
 ## Backends
 
@@ -499,6 +520,39 @@ and sent):
 reminder_hours = 24
 episode_gap_minutes = 60   # not seen this long: it has ended
 ```
+
+### What may pass on its own waits (1.49.0)
+
+A warning about something that often passes on its own is mailed only once it
+has lasted its wait, or when it keeps coming back:
+
+- **It lasts.** Each source may wait before its warnings are mailed:
+  `[alerts.wait]`, in minutes, by source or by source and kind
+  (`policy_watch.heavy`). The defaults: a CPU clock dip 60 minutes, heavy use
+  of a login node 30; everything else at once. Critical alerts never wait.
+- **It comes back.** The `recur_times`-th episode (3) of the same condition
+  within `recur_days` (7) is mailed at its start, saying when the earlier ones
+  were and how long each lasted: "The 3rd time in 7 days (before: Sat 14 05:55,
+  30 min; Sat 14 11:55, 30 min)". Once in `recur_days`; `recur_times = 0` turns
+  it off.
+
+```toml
+[alerts]
+recur_times = 3
+recur_days = 7
+
+[alerts.wait]
+clock = 60
+policy_watch.heavy = 30
+disk = 0
+```
+
+Every episode of every condition is kept (`alert_episodes`: first and last
+seen, how often it was mailed, its wait; 90 days), mailed or not: the
+Console's Alerts > Now shows the last week's, still happening or over.
+`nomad alerts` says of a condition seen now but not mailed yet that it is
+waiting. spydur, one week in November 2026: 24 CPU clock alerts, each over in
+15 to 90 minutes.
 
 What has been raised is kept in the `alert_state` table, so this holds across
 `nomad collect --once` runs from cron. A condition not seen for

@@ -46,7 +46,7 @@ On the login nodes
 Your jobs
 ---------
 * Your jobs ask for more time than they use
-  - On spydur (cpunodes), 20 of your last 22 jobs asked for more time than they used (typically 1 day; they used about 1 h 38 min). Ask for this instead:
+  - On spydur (cpunodes), 20 of your last 22 jobs (job IDs 4521, 4519, 4502, 4498, 4490, 4487, 4480, 4477 and 12 more) asked for more time than they used (typically 1 day; they used about 1 h 38 min). Ask for this instead:
       #SBATCH --time=04:00:00
   - On spydur (gpunodes), ...
   Jobs that ask for less time start sooner: the scheduler can fit them into gaps ...
@@ -56,6 +56,9 @@ The details, and how to do it another way: https://nomad.example.edu/me
 These emails come at most once every 7 days, and only with something new. To
 stop them, turn off "Email me about my own use" at https://nomad.example.edu/me.
 ```
+
+Each jobs note names the jobs it is about, newest first (eight, then "and N
+more"; 1.49.0), so a person can look at each one.
 
 ## Who gets one
 

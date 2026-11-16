@@ -690,7 +690,12 @@ against node51-53), and its CPU's top clock (cpufreq's maximum, or an Intel
 model's rated clock). A low clock counts only when its sha256 rate agrees,
 where it has one to compare with (a brake lowers both; a count another tool
 disturbed lowers only one); judged by the sha256 rate alone, low is below
-`sha_min_fraction` (0.25). After `sustain` (2) low readings in a row it is throttled:
+`sha_min_fraction` (0.25). A busy host (load per CPU 0.5 or more) is judged
+against what it gives busy, below `busy_min_fraction` (0.4): the median of its
+own busy readings and of the busy hosts alike now, else its CPU's rated clock
+(or 60% of its top clock), never the top clock it reaches idle (1.49.0). With
+every core at work a CPU runs far below its top clock, lower on heavy vector
+code. After `sustain` (2) low readings in a row it is throttled:
 alerted ([Alerts](alerts.md), "CPU clock"), critical when the power collector
 shows a supply problem on it. Measured on arachne, 5 Nov 2026: node02 396 MHz
 (11% of 3,764; sha256 115 MB/s), node51 3,730 MHz (sha256 1,826 MB/s).

@@ -706,6 +706,16 @@ enabled = true
 min_severity = "warning"     # info | warning | critical
 reminder_hours = 24
 episode_gap_minutes = 60
+# What may pass on its own waits before it is mailed (1.49.0): a warning is
+# mailed once it has lasted its wait, or when it comes back the recur_times-th
+# time within recur_days. Critical alerts go at once. Every episode is kept
+# and shown in the Console (Alerts > Now).
+# recur_times = 3               # 0: never for coming back
+# recur_days = 7
+# [alerts.wait]                 # minutes, by source (or source.kind)
+# clock = 60                    # the defaults: a CPU clock dip, heavy use of a login node
+# policy_watch.heavy = 30
+# disk = 0
 
 # ─── Email dispatch ──────────────────────────────────────────────
 # Sent through [mail] above. To enable: fill in [mail], put your

@@ -76,6 +76,7 @@ _NETID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
 _LINK = re.compile(r"^https?://[^\s<>\"']+$")
 SHOWN = 5               # occurrences of one note in an email at most; the rest: "and N more"
+JOB_IDS_SHOWN = 8       # the jobs a jobs note is about, by id (1.49.0); the rest: "and N more"
 _ASKED = {"cpu": "cores", "memory": "memory", "time": "time", "gpu": "GPUs", "io": "I/O"}
 # Why it matters, once a note: the email's own words (no contractions, as the rest of it).
 _WHY = {
@@ -569,13 +570,27 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
         typical = f"typically {_asked_for(i)}" + (f"; they used about {used}" if used else "")
         # 1.45.0: size advice comes from the jobs that completed; say so when some didn't
         kind = "completed jobs" if getattr(i, "failed_jobs", 0) else "jobs"
-        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} {kind} asked for more {word} "
-                 f"than they used ({typical}). Ask for this instead:"]
+        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} {kind}{_ids(i)} asked for more "
+                 f"{word} than they used ({typical}). Ask for this instead:"]
         lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
         why = _WHY.get(i.dimension_key)
         out.append(Entry("jobs", key, f"Your jobs ask for more {word} than they use", lines,
                          group=f"jobs:{i.dimension_key}", advice=[why] if why else []))
     return out
+
+
+def _ids(issue) -> str:
+    """' (job IDs 4521, 4519 and 3 more)': the jobs a note is about, newest
+    first, so a person can look at each (1.49.0); '' when nomad has none."""
+    ids = [str(j.get("job_id")) for j in (getattr(issue, "jobs", None) or [])
+           if isinstance(j, dict) and j.get("job_id")]
+    if not ids:
+        return ""
+    shown = ids[:JOB_IDS_SHOWN]
+    more = max(len(ids), getattr(issue, "affected_jobs", 0) or 0) - len(shown)
+    words = ", ".join(shown[:-1]) + (f", {shown[-1]}" if more else f" and {shown[-1]}") if len(shown) > 1 \
+        else shown[0]
+    return f" (job ID{'s' if len(shown) > 1 or more else ''} {words}" + (f" and {more} more" if more > 0 else "") + ")"
 
 
 def _when(iso: str) -> str:

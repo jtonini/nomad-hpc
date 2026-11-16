@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.49.0 (November 2026)
+
+Alerts that say what is real, and are mailed when it matters. spydur, one
+week of November: about 100 alert emails, 24 of them CPU clock dips of 15 to
+90 minutes on nodes running every core.
+
+- **The CPU clock of a busy host** is judged against what it gives busy
+  (load per CPU 0.5 or more): the median of its own busy readings and of the
+  busy hosts alike, else its CPU's rated clock (or 60% of its top clock),
+  below `busy_min_fraction` (0.4) in `[alerts.clock]`. With every core at
+  work a CPU runs far below its top clock, and lower on heavy vector code:
+  spydur's Xeon 6230Rs, 3,970 MHz idle, about 2,700 busy, dips to 1,420, none
+  of it a brake. A brake (arachne's 400 of 3,700 MHz) is still found at any
+  load; the message says "under load (0.95 per CPU)".
+- **What may pass on its own waits** (`[alerts.wait]`, minutes by source or
+  source.kind; defaults: CPU clock 60, heavy use of a login node 30; critical
+  never waits), and **what keeps coming back is mailed**: the `recur_times`-th
+  (3) episode within `recur_days` (7), saying when the earlier ones were and how
+  long each lasted, once in `recur_days`. Every episode is kept
+  (`alert_episodes`, 90 days), mailed or not; `nomad alerts` says of a
+  condition not mailed yet that it is waiting.
+- **What an alert says:** a CPU clock alert names the jobs running on the node
+  (job ids); heavy use of a login node says how much ("python, ~4 cores,
+  sustained; 2.3 GB"); each alert ends with the Console's page for it (a node's
+  timeline, Policy watch, Alerts) where nomad knows the Console's address
+  (`[alerts] link`, else `[notices] link`). People are named only with
+  `owners_in_alerts`, as before.
+- **A person's weekly note** names the jobs it is about: "5 of your last 5
+  completed jobs (job IDs 4521, 4519, ... and 3 more) asked for more memory".
+- The Console's part is fix 130: Alerts > Now shows what nomad sent in the
+  last 7 days, still seen or over.
+- tests/test_release_1490.py.
+
 ## v1.48.3 (November 2026)
 
 - **Policies in the Console** (`[[console.policies]]` in nomad.toml;

@@ -72,10 +72,11 @@ def test_no_cycle_counter_the_sha256_rate_against_its_own_and_its_peers():
 
 def test_rules():
     raw = {"min_fraction": 0.3, "sustain": 3, "ignore": ["gpu0*"], "node07": {"min_fraction": 0.8, "enabled": False}}
-    assert C.rules(raw, "node02") == {"enabled": True, "min_fraction": 0.3, "sha_min_fraction": 0.25, "sustain": 3}
+    assert C.rules(raw, "node02") == {"enabled": True, "min_fraction": 0.3, "sha_min_fraction": 0.25, "sustain": 3,
+                                      "busy_min_fraction": 0.4}
     assert C.rules(raw, "gpu09")["enabled"] is False
     assert C.rules(raw, "node07.cluster") == {"enabled": False, "min_fraction": 0.8, "sha_min_fraction": 0.25,
-                                             "sustain": 3}
+                                             "sustain": 3, "busy_min_fraction": 0.4}
     assert C.rules({"min_fraction": 2, "sustain": "x"}, "n") == C.DEFAULTS
 
 

@@ -1277,6 +1277,9 @@ class PolicyWatchCollector(BaseCollector):
             for f in fs:
                 if f["kind"] == ESCALATION:
                     p = f["program"] + (f" ({f['note']})" if f.get("note") else "")
+                elif f["kind"] == "heavy":
+                    # how much it holds (1.49.0): "python, ~4 cores, sustained; 2.3 GB"
+                    p = f["program"] + (f", {f['note']}" if f.get("note") else "")
                 else:
                     p = f["program"] + (f" port {f['detail']}" if f["detail"].isdigit() else
                                         f" {f['detail']}" if f["detail"] else "")

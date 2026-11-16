@@ -2221,8 +2221,9 @@ def _show_active_alerts(conn, config) -> None:
         color = {'critical': 'red', 'warning': 'yellow'}.get(r[1], 'blue')
         where = f"{r[0]}: " if r[0] else ""
         click.echo(f"    {click.style(r[1].upper()[:4], fg=color)}  {where}{r[2]}")
-        click.echo(f"          since {str(r[3])[:16].replace('T', ' ')}, raised {r[5]}x, "
-                   f"last {str(r[4] or '-')[:16].replace('T', ' ')}")
+        click.echo(f"          since {str(r[3])[:16].replace('T', ' ')}, "
+                   + (f"raised {r[5]}x, last {str(r[4] or '-')[:16].replace('T', ' ')}" if r[5] else
+                      "not mailed yet: waiting, as it may pass on its own ([alerts.wait])"))
     click.echo()
     click.echo(click.style("  Raised, newest first", bold=True))
     click.echo()

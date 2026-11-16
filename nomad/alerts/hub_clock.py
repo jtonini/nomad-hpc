@@ -29,7 +29,7 @@ def _time(text):
 
 def due_clock_alerts(conn: sqlite3.Connection, sites, config: dict | None, now: datetime, failing=()):
     """(items, held) for send_once; held: "site/node" kept as it was."""
-    from nomad.collectors.clock import alert_item, fresh, hosts_now, power_of, rules
+    from nomad.collectors.clock import alert_item, fresh, hosts_now, jobs_on, power_of, rules
     raw = ((config or {}).get("alerts") or {}).get("clock") or {}
     raw = raw if isinstance(raw, dict) else {}
     if raw.get("enabled") is False:
@@ -51,7 +51,7 @@ def due_clock_alerts(conn: sqlite3.Connection, sites, config: dict | None, now: 
                 continue
             supplies, unread = power_of(conn, node, site)
             it = alert_item(node, h, supplies, unread, where=f" at {site}",
-                            every_minutes=h.get("every_minutes") or 15)
+                            every_minutes=h.get("every_minutes") or 15, jobs=jobs_on(conn, node, site))
             it.update({"key": f"clock:{site}:{node}", "site": f"{site}/{node}", "cluster": site,
                        "subject": f"{site}/{node} {it['subject']}"})
             it["details"] = dict(it["details"], cluster=site, as_of=h.get("read_at"), sent_by="hub")

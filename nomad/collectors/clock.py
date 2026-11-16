@@ -26,7 +26,12 @@ usual clock (the 90th percentile of its last 30 days' readings that weren't
 low), the most a host alike gives now (alike()), and the CPU's top clock
 (cpufreq's maximum, or an Intel model's rated clock); a low clock counts
 only when the sha256 rate agrees, where there is one to compare it with;
-judged by the sha256 rate alone, below ``sha_min_fraction`` (0.25). A host is
+judged by the sha256 rate alone, below ``sha_min_fraction`` (0.25). A host
+whose CPUs are busy (load per CPU 0.5 or more) is judged against what it and
+the busy hosts alike give busy (their median), else its CPU's rated clock (or
+60% of its top clock), below ``busy_min_fraction`` (0.4): with every core at
+work a CPU runs far below its top clock, and lower on heavy vector code (1.49.0;
+spydur's Xeon 6230Rs: 3,970 MHz idle, 2,700 busy, dips to 1,420). A host is
 throttled after ``sustain`` (2) low readings in a row: alerted (source
 ``clock``, subject "cpu clock"), critical when its power readings show a
 supply problem too (the power collector, on the same site). Its board
@@ -47,6 +52,7 @@ seen from here.
 
     [alerts.clock]
     # min_fraction = 0.5
+    # busy_min_fraction = 0.4          # a busy host's, of its busy clock
     # sustain = 2
     # ignore = ["gpu0*"]               # hosts not alerted (shell patterns)
     [alerts.clock.node07]
@@ -82,7 +88,13 @@ PEER_HOURS = 2             # hosts like it: their readings this recent
 # min_fraction: of the clock; sha_min_fraction: of the sha256 rate, where there is no counter (a rate
 # shared with a busy hyperthread sibling, or measured against an idle past, falls further than a clock
 # does: braked node02 gave 6% of node51's)
-DEFAULTS = {"enabled": True, "min_fraction": 0.5, "sha_min_fraction": 0.25, "sustain": 2}
+DEFAULTS = {"enabled": True, "min_fraction": 0.5, "sha_min_fraction": 0.25, "sustain": 2,
+            "busy_min_fraction": 0.4}
+# A host this busy (load per CPU) is judged against busy readings (1.49.0): with every core at work a
+# CPU runs well below its top clock, and lower still on heavy vector code (spydur's Xeon 6230Rs: about
+# 3,970 MHz idle, 2,700 busy, dips to 1,420), none of it a brake. A brake (PROCHOT) holds the lowest
+# clock at any load: arachne's 400 of 3,700 MHz.
+BUSY = 0.5
 
 # The probe, run by the host's own python3 (3.6+): one line, CLOCK|key=value|...
 # Each socket is measured (a brake is per package: one socket braked slows every job spanning
@@ -238,7 +250,7 @@ def rules(alerts_clock: dict | None, node: str) -> dict:
     for layer in [raw] + [raw[k] for k in (node, short) if isinstance(raw.get(k), dict)][:1]:
         if isinstance(layer.get("enabled"), bool):
             out["enabled"] = layer["enabled"]
-        for key in ("min_fraction", "sha_min_fraction"):
+        for key in ("min_fraction", "sha_min_fraction", "busy_min_fraction"):
             v = layer.get(key)
             if isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1:
                 out[key] = float(v)
@@ -259,6 +271,18 @@ def _p90(values: list) -> float | None:
     return v[min(len(v) - 1, int(round(0.9 * (len(v) - 1))))]
 
 
+def load_per_cpu(r: dict) -> float | None:
+    load, cpus = r.get("load1"), r.get("cpus")
+    if isinstance(load, (int, float)) and not isinstance(load, bool) and isinstance(cpus, int) and cpus > 0:
+        return load / cpus
+    return None
+
+
+def is_busy(r: dict) -> bool:
+    per = load_per_cpu(r)
+    return per is not None and per >= BUSY
+
+
 def alike(a: dict, b: dict) -> bool:
     """Hosts to compare: the same CPU model, both real or both virtual, with
     the same sha256 instructions (a VM's model name, "Common KVM processor",
@@ -271,7 +295,29 @@ def reference(r: dict, own: list[dict], peers: list[dict]) -> tuple[float | None
     """(the most this host should give, where that comes from, "mhz" or
     "sha_mbps"): the highest of its usual clock (``own``: 30 days' readings
     that weren't low, their 90th percentile), the most a host alike gives now
-    (``peers``: alike(), not low) and its CPU's top clock."""
+    (``peers``: alike(), not low) and its CPU's top clock. A busy host
+    (is_busy) is judged against what it gives busy: the median of its own
+    busy readings and of the busy hosts alike now, else its CPU's rated clock
+    (or 60% of its top clock), never the top clock it reaches idle."""
+    if r.get("mhz") and is_busy(r):
+        found = []
+        mine = [x["mhz"] for x in own if x.get("mhz") and is_busy(x)]
+        if len(mine) >= 4:
+            found.append((float(statistics.median(mine)), "its usual clock this busy"))
+        like = [p["mhz"] for p in peers if p.get("mhz") and is_busy(p)]
+        if like:
+            found.append((float(statistics.median(like)),
+                          f"{len(like)} busy host{'s' if len(like) > 1 else ''} with its CPU"))
+        if not found:
+            m = _INTEL_RATED.search(r.get("model") or "")
+            if m:
+                found.append((float(m.group(1)) * 1000, "its CPU's rated clock"))
+            elif r.get("max_mhz"):
+                found.append((0.6 * float(r["max_mhz"]), "60% of its CPU's top clock"))
+        if found:
+            ref, basis = max(found, key=lambda x: x[0])
+            return ref, basis, "mhz"
+        return None, None, "mhz"
     if r.get("mhz"):
         found = []
         mine = _p90([x.get("mhz") for x in own])
@@ -317,7 +363,10 @@ def judge(r: dict, own: list[dict], peers: list[dict], rule: dict) -> dict:
         return out
     ratio = value / ref
     out["ratio"] = round(ratio, 4)
-    if ratio >= rule["min_fraction" if measure == "mhz" else "sha_min_fraction"]:
+    busy = measure == "mhz" and is_busy(r)
+    floor = rule.get("busy_min_fraction", DEFAULTS["busy_min_fraction"]) if busy else \
+        rule["min_fraction" if measure == "mhz" else "sha_min_fraction"]
+    if ratio >= floor:
         return out
     if measure == "mhz" and r.get("sha_mbps"):
         sha_ref, _b, _m = reference(dict(r, mhz=None), own, peers)
@@ -325,7 +374,10 @@ def judge(r: dict, own: list[dict], peers: list[dict], rule: dict) -> dict:
             return out                      # its sha256 rate as usual: not a brake
     out["low"] = True
     slower = max(1, round(1 / ratio)) if ratio > 0 else None
-    if measure == "mhz":
+    if busy:
+        what = (f"its CPU runs at {value} MHz under load ({load_per_cpu(r):.2f} per CPU), {ratio:.0%} of "
+                f"{round(ref)} MHz ({basis})")
+    elif measure == "mhz":
         what = f"its CPU runs at {value} MHz busy, {ratio:.0%} of {round(ref)} MHz ({basis})"
     else:
         what = (f"its CPU does {value:g} MB/s on nomad's sha256 test, {ratio:.0%} of {ref:g} ({basis}; "
@@ -378,10 +430,59 @@ ADVICE = ("Drain it until it is fixed (scontrol update nodename={node} state=dra
           "power-cycle the node.")
 
 
+JOBS_SHOWN = 8
+
+
+def jobs_on(conn: sqlite3.Connection, node: str, site: str | None = None, now: datetime | None = None) -> list[str]:
+    """The jobs running on ``node`` now (the jobs table's, newest first): the
+    jobs a slow clock slows (1.49.0). Job ids only."""
+    from nomad.hostlist import expand_hostlist
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    except sqlite3.Error:
+        return []
+    if not {"job_id", "node_list", "start_time", "state"} <= cols:
+        return []
+    now = now or datetime.now()
+    by, args = ("", []) if site is None or "source_site" not in cols else (" AND source_site = ?", [site])
+    try:
+        rows = conn.execute(
+            "SELECT job_id, node_list, state, end_time FROM jobs WHERE start_time >= ? AND start_time <= ? "
+            f"AND (end_time IS NULL OR end_time = '' OR end_time >= ?){by} ORDER BY start_time DESC",
+            [(now - timedelta(days=30)).isoformat(timespec="seconds"), now.isoformat(timespec="seconds"),
+             now.isoformat(timespec="seconds")] + args).fetchall()
+    except sqlite3.Error:
+        return []
+    short = node.split(".")[0]
+    out = []
+    for job_id, nodes, state, _end in rows:
+        st = str(state or "").split(" ")[0].upper()
+        if st and st not in ("RUNNING", "COMPLETING", "CONFIGURING", "SUSPENDED"):
+            continue
+        try:
+            names = expand_hostlist(nodes or "")
+        except Exception:                               # noqa: BLE001 -- a node list nomad can't read
+            continue
+        if node in names or short in names:
+            out.append(str(job_id))
+    return out
+
+
+def jobs_words(ids: list[str]) -> str:
+    """' Running there: 3 jobs (4521, 4519, 4502).' or ''."""
+    if not ids:
+        return ""
+    shown = ids[:JOBS_SHOWN]
+    more = len(ids) - len(shown)
+    return (f" Running there: {len(ids)} job{'s' if len(ids) > 1 else ''} ({', '.join(shown)}"
+            + (f" and {more} more" if more else "") + ").")
+
+
 def alert_item(node: str, host: dict, supplies: list[str], unread: str | None, where: str = "",
-               every_minutes: float = EVERY_MINUTES) -> dict:
+               every_minutes: float = EVERY_MINUTES, jobs: list[str] | None = None) -> dict:
     severity = "critical" if supplies else "warning"
     message = f"{node}{where}: {host['problem']}, since {host['low_since']}."
+    message += jobs_words(jobs or [])
     if supplies:
         message += f" Its power: {'; '.join(supplies)}."
     elif unread:
@@ -391,7 +492,7 @@ def alert_item(node: str, host: dict, supplies: list[str], unread: str | None, w
             "details": {"node": node, "mhz": host.get("mhz"), "sha_mbps": host.get("sha_mbps"),
                         "reference": host.get("reference"), "basis": host.get("basis"),
                         "ratio": host.get("ratio"), "since": host.get("low_since"),
-                        "supplies": supplies or None,
+                        "supplies": supplies or None, "jobs": (jobs or [])[:50] or None,
                         # readings every_minutes apart are one episode, not news each time
                         "episode_gap_minutes": max(60, int(every_minutes * 3))}}
 
@@ -520,16 +621,18 @@ class ClockCollector(TempsCollector):
             since = (datetime.now() - timedelta(days=HISTORY_DAYS)).isoformat(timespec="seconds")
             recent = (datetime.now() - timedelta(hours=PEER_HOURS)).isoformat(timespec="seconds")
             # hosts with the same CPU: this read's, and others' latest within PEER_HOURS
-            latest = {n: {"model": m, "mhz": z, "sha_mbps": s, "vm": v, "sha_ni": k} for n, m, z, s, v, k in
-                      conn.execute("SELECT h.node, h.model, h.mhz, h.sha_mbps, c.vm, c.sha_ni FROM cpu_clock_hosts h "
+            latest = {n: {"model": m, "mhz": z, "sha_mbps": s, "vm": v, "sha_ni": k, "load1": ld, "cpus": cp}
+                      for n, m, z, s, v, k, ld, cp in
+                      conn.execute("SELECT h.node, h.model, h.mhz, h.sha_mbps, c.vm, c.sha_ni, c.load1, c.cpus "
+                                   "FROM cpu_clock_hosts h "
                                    "LEFT JOIN cpu_clock c ON c.id = (SELECT MAX(id) FROM cpu_clock WHERE node = h.node) "
                                    "WHERE h.read_at >= ? AND h.low_since IS NULL", (recent,))}
             latest.update({d["node"]: d for d in data})
             for d in data:
                 rule = rules(self.alert_rules, d["node"])
-                own = [{"mhz": z, "sha_mbps": s} for z, s in conn.execute(
-                    "SELECT mhz, sha_mbps FROM cpu_clock WHERE node = ? AND timestamp >= ? AND COALESCE(low, 0) = 0",
-                    (d["node"], since))]
+                own = [{"mhz": z, "sha_mbps": s, "load1": ld, "cpus": cp} for z, s, ld, cp in conn.execute(
+                    "SELECT mhz, sha_mbps, load1, cpus FROM cpu_clock WHERE node = ? AND timestamp >= ? "
+                    "AND COALESCE(low, 0) = 0", (d["node"], since))]
                 peers = [v for n, v in latest.items() if n != d["node"] and alike(d, v)]
                 j = judge(d, own, peers, rule)
                 d["low"] = 1 if j["low"] else 0
@@ -561,7 +664,8 @@ class ClockCollector(TempsCollector):
                     ":ratio, :low_since, :throttled, :severity, :problem, :every_minutes)", host)
                 if host["severity"]:
                     supplies, unread = power_of(conn, d["node"])
-                    fresh.append(alert_item(d["node"], host, supplies, unread, every_minutes=self.every_minutes))
+                    fresh.append(alert_item(d["node"], host, supplies, unread, every_minutes=self.every_minutes,
+                                            jobs=jobs_on(conn, d["node"])))
             cutoff = (datetime.now() - timedelta(days=self.keep_days)).isoformat(timespec="seconds")
             conn.execute("DELETE FROM cpu_clock WHERE timestamp < ?", (cutoff,))
             conn.commit()
