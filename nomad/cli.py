@@ -8069,8 +8069,8 @@ def usage_report_labs(ctx, term, since, until, only, condo_owners, db, report_co
         who = "" if mask else f" ({', '.join(lab['leaders'])})"
         space = sum(x["used_bytes"] for x in f["storage"]["paths"]) if f["storage"]["measured"] else None
         click.echo(f"  {shown(lab['name'])}{who}: {t['people']} of {f['members']['count']} ran jobs; "
-                   f"{t['core_hours']:,.0f} core-hours, {t['gpu_hours']:,.0f} GPU-hours; "
-                   f"{t['jobs_ended']} jobs ended, {p(t['failed_pct'])} failed; CPU used {p(t['cpu_used_pct'])}, "
+                   f"{cterm.hours(t['core_hours'])} core-hours, {cterm.hours(t['gpu_hours'])} GPU-hours; "
+                   f"{cterm.failed_line(t)}; CPU used {p(t['cpu_used_pct'])}, "
                    f"memory used {p(t['memory_used_pct'])}; storage "
                    + ("not measured" if space is None else cterm._bytes(space) if space else "none"))
     condo = [x for x in data["left_out"] if x["why"] == "condo"]
@@ -8081,8 +8081,12 @@ def usage_report_labs(ctx, term, since, until, only, condo_owners, db, report_co
     quiet = [x for x in data["left_out"] if x["why"] == "quiet"]
     if quiet:
         names = "" if mask else ": " + ", ".join(x["name"] for x in quiet)
-        click.echo(f"  no report: {len(quiet)} lab{'' if len(quiet) == 1 else 's'} with no job and no space "
-                   f"all term{names}")
+        click.echo(f"  no report: {len(quiet)} lab{'' if len(quiet) == 1 else 's'} with no job all term that "
+                   f"{cterm.quiet_words(data, len(quiet))}{names} (--lab writes one anyway)")
+    if data.get("shared_people"):
+        k = data["shared_people"]
+        click.echo(f"  {k} {'person is' if k == 1 else 'people are'} in more than one of these labs and "
+                   f"count{'s' if k == 1 else ''} in each")
     click.echo(f"wrote {len(paths)} files under {target} (readable only by you)"
                + ("; no summary, as --lab leaves labs out" if summary is None else ""))
     if send:

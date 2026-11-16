@@ -20,6 +20,7 @@ might do differently from another.
                                            # each term's first day (MM-DD), to the next one's;
                                            # a term's lab reports are made the day the next begins
     term_condo_owners = false              # condo owners get a term report too (they get a monthly one)
+    term_min_space = "1 GB"                # a lab with no job all term: a report only if it holds this much
     term_out_dir = "/var/lib/nomad/reports/labs"
 
     [report.policy]                        # what the reports check against
@@ -113,6 +114,7 @@ class Delivery:
     institution: str = "Research Computing"
     terms: tuple = DEFAULT_TERMS   # (month, day, name or None), in the year's order
     term_condo_owners: bool = False
+    term_min_space: int = 1_000_000_000     # bytes; 0: any space held gets a report
     term_out_dir: Path | None = None
 
     @property
@@ -185,7 +187,7 @@ class Settings:
 
 _LABS_KEYS = ("mail_domain", "send_from", "review_to", "summary_to", "name_members", "formats",
               "owner_patterns", "netid_max_length", "contact", "out_dir", "institution", "branding",
-              "terms", "term_condo_owners", "term_out_dir")
+              "terms", "term_condo_owners", "term_min_space", "term_out_dir")
 _POLICY_KEYS = ("owner_start_minutes", "guest_max_days", "guest_grace_minutes", "home_quota_gb",
                 "lab_scratch_quota_tb", "scratch_path", "use_below")
 _CONDO_KEYS = ("owner", "partition", "nodes", "members", "email", "cc", "confirmed", "account", "label",
@@ -337,9 +339,28 @@ def _delivery(d: dict) -> Delivery:
         if not isinstance(d["term_condo_owners"], bool):
             raise CondoConfigError("term_condo_owners must be true or false")
         out.term_condo_owners = d["term_condo_owners"]
+    if d.get("term_min_space") is not None:
+        out.term_min_space = _size(d["term_min_space"], "term_min_space")
     if d.get("term_out_dir"):
         out.term_out_dir = Path(str(d["term_out_dir"])).expanduser()
     return out
+
+
+def _size(v, what: str) -> int:
+    """A size as people write it ("1 GB", "500M") or bytes; 0 or more."""
+    from nomad.storage import parse_size
+    if isinstance(v, bool):
+        raise CondoConfigError(f"{what} must be a size such as \"1 GB\" or \"500 MB\"")
+    if isinstance(v, (int, float)):
+        b = int(v)
+    else:
+        try:
+            b = parse_size(v)
+        except ValueError:
+            raise CondoConfigError(f"{what} must be a size such as \"1 GB\" or \"500 MB\"") from None
+    if b < 0:
+        raise CondoConfigError(f"{what} can't be below 0")
+    return b
 
 
 def _policy(d: dict) -> Policy:

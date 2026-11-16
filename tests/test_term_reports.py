@@ -210,7 +210,7 @@ def test_a_lab_with_no_use_all_term_gets_no_report(db, settings, data):
     assert {"lab": "quinn$", "name": "quinn$", "why": "quiet"} in data["left_out"]
     assert "quinn$" not in {f["lab"]["group"] for f in data["reports"]}
     labs, summary = term.build_all(data, settings, ["html"])
-    assert "No report, as they ran no job and held no space all term: quinn$." in summary.text
+    assert "No report, as they ran no job all term and hold under 1 GB: quinn$." in summary.text
     conn = sqlite3.connect(db)
     try:
         asked = term.build(conn, settings, *FALL[:2], nomad_config=NOMAD_CONFIG, now=NOW, only=["quinn$"])
@@ -321,7 +321,7 @@ def test_the_command(db, tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert "Fall 2026 (25 August 2026 to 9 January 2027): lab reports" in r.output
     assert "kim$ (kim): 3 of 3 ran jobs" in r.output and "holding condos: lee$" in r.output
-    assert "no report: 1 lab with no job and no space all term: quinn$" in r.output
+    assert "no report: 1 lab with no job all term that holds under 1 GB: quinn$ (--lab writes one anyway)" in r.output
     assert (tmp_path / "o" / "kim" / "2026-08-25_2027-01-10.html").exists()
     masked = _cli(db, tmp_path, "--out", str(tmp_path / "m"), "--mask", monkeypatch=monkeypatch)
     for name in ("kim", "lee", "olive", "quinn"):

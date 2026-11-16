@@ -97,14 +97,17 @@ def _use(jobs, t0, t1, ceilings) -> dict:
     st = jobfacts.summarize([summary_row(j) for j in ended], ceilings) or {}
     waits = [j.wait_s / 60 for j in jobs if j.start is not None and t0 <= j.start < t1 and j.wait_s is not None]
     return {
-        "core_hours": round(sum(j.cpus * j.hours_in(t0, t1) for j in ran), 1),
-        "gpu_hours": round(sum(j.gpus * j.hours_in(t0, t1) for j in ran), 1),
+        # to 4 places: a lab's few seconds of jobs are "under 1", not 0
+        "core_hours": round(sum(j.cpus * j.hours_in(t0, t1) for j in ran), 4),
+        "gpu_hours": round(sum(j.gpus * j.hours_in(t0, t1) for j in ran), 4),
         "people": len({j.user for j in ran}),
         "jobs_started": sum(1 for j in jobs if j.start is not None and t0 <= j.start < t1),
         "jobs_ended": len(ended),
         "outcomes": st.get("outcomes") or dict.fromkeys(jobfacts.OUTCOME_KEYS, 0),
         "failed": sum((st.get("outcomes") or {}).get(k, 0) for k in jobfacts.PROBLEMS),
         "failed_pct": st.get("failed_pct"),
+        # what the failed share is of: the jobs that ran to an end, less node failures
+        "judged": (st.get("ran_to_an_end") or 0) - (st.get("outcomes") or {}).get("node_fail", 0),
         "cpu_used_pct": (st.get("core_hours") or {}).get("used_pct"),
         "cpu_jobs_measured": (st.get("core_hours") or {}).get("jobs_measured", 0),
         "memory_used_pct": (st.get("memory") or {}).get("used_pct"),
@@ -297,6 +300,9 @@ def build(conn: sqlite3.Connection, settings: Settings, t0: datetime, t1: dateti
            "partial": bool(only),
            "previous": {"from": p0.isoformat(), "to": p1.isoformat(), "label": label(p0, p1, pname),
                         "records_begin": begins.isoformat() if begins else None}}
+    floor = settings.delivery.term_min_space
+    out["min_space"] = floor
+    reported: dict = defaultdict(int)          # person -> reports they count in
     for lab in labs:
         if lab.condos and not with_condos:
             out["left_out"].append({"lab": lab.group, "name": lab.name, "why": "condo"})
@@ -319,12 +325,17 @@ def build(conn: sqlite3.Connection, settings: Settings, t0: datetime, t1: dateti
                           generated=out["generated"], period=period, policy=settings.policy,
                           name_members=settings.delivery.name_members)
         t = fig["total"]
-        if not (t["core_hours"] or t["jobs_started"] or t["jobs_ended"] or fig["storage"]["paths"]) and not only:
-            # No job and no space all term: no report (a group named for
-            # someone who doesn't compute is a lab by nomad's rules).
+        held = sum(p["used_bytes"] for p in fig["storage"]["paths"])
+        little = held < floor if floor else not fig["storage"]["paths"]
+        if not (t["core_hours"] or t["jobs_started"] or t["jobs_ended"]) and little and not only:
+            # No job all term and little or no space: no report (a group
+            # named for someone who doesn't compute is a lab by nomad's rules).
             out["left_out"].append({"lab": lab.group, "name": lab.name, "why": "quiet"})
             continue
         out["reports"].append(fig)
+        for u in people:
+            reported[u] += 1
+    out["shared_people"] = sum(1 for k in reported.values() if k > 1)
     return out
 
 
@@ -341,6 +352,49 @@ def _bytes(b) -> str:
     return f"{x:,.1f} PB"  # pragma: no cover
 
 
+def hours(x) -> str:
+    """Core- or GPU-hours: a little use is "under 1", not 0."""
+    if x is None:
+        return "-"
+    return "under 1" if 0 < x < 1 else n(x)
+
+
+def failed_line(u) -> str:
+    """How a lab's jobs ended, in a line: '6 jobs ended; 4 failed of the 5
+    that ran to an end (80%)' (the failed share leaves out cancelled jobs
+    and node failures)."""
+    ended, judged, failed = u["jobs_ended"], u.get("judged"), u["failed"]
+    if not ended:
+        return "no job ended"
+    head = plural(ended, "job") + " ended"
+    if judged is None or judged == ended:
+        return f"{head}, {n(failed)} failed ({pct(u['failed_pct'])})"
+    if not judged:
+        return f"{head}; none ran to an end"
+    return f"{head}; {n(failed)} failed of the {n(judged)} that ran to an end ({pct(u['failed_pct'])})"
+
+
+def _ended_tile(u) -> str:
+    """The Jobs ended tile's line, short: '2 of 4 failed'; '4 failed, 1
+    cancelled' when some didn't run to an end (the table below has them all)."""
+    ended = u["jobs_ended"]
+    if not ended:
+        return ""
+    if u.get("judged") == ended:
+        return f"{n(u['failed'])} of {n(ended)} failed"
+    oc = u.get("outcomes") or {}
+    bits = [f"{n(u['failed'])} failed"]
+    if oc.get("cancelled"):
+        bits.append(f"{n(oc['cancelled'])} cancelled")
+    if oc.get("node_fail"):
+        bits.append(plural(oc["node_fail"], "node failure"))
+    return ", ".join(bits)
+
+
+def _space_words(b) -> str:
+    return _bytes(b).replace(".0 ", " ")
+
+
 def _signed(b) -> str:
     if b is None:
         return "-"
@@ -354,6 +408,14 @@ def _change(now, then) -> str:
         return "new" if now else "-"
     d = 100.0 * (now - then) / then
     return "about the same" if abs(d) < 5 else (f"up {d:.0f}%" if d > 0 else f"down {-d:.0f}%")
+
+
+def quiet_words(data: dict, labs: int = 2) -> str:
+    """What the labs with no report held: 'hold no space', 'hold under 1 GB'
+    ('holds' for one)."""
+    floor = data.get("min_space") or 0
+    verb = "holds" if labs == 1 else "hold"
+    return f"{verb} under {_space_words(floor)}" if floor else f"{verb} no space"
 
 
 def lab_doc(fig: dict, delivery, brand=None) -> list:
@@ -378,21 +440,21 @@ def lab_doc(fig: dict, delivery, brand=None) -> list:
         ch = (f"{_change(t['core_hours'], prev.get('core_hours'))} on {prev['label']}"
               if prev.get("measured") and not prev.get("partial") else "")
         doc.append(Tiles([
-            ("Core-hours", n(t["core_hours"]), ch, LAB),
-            ("GPU-hours", n(t["gpu_hours"]) if t["gpu_hours"] else "-", "", LAB),
-            ("Jobs ended", n(t["jobs_ended"]), f"{pct(t['failed_pct'])} failed" if t["failed_pct"] is not None
-             else "", LAB),
+            ("Core-hours", hours(t["core_hours"]), ch, LAB),
+            ("GPU-hours", hours(t["gpu_hours"]) if t["gpu_hours"] else "-", "", LAB),
+            ("Jobs ended", n(t["jobs_ended"]), _ended_tile(t), LAB),
             ("Median wait", minutes(t["wait_median_minutes"]), f"{plural(t['waits'], 'job')} started"
              if t["waits"] else "", LAB)]))
 
         doc.append(H("By cluster"))
-        rows = [[c["label"], n(c["core_hours"]), n(c["gpu_hours"]) if c["gpu_hours"] else "-", n(c["people"]),
+        rows = [[c["label"], hours(c["core_hours"]), hours(c["gpu_hours"]) if c["gpu_hours"] else "-", n(c["people"]),
                  n(c["jobs_ended"]), pct(c["failed_pct"]), pct(c["cpu_used_pct"]), pct(c["memory_used_pct"]),
                  minutes(c["wait_median_minutes"])] for c in fig["clusters"]]
         doc.append(Table(["Cluster", "Core-hours", "GPU-hours", "People", "Jobs ended", "Failed", "CPU used",
                           "Memory used", "Median wait"], rows, "lrrrrrrrr",
-                         note="Failed: of the jobs that ran to an end, those that failed, ran out of memory or "
-                              "hit their time limit. Median wait: from when a job could start to its start."))
+                         note="Failed: of the jobs that ran to an end (not cancelled, and not stopped by a "
+                              "node failure), the share that failed, ran out of memory or hit their time limit. "
+                              "Median wait: from when a job could start to its start."))
         oc = t["outcomes"]
         if t["jobs_ended"]:
             doc.append(Table(["Jobs ended", "Completed", "Failed", "Out of memory", "Timed out", "Cancelled",
@@ -419,8 +481,8 @@ def lab_doc(fig: dict, delivery, brand=None) -> list:
     if m["named"] and m["each"]:
         used = [r for r in m["each"] if r["core_hours"] or r["jobs_ended"] or r["storage_bytes"]]
         quiet = len(m["each"]) - len(used)
-        rows = [[r["user"] + (" (PI)" if r["pi"] else ""), n(r["core_hours"]),
-                 n(r["gpu_hours"]) if r["gpu_hours"] else "-", n(r["jobs_ended"]), n(r["failed"]),
+        rows = [[r["user"] + (" (PI)" if r["pi"] else ""), hours(r["core_hours"]),
+                 hours(r["gpu_hours"]) if r["gpu_hours"] else "-", n(r["jobs_ended"]), n(r["failed"]),
                  pct(r["cpu_used_pct"]), pct(r["memory_used_pct"]),
                  _bytes(r["storage_bytes"]) if r["storage_bytes"] else "-"] for r in used]
         note = "This term's figures for each person."
@@ -453,9 +515,10 @@ def lab_doc(fig: dict, delivery, brand=None) -> list:
         if not prev.get("measured"):
             doc.append(P(f"Not measured: {prev.get('why', 'no figures')}.", muted=True))
         else:
-            rows = [["Core-hours", n(t["core_hours"]), n(prev["core_hours"]),
+            rows = [["Core-hours", hours(t["core_hours"]), hours(prev["core_hours"]),
                      _change(t["core_hours"], prev["core_hours"])],
-                    ["GPU-hours", n(t["gpu_hours"]), n(prev["gpu_hours"]), _change(t["gpu_hours"], prev["gpu_hours"])],
+                    ["GPU-hours", hours(t["gpu_hours"]), hours(prev["gpu_hours"]),
+                     _change(t["gpu_hours"], prev["gpu_hours"])],
                     ["Jobs ended", n(t["jobs_ended"]), n(prev["jobs_ended"]),
                      _change(t["jobs_ended"], prev["jobs_ended"])],
                     ["People who ran jobs", n(t["people"]), n(prev["people"]), _change(t["people"], prev["people"])]]
@@ -484,12 +547,18 @@ def summary_doc(data: dict, delivery, brand=None) -> list:
         lab = f["lab"]
         space = sum(p["used_bytes"] for p in f["storage"]["paths"]) if f["storage"]["measured"] else None
         rows.append([lab["name"], ", ".join(lab["leaders"]), f"{n(t['people'])} of {n(f['members']['count'])}",
-                     n(t["core_hours"]), n(t["gpu_hours"]) if t["gpu_hours"] else "-", n(t["jobs_ended"]),
+                     hours(t["core_hours"]), hours(t["gpu_hours"]) if t["gpu_hours"] else "-", n(t["jobs_ended"]),
                      pct(t["failed_pct"]), pct(t["cpu_used_pct"]), pct(t["memory_used_pct"]),
                      minutes(t["wait_median_minutes"]), _bytes(space) if space else "-"])
     if rows:
+        shared = data.get("shared_people") or 0
+        note = ("Failed: of the jobs that ran to an end (not cancelled, and not stopped by a node failure), the "
+                "share that failed, ran out of memory or hit their time limit.")
+        if shared:
+            note += (f" {plural(shared, 'person is', 'people are')} in more than one of these labs and "
+                     f"count{'s' if shared == 1 else ''} in each, so the rows add up to more than the clusters' use.")
         doc.append(Table(["Lab", "PI", "Ran jobs", "Core-hours", "GPU-hours", "Jobs ended", "Failed", "CPU used",
-                          "Memory used", "Median wait", "Storage"], rows, "llrrrrrrrrr"))
+                          "Memory used", "Median wait", "Storage"], rows, "llrrrrrrrrr", note=note))
     else:
         doc.append(P("No lab to report on: none has a PI by [console.labs] in nomad.toml.", muted=True))
     condo = [x for x in data["left_out"] if x["why"] == "condo"]
@@ -498,7 +567,7 @@ def summary_doc(data: dict, delivery, brand=None) -> list:
             " (they hold condos and get a monthly report; term_condo_owners = true adds them)."), muted=True))
     quiet = [x for x in data["left_out"] if x["why"] == "quiet"]
     if quiet:
-        doc.append(P("No report, as they ran no job and held no space all term: "
+        doc.append(P(f"No report, as they ran no job all term and {quiet_words(data)}: "
                      + ", ".join(x["name"] for x in quiet) + ".", muted=True))
     doc.append(Foot(([delivery.contact] if delivery.contact else [])
                     + [f"Figures from NØMAÐ (nomad-hpc.com), {data['generated'][:10]}."]))

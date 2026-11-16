@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.48.2 (November 2026)
+
+The term reports, as the first run of Fall 2026 so far read on a real hub:
+
+- **No report about nothing.** 52 of 66 labs had run no job and got a report
+  only for the space they held, most of it under 1 GB (an empty home folder's
+  worth). A lab with no job all term now gets one when it holds at least
+  `term_min_space` (`[report.labs]`, default 1 GB; `0` for any space). Named
+  with `--lab`, or opened by its PI in the Console, it is written anyway.
+- **What the failed share is of.** It is of the jobs that ran to an end, so
+  "6 jobs ended, 80% failed" was 4 of 5, with one cancelled. The command now
+  says "6 jobs ended; 4 failed of the 5 that ran to an end (80%)", the report's
+  tile "4 failed, 1 cancelled", and the tables' note says what is left out.
+  Counts of jobs have their thousands separators.
+- **Under 1, not 0.** A lab whose jobs ran a few seconds each showed 0
+  core-hours beside 158 jobs ended; it says "under 1" now (hours are kept to
+  four places).
+- **Someone in two labs.** The summary says how many people are in more than
+  one of its labs, and that the rows add up to more than the clusters' use;
+  the command too.
+- tests/test_release_1482.py.
+
 ## v1.48.1 (November 2026)
 
 - **A GPU job's advice from the work its GPUs did.** When GPUs average 15–40%

@@ -23,12 +23,13 @@ and are left out here, unless `term_condo_owners = true` in `[report.labs]`
 The term reports use the same `report.toml` as the condo reports, and the
 same delivery settings in `[report.labs]`: `mail_domain` (a PI's address is
 NETID@mail_domain), `send_from`, `review_to`, `summary_to`, `formats`,
-`name_members`, `contact` and the branding. Three settings are their own:
+`name_members`, `contact` and the branding. Four settings are their own:
 
 ```toml
 [report.labs]
 terms = { "08-25" = "Fall", "01-10" = "Spring", "05-10" = "Summer" }
 term_condo_owners = false
+term_min_space = "1 GB"
 term_out_dir = "/var/lib/nomad/reports/labs"
 ```
 
@@ -36,6 +37,9 @@ term_out_dir = "/var/lib/nomad/reports/labs"
   to the next one's first day. A list (`["08-25", "01-10", "05-10"]`) works
   too; the reports then go by dates. The default is the three terms above.
 - `term_condo_owners`: labs that hold condos get a term report as well.
+- `term_min_space`: a lab whose people ran no job all term gets a report
+  only when they hold at least this much space (default 1 GB; a size such
+  as `"500 MB"` or `"2T"`, or bytes). With `0`, any space held gets one.
 - `term_out_dir`: where the files go (default: the data directory's
   `reports/labs`). Each lab's are in a folder of its own, named for the
   term (`2026-08-25_2027-01-10.html`), and the summary's in `summary/`. They
@@ -61,8 +65,8 @@ run doesn't mail a report twice (`--resend` does).
 
 1. **The term:** its dates, how many of the lab's people ran jobs, on how many
    clusters, and the PI.
-2. **Core-hours, GPU-hours, jobs ended** (the share that failed) and **the
-   median wait**, then the same by cluster, with how much of the cores the
+2. **Core-hours, GPU-hours, jobs ended** (how many failed, and how many
+   were cancelled) and **the median wait**, then the same by cluster, with how much of the cores the
    jobs held they kept busy and how much of the memory they asked for they
    used at their peak.
 3. **How jobs ended:** completed, failed, out of memory, timed out,
@@ -82,7 +86,9 @@ run doesn't mail a report twice (`--resend` does).
 Research computing's summary has a row per lab: its PI, how many of its
 people ran jobs, core-hours, GPU-hours, jobs, failures, CPU and memory used,
 the median wait and storage, and which labs were left out because they hold
-condos.
+condos or ran nothing. When someone is in more than one of the labs, it says
+how many: they count in each, so the rows add up to more than the clusters'
+use.
 
 ## How the figures are made
 
@@ -91,15 +97,17 @@ condos.
   PI, with its members as the groups collector reads them now, and the PI. A
   lab of its PI only gets a report too. Someone who left during the term
   isn't counted; someone in two labs counts in each. A lab whose people ran
-  no job and held no space all term gets no report; the summary names it
-  (asked for by `--lab`, it is written anyway).
+  no job all term and hold less than `term_min_space` gets no report; the
+  summary names it (asked for by `--lab`, or by its PI in the Console, it is
+  written anyway).
 - **Core-hours and GPU-hours** are each job's cores (Slurm's allocation,
   else the request) or GPUs times the hours it ran inside the term, on every
-  cluster the hub reads.
+  cluster the hub reads. Jobs of a few seconds add up to "under 1".
 - **How jobs ended, CPU and memory used** are for the jobs that ended in the
   term and were measured (job_summary), as How I'm doing works them out.
-  Failed is of the jobs that ran to an end: failed, out of memory or timed
-  out.
+  Failed is of the jobs that ran to an end, which leaves out cancelled jobs
+  and node failures: failed, out of memory or timed out. So "6 jobs ended; 4
+  failed of the 5 that ran to an end (80%)" is a lab with one job cancelled.
 - **Waits** are for the jobs that started in the term: from when each could
   start (Slurm's Eligible time, else its submission) to its start.
 - **Storage** is the latest reading of who holds each path's space before the

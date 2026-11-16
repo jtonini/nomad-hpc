@@ -81,6 +81,7 @@ formats = ["html", "pdf", "json"]
 contact = "Questions: rc@example.edu"
 terms = { "08-25" = "Fall", "01-10" = "Spring", "05-10" = "Summer" }   # lab reports each term
 term_condo_owners = false         # labs with condos get the monthly report instead
+term_min_space = "1 GB"           # a lab with no job all term: a report only if it holds this much
 
 [report.policy]                   # what the reports check against
 owner_start_minutes = 5
