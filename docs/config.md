@@ -543,6 +543,41 @@ nomad course answer GROUP NETID --yes|--no   record what someone said
 Like `nomad lab`, each change is shown first and written with `--apply`,
 after a backup, only if the file still reads back as intended.
 
+### Policies in the Console: `nomad console policy`
+
+The Console's Help > Policies lists research computing's policy documents,
+to read in the page or download, for everyone who signs in (1.48.3). Each is
+a file on the Console's machine, which it serves (only the files listed, a
+PDF, HTML, Markdown or text file of at most 25 MB), or a link to where the
+document lives:
+
+```toml
+[[console.policies]]
+title = "Research computing usage policy"
+file = "/etc/nomad/policies/usage-policy.pdf"
+about = "Who may use the clusters, what each lab gets, and its term report."
+updated = "2026-09-01"         # the document's date (default: the file's)
+
+[[console.policies]]
+title = "Data storage and retention"
+url = "https://example.edu/research-computing/storage"
+```
+
+```bash
+nomad console policies                                      the list, and what is wrong with any
+nomad console policy "Usage policy" --file /etc/nomad/policies/usage-policy.pdf \
+    --about "Who may use the clusters" --updated 2026-09-01 --apply
+nomad console policy "Storage policy" --url https://example.edu/storage --apply
+nomad console policy "Usage policy" --remove --apply
+```
+
+The same entry again changes nothing; a changed one replaces the entry of
+that title. Put the files where the Console's account can read them
+(`/etc/nomad/policies`, mode 644); `nomad console policies` says when one
+isn't there or isn't readable by every account, and the Console tells staff
+why a document doesn't show. HTML is shown sandboxed: no scripts run. The
+Console reads the list each time it is asked: no restart.
+
 ## Environment Variables
 
 | Variable | Description |

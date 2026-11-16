@@ -59,7 +59,10 @@ Then, on the hub:
    goes to its PI.
 
 What was sent is kept beside the summary (`summary/TERM.sent.json`): a second
-run doesn't mail a report twice (`--resend` does).
+run doesn't mail a report twice (`--resend` does). A run for every lab takes
+away the term's earlier files of a lab that gets no report now (one that had
+a job then, and none since); other terms' files stay, and so do the others'
+when `--lab` names one.
 
 ## What a PI gets
 

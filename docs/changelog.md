@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.48.3 (November 2026)
+
+- **Policies in the Console** (`[[console.policies]]` in nomad.toml;
+  `nomad.config.policies`; docs/config.md): research computing's policy
+  documents, each a file the Console serves (PDF, HTML, Markdown or text, at
+  most 25 MB, only the files listed) or a link, with a title, a line on what
+  it covers and its date. `nomad console policies` lists them and says what
+  is wrong with any (no such file, not readable by every account, an
+  unknown key); `nomad console policy TITLE --file PATH | --url URL
+  [--about] [--updated] [--remove] --apply` writes one with nomad's careful
+  edit (a backup, nothing else changed; the same entry again changes
+  nothing). The Console's Help > Policies is its fix 129.
+- **Term reports:** a run for every lab takes away the term's earlier files
+  of a lab that gets no report now, so the folder holds only this run's
+  (mail always went from the run's own); "under 1 core-hour", not "under 1
+  core-hours".
+- tests/test_release_1483.py.
+
 ## v1.48.2 (November 2026)
 
 The term reports, as the first run of Fall 2026 so far read on a real hub:

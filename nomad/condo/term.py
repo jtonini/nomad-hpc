@@ -359,6 +359,34 @@ def hours(x) -> str:
     return "under 1" if 0 < x < 1 else n(x)
 
 
+def hours_with(x, unit: str) -> str:
+    """'under 1 core-hour', '1 core-hour', '12 core-hours'."""
+    v = hours(x)
+    return f"{v} {unit}" if v in ("under 1", "1") else f"{v} {unit}s"
+
+
+def clear_stale(out, key: str, written: list) -> list:
+    """A term's files in the lab folders this run wrote none in: a lab that
+    had a report the last time and has none now (a quiet one). The files
+    named for the term only (KEY.html, .pdf, .json, .md); the summary's and
+    other terms' stay. The files removed."""
+    from pathlib import Path
+    out = Path(out)
+    keep = {Path(p).parent for p in written}
+    gone = []
+    if not out.is_dir():
+        return gone
+    for folder in sorted(out.iterdir()):
+        if folder.is_symlink() or not folder.is_dir() or folder.name == "summary" or folder in keep:
+            continue
+        for ext in ("html", "pdf", "json", "md"):
+            f = folder / f"{key}.{ext}"
+            if f.is_file() and not f.is_symlink():
+                f.unlink()
+                gone.append(f)
+    return gone
+
+
 def failed_line(u) -> str:
     """How a lab's jobs ended, in a line: '6 jobs ended; 4 failed of the 5
     that ran to an end (80%)' (the failed share leaves out cancelled jobs

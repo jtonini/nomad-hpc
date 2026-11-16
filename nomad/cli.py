@@ -7435,6 +7435,107 @@ def console_roles(ctx, netid, db, mask):
         conn.close()
 
 
+@console.command('policies')
+@click.pass_context
+def console_policies(ctx):
+    """The policy documents in the Console's Help > Policies
+    ([[console.policies]] in nomad.toml), and what is wrong with any.
+
+    \b
+    nomad console policies
+    nomad console policy "Usage policy" --file /etc/nomad/policies/usage.pdf --apply
+    nomad console policy "Storage policy" --url https://example.edu/storage --apply
+
+    Each is a PDF, HTML, Markdown or text file the Console serves (only the
+    files listed here), or a link to where it lives. The Console reads the
+    list each time it is asked: no restart.
+    """
+    from nomad.config import policies as pol
+    path = ctx.obj.get('config_target') or "nomad.toml"
+    items, problems = pol.read(ctx.obj.get('config') or {})
+    if not items and not problems:
+        click.echo(f"{path}: no [[console.policies]]; Help > Policies is empty (staff see how to add one).")
+        click.echo('  nomad console policy "Usage policy" --file /etc/nomad/policies/usage.pdf --apply   adds one')
+        return
+    click.echo(f"{path}: {len(items)} in Help > Policies")
+    for p in items:
+        when = f", updated {p.updated}" if p.updated else ""
+        if p.kind == "link":
+            click.echo(f"  {p.title}: a link, {p.url}{when}")
+            continue
+        state = f"  NOT SHOWN: {p.problem}" if p.problem else (
+            "" if pol.open_to_all(p.file) else
+            "  (readable here; not by every account: make sure the Console's can read it)")
+        click.echo(f"  {p.title}: {p.kind}, {p.file}{when}{state}")
+    for line in problems:
+        click.echo(f"  ! {line}")
+
+
+@console.command('policy')
+@click.argument('title')
+@click.option('--file', 'file_', metavar='PATH', help='The document: a .pdf, .html, .md or .txt file, by its full path.')
+@click.option('--url', metavar='URL', help='Or a link to where it lives (https://...).')
+@click.option('--about', metavar='TEXT', help='A line on what it covers.')
+@click.option('--updated', metavar='YYYY-MM-DD', help="The document's date (default: the file's).")
+@click.option('--remove', is_flag=True, help='Take it off the list (only TITLE is needed).')
+@click.option('--apply', is_flag=True, help='Write the change (default: only show it).')
+@click.pass_context
+def console_policy(ctx, title, file_, url, about, updated, remove, apply):
+    """Add, change or take off one policy document in the Console's Help >
+    Policies ([[console.policies]] in nomad.toml), by its TITLE.
+
+    \b
+    nomad console policy "Usage policy" --file /etc/nomad/policies/usage.pdf
+    nomad console policy "Usage policy" --file /etc/nomad/policies/usage.pdf \\
+        --about "Who may use the clusters, and what each lab gets" --updated 2026-09-01 --apply
+    nomad console policy "Storage policy" --url https://example.edu/storage --apply
+    nomad console policy "Usage policy" --remove --apply
+
+    The same entry again changes nothing. Give the file the Console reads
+    with -c, as an account that can write it and its folder (the backup goes
+    there), or as root. Put the documents where the Console's account can
+    read them (e.g. /etc/nomad/policies, 644).
+    """
+    from nomad.config import policies as pol
+    edit = _lab_edit(ctx)
+    try:
+        if remove and (file_ or url or about or updated):
+            raise pol.PolicyError("--remove takes only the title")
+        body = None if remove else pol.entry(title, file=file_, url=url, about=about, updated=updated)
+        changes = pol.set_policy(edit, body, title)
+    except pol.PolicyError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    if not changes:
+        click.echo(f"{edit.path}: " + (f"no policy titled {title!r}; nothing to take off." if remove
+                                       else "that entry is there already; nothing to change."))
+        return
+    click.echo(f"{edit.path}:")
+    for c in changes:
+        for line in c.splitlines():
+            click.echo(f"  {line}")
+    if body and body.get("file"):
+        problem = pol.file_problem(body["file"])
+        if problem:
+            click.echo(f"  note: {body['file']}: {problem}; the Console will say so until it is there")
+        elif not pol.open_to_all(body["file"]):
+            click.echo(f"  note: {body['file']} isn't readable by every account: make sure the Console's "
+                       "can read it (e.g. chmod 644, in folders it can pass through)")
+    if not apply:
+        click.echo("\nNothing changed. Run again with --apply to write it.")
+        return
+    try:
+        backup = edit.save(pol.check_for(title, body), tag="policy", keep=pol.BACKUPS)
+    except ValueError as e:
+        raise click.ClickException(f"{e}; nothing changed")
+    except OSError as e:
+        raise click.ClickException(
+            f"can't write {edit.path} ({e.strerror or e}): saving needs its folder writable too (the "
+            "backup and the new file go there), so run it as root or as an account that can; "
+            "nothing changed")
+    click.echo("\nWritten." + (f" Backup: {backup}" if backup else "")
+               + " The Console reads it as it is asked: no restart.")
+
+
 @cli.group('import')
 def import_group():
     """Load data nomad didn't collect itself.
@@ -8069,7 +8170,7 @@ def usage_report_labs(ctx, term, since, until, only, condo_owners, db, report_co
         who = "" if mask else f" ({', '.join(lab['leaders'])})"
         space = sum(x["used_bytes"] for x in f["storage"]["paths"]) if f["storage"]["measured"] else None
         click.echo(f"  {shown(lab['name'])}{who}: {t['people']} of {f['members']['count']} ran jobs; "
-                   f"{cterm.hours(t['core_hours'])} core-hours, {cterm.hours(t['gpu_hours'])} GPU-hours; "
+                   f"{cterm.hours_with(t['core_hours'], 'core-hour')}, {cterm.hours_with(t['gpu_hours'], 'GPU-hour')}; "
                    f"{cterm.failed_line(t)}; CPU used {p(t['cpu_used_pct'])}, "
                    f"memory used {p(t['memory_used_pct'])}; storage "
                    + ("not measured" if space is None else cterm._bytes(space) if space else "none"))
@@ -8089,6 +8190,12 @@ def usage_report_labs(ctx, term, since, until, only, condo_owners, db, report_co
                    f"count{'s' if k == 1 else ''} in each")
     click.echo(f"wrote {len(paths)} files under {target} (readable only by you)"
                + ("; no summary, as --lab leaves labs out" if summary is None else ""))
+    if not data.get("partial"):
+        gone = cterm.clear_stale(target, data["period"]["key"], paths)
+        if gone:
+            folders = len({p.parent for p in gone})
+            click.echo(f"removed this term's earlier files of {folders} lab{'' if folders == 1 else 's'} "
+                       "with no report now")
     if send:
         plan = cterm.plan_mail(labs, summary, settings, data)
         try:

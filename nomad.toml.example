@@ -610,6 +610,20 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # prefix = "ARC"                        # letters and digits, at most 10
 # digits = 4                            # the width, with leading zeros (3 to 8); a larger number just grows
 
+# Research computing's policies, in the Console's Help > Policies (1.48.3): a
+# file the Console serves (PDF, HTML, Markdown or text, only the files listed
+# here) or a link. `nomad console policy TITLE --file PATH --apply` writes one;
+# `nomad console policies` checks them. Read each time: no restart.
+# [[console.policies]]
+# title = "Research computing usage policy"
+# file = "/etc/nomad/policies/usage-policy.pdf"   # readable by the Console's account
+# about = "Who may use the clusters, what each lab gets, and its term report."
+# updated = "2026-09-01"                          # the document's date (default: the file's)
+#
+# [[console.policies]]
+# title = "Data storage and retention"
+# url = "https://example.edu/research-computing/storage"
+
 # Data unchanged for a year (`nomad storage cold`; Diagnostics > Storage):
 # who holds at least min_tb of it on a path, and the cases about it (numbered
 # as above). A weekly email to notify, no alert for each person.
