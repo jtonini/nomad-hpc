@@ -38,6 +38,7 @@ def ml_group():
       nomad ml ask [--note "..."]           queue a request (as Data readiness's Train...)
       nomad ml cancel ID                    a queued request
       nomad ml scores ID failure|waste [--part now|holdout] [--top N]   a run's riskiest jobs
+      nomad ml preview                      what a request would be sent now, in counts
       nomad ml key                          make the worker's key (once), and say its fingerprint
     On the worker ([ml.worker]):
       nomad ml key                          the key copied from the hub: its fingerprint
@@ -66,7 +67,8 @@ def _target_lines(summary: dict) -> list[str]:
         rate = x.get("rate_holdout")
         line = f"  {t}: {x['train']} jobs learned from, {x['holdout']} newest held out"
         if rate is not None:
-            line += f" ({round(100 * rate)}% of them {'failed' if t == 'failure' else 'wasted their time'})"
+            did = {"failure": "failed", "idle": "left most of their cores idle"}.get(t, "wasted their time")
+            line += f" ({round(100 * rate)}% of them {did})"
         lines.append(line)
         for name, key in (("TESSERA", "tessera"), ("logistic regression", "baseline")):
             if auc.get(key) is None and top.get(key) is None:
@@ -75,7 +77,131 @@ def _target_lines(summary: dict) -> list[str]:
                          f"{'–' if top.get(key) is None else str(round(100 * top[key])) + '%'} did")
         if x.get("weights"):
             lines.append("    TESSERA's blend: " + ", ".join(f"{k} {v}" for k, v in x["weights"].items()))
+        lines += _rolling_lines(x, t)
     return lines
+
+
+def _span(iv) -> str:
+    d = (iv or {}).get("difference")
+    return "" if not d else f", difference {d[0]:+.2f} to {d[1]:+.2f}"
+
+
+def _over_line(over, what, unit) -> str:
+    if not over:
+        return ""
+    a, d, c = over["auc"], over["difference"], over["clear"]
+    t = f"TESSERA {a['tessera']:.2f}, " if a.get("tessera") is not None else ""
+    line = f"    {what}, over {over['tests']} {unit}: {t}logistic {a['baseline']:.2f} on average"
+    if d.get("mean") is not None:
+        line += (f"; the difference {d['mean']:+.2f} ({d['low']:+.2f} to {d['high']:+.2f}), clear above zero in "
+                 f"{c['above']}, below in {c['below']}, spans zero in {c['spans']}")
+    return line
+
+
+def _test_line(head, m, did) -> str:
+    head += f": {m['test']:,} tested"
+    if m.get("rate_test") is not None:
+        head += f" ({round(100 * m['rate_test'])}% {did})"
+    if m.get("skipped"):
+        return f"{head}: {m['skipped']}"
+    a = m.get("auc") or {}
+    t = f"TESSERA {a['tessera']:.2f}, " if a.get("tessera") is not None else ""
+    line = f"{head}; {t}logistic {a['baseline']:.2f}" if a.get("baseline") is not None else head
+    line += _span(m.get("interval"))
+    w = (m.get("without_place") or {}).get("auc") or {}
+    if w.get("baseline") is not None:
+        wt = f"TESSERA {w['tessera']:.2f}, " if w.get("tessera") is not None else ""
+        line += f"; without partition and cluster {wt}logistic {w['baseline']:.2f}"
+        line += _span((m.get("without_place") or {}).get("interval"))
+    return line
+
+
+def _rolling_lines(x, target) -> list[str]:
+    """Period by period and new people (1.50.0): each test, and over them."""
+    did = {"failure": "failed", "idle": "idle"}.get(target, "wasted")
+    out = []
+    r = x.get("rolling") or {}
+    if r.get("periods"):
+        out.append(f"    period by period ({r.get('days', 7)} days each, held out in turn, learned from what "
+                   "ended before it):")
+        out += [_test_line(f"      from {m['start']}", m, did) for m in r["periods"]]
+        out += [s for s in (_over_line(r.get("over"), "with everything", "periods"),
+                            _over_line(r.get("over_without_place"), "without partition and cluster", "periods")) if s]
+    g = x.get("people") or {}
+    if g.get("groups"):
+        out.append("    new people (each group's held-out jobs, the models trained on everyone else's earlier jobs):")
+        out += [_test_line(f"      group {m['group']}", m, did) for m in g["groups"]]
+        out += [s for s in (_over_line(g.get("over"), "with everything", "groups"),
+                            _over_line(g.get("over_without_place"), "without partition and cluster", "groups")) if s]
+    return out
+
+
+def preview_lines(data: dict, plan: dict) -> list[str]:
+    """What a request would send, in counts (1.50.0): the jobs and when they ended, the
+    people (how many, and how much the busiest weigh: no one named), each target, and the
+    tests it would run."""
+    c = data.get("counts") or {}
+    ended = c.get("train", 0) + c.get("holdout", 0)
+    out = [f"Jobs: {ended:,} that ended, and {c.get('now', 0):,} running or waiting (scored, not tested)."]
+    if plan.get("thin"):
+        out.append(f"  thin = {plan['thin']}: {c.get('thinned', 0):,} more left out as repeats (the same request by "
+                   "the same person the same day)")
+    if plan.get("max_jobs"):
+        out.append(f"  max_jobs = {plan['max_jobs']:,}: the newest of them")
+    if c.get("ended_from"):
+        out.append(f"  they ended from {c['ended_from']} to {c['ended_to']}; {c.get('people', 0):,} people, the busiest "
+                   f"has {round(100 * c['busiest']['1'])}% of the jobs, the 5 busiest {round(100 * c['busiest']['5'])}%")
+    part = data.get("part") or []
+    for target in plan.get("predicts") or []:
+        lab = (data.get("labels") or {}).get(target) or []
+        known = [(p, v) for p, v in zip(part, lab) if v is not None and p != "now"]
+        if not known:
+            out.append(f"{target}: no job to ask it of")
+            continue
+        tr = [v for p, v in known if p == "train"]
+        ho = [v for p, v in known if p == "holdout"]
+        rate = lambda v: f"{100 * sum(v) / len(v):.1f}%" if v else "-"  # noqa: E731
+        out.append(f"{target}: {len(known):,} jobs; learned from {len(tr):,} ({rate(tr)}), held out the newest "
+                   f"{len(ho):,} ({rate(ho)})")
+        if plan.get("rolling") and data.get("period") is not None:
+            per = [(pe, v) for pe, p, v in zip(data["period"], part, lab) if v is not None and p != "now"]
+            have = sorted({pe for pe, _ in per}, reverse=True)[-int(plan["rolling"]):]
+            starts = data.get("periods") or []
+            out.append(f"  period by period ({plan.get('rolling_days', 7)} days): " + "; ".join(
+                f"from {starts[k] if k < len(starts) else k} {sum(1 for pe, _ in per if pe == k):,} tested, "
+                f"{sum(1 for pe, _ in per if pe > k):,} before" for k in have))
+        if plan.get("people_folds") and data.get("group") is not None:
+            grp = [(g, p) for g, p, v in zip(data["group"], part, lab) if v is not None and p != "now"]
+            out.append("  new people: " + "; ".join(
+                f"group {g + 1} {sum(1 for x, p in grp if x == g and p == 'holdout'):,} tested, "
+                f"{sum(1 for x, p in grp if x != g and p == 'train'):,} to learn from"
+                for g in range(int(plan["people_folds"]))))
+    return out
+
+
+@ml_group.command("preview")
+@click.pass_context
+def ml_preview(ctx):
+    """What a request would be sent now, in counts only: how many jobs (after thin and
+    max_jobs) and when they ended, how many people and how much the busiest weigh, each
+    target, and the tests (the holdout, period by period, new people). Nothing is sent,
+    nothing trained (hub)."""
+    import sqlite3
+
+    from nomad.actions.remote import hub_settings
+    from nomad.learn import dataset as D
+    config, target, s, _ = _hub(ctx)
+    db = hub_settings(target)["combined_db"]
+    if not Path(db).exists():
+        raise click.ClickException(f"no combined database at {db}: run it on the hub")
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=60)
+    conn.row_factory = sqlite3.Row
+    try:
+        data, _ = D.build(conn, s.plan())
+    finally:
+        conn.close()
+    for line in preview_lines(data, s.plan()):
+        click.echo(line)
 
 
 @ml_group.command("status")

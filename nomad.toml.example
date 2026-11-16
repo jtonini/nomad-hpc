@@ -1014,6 +1014,10 @@ min_jobs = 50
 # key_file = "~/.config/nomad/ml_worker_key"   # the worker's key (the nomad account's, 600)
 # compare = true                        # also each model without partition and cluster, and the
 #                                       # logistic regression with them alone (1.45.1)
+# thin = 0                              # at most this many of one person's same request a day (0: all) (1.50.0)
+# rolling = 0                           # the last this many periods held out in turn (0: not) (1.50.0)
+# rolling_days = 7                      # each period's length in days
+# people_folds = 0                      # new people: this many groups (0: not; 2 to 10) (1.50.0)
 # [ml.train.epochs]
 # gnn = 100
 # lstm = 60

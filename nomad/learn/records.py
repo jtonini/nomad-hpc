@@ -198,12 +198,13 @@ def fail(rec, rid: int, worker: str, why: str) -> dict:
     return request_of(rec, rid)
 
 
-DEPTH = 6
+DEPTH = 9      # 1.50.0: targets > failure > rolling > months > [a month] > without_place > interval > difference
 
 
 def _clean_summary(summary: dict) -> dict:
     """The summary as stored: only numbers and short words (it is shown), at most
-    DEPTH levels deep (targets > failure > without_place > auc > tessera: 1.45.1)."""
+    DEPTH levels deep (targets > failure > without_place > auc > tessera: 1.45.1;
+    month by month, three more: 1.50.0)."""
     def clean(v, depth=0):
         if isinstance(v, bool) or v is None:
             return v

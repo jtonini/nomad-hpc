@@ -70,7 +70,34 @@ older jobs. Data readiness shows, per target:
 - with `bootstrap` (1.46.0), the 95% range of each AUC and of the difference
   between the two models, from resamples of the held-out jobs (the same jobs
   for both models in each resample). Where the difference's range spans
-  zero, the card says they do about as well, whatever their AUCs.
+  zero, the card says they do about as well, whatever their AUCs;
+- with `rolling` (1.50.0), **period by period**: each of the last `rolling`
+  periods of `rolling_days` (weeks by default) held out in turn. For each,
+  both models are trained again on the jobs that ended before it and tested
+  on the jobs that ended in it; no later job, and none running or waiting, is
+  in TESSERA's network;
+- with `people_folds` (1.50.0), **new people**: everyone is dealt into that
+  many groups (the busiest first, each to the group with the fewest jobs so
+  far, so no group is one person's arrays). For each group, both models are
+  trained on everyone else's jobs from before the holdout and tested on the
+  group's held-out jobs: people neither model saw, later. Only the group's
+  number leaves the hub, never who is in it;
+- for both: each test's AUCs and the range of their difference (and, with
+  `compare`, the same without partition and cluster); then over the tests,
+  each model's mean AUC and in how many the difference was clear of zero
+  either way. One holdout is one test: a result that holds week after week,
+  and for people the models never saw, is one to report. Each test trains
+  both models again (twice with `compare`), so a run takes longer.
+
+With `thin` (1.50.0), of the jobs one person submitted on one day with the
+same request (partition, cluster, cores, GPUs, memory, time), at most that
+many are used, picked at random but the same each time. On a small cluster a
+few people's job arrays can be most of the jobs: thousands of copies of one
+request would weigh as much as everyone else together, and the same request
+would be both learned from and tested on. Thinning comes before `max_jobs`,
+so the newest `max_jobs` reach further back. `nomad ml preview` says, in
+counts, what a request would be sent now: how many jobs, when they ended,
+how many people and how much the busiest weigh, and each test's size.
 
 When the logistic regression does as well or better, it says so.
 
@@ -98,6 +125,10 @@ key_file = "~/.config/nomad/ml_worker_key"   # the nomad account's (600)
 # db = "ml.db"                   # default: beside lab_check.db
 compare = true                   # also each model without partition and cluster, and the
                                  # logistic regression with them alone (1.45.1)
+thin = 0                         # at most this many of one person's same request a day (0: all) (1.50.0)
+rolling = 0                      # the last this many periods held out in turn (0: not; up to 26) (1.50.0)
+rolling_days = 7                 # each period's length in days (1.50.0)
+people_folds = 0                 # new people: this many groups (0: not; 2 to 10) (1.50.0)
 
 [ml.train.epochs]
 gnn = 100
@@ -176,6 +207,7 @@ nomad ml status [--json]                        the request queued or running, t
 nomad ml ask [--note "..."]                     queue a request, as Train… does (hub)
 nomad ml cancel ID                              a queued request (hub)
 nomad ml scores ID failure|waste [--part now|holdout] [--top N]   a run's riskiest jobs (hub: names them)
+nomad ml preview                                what a request would be sent now, in counts (hub)
 nomad ml key                                    make (hub) or check (worker) the key: its fingerprint
 nomad ml check                                  the worker reaches the Console with its key
 nomad ml work                                   one pass: take a request, if any, train, answer

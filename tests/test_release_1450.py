@@ -41,7 +41,8 @@ def test_settings_and_their_problems():
     assert on.plan() == {"engine": "baseline", "predicts": ["waste"], "jobs_days": 90, "max_jobs": 50000,
                          "waste_threshold": 0.6, "holdout_share": 0.2, "epochs": {"gnn": 20, "lstm": 60, "ae": 60},
                          "compare": True, "tessera": {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10},
-                         "idle_threshold": 0.5, "bootstrap": 1000}
+                         "idle_threshold": 0.5, "bootstrap": 1000, "thin": 0, "rolling": 0, "rolling_days": 7,
+                         "people_folds": 0}
     bad = settings({"ml": {"train": {"enabled": "yes", "engine": "magic", "predicts": ["luck"], "holdout_share": 0.9,
                                      "jobs_days": 1, "epochs": {"ae": 0}}}})
     assert (bad.enabled, bad.engine, bad.predicts, bad.holdout_share, bad.jobs_days, bad.epochs["ae"]) == (

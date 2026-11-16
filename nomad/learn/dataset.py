@@ -27,9 +27,26 @@ The outcomes:
 Each of waste and idle carries its spread (counts only): how much of what
 was asked the jobs used, at the tenth to nine tenths of them, and how many
 would count at a few thresholds.
+
+1.50.0, a fairer test:
+  thin     of the jobs one person submitted on one day with the same request
+           (partition, cluster, cores, GPUs, memory, time), at most this many
+           are kept, picked at random but the same each time (by job): a job
+           array of thousands counts a few times, not thousands, and the same
+           job isn't learned from and tested on under two numbers. Before the
+           max_jobs cap, so the newest max_jobs reach further back.
+  period   each ended job's period, counting back from the newest one that
+           ended: 0 the last rolling_days, 1 the ones before, ...; ``periods``
+           says when each began (YYYY-MM-DD). For rolling: each of the last
+           periods held out in turn.
+  group    with people_folds, each ended job's group of people (numbered from
+           0): people dealt into that many groups, the busiest first, each to
+           the group with the fewest jobs so far, so no group is one person's
+           arrays. Only the number leaves the hub, never who is in which.
 """
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -75,13 +92,14 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
     if not cols:
         raise ValueError("no jobs table in this database")
     site = "j.source_site" if "source_site" in cols else "NULL"
+    user = "j.user_name" if "user_name" in cols else "NULL"
     since = (now - timedelta(days=int(plan["jobs_days"]))).isoformat(sep=" ")
     join, avg = _measured(conn) if "idle" in plan.get("predicts", ()) else ("", "NULL")
     rows = conn.execute(
         f"SELECT j.job_id AS job_id, {site} AS site, j.partition AS partition, j.req_cpus AS req_cpus, "
         "j.req_gpus AS req_gpus, j.req_mem_mb AS req_mem_mb, j.req_time_seconds AS req_time_seconds, "
         "j.runtime_seconds AS runtime_seconds, j.submit_time AS submit_time, j.end_time AS end_time, "
-        f"j.state AS state, {avg} AS avg_cpu FROM jobs j{join} WHERE j.submit_time >= ?",
+        f"j.state AS state, {user} AS user_name, {avg} AS avg_cpu FROM jobs j{join} WHERE j.submit_time >= ?",
         (since,)).fetchall()
     ended, waiting = [], []
     for r in rows:
@@ -95,6 +113,9 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
         elif st in NOW:
             waiting.append((None, sub, st, r))
     ended.sort(key=lambda x: (x[0], str(x[3]["job_id"])))
+    seen = len(ended)
+    ended = thin(ended, int(plan.get("thin") or 0))
+    thinned = seen - len(ended)
     if plan.get("max_jobs"):
         ended = ended[-int(plan["max_jobs"]):]
     n_hold = int(round(len(ended) * float(plan["holdout_share"])))
@@ -106,6 +127,13 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
     threshold = float(plan["waste_threshold"])
     idle_at = float(plan.get("idle_threshold", 0.5))
     out_rows, windows, failure, waste, idle, mapping = [], [], [], [], [], []
+    days = max(1, int(plan.get("rolling_days") or 7))
+    last = max((end for end, *_ in ended), default=now).date()
+    period = [None if part == "now" else (last - end.date()).days // days for (end, *_), part in zip(every, parts)]
+    periods = [(last - timedelta(days=days * (k + 1) - 1)).isoformat()
+               for k in range(max((p for p in period if p is not None), default=-1) + 1)]
+    people = groups(ended, int(plan.get("people_folds") or 0))
+    group = [None if part == "now" else people.get(str(r["user_name"] or "")) for (_, _, _, r), part in zip(every, parts)]
     for i, ((end, sub, st, r), part) in enumerate(zip(every, parts)):
         asked = (r["req_time_seconds"] or 0) / 3600.0
         out_rows.append([float(r["req_cpus"] or 0), float(r["req_gpus"] or 0), (r["req_mem_mb"] or 0) / 1024.0,
@@ -125,12 +153,63 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
             idle.append(None if used is None else (1 if 1.0 - used > idle_at else 0))
         mapping.append((i, str(r["job_id"]), r["site"]))
     counts = {p: parts.count(p) for p in PARTS}
+    counts["thinned"] = thinned
+    busy = sorted(_tally(ended).values(), reverse=True)
+    counts["people"] = len(busy)
+    counts["busiest"] = {str(n): round(sum(busy[:n]) / len(ended), 4) for n in (1, 5)} if ended else None
+    counts["ended_from"] = min(end for end, *_ in ended).date().isoformat() if ended else None
+    counts["ended_to"] = last.isoformat() if ended else None
     data = {"features": list(FEATURES), "rows": out_rows, "window": windows, "part": parts,
+            "period": period, "periods": periods, "group": group if people else None,
             "labels": {"failure": failure, "waste": waste, "idle": idle}, "plan": plan, "counts": counts,
             "partitions": len(partitions), "clusters": len(sites),
             "spread": {"waste": used_spread(ended),
                        "idle": _spread([_cores_used(st, r, SHORT_JOB_SECONDS) for _, _, st, r in ended], "cores")}}
     return data, mapping
+
+
+def _key(r) -> int:
+    """A job's place in its thinning draw: random-looking, but the same for the same job every time."""
+    return int.from_bytes(hashlib.blake2b(f"{r['site']}|{r['job_id']}".encode(), digest_size=8).digest(), "big")
+
+
+def thin(ended: list, most: int) -> list:
+    """Of the ended jobs one person submitted on one day with the same request (partition,
+    cluster, cores, GPUs, memory, time), at most ``most`` (1.50.0; 0: all), the same ones
+    each time; still in order of when they ended."""
+    if most <= 0:
+        return ended
+    keep: dict = {}
+    for n, (_, sub, _, r) in enumerate(ended):
+        k = (str(r["user_name"] or ""), sub.date(), str(r["partition"] or ""), str(r["site"] or ""), r["req_cpus"],
+             r["req_gpus"], r["req_mem_mb"], r["req_time_seconds"])
+        keep.setdefault(k, []).append((_key(r), n))
+    chosen = {n for v in keep.values() for _, n in sorted(v)[:most]}
+    return [x for n, x in enumerate(ended) if n in chosen]
+
+
+def _tally(ended: list) -> dict:
+    """How many of the ended jobs are each person's (stays on the hub)."""
+    jobs: dict = {}
+    for *_, r in ended:
+        who = str(r["user_name"] or "")
+        jobs[who] = jobs.get(who, 0) + 1
+    return jobs
+
+
+def groups(ended: list, k: int) -> dict:
+    """People dealt into ``k`` groups (1.50.0; 0: none): the busiest first, each to the
+    group with the fewest jobs so far (ties: the lower number). {person: group}."""
+    if k < 2:
+        return {}
+    jobs = _tally(ended)
+    load = [0] * k
+    out = {}
+    for who, n in sorted(jobs.items(), key=lambda x: (-x[1], x[0])):
+        g = min(range(k), key=lambda i: (load[i], i))
+        out[who] = g
+        load[g] += n
+    return out
 
 
 def _cores_used(st, r, short) -> float | None:
@@ -166,4 +245,4 @@ def _spread(values, of: str) -> dict | None:
     return {"of": of, "jobs": n, "used_at": at, "wasted_at": wasted}
 
 
-__all__ = ["build", "used_spread", "FEATURES", "ENDED", "NOW", "PARTS"]
+__all__ = ["build", "thin", "groups", "used_spread", "FEATURES", "ENDED", "NOW", "PARTS"]

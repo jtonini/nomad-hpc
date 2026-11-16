@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.50.0 (November 2026)
+
+A fairer test of TESSERA: whether a result holds beyond one holdout, beyond
+a few people's job arrays, and for people the models never saw.
+
+- **`[ml.train] thin`** (0: all): of the jobs one person submitted on one day
+  with the same request, at most this many, the same ones each time; before
+  `max_jobs`, so the newest `max_jobs` reach further back.
+- **`rolling`** and **`rolling_days`** (0: off; weeks): each of the last
+  periods held out in turn, both models trained again on what ended before
+  it; no later job, and none running or waiting, in TESSERA's network.
+- **`people_folds`** (0: off; 2 to 10): new people. Everyone dealt into
+  groups (the busiest first, each to the group with the fewest jobs); each
+  group's held-out jobs tested on models trained on everyone else's earlier
+  jobs. Only group numbers leave the hub.
+- Per test: sizes, how often the outcome happened, each model's AUC and the
+  95% range of their difference (with `compare`, without partition and
+  cluster too); over the tests, each model's mean AUC and how often the
+  difference was clear of zero. `nomad ml status` prints them; Data
+  readiness shows them with Console fix 131.
+- **`nomad ml preview`:** what a request would be sent now, in counts: the
+  jobs and when they ended, how many people and how much the busiest weigh,
+  each target, each test's size. Nothing is sent or trained.
+- The summary kept on the hub goes three levels deeper (the tests' ranges
+  were cut off).
+- `nomad ml status` says "left most of their cores idle" for the idle target
+  (it said "wasted their time").
+
 ## v1.49.1 (November 2026)
 
 The lab check, ready to go to PIs in the middle of a term.

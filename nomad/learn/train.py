@@ -29,6 +29,17 @@ used (the hub's counts, no job's own figure).
 1.46.0: the idle target (most of the cores asked left idle), and with
 [ml.train] bootstrap, 95% ranges of each AUC and of the difference between
 the models, from resamples of the held-out jobs.
+
+1.50.0, a fairer test. With [ml.train] rolling, period by period (weeks by
+default): each of the last periods held out in turn, both models trained
+again on the jobs that ended before it, with no later job in the network:
+whether what one holdout says holds from week to week. With people_folds,
+new people: for each group of people, both models trained on everyone
+else's jobs from before the holdout and tested on the group's held-out jobs.
+Each test's AUCs and the difference's range (without partition and cluster
+too, with compare); then over the tests, each model's mean AUC and how often
+the difference was clear of zero either way. With thin (the dataset), one
+person's job arrays count a few times a day, not thousands.
 """
 from __future__ import annotations
 
@@ -164,6 +175,110 @@ def _tessera(Xf, y, train, window, plan, used):
     return np.asarray(clf.predict_proba(), dtype=float), clf
 
 
+def _side(interval) -> str | None:
+    """Whether a paired range of the difference is clear of zero: above, below, or spans."""
+    d = (interval or {}).get("difference")
+    if not d:
+        return None
+    return "above" if d[0] > 0 else "below" if d[1] < 0 else "spans"
+
+
+def _over(tests: list, key: str | None = None) -> dict | None:
+    """Over the tests measured (periods, or groups of people): each model's mean AUC, the
+    difference's mean, lowest and highest, and in how many its range was above zero, below,
+    or spanned it. ``key``: "without_place" for the same without partition and cluster."""
+    got = [(m.get(key) or {}) if key else m for m in tests if not m.get("skipped")]
+    got = [g for g in got if (g.get("auc") or {}).get("baseline") is not None]
+    if not got:
+        return None
+    mean = lambda v: round(sum(v) / len(v), 4) if v else None  # noqa: E731
+    t = [g["auc"]["tessera"] for g in got if g["auc"].get("tessera") is not None]
+    diff = [g["auc"]["tessera"] - g["auc"]["baseline"] for g in got if g["auc"].get("tessera") is not None]
+    sides = [_side(g.get("interval")) for g in got]
+    return {"tests": len(got), "auc": {"tessera": mean(t), "baseline": mean([g["auc"]["baseline"] for g in got])},
+            "difference": {"mean": mean(diff), "low": round(min(diff), 4) if diff else None,
+                           "high": round(max(diff), 4) if diff else None},
+            "clear": {k: sides.count(k) for k in ("above", "below", "spans")}}
+
+
+def _fold(X, y, learn, test, window, plan, engine, used) -> dict:
+    """One test (1.50.0): both models trained on the ``learn`` jobs and tested on the ``test``
+    ones, with only these in TESSERA's network. Sizes, how often the outcome happened,
+    each AUC and the difference's range; with compare, the same without partition and
+    cluster, and partition and cluster alone. Says why when it can't be measured."""
+    import numpy as np
+    resamples = int(plan.get("bootstrap") or 0)
+    rows = np.where(learn | test)[0]
+    ys, lr, te = y[rows], learn[rows], test[rows]
+    e = {"train": int(lr.sum()), "test": int(te.sum()),
+         "rate_train": round(float(ys[lr].mean()), 4) if lr.any() else None,
+         "rate_test": round(float(ys[te].mean()), 4) if te.any() else None}
+    if not te.any():
+        e["skipped"] = "no jobs to test"
+        return e
+    if lr.sum() < MIN_TRAIN or len(set(ys[lr].tolist())) < 2:
+        e["skipped"] = f"too few jobs to learn from (fewer than {MIN_TRAIN}, or one outcome only)"
+        return e
+    if len(set(ys[te].tolist())) < 2:
+        e["skipped"] = "its jobs had one outcome only: nothing to rank"
+        return e
+    Xs, ws, yt = X[rows], window[rows], ys[te]
+    base = _logistic(_features(Xs, "all"), ys, lr)
+    risk = _tessera(_features(Xs, "all"), ys, lr, ws, plan, used)[0] if engine == "tessera" else None
+    e["auc"] = {"tessera": _auc(yt, risk[te]) if risk is not None else None, "baseline": _auc(yt, base[te])}
+    if resamples:
+        e["interval"] = _intervals(yt, risk[te] if risk is not None else None, base[te], resamples)
+    if plan.get("compare"):
+        b2 = _logistic(_features(Xs, "without_place"), ys, lr)
+        t2 = _tessera(_features(Xs, "without_place"), ys, lr, ws, plan, used)[0] if engine == "tessera" else None
+        e["without_place"] = {"auc": {"tessera": _auc(yt, t2[te]) if t2 is not None else None,
+                                      "baseline": _auc(yt, b2[te])},
+                              "interval": _intervals(yt, t2[te] if t2 is not None else None, b2[te], resamples)
+                              if resamples else None}
+        alone = _features(Xs, "place_alone")
+        e["place_alone"] = {"auc": {"baseline": _auc(yt, _logistic(alone, ys, lr)[te]) if alone.shape[1] else None}}
+    return e
+
+
+def _summed(tests: list, plan: dict) -> dict:
+    got = {"over": _over(tests)}
+    if plan.get("compare"):
+        got["over_without_place"] = _over(tests, "without_place")
+    return got
+
+
+def _rolling(X, y, part, period, starts, window, plan, engine, used, target, progress) -> dict:
+    """Each of the last ``plan["rolling"]`` periods (of ``rolling_days``) held out in turn
+    (1.50.0): the jobs that ended in it are tested; those that ended before it are learned
+    from; none after it is in TESSERA's network, nor any running or waiting."""
+    k = int(plan.get("rolling") or 0)
+    ended = (y >= 0) & (part != "now") & (period >= 0)
+    have = sorted(set(period[ended].tolist()), reverse=True)[-k:]          # the oldest of the last k first
+    out = []
+    for n, p in enumerate(have, 1):
+        start = starts[p] if 0 <= p < len(starts) else str(p)
+        progress(f"{target}: the period from {start} held out ({n} of {len(have)})")
+        out.append({"start": start, **_fold(X, y, ended & (period > p), ended & (period == p), window, plan, engine,
+                                             used)})
+    return {"days": int(plan.get("rolling_days") or 7), "periods": out, **_summed(out, plan)}
+
+
+def _people(X, y, part, group, window, plan, engine, used, target, progress) -> dict:
+    """New people (1.50.0): for each group of people, the models trained on everyone else's
+    jobs from before the holdout, and tested on the group's held-out jobs: people neither
+    model saw, later. None of the group's earlier jobs, nor anyone else's later ones, is in
+    TESSERA's network."""
+    k = int(plan.get("people_folds") or 0)
+    ended = (y >= 0) & (part != "now") & (group >= 0)
+    out = []
+    for g in range(k):
+        progress(f"{target}: new people, group {g + 1} of {k}")
+        e = _fold(X, y, ended & (part == "train") & (group != g), ended & (part == "holdout") & (group == g), window,
+                  plan, engine, used)
+        out.append({"group": g + 1, **e})
+    return {"groups": out, **_summed(out, plan)}
+
+
 def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
     import numpy as np
 
@@ -239,6 +354,13 @@ def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
             alone = _features(Xp, "place_alone")
             out["place_alone"] = {"auc": {"baseline": _auc(yh, _logistic(alone, yp, train)[hold])
                                           if alone.shape[1] else None}}
+        if int(plan.get("rolling") or 0) and data.get("period") is not None:
+            period = np.array([-1 if v is None else int(v) for v in data["period"]], dtype=int)
+            out["rolling"] = _rolling(X, y, part, period, list(data.get("periods") or []), window, plan, engine, used,
+                                      target, progress)
+        if int(plan.get("people_folds") or 0) and data.get("group") is not None:
+            group = np.array([-1 if v is None else int(v) for v in data["group"]], dtype=int)
+            out["people"] = _people(X, y, part, group, window, plan, engine, used, target, progress)
         out["seconds"] = round(time.time() - t0, 1)
         summary["targets"][target] = out
         keep = np.where(pp != "train")[0]

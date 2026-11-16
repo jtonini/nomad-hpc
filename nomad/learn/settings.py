@@ -30,6 +30,17 @@ On the hub::
     # db = "ml.db"                   # default: beside lab_check.db
     compare = true                   # also each model without partition and cluster, and the
                                      # logistic regression with them alone: what they carry
+    thin = 3                         # (1.50.0) of one person's jobs submitted on one day with the
+                                     # same request, at most this many (0: all): a job array of
+                                     # thousands counts a few times; before max_jobs, so the
+                                     # newest max_jobs reach further back
+    rolling = 6                      # (1.50.0) also each of the last this many periods held out
+                                     # in turn, both models trained on the jobs that ended before
+                                     # it: whether a result holds week after week (0: not)
+    rolling_days = 7                 # each period's length in days (7: weeks; 30: about months)
+    people_folds = 5                 # (1.50.0) also new people: everyone dealt into this many
+                                     # groups; each group's newest jobs tested on models that
+                                     # never saw its people (0: not; only group numbers leave)
     [ml.train.epochs]
     gnn = 100
     lstm = 60
@@ -82,6 +93,10 @@ class Settings:
     db: Path | None = None
     epochs: dict = field(default_factory=lambda: {"gnn": 100, "lstm": 60, "ae": 60})
     compare: bool = True
+    thin: int = 0                        # 1.50.0: at most this many same jobs a person a day; 0: all
+    rolling: int = 0                     # the last this many periods held out in turn; 0: not
+    rolling_days: int = 7
+    people_folds: int = 0                # new people: this many groups; 0: not
     tessera: dict = field(default_factory=lambda: {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10})
     problems: tuple = field(default_factory=tuple)
 
@@ -92,7 +107,8 @@ class Settings:
                 "max_jobs": self.max_jobs, "waste_threshold": self.waste_threshold,
                 "idle_threshold": self.idle_threshold, "bootstrap": self.bootstrap,
                 "holdout_share": self.holdout_share, "epochs": dict(self.epochs), "compare": self.compare,
-                "tessera": dict(self.tessera)}
+                "thin": self.thin, "rolling": self.rolling, "rolling_days": self.rolling_days,
+                "people_folds": self.people_folds, "tessera": dict(self.tessera)}
 
 
 def _num(raw, key, default, lo, hi, problems, kind=float, where="[ml.train]"):
@@ -101,6 +117,14 @@ def _num(raw, key, default, lo, hi, problems, kind=float, where="[ml.train]"):
         problems.append(f"{where} {key} should be a number from {lo} to {hi}")
         return default
     return kind(v)
+
+
+def _folds(raw, problems) -> int:
+    v = raw.get("people_folds", 0)
+    if isinstance(v, bool) or not isinstance(v, int) or not (v == 0 or 2 <= v <= 10):
+        problems.append("[ml.train] people_folds should be 0 (not) or a number from 2 to 10")
+        return 0
+    return v
 
 
 def settings(config: dict | None) -> Settings:
@@ -156,6 +180,10 @@ def settings(config: dict | None) -> Settings:
         waste_threshold=_num(raw, "waste_threshold", 0.6, 0.05, 0.95, p),
         idle_threshold=_num(raw, "idle_threshold", 0.5, 0.05, 0.95, p),
         bootstrap=_num(raw, "bootstrap", 1000, 0, 10000, p, int),
+        thin=_num(raw, "thin", 0, 0, 1000, p, int),
+        rolling=_num(raw, "rolling", 0, 0, 26, p, int),
+        rolling_days=_num(raw, "rolling_days", 7, 1, 92, p, int),
+        people_folds=_folds(raw, p),
         holdout_share=_num(raw, "holdout_share", 0.2, 0.05, 0.5, p),
         keep_runs=_num(raw, "keep_runs", 20, 1, 500, p, int),
         stale_minutes=_num(raw, "stale_minutes", 360, 10, 10080, p, int),
