@@ -195,13 +195,53 @@ def _over(tests: list, key: str | None = None) -> dict | None:
     t = [g["auc"]["tessera"] for g in got if g["auc"].get("tessera") is not None]
     diff = [g["auc"]["tessera"] - g["auc"]["baseline"] for g in got if g["auc"].get("tessera") is not None]
     sides = [_side(g.get("interval")) for g in got]
-    return {"tests": len(got), "auc": {"tessera": mean(t), "baseline": mean([g["auc"]["baseline"] for g in got])},
+    rule = [g["rule"] for g in got if (g.get("rule") or {}).get("auc") is not None] if not key else []
+    right = {m: [(g.get("tenth") or {}).get(m, {}) or {} for g in got] for m in ("tessera", "baseline")} if not key \
+        else {}
+    extra = {}
+    if rule:
+        extra["rule"] = {"auc": mean([r["auc"] for r in rule]),
+                         "right": mean([r["right"] for r in rule if r.get("right") is not None]),
+                         "caught": mean([r["caught"] for r in rule if r.get("caught") is not None])}
+    if right:
+        extra["tenth"] = {m: {"right": mean([x["right"] for x in v if x.get("right") is not None]),
+                              "caught": mean([x["caught"] for x in v if x.get("caught") is not None])}
+                          for m, v in right.items()}
+    return {**extra, "tests": len(got), "auc": {"tessera": mean(t), "baseline": mean([g["auc"]["baseline"] for g in got])},
             "difference": {"mean": mean(diff), "low": round(min(diff), 4) if diff else None,
                            "high": round(max(diff), 4) if diff else None},
             "clear": {k: sides.count(k) for k in ("above", "below", "spans")}}
 
 
-def _fold(X, y, learn, test, window, plan, engine, used) -> dict:
+def _flagging(y, scores, k: int) -> dict | None:
+    """Of the ``k`` jobs a score ranks first: the share that did it (how often a warning
+    on them would be right) and their share of all that did it (how many it would catch)."""
+    import numpy as np
+    if scores is None or k <= 0 or not len(y):
+        return None
+    top = np.argsort(-np.asarray(scores, dtype=float), kind="stable")[:k]
+    hit, pos = int(y[top].sum()), int(y.sum())
+    return {"right": round(hit / len(top), 4), "caught": round(hit / pos, 4) if pos else None}
+
+
+def _rule(y, prev, risk, base) -> dict | None:
+    """The simple rule (1.51.0): warn about a job whose person's last job did it. Its AUC
+    (as a yes-or-no score), how many it flags, how often it would be right and what
+    share it would catch; and each model flagging as many jobs, to set beside it."""
+    import numpy as np
+    if prev is None or not len(y):
+        return None
+    flag = np.asarray(prev) == 1
+    k, pos = int(flag.sum()), int(y.sum())
+    out = {"auc": _auc(y, flag.astype(float)), "flagged": k, "of": int(len(y)),
+           "right": round(float(y[flag].mean()), 4) if k else None,
+           "caught": round(float(y[flag].sum()) / pos, 4) if pos else None}
+    if k:
+        out["models"] = {"tessera": _flagging(y, risk, k), "baseline": _flagging(y, base, k)}
+    return out
+
+
+def _fold(X, y, learn, test, window, plan, engine, used, prev=None) -> dict:
     """One test (1.50.0): both models trained on the ``learn`` jobs and tested on the ``test``
     ones, with only these in TESSERA's network. Sizes, how often the outcome happened,
     each AUC and the difference's range; with compare, the same without partition and
@@ -226,6 +266,11 @@ def _fold(X, y, learn, test, window, plan, engine, used) -> dict:
     base = _logistic(_features(Xs, "all"), ys, lr)
     risk = _tessera(_features(Xs, "all"), ys, lr, ws, plan, used)[0] if engine == "tessera" else None
     e["auc"] = {"tessera": _auc(yt, risk[te]) if risk is not None else None, "baseline": _auc(yt, base[te])}
+    k = max(1, math.ceil(len(yt) / 10))
+    e["tenth"] = {"tessera": _flagging(yt, risk[te], k) if risk is not None else None,
+                  "baseline": _flagging(yt, base[te], k)}
+    if prev is not None:
+        e["rule"] = _rule(yt, prev[rows][te], risk[te] if risk is not None else None, base[te])
     if resamples:
         e["interval"] = _intervals(yt, risk[te] if risk is not None else None, base[te], resamples)
     if plan.get("compare"):
@@ -247,7 +292,7 @@ def _summed(tests: list, plan: dict) -> dict:
     return got
 
 
-def _rolling(X, y, part, period, starts, window, plan, engine, used, target, progress) -> dict:
+def _rolling(X, y, part, period, starts, window, plan, engine, used, target, progress, prev=None) -> dict:
     """Each of the last ``plan["rolling"]`` periods (of ``rolling_days``) held out in turn
     (1.50.0): the jobs that ended in it are tested; those that ended before it are learned
     from; none after it is in TESSERA's network, nor any running or waiting."""
@@ -259,11 +304,11 @@ def _rolling(X, y, part, period, starts, window, plan, engine, used, target, pro
         start = starts[p] if 0 <= p < len(starts) else str(p)
         progress(f"{target}: the period from {start} held out ({n} of {len(have)})")
         out.append({"start": start, **_fold(X, y, ended & (period > p), ended & (period == p), window, plan, engine,
-                                             used)})
+                                             used, prev)})
     return {"days": int(plan.get("rolling_days") or 7), "periods": out, **_summed(out, plan)}
 
 
-def _people(X, y, part, group, window, plan, engine, used, target, progress) -> dict:
+def _people(X, y, part, group, window, plan, engine, used, target, progress, prev=None) -> dict:
     """New people (1.50.0): for each group of people, the models trained on everyone else's
     jobs from before the holdout, and tested on the group's held-out jobs: people neither
     model saw, later. None of the group's earlier jobs, nor anyone else's later ones, is in
@@ -274,7 +319,7 @@ def _people(X, y, part, group, window, plan, engine, used, target, progress) -> 
     for g in range(k):
         progress(f"{target}: new people, group {g + 1} of {k}")
         e = _fold(X, y, ended & (part == "train") & (group != g), ended & (part == "holdout") & (group == g), window,
-                  plan, engine, used)
+                  plan, engine, used, prev)
         out.append({"group": g + 1, **e})
     return {"groups": out, **_summed(out, plan)}
 
@@ -334,6 +379,13 @@ def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
             out["similarity"] = getattr(clf, "similarity_backend_", None)
         out["auc"] = {"tessera": _auc(yh, risk[hold]) if engine == "tessera" else None,
                       "baseline": _auc(yh, base[hold])}
+        k = max(1, math.ceil(len(yh) / 10))
+        out["tenth"] = {"tessera": _flagging(yh, risk[hold], k) if engine == "tessera" else None,
+                        "baseline": _flagging(yh, base[hold], k)}
+        prev = None
+        if (data.get("previous") or {}).get(target) is not None:
+            prev = np.array([-1 if v is None else int(v) for v in data["previous"][target]], dtype=int)
+            out["rule"] = _rule(yh, prev[pop][hold], risk[hold] if engine == "tessera" else None, base[hold])
         out["top_tenth"] = {"tessera": _top_tenth(yh, risk[hold]) if engine == "tessera" else None,
                             "baseline": _top_tenth(yh, base[hold])}
         resamples = int(plan.get("bootstrap") or 0)
@@ -357,10 +409,10 @@ def run(data: dict, device: str = "cuda", progress=lambda text: None) -> dict:
         if int(plan.get("rolling") or 0) and data.get("period") is not None:
             period = np.array([-1 if v is None else int(v) for v in data["period"]], dtype=int)
             out["rolling"] = _rolling(X, y, part, period, list(data.get("periods") or []), window, plan, engine, used,
-                                      target, progress)
+                                      target, progress, prev)
         if int(plan.get("people_folds") or 0) and data.get("group") is not None:
             group = np.array([-1 if v is None else int(v) for v in data["group"]], dtype=int)
-            out["people"] = _people(X, y, part, group, window, plan, engine, used, target, progress)
+            out["people"] = _people(X, y, part, group, window, plan, engine, used, target, progress, prev)
         out["seconds"] = round(time.time() - t0, 1)
         summary["targets"][target] = out
         keep = np.where(pp != "train")[0]

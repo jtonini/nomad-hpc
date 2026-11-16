@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.51.0 (November 2026)
+
+What a year of jobs said about why they fail: most failures stop within
+a minute, the costly ones run out of time or memory after hours, and
+whether a person's last job failed says more than what a job asks for.
+
+- **The weekly note tells three more things.** Jobs that ran out of time or
+  memory, or came close (at least `short_min_jobs`), with the value to ask
+  for instead from the person's own jobs. Jobs that stopped with an error
+  within a minute of starting (at least `quick_min_jobs` on a cluster in a
+  week), by job ID, with what usually causes that and where the job's
+  output says which. And, for someone new to a cluster (`new_days`) most
+  of whose jobs there haven't completed, that this is common at the start
+  and that Research Computing will look at a script with them. Settings in
+  `[notices.jobs]`.
+- **A job's first minutes are kept** (`[collectors.job_live]`
+  `early_minutes`, 30; `early_keep_days`, 90): each reading of a job while
+  it has run that long or less, in `job_early`, no names, to learn whether
+  early readings tell which jobs will run out of memory or time.
+- **Training sets the models beside a simple rule:** warn about a job when
+  the same person's last job did it (the dataset carries, per job, what that
+  last job did: numbers only). In every test: how often each model, warning
+  about the tenth it ranked first, would have been right and how much it
+  would have caught; the rule's figures and each model warning about as many;
+  and whether any is good enough to warn people (`warn_right`, 0.8;
+  `warn_caught`, 0.5). `nomad ml status` says each in those words.
+
 ## v1.50.0 (November 2026)
 
 A fairer test of TESSERA: whether a result holds beyond one holdout, beyond

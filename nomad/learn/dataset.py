@@ -43,6 +43,12 @@ would count at a few thresholds.
            0): people dealt into that many groups, the busiest first, each to
            the group with the fewest jobs so far, so no group is one person's
            arrays. Only the number leaves the hub, never who is in which.
+
+1.51.0, a simple rule to beat: ``previous``, per target, what became of the
+same person's last job that had ended when this one was sent (1 it did it,
+0 it didn't, None no such job): of all their jobs, before thinning. "Their
+last job failed" foretold failures better than the models on UR's clusters;
+a model is worth its keep where it does better than that.
 """
 from __future__ import annotations
 
@@ -113,6 +119,9 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
         elif st in NOW:
             waiting.append((None, sub, st, r))
     ended.sort(key=lambda x: (x[0], str(x[3]["job_id"])))
+    threshold = float(plan["waste_threshold"])
+    idle_at = float(plan.get("idle_threshold", 0.5))
+    history = _history(ended, threshold, idle_at, SHORT_JOB_SECONDS)
     seen = len(ended)
     ended = thin(ended, int(plan.get("thin") or 0))
     thinned = seen - len(ended)
@@ -124,8 +133,7 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
     partitions = sorted({str(x[3]["partition"] or "") for x in every})
     sites = sorted({str(x[3]["site"] or "") for x in every})
     first = min((x[1] for x in every), default=now)
-    threshold = float(plan["waste_threshold"])
-    idle_at = float(plan.get("idle_threshold", 0.5))
+    previous: dict = {t: [] for t in LABELS}
     out_rows, windows, failure, waste, idle, mapping = [], [], [], [], [], []
     days = max(1, int(plan.get("rolling_days") or 7))
     last = max((end for end, *_ in ended), default=now).date()
@@ -145,12 +153,13 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
             waste.append(None)
             idle.append(None)
         else:
-            failure.append(0 if st == "COMPLETED" else 1)
-            ran = r["runtime_seconds"] or 0
-            waste.append((1 if 1.0 - ran / (r["req_time_seconds"]) > threshold else 0)
-                         if st == "COMPLETED" and (r["req_time_seconds"] or 0) > 0 and ran > 0 else None)
-            used = _cores_used(st, r, SHORT_JOB_SECONDS)
-            idle.append(None if used is None else (1 if 1.0 - used > idle_at else 0))
+            got = labels_of(st, r, threshold, idle_at, SHORT_JOB_SECONDS)
+            failure.append(got["failure"])
+            waste.append(got["waste"])
+            idle.append(got["idle"])
+        before = _before(history.get(str(r["user_name"] or "")), sub)
+        for t in LABELS:
+            previous[t].append(before.get(t))
         mapping.append((i, str(r["job_id"]), r["site"]))
     counts = {p: parts.count(p) for p in PARTS}
     counts["thinned"] = thinned
@@ -161,11 +170,50 @@ def build(conn: sqlite3.Connection, plan: dict, now: datetime | None = None) -> 
     counts["ended_to"] = last.isoformat() if ended else None
     data = {"features": list(FEATURES), "rows": out_rows, "window": windows, "part": parts,
             "period": period, "periods": periods, "group": group if people else None,
-            "labels": {"failure": failure, "waste": waste, "idle": idle}, "plan": plan, "counts": counts,
+            "labels": {"failure": failure, "waste": waste, "idle": idle}, "previous": previous,
+            "plan": plan, "counts": counts,
             "partitions": len(partitions), "clusters": len(sites),
             "spread": {"waste": used_spread(ended),
                        "idle": _spread([_cores_used(st, r, SHORT_JOB_SECONDS) for _, _, st, r in ended], "cores")}}
     return data, mapping
+
+
+LABELS = ("failure", "waste", "idle")
+
+
+def labels_of(st, r, threshold: float, idle_at: float, short: int) -> dict:
+    """An ended job's outcome for each target: 1 it did it, 0 it didn't, None not asked of it."""
+    ran = r["runtime_seconds"] or 0
+    used = _cores_used(st, r, short)
+    return {"failure": 0 if st == "COMPLETED" else 1,
+            "waste": (1 if 1.0 - ran / r["req_time_seconds"] > threshold else 0)
+            if st == "COMPLETED" and (r["req_time_seconds"] or 0) > 0 and ran > 0 else None,
+            "idle": None if used is None else (1 if 1.0 - used > idle_at else 0)}
+
+
+def _history(ended: list, threshold: float, idle_at: float, short: int) -> dict:
+    """{person: ([when each ended], [{target: what their latest job ended by then did}])},
+    in order of ending: each target keeps its latest known outcome (a job not asked a
+    target doesn't wipe it). Stays on the hub."""
+    out: dict = {}
+    for end, _, st, r in ended:
+        times, states = out.setdefault(str(r["user_name"] or ""), ([], []))
+        now = dict(states[-1]) if states else {}
+        for t, v in labels_of(st, r, threshold, idle_at, short).items():
+            if v is not None:
+                now[t] = v
+        times.append(end)
+        states.append(now)
+    return out
+
+
+def _before(seq, sub) -> dict:
+    """What the person's jobs that had ended before ``sub`` last did, per target."""
+    import bisect
+    if not seq:
+        return {}
+    i = bisect.bisect_left(seq[0], sub)
+    return seq[1][i - 1] if i else {}
 
 
 def _key(r) -> int:
@@ -245,4 +293,4 @@ def _spread(values, of: str) -> dict | None:
     return {"of": of, "jobs": n, "used_at": at, "wasted_at": wasted}
 
 
-__all__ = ["build", "thin", "groups", "used_spread", "FEATURES", "ENDED", "NOW", "PARTS"]
+__all__ = ["build", "thin", "groups", "labels_of", "used_spread", "FEATURES", "ENDED", "NOW", "PARTS", "LABELS"]

@@ -32,6 +32,12 @@ Each run lists the running jobs (``squeue``), asks ``sstat`` for their steps
   node each ran on (but for memory their processes share, which Slurm
   counts once per process, and Slurm's own sampling).
 
+A job's first minutes (1.51.0): while a job has run ``early_minutes`` (30)
+or less, each reading of it is also kept in ``job_early``, one row a
+reading, for ``early_keep_days`` (90): what jobs held and kept busy early
+on, to learn whether that tells which will run out of memory or time. No
+person's name is kept there (the job's ID joins it to its job).
+
 sstat shows someone else's job only to root and Slurm's own account, so it
 runs as Slurm's account through sudo (``sstat_as``, by default ``[actions]
 slurm_as``; "self" when this account is root or SlurmUser), by its full
@@ -42,6 +48,8 @@ nomad running here (the check `nomad node drain` makes, 1.31).
     enabled = true            # a Slurm head node
     # interval = 300
     # sstat_as = "slurm"      # default: [actions] slurm_as
+    # early_minutes = 30      # a job's readings while it has run this long or less, kept (0: none)
+    # early_keep_days = 90
 """
 from __future__ import annotations
 
@@ -51,7 +59,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .base import BaseCollector, CollectionError, find_tool, tool_env
@@ -179,11 +187,34 @@ class JobLiveCollector(BaseCollector):
     """
     # Columns added since the table first was (1.32.2): put on a table made before.
     ADDED = (("held_most_mb", "REAL"), ("peaks_sum_mb", "REAL"), ("steps_unseen", "INTEGER"))
+    # A job's first minutes, a row a reading (1.51.0): no person's name.
+    EARLY = """
+        CREATE TABLE IF NOT EXISTS job_early (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, slurm_id TEXT, start TEXT,
+            sampled_at TEXT NOT NULL, elapsed_s INTEGER, cpus INTEGER, nodes INTEGER, measured INTEGER,
+            tasks INTEGER, busy_now REAL, busy_avg REAL, rss_now_mb REAL, peak_rss_mb REAL, held_most_mb REAL,
+            peaks_sum_mb REAL, steps_unseen INTEGER);
+        CREATE INDEX IF NOT EXISTS idx_job_early_job ON job_early(job_id);
+        CREATE INDEX IF NOT EXISTS idx_job_early_at ON job_early(sampled_at);
+    """
+    EARLY_COLS = ("job_id", "slurm_id", "start", "sampled_at", "elapsed_s", "cpus", "nodes", "measured", "tasks",
+                  "busy_now", "busy_avg", "rss_now_mb", "peak_rss_mb", "held_most_mb", "peaks_sum_mb",
+                  "steps_unseen")
 
     def __init__(self, config: dict[str, Any], db_path):
         super().__init__(config, db_path)
         v = self.config.get("sstat_as")
         self.sstat_as = v if isinstance(v, str) and (v == "self" or _NAME.fullmatch(v)) else None
+        self.early_minutes = self._whole("early_minutes", 30, 0, 24 * 60)
+        self.early_keep_days = self._whole("early_keep_days", 90, 1, 3650)
+
+    def _whole(self, key, default, lo, hi):
+        v = self.config.get(key, default)
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            logger.warning("[collectors.job_live] %s should be a whole number from %s to %s: %s used", key, lo, hi,
+                           default)
+            return default
+        return v
 
     def _argv(self) -> list[str]:
         """sstat's own command, through sudo unless "self"."""
@@ -332,6 +363,7 @@ class JobLiveCollector(BaseCollector):
                     conn.execute(f"ALTER TABLE job_live ADD COLUMN {col} {kind}")
             prev = {r["job_id"]: dict(r) for r in conn.execute("SELECT * FROM job_live")}
             keep = set()
+            early: list = []
             names = ", ".join(self.COLS)
             values = ", ".join(f":{c}" for c in self.COLS)
             sets = ", ".join(f"{c} = excluded.{c}" for c in self.COLS if c != "job_id")
@@ -345,6 +377,16 @@ class JobLiveCollector(BaseCollector):
                 row["steps_unseen"] = self.unseen(before, d)
                 conn.execute(f"INSERT INTO job_live ({names}) VALUES ({values}) "
                              f"ON CONFLICT(job_id) DO UPDATE SET {sets}", row)
+                if self.early_minutes and row.get("elapsed_s") is not None \
+                        and row["elapsed_s"] <= self.early_minutes * 60:
+                    early.append({k: row.get(k) for k in self.EARLY_COLS})
+            if self.early_minutes:
+                conn.executescript(self.EARLY)
+                if early:
+                    conn.executemany(f"INSERT INTO job_early ({', '.join(self.EARLY_COLS)}) VALUES "
+                                     f"({', '.join(':' + c for c in self.EARLY_COLS)})", early)
+                cutoff = (datetime.now() - timedelta(days=self.early_keep_days)).isoformat(timespec="seconds")
+                conn.execute("DELETE FROM job_early WHERE sampled_at < ?", (cutoff,))
             gone = [k for k in prev if k not in keep]
             for i in range(0, len(gone), 500):
                 part = gone[i:i + 500]

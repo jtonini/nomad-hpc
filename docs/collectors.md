@@ -828,7 +828,18 @@ covers only drain and resume needs `sstat` too: root adds
 enabled = true
 # interval = 300
 # sstat_as = "slurm"        # default: [actions] slurm_as
+# early_minutes = 30        # a job's first readings kept (0: none) (1.51.0)
+# early_keep_days = 90
 ```
+
+**A job's first minutes** (1.51.0): `job_live` keeps only each running job's
+latest reading, and drops it when the job ends. While a job has run
+`early_minutes` (30) or less, each reading of it is also kept in
+`job_early`, one row a reading (cores kept busy, memory held, its peak),
+for `early_keep_days` (90), with no person's name (the job's ID joins it to
+its job). It is there to learn whether what a job does in its first minutes
+tells which jobs will run out of memory or time, before trying to warn
+anyone.
 
 The Console shows it beside what each running job asked for (staff, every
 job; a person, their own).

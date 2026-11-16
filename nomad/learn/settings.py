@@ -38,6 +38,8 @@ On the hub::
                                      # in turn, both models trained on the jobs that ended before
                                      # it: whether a result holds week after week (0: not)
     rolling_days = 7                 # each period's length in days (7: weeks; 30: about months)
+    warn_right = 0.8                 # (1.51.0) good enough to warn people: right this often when it
+    warn_caught = 0.5                # warns, and warning about this share of the jobs that did it
     people_folds = 5                 # (1.50.0) also new people: everyone dealt into this many
                                      # groups; each group's newest jobs tested on models that
                                      # never saw its people (0: not; only group numbers leave)
@@ -97,6 +99,8 @@ class Settings:
     rolling: int = 0                     # the last this many periods held out in turn; 0: not
     rolling_days: int = 7
     people_folds: int = 0                # new people: this many groups; 0: not
+    warn_right: float = 0.8              # 1.51.0: the bar for warning people
+    warn_caught: float = 0.5
     tessera: dict = field(default_factory=lambda: {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10})
     problems: tuple = field(default_factory=tuple)
 
@@ -108,7 +112,8 @@ class Settings:
                 "idle_threshold": self.idle_threshold, "bootstrap": self.bootstrap,
                 "holdout_share": self.holdout_share, "epochs": dict(self.epochs), "compare": self.compare,
                 "thin": self.thin, "rolling": self.rolling, "rolling_days": self.rolling_days,
-                "people_folds": self.people_folds, "tessera": dict(self.tessera)}
+                "people_folds": self.people_folds, "warn_right": self.warn_right, "warn_caught": self.warn_caught,
+                "tessera": dict(self.tessera)}
 
 
 def _num(raw, key, default, lo, hi, problems, kind=float, where="[ml.train]"):
@@ -184,6 +189,8 @@ def settings(config: dict | None) -> Settings:
         rolling=_num(raw, "rolling", 0, 0, 26, p, int),
         rolling_days=_num(raw, "rolling_days", 7, 1, 92, p, int),
         people_folds=_folds(raw, p),
+        warn_right=_num(raw, "warn_right", 0.8, 0.05, 1.0, p),
+        warn_caught=_num(raw, "warn_caught", 0.5, 0.05, 1.0, p),
         holdout_share=_num(raw, "holdout_share", 0.2, 0.05, 0.5, p),
         keep_runs=_num(raw, "keep_runs", 20, 1, 500, p, int),
         stale_minutes=_num(raw, "stale_minutes", 360, 10, 10080, p, int),

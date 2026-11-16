@@ -16,6 +16,24 @@ new there, with what happened, the better way, and a link to My activity.
   severity `high` or `critical` by the same rules as `nomad edu me`, with
   the value to ask for instead (`#SBATCH --mem=8G`). Only for people who
   finished jobs in the last week.
+- **Jobs that ran short** (1.51.0): jobs that reached their time limit or
+  ran out of memory, or came close (at least `short_min_jobs`, 2), with the
+  value to ask for instead from the person's own jobs, and that the work
+  since a job last saved its progress is lost. Jobs sent from NØMAÐ's
+  Submit page are checked for this before they go.
+- **Jobs that stopped within a minute** (1.51.0): at least `quick_min_jobs`
+  (3) jobs on a cluster in the last week that stopped with an error within
+  `quick_seconds` (60) of starting, by job ID, with what usually causes it
+  (a path with a typo, a module the script doesn't load, a program the
+  cluster doesn't know, a script that isn't executable) and that the first
+  lines of the job's output file say which. Jobs killed for memory or
+  stopped at their time limit are told as jobs that ran short instead.
+- **Getting started** (1.51.0): someone whose first job on a cluster was in
+  the last `new_days` (30), most of whose jobs there haven't completed,
+  hears that this is common when starting out and gets better quickly (on
+  the clusters NØMAÐ was first run on, people's first ten jobs failed about
+  half the time, about three in ten after), and that Research Computing
+  will look at a script with them. Once a cluster.
 
 What is alike is one note: the times of one kind of login-node use (up to
 five shown, the rest on My activity), or one kind of asking for too much
@@ -125,6 +143,10 @@ days = 30                            # the jobs a pattern is read from
 min_jobs = 5                         # at least this many of them on the partition
 severities = ["critical", "high"]
 repeat_days = 30                     # the same pattern told again after this, if it still holds
+short_min_jobs = 2                   # jobs that ran out of time or memory: at least this many (1.51.0)
+quick_seconds = 60                   # a job that stopped with an error this soon (1.51.0)
+quick_min_jobs = 3                   # ... at least this many on a cluster in a week (0: never)
+new_days = 30                        # first job on a cluster this recently: getting started (0: never)
 
 [notices.login_node]                 # what counts on a login node (collectors.md)
 ```

@@ -14,6 +14,18 @@ something new there:
   asking for far more than they used (most of at least ``min_jobs`` jobs on
   a partition, of severity ``high`` or ``critical``), with the value to ask
   for instead. Only for people who finished jobs in the last week.
+- (1.51.0) **jobs that ran short**: jobs that reached their time limit or
+  ran out of memory (at least ``short_min_jobs`` of them), with the value
+  to ask for instead, from the person's own jobs: the work since a job's
+  last checkpoint is lost when it is stopped;
+- (1.51.0) **jobs that stopped within a minute** with an error (at least
+  ``quick_min_jobs`` of them on a cluster in the last week): what usually
+  causes it and where the job's own output says which;
+- (1.51.0) **people new to a cluster** (their first job there in the last
+  ``new_days``) most of whose jobs there have not completed: that it is
+  common at the start, and that Research Computing will look at a script
+  with them (on the first clusters it ran on, people's first ten jobs
+  failed about half the time, against about three in ten after).
 
 Each email says what, where and when, and the better way, and links to My
 activity for the details. What is alike is one note: the times of one kind
@@ -52,6 +64,10 @@ Settings, in the hub's nomad.toml::
     min_jobs = 5                         # at least this many of them on the partition
     severities = ["critical", "high"]
     repeat_days = 30                     # the same pattern told again after this, if it still holds
+    short_min_jobs = 2                   # (1.51.0) jobs that ran out of time or memory: at least this many
+    quick_seconds = 60                   # (1.51.0) a job that stopped with an error this soon
+    quick_min_jobs = 3                   # ... at least this many on a cluster in the last week (0: never)
+    new_days = 30                        # (1.51.0) first job on a cluster this recently: new (0: never)
 
     [notices.login_node]                 # what counts on a login node (nomad.edu.login_node)
 
@@ -70,7 +86,8 @@ KINDS = ("login_node", "jobs")
 SEVERITIES = ("critical", "high", "medium")
 KEYS = {"kinds", "every_days", "link", "review_to", "greeting", "mail_domain", "send_from", "signature",
         "contact", "courses", "skip_users", "db", "jobs", "login_node"}
-JOB_KEYS = {"days", "min_jobs", "severities", "repeat_days"}
+JOB_KEYS = {"days", "min_jobs", "severities", "repeat_days", "short_min_jobs", "quick_seconds", "quick_min_jobs",
+            "new_days"}
 GREETING = "Hello,"
 _NETID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
@@ -115,6 +132,10 @@ class Settings:
     jobs_min: int = 5
     jobs_severities: tuple = ("critical", "high")
     repeat_days: int = 30
+    short_min: int = 2                   # 1.51.0: jobs that ran out of time or memory
+    quick_seconds: int = 60              # 1.51.0: jobs that stopped with an error within this
+    quick_min: int = 3
+    new_days: int = 30                   # 1.51.0: people new to a cluster
     problems: tuple = ()
 
     @property
@@ -247,6 +268,10 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
     jdays = _int(jobs, "days", 30, 7, 365, problems, "[notices.jobs]")
     jmin = _int(jobs, "min_jobs", 5, 1, 1000, problems, "[notices.jobs]")
     repeat = _int(jobs, "repeat_days", 30, 7, 365, problems, "[notices.jobs]")
+    short = _int(jobs, "short_min_jobs", 2, 1, 1000, problems, "[notices.jobs]")
+    quick_s = _int(jobs, "quick_seconds", 60, 5, 3600, problems, "[notices.jobs]")
+    quick_n = _int(jobs, "quick_min_jobs", 3, 0, 1000, problems, "[notices.jobs]")
+    new_days = _int(jobs, "new_days", 30, 0, 365, problems, "[notices.jobs]")
     sev = jobs.get("severities", ["critical", "high"])
     if not isinstance(sev, list) or not sev or not all(s in SEVERITIES for s in sev):
         problems.append(f"[notices.jobs] severities: a list of {', '.join(SEVERITIES)}")
@@ -257,6 +282,7 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
                     skip_users=tuple(sorted({x.strip().lower() for x in skip if x.strip()})),
                     db=Path(db).expanduser() if db else None, jobs_days=jdays, jobs_min=jmin,
                     jobs_severities=tuple(s for s in SEVERITIES if s in sev), repeat_days=repeat,
+                    short_min=short, quick_seconds=quick_s, quick_min=quick_n, new_days=new_days,
                     problems=tuple(problems))
 
 
@@ -553,6 +579,12 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
         return []
     out = []
     for i in getattr(ins, "issues", None) or []:
+        if (i.kind == "dimension" and i.direction == "raise" and i.dimension_key in _SHORT
+                and i.affected_jobs >= s.short_min and i.suggested_display and i.directive):
+            e = _short_entry(i, s, now, told)
+            if e:
+                out.append(e)
+            continue
         if (i.kind != "dimension" or i.direction != "lower" or i.severity not in s.jobs_severities
                 or i.affected_jobs < s.jobs_min or not i.suggested_display or not i.directive):
             continue
@@ -576,6 +608,148 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
         why = _WHY.get(i.dimension_key)
         out.append(Entry("jobs", key, f"Your jobs ask for more {word} than they use", lines,
                          group=f"jobs:{i.dimension_key}", advice=[why] if why else []))
+    return out
+
+
+_SHORT = {"time": ("time", "reached their time limit or came close to it"),
+          "memory": ("memory", "ran out of memory or came close to it")}
+_SHORT_WHY = {
+    "time": "A job stopped at its time limit loses the work it did since it last saved its progress, and its "
+            "time in the queue.",
+    "memory": "A job that runs out of memory is stopped: the work it did since it last saved its progress is "
+              "lost.",
+}
+
+
+def _recent(last, now: datetime, days: int) -> bool:
+    try:
+        return bool(last) and now - datetime.fromisoformat(last) < timedelta(days=days)
+    except ValueError:
+        return False
+
+
+def _short_entry(i, s: Settings, now: datetime, told: dict) -> Entry | None:
+    """Jobs that ran out of time or memory, or came close (1.51.0): the value
+    to ask for instead, from the person's own jobs."""
+    from nomad.edu.insights import sbatch_lines
+    key = f"jobs:short:{i.cluster or ''}:{i.partition or ''}:{i.dimension_key}"
+    if _recent(told.get(key), now, s.repeat_days):
+        return None
+    word, what = _SHORT[i.dimension_key]
+    where = f"{i.cluster}" + (f" ({i.partition})" if i.partition else "") if i.cluster else "the clusters"
+    used = _used(i.usage_stats)
+    typical = f"they typically asked for {_asked_for(i)}" + (
+        f" and {'ran' if word == 'time' else 'used'} about {used}" if used else "")
+    lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} jobs{_ids(i)} {what} ({typical}). "
+             "Ask for this instead:"]
+    lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
+    advice = [_SHORT_WHY[i.dimension_key]]
+    if s.link:
+        advice.append(f"NØMAÐ's Submit page checks this against your earlier jobs before a job goes: {s.link}/submit")
+    return Entry("jobs", key, f"Some of your jobs ran out of {word}", lines, group=f"jobs:short:{word}",
+                 advice=advice)
+
+
+_QUICK_WHY = [
+    "A job that stops this soon usually could not find or start something: a file or folder path with a typo "
+    "or that is not on the cluster, a module the script does not load, a program name the cluster does not "
+    "know, or a script that is not executable.",
+    "The first lines of the job's output file (slurm-JOBID.out, in the folder it was sent from, unless the "
+    "script names another) usually say which.",
+]
+
+
+def _ended_iso(v) -> str:
+    return str(v or "").replace(" ", "T")
+
+
+def _quick_entries(conn, username: str, s: Settings, now: datetime, told: dict) -> list:
+    """Jobs that stopped with an error within ``quick_seconds`` (1.51.0), at least
+    ``quick_min`` of them on a cluster in the last ``every_days``; and, for a person
+    new to a cluster (first job there within ``new_days``), most of whose jobs there
+    have not completed, a word that it is common at the start and where to get help.
+    A job killed for memory or stopped at its time limit isn't one: those are told
+    as jobs that ran short."""
+    from nomad.collectors.slurm import compute_failure_reason
+    if conn is None:
+        return []
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    except sqlite3.Error:
+        return []
+    if not {"user_name", "state", "end_time", "runtime_seconds", "job_id"} <= cols:
+        return []
+    site = "source_site" if "source_site" in cols else "NULL"
+    code = "exit_code" if "exit_code" in cols else "NULL"
+    sig = "exit_signal" if "exit_signal" in cols else "NULL"
+    since = _local_iso(now - timedelta(days=s.every_days))
+    out = []
+    try:
+        rows = conn.execute(f"SELECT job_id, {site} AS site, state, runtime_seconds, end_time, {code} AS code, "
+                            f"{sig} AS sig FROM jobs WHERE user_name = ? AND replace(end_time, ' ', 'T') >= ?",
+                            (username, since)).fetchall()
+    except sqlite3.Error:
+        return []
+    quick: dict = {}
+    for r in rows:
+        st = str(r[2] or "").split()[0].upper() if r[2] else ""
+        if st != "FAILED" or (r[3] if r[3] is not None else 10 ** 9) >= s.quick_seconds:
+            continue
+        if compute_failure_reason(st, r[5], r[6]) == 4:          # killed for memory: ran short, not quick
+            continue
+        quick.setdefault(str(r[1] or ""), []).append((_ended_iso(r[4]), str(r[0])))
+    for where, jobs in sorted(quick.items()):
+        if not s.quick_min or len(jobs) < s.quick_min:
+            continue
+        if _recent(told.get(f"jobs:quick:{where}"), now, s.every_days):
+            continue
+        jobs.sort(reverse=True)
+        ids = [j[1] for j in jobs[:JOB_IDS_SHOWN]]
+        more = len(jobs) - len(ids)
+        listed = (", ".join(ids[:-1]) + (f", {ids[-1]}" if more else f" and {ids[-1]}") if len(ids) > 1 else ids[0]) \
+            + (f" and {more} more" if more else "")
+        days = "this week" if s.every_days == 7 else f"in the last {s.every_days} days"
+        cluster = f"On {where}, " if where else ""
+        out.append(Entry("jobs", f"jobs:quick:{where}", "Some of your jobs stopped within a minute",
+                         [f"{cluster}{len(jobs)} of your jobs {days} stopped with an error within "
+                          f"{_dur(s.quick_seconds) if s.quick_seconds != 60 else 'a minute'} of starting "
+                          f"(job ID{'s' if len(jobs) > 1 else ''} {listed})."],
+                         group="jobs:quick", advice=list(_QUICK_WHY), started=max(j[0] for j in jobs)))
+    if s.new_days:
+        out += _new_entries(conn, username, s, now, told, site, cols)
+    return out
+
+
+def _new_entries(conn, username, s: Settings, now: datetime, told: dict, site: str, cols: set) -> list:
+    """A person whose first job on a cluster was within ``new_days`` and most of
+    whose jobs there have not completed (1.51.0): told once a cluster."""
+    if "submit_time" not in cols:
+        return []
+    out = []
+    try:
+        rows = conn.execute(f"SELECT {site} AS site, MIN(replace(submit_time, ' ', 'T')), COUNT(*), "
+                            "SUM(CASE WHEN upper(substr(state, 1, 9)) = 'COMPLETED' THEN 1 ELSE 0 END), "
+                            "SUM(CASE WHEN upper(substr(state, 1, 9)) = 'CANCELLED' OR end_time IS NULL "
+                            "OR end_time = '' THEN 1 ELSE 0 END) FROM jobs WHERE user_name = ? GROUP BY 1",
+                            (username,)).fetchall()
+    except sqlite3.Error:
+        return []
+    since = _local_iso(now - timedelta(days=s.new_days))
+    for where, first, n, done, other in rows:
+        ended = (n or 0) - (other or 0)
+        if not first or first < since or ended < 2 or (done or 0) * 2 > ended:
+            continue
+        key = f"jobs:new:{where or ''}"
+        if told.get(key):
+            continue
+        place = f" on {where}" if where else ""
+        out.append(Entry("jobs", key, f"Getting started{place}",
+                         [f"You started running jobs{place} recently, and {ended - (done or 0)} of your "
+                          f"{ended} jobs there so far have not completed."],
+                         group="jobs:new",
+                         advice=["That is common when starting out on a cluster, and it gets better quickly.",
+                                 "Research Computing will gladly look at a job script with you: reply to this "
+                                 + ("email, or write to the address below." if s.contact else "email.")]))
     return out
 
 
@@ -645,6 +819,7 @@ def plan(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
             entries += _login_entries(db, n, config, s, now, told)
         if "jobs" in people[user] and "jobs" in s.kinds:
             entries += _job_entries(db, n, config, s, now, told)
+            entries += _quick_entries(conn, n, s, now, told)
         if not entries:
             left["nothing new"] += 1
             continue

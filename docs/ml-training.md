@@ -99,6 +99,18 @@ so the newest `max_jobs` reach further back. `nomad ml preview` says, in
 counts, what a request would be sent now: how many jobs, when they ended,
 how many people and how much the busiest weigh, and each test's size.
 
+**What a warning would have been worth** (1.51.0), in every test: had each
+model warned about the tenth of the jobs it ranked first, how often it would
+have been right and what share of the jobs that did it those were; and a
+**simple rule** to beat, which needs no model: warn about a job when the
+same person's last job (the last one that had ended when it was sent) did
+it. On UR's clusters "their last job failed" was right about 6 times in 10
+and caught about two thirds of the failures, where the models, from what a
+job asked for, were right about 4 times in 10. Beside the rule, each model
+warning about as many jobs. Then whether any of them is good enough to warn
+people: right at least `warn_right` (0.8) of the time, and catching at
+least `warn_caught` (0.5) of the jobs that did it.
+
 When the logistic regression does as well or better, it says so.
 
 ## Settings
@@ -129,6 +141,8 @@ thin = 0                         # at most this many of one person's same reques
 rolling = 0                      # the last this many periods held out in turn (0: not; up to 26) (1.50.0)
 rolling_days = 7                 # each period's length in days (1.50.0)
 people_folds = 0                 # new people: this many groups (0: not; 2 to 10) (1.50.0)
+warn_right = 0.8                 # good enough to warn people: right this often (1.51.0)
+warn_caught = 0.5                # ... and catching this share of the jobs that did it
 
 [ml.train.epochs]
 gnn = 100

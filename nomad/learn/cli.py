@@ -57,7 +57,7 @@ def _say(r: dict | None) -> str:
     return f"request {r['id']} {r['state']} ({when}, asked by {r['asked_by']})" + tail
 
 
-def _target_lines(summary: dict) -> list[str]:
+def _target_lines(summary: dict, plan: dict | None = None) -> list[str]:
     lines = []
     for t, x in (summary.get("targets") or {}).items():
         if x.get("skipped"):
@@ -75,10 +75,49 @@ def _target_lines(summary: dict) -> list[str]:
                 continue
             lines.append(f"    {name}: AUC {auc.get(key)}; of the tenth it ranked riskiest, "
                          f"{'–' if top.get(key) is None else str(round(100 * top[key])) + '%'} did")
+        lines += _warn_lines(x, t, plan or {})
         if x.get("weights"):
             lines.append("    TESSERA's blend: " + ", ".join(f"{k} {v}" for k, v in x["weights"].items()))
         lines += _rolling_lines(x, t)
     return lines
+
+
+def _in10(v) -> str:
+    return "-" if v is None else f"{10 * v:.1f} in 10"
+
+
+def _pc(v) -> str:
+    return "-" if v is None else f"{round(100 * v)}%"
+
+
+def _warn_lines(x, target, plan) -> list[str]:
+    """What a warning would have been worth (1.51.0): each model warning about the tenth
+    it ranked first; the simple rule (the person's last job did it), and each model
+    warning about as many; and whether any is good enough to warn people."""
+    did = {"failure": "failed", "idle": "left most cores idle"}.get(target, "wasted their time")
+    out = []
+    tenth = x.get("tenth") or {}
+    for name, key in (("TESSERA", "tessera"), ("logistic regression", "baseline")):
+        f = tenth.get(key)
+        if f:
+            out.append(f"    {name} warning about the tenth it ranked first: right {_in10(f['right'])}, would have "
+                       f"caught {_pc(f['caught'])} of the jobs that {did}")
+    r = x.get("rule")
+    if r and r.get("flagged"):
+        line = (f"    the simple rule (warn when the person's last job {did}): warns about {r['flagged']:,} of "
+                f"{r['of']:,}, right {_in10(r['right'])}, would have caught {_pc(r['caught'])}")
+        m = r.get("models") or {}
+        if m.get("tessera"):
+            line += f"; TESSERA warning about as many: right {_in10(m['tessera']['right'])}, caught " \
+                    f"{_pc(m['tessera']['caught'])}"
+        out.append(line)
+    bar_r, bar_c = float(plan.get("warn_right", 0.8)), float(plan.get("warn_caught", 0.5))
+    cands = [v for v in [*(tenth.get(k) for k in ("tessera", "baseline")), r] if v and v.get("right") is not None]
+    if cands:
+        good = any(v["right"] >= bar_r and (v.get("caught") or 0) >= bar_c for v in cands)
+        out.append(f"    good enough to warn people (right at least {_in10(bar_r)} and catching at least "
+                   f"{_pc(bar_c)}): {'yes' if good else 'no'}")
+    return out
 
 
 def _span(iv) -> str:
@@ -108,6 +147,8 @@ def _test_line(head, m, did) -> str:
     t = f"TESSERA {a['tessera']:.2f}, " if a.get("tessera") is not None else ""
     line = f"{head}; {t}logistic {a['baseline']:.2f}" if a.get("baseline") is not None else head
     line += _span(m.get("interval"))
+    if (m.get("rule") or {}).get("auc") is not None:
+        line += f"; their last job: AUC {m['rule']['auc']:.2f}"
     w = (m.get("without_place") or {}).get("auc") or {}
     if w.get("baseline") is not None:
         wt = f"TESSERA {w['tessera']:.2f}, " if w.get("tessera") is not None else ""
@@ -223,7 +264,7 @@ def ml_status(ctx, as_json):
         sm = last["summary"]
         click.echo(f"  on {last.get('worker')}, {sm.get('engine')} on {sm.get('device') or 'cpu'}, "
                    f"{sm.get('seconds')} s")
-        for line in _target_lines(sm):
+        for line in _target_lines(sm, last.get("plan")):
             click.echo(line)
 
 
