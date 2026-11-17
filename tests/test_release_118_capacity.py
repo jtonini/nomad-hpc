@@ -257,7 +257,7 @@ def test_idle_while_waiting(idle_data):
     assert r["earlier_hours_median"] == pytest.approx(6, abs=0.1)
     assert r["reason_unknown"] == 1                  # G: waited before reasons were recorded
     assert r["left_out"] == {"several_nodes": 1, "too_long": 1, "no_time_limit": 0, "own_limits": 1,
-                             "too_big": 1}
+                             "too_big": 1, "array_pace": 0}      # array_pace: 1.53.3
     assert r["waiting_jobs"] == 3                    # A, G and H (H wants a GPU these nodes lack)
 
 

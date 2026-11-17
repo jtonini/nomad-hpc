@@ -62,8 +62,11 @@ def _select(jcols: set, scols: set) -> str:
     site = ("j.source_site" if "source_site" in jcols else "j.cluster" if "cluster" in jcols
             else "NULL")
     # From when the job could start (1.13), not from submission.
-    from nomad.db.jobkeys import queue_wait_sql
+    from nomad.db.jobkeys import later_task_sql, queue_wait_sql
     wait = queue_wait_sql(jcols, "j") if "wait_time_seconds" in jcols else "NULL"
+    # A later task of a job array: an array counts once in a wait, by its
+    # first task (1.53.3); not worked out from its submission either.
+    later = later_task_sql(jcols, "j") or "0"
     return (
         "SELECT CASE WHEN instr(j.state, ' by ') > 0 "
         "THEN substr(j.state, 1, instr(j.state, ' by ') - 1) ELSE j.state END AS state, "
@@ -71,7 +74,7 @@ def _select(jcols: set, scols: set) -> str:
         f"{j('req_mem_mb')} AS req_mem_mb, {j('req_gpus')} AS req_gpus, "
         f"{j('req_time_seconds')} AS req_time, {j('eligible_time')} AS eligible_time, "
         f"{j('runtime_seconds')} AS runtime, {j('submit_time')} AS submit_time, "
-        f"{j('start_time')} AS start_time, {wait} AS wait_seconds, "
+        f"{j('start_time')} AS start_time, {wait} AS wait_seconds, ({later}) AS later_task, "
         f"{site} AS site, {s('avg_cpu_percent')} AS avg_cpu, {s('peak_memory_gb')} AS peak_gb, "
         f"{s('max_tasks')} AS max_tasks, {j('alloc_tres')} AS alloc_tres, "
         f"{j('job_id')} AS job_id, {j('end_time')} AS end_time "
@@ -114,6 +117,8 @@ def finished_rows(conn: sqlite3.Connection, since: str, until: str, *, users=Non
 
 
 def _wait_seconds(r) -> float | None:
+    if r.get("later_task"):
+        return None                     # a later task of a job array: not known (1.53.3)
     w = num(r.get("wait_seconds"))
     if w is not None and w >= 0:
         return w

@@ -229,6 +229,8 @@ def _waits_for_room(j, lo, hi):
     """(a, b, minutes): a wait for room that ended in [lo, hi) (see the top):
     [a, b) its last WAIT_LOOKBACK_DAYS at most, ``minutes`` all of it; or None."""
     from nomad.db.jobkeys import waiting_for_cluster
+    if getattr(j, "follows", False) and j.ready_since is None:
+        return None          # a later task of a job array, never seen waiting for room: not known (1.53.3)
     reason = j.pending_reason
     room = waiting_for_cluster(reason)
     if room is False or (room and not str(reason).startswith(("Resources", "Priority"))):

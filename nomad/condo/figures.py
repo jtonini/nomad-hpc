@@ -122,13 +122,16 @@ class Job:
     pending_reason: str | None = None     # the last reason Slurm gave while it waited (1.18)
     req_nodes: int | None = None
     ready_since: datetime | None = None   # first seen waiting for the cluster (1.18)
+    # A later task of a job array (mark_later_tasks): no wait of its own in a
+    # median; waiting for room only from when nomad saw it so (1.53.3).
+    follows: bool = False
 
     def hours_in(self, t0: datetime, t1: datetime) -> float:
         return _overlap(self.start, self.end, t0, t1)
 
     @property
     def wait_s(self) -> float | None:
-        if self.start is None or self.ref is None:
+        if self.start is None or self.ref is None or self.follows:
             return None
         return max(0.0, (self.start - self.ref).total_seconds())
 
@@ -257,7 +260,45 @@ def load_jobs(conn, site: str | None, lo: datetime, hi: datetime, now: datetime,
         if k not in seen:
             seen.add(k)
             unique.append(j)
+    mark_later_tasks(conn, unique)
     return unique
+
+
+def mark_later_tasks(conn, jobs: list[Job]) -> None:
+    """Mark the later tasks of job arrays (Job.follows): a task of an array
+    that had a task start before it (the same array number, submission and
+    site). Such a task starts at the array's own pace, and its eligible time
+    is the array's: an array sent five weeks ago whose tasks run a few at a
+    time has tasks that start today "eligible" for five weeks. An array
+    counts once in a median wait, by its first task; a later task waited for
+    room only from when nomad saw its array wait for room (ready_since, kept
+    on the task by the Slurm collector), and is not otherwise a job an idle
+    condo could have taken (1.53.3). The rule is
+    nomad.db.jobkeys.later_task_sql's."""
+    from nomad.db.jobkeys import array_of
+    tasks = [j for j in jobs if j.start is not None and array_of(j.job_id)]
+    if not tasks:
+        return
+    cols = columns(conn, "jobs")
+    if not {"job_id", "start_time", "submit_time"} <= cols:
+        return
+    where = " AND +source_site IS ?" if "source_site" in cols else ""      # by the job number's index
+    first: dict = {}
+    for j in tasks:
+        key = (j.site, array_of(j.job_id), j.submit)
+        if key not in first:
+            n = key[1]
+            args = [f"{n}_", f"{n}`"] + ([j.site] if where else [])
+            starts = []
+            for sub, st in conn.execute(
+                    f"SELECT submit_time, start_time FROM jobs WHERE job_id >= ? AND job_id < ?{where} "
+                    "AND +start_time IS NOT NULL", args):
+                if parse_time(sub) == j.submit and (s := parse_time(st)) is not None:
+                    starts.append(s)
+            first[key] = min(starts) if starts else None
+        f = first[key]
+        if f is not None and f < j.start:
+            j.follows = True
 
 
 def load_submitted(conn, site: str | None, partitions: set, t0: datetime, t1: datetime,
@@ -283,6 +324,7 @@ def load_submitted(conn, site: str | None, partitions: set, t0: datetime, t1: da
         j = make_job(r, t0, now)
         if j is not None and j.submit is not None and t0 <= j.submit < t1:
             out.append(j)
+    mark_later_tasks(conn, out)
     return out
 
 

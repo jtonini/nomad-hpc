@@ -81,6 +81,46 @@ def waiting_for_cluster(reason) -> bool | None:
     return r.startswith(_FOR_CLUSTER)
 
 
+# A task of a job array (123_4; not a pending range 123_[5-9], not a job
+# moved aside, 123_4@...). Its eligible time is its array's: an array sent
+# five weeks ago whose tasks run a few at a time has tasks that start today
+# "eligible" for five weeks (1.53.3).
+ARRAY_TASK = re.compile(r"^(\d+)_\d+$")
+
+
+def array_of(job_id) -> str | None:
+    """The array's number of a task of a job array (``123`` for 123_4); None
+    for any other job."""
+    m = ARRAY_TASK.match(str(job_id or ""))
+    return m.group(1) if m else None
+
+
+def later_task_sql(cols: set, alias: str = "") -> str | None:
+    """SQL, true for a later task of a job array: a task of an array that had
+    a task start before it (the same array: its number, its submission, its
+    site). Such a task starts at the array's own pace -- as many at a time as
+    it allows, as its own tasks free the nodes, or as the cluster does -- and
+    its eligible time is the array's, so its "wait" counts the array's age.
+    A wait counts an array once, by its first task; where nomad saw a later
+    task's array wait for room (ready_since, kept on the task by the Slurm
+    collector), the condo figures count that much of it as waiting for room
+    (1.53.3). None where the table can't tell.
+
+    alias: the jobs table's alias in the query ("" for the table itself)."""
+    if not {"job_id", "submit_time", "start_time"} <= cols:
+        return None
+    o = f"{alias}." if alias else "jobs."
+    # Only the job number's index is to be used (the unary + keeps the others
+    # out): the array's tasks, not every job of the site or every earlier one.
+    site = f" AND +k.source_site IS {o}source_site" if "source_site" in cols else ""
+    number = f"substr({o}job_id, 1, instr({o}job_id, '_') - 1)"
+    return (f"({o}job_id GLOB '[0-9]*_[0-9]*' AND {o}job_id NOT GLOB '*[^0-9_]*' "
+            f"AND {o}start_time IS NOT NULL "
+            f"AND EXISTS (SELECT 1 FROM jobs k WHERE k.job_id >= {number} || '_' "
+            f"AND k.job_id < {number} || '`' AND +k.submit_time = {o}submit_time "
+            f"AND +k.start_time < {o}start_time{site}))")
+
+
 _MEM_UNIT = {'K': 1 / 1024, 'M': 1, 'G': 1024, 'T': 1024 ** 2, 'P': 1024 ** 3}
 _TRES_MEM = re.compile(r'(?:^|,)mem=([0-9]+(?:\.[0-9]+)?)([KMGTP]?)', re.IGNORECASE)
 _TRES_NODE = re.compile(r'(?:^|,)node=([0-9]+)')
@@ -237,17 +277,21 @@ def queue_wait_sql(cols: set, alias: str = "") -> str:
     (wait_time_seconds) where the eligible time isn't recorded (squeue
     doesn't give it, jobs stored before 1.13). A job waiting on another's
     end or a --begin time isn't waiting for the queue, and counting that
-    time made a partition look slower than it is.
+    time made a partition look slower than it is. NULL for a later task of a
+    job array (later_task_sql): its wait isn't known (1.53.3).
 
     cols: the jobs table's columns; alias: the table's alias in the query.
     """
     a = f"{alias}." if alias else ""
     if "eligible_time" not in cols or "start_time" not in cols:
-        return f"{a}wait_time_seconds"
-    return (f"CASE WHEN {a}eligible_time IS NOT NULL AND {a}start_time IS NOT NULL "
-            f"AND {a}start_time >= {a}eligible_time "
-            f"THEN CAST(ROUND((julianday({a}start_time) - julianday({a}eligible_time)) "
-            f"* 86400) AS INTEGER) ELSE {a}wait_time_seconds END")
+        wait = f"{a}wait_time_seconds"
+    else:
+        wait = (f"CASE WHEN {a}eligible_time IS NOT NULL AND {a}start_time IS NOT NULL "
+                f"AND {a}start_time >= {a}eligible_time "
+                f"THEN CAST(ROUND((julianday({a}start_time) - julianday({a}eligible_time)) "
+                f"* 86400) AS INTEGER) ELSE {a}wait_time_seconds END")
+    later = later_task_sql(cols, alias)
+    return wait if later is None else f"CASE WHEN {later} THEN NULL ELSE {wait} END"
 
 
 def ensure_job_columns(conn: sqlite3.Connection) -> None:

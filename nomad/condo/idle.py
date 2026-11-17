@@ -108,7 +108,7 @@ class CondoIdle:
     earlier_hours: list = field(default_factory=list)
     reason_unknown: int = 0                # of earlier_jobs, waiting reason not recorded
     left_out: dict = field(default_factory=lambda: {"several_nodes": 0, "too_long": 0, "no_time_limit": 0,
-                                                    "own_limits": 0, "too_big": 0})
+                                                    "own_limits": 0, "too_big": 0, "array_pace": 0})
     idle_node_hours: float = 0.0
     stretches: list = field(default_factory=list)   # hours of each wholly idle stretch
     earlier_keys: set = field(default_factory=set)  # (site, job) counted in earlier_jobs
@@ -193,6 +193,9 @@ def _candidates(out: CondoIdle, jobs, reach, biggest, t0, t1, now, guest_max) ->
         if j.ref is None or not j.partitions or (reach & set(j.partitions)):
             continue
         if (j.site, j.job_id) in seen:
+            continue
+        if j.follows and j.ready_since is None:
+            out.left_out["array_pace"] += 1    # a later task of a job array, never seen waiting for room (1.53.3)
             continue
         if j.start is not None:
             until = j.start

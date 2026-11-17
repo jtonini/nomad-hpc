@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.53.3 (November 2026)
+
+- **A job array's later tasks no longer count its age as their wait.**
+  Every task of an array carries the array's submission and eligible time,
+  so an array sent five weeks ago whose tasks run a few at a time has tasks
+  that start today "eligible" for five weeks. On two clusters, nearly all
+  the hours the lab figures counted as waiting for room in a month were
+  such tasks. Now a wait counts an array once, by its first task: in the
+  condo reports and My lab, the job facts (labs, sites, courses, a person's
+  own), the Submit page's typical waits and the long-wait insight
+  (`nomad.db.jobkeys.later_task_sql`, the rule in one place). A later task
+  waited for room only from when nomad saw its array wait for room, and is
+  otherwise not a job an idle condo could have taken (left out as "array
+  pace").
+- **The Slurm collector keeps an array's waiting reason on its tasks.** A
+  task's own row has no reason (squeue lists an array's pending tasks as one
+  range, 123_[5-9%2]); when a task first appears it takes the reason the
+  range had at the last reading, and since when nomad saw it wait for room:
+  an array held by its own limit (JobArrayTaskLimit, as many at a time as
+  it allows) is told apart from one that waited for the cluster, from now
+  on.
+- The Submit page's typical waits count from when each job could start, as
+  the other figures have since 1.13.
+
 ## v1.53.2 (November 2026)
 
 - **A job array counts once in the median wait**, by its first task: the

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from nomad.db.jobkeys import (ACTIVE_STATES, ensure_job_columns, mem_per_node_mb, place, same_job,
+from nomad.db.jobkeys import (ACTIVE_STATES, array_of, ensure_job_columns, mem_per_node_mb, place, same_job,
                               stored_job, waiting_for_cluster)
 
 from .base import BaseCollector, CollectionError, registry
@@ -487,6 +487,32 @@ def record_runaways(conn, seen, checked, listed, now: str) -> None:
     gone |= have - active
     for job_id in gone:
         conn.execute(f"DELETE FROM {RUNAWAY} WHERE job_id = ?", (job_id,))
+
+
+def _array_reason(conn, job_id: str, submit) -> tuple | None:
+    """For a task of a job array seen for the first time: (reason,
+    ready_since) of its array's pending tasks at the last reading (the range
+    squeue lists, "123_[5-9%2]"), or None. A task's own row comes from squeue
+    once it runs, or from sacct, with no reason of its own; this one says
+    whether the array was held by its own limit (JobArrayTaskLimit: as many
+    at a time as it allows) or waited for the cluster (Resources, Priority),
+    and since when nomad saw it wait for room without a break, so the condo
+    figures count that much of the task's wait as waiting for room and no
+    more (1.53.3). Kept once stored: a later reading without a reason leaves
+    it."""
+    n = array_of(job_id)
+    if n is None or conn.execute("SELECT 1 FROM jobs WHERE job_id = ?", (job_id,)).fetchone():
+        return None
+    sub = str(submit)[:19].replace(' ', 'T') if submit else None
+    # by the job number's index; the newest range (squeue's id changes as tasks start) last written
+    ranges = sorted(conn.execute(
+        "SELECT rowid, pending_reason, ready_since, submit_time FROM jobs WHERE job_id >= ? AND job_id < ? "
+        "AND substr(job_id, length(?) + 1, 1) = '[' AND +pending_reason IS NOT NULL",
+        (f"{n}_", f"{n}`", f"{n}_")).fetchall(), key=lambda r: r[0], reverse=True)
+    for _, reason, ready, at in (tuple(r) for r in ranges):
+        if sub is None or at is None or str(at)[:19].replace(' ', 'T') == sub:
+            return str(reason)[:120], ready
+    return None
 
 
 @registry.register
@@ -1160,6 +1186,10 @@ class SlurmCollector(BaseCollector):
                     if job_id is None:
                         continue
                     record['job_id'] = job_id
+                    if record.get('pending_reason') is None:
+                        got = _array_reason(conn, job_id, record.get('submit_time'))
+                        if got is not None:
+                            record['pending_reason'], record['ready_since'] = got
                     conn.execute(_JOB_UPSERT, tuple(record[f] for f in _JOB_FIELDS))
 
             # Committed before sacct is asked about anything, so the database

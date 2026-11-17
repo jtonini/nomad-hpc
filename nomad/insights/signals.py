@@ -672,10 +672,14 @@ def read_queue_signals(db_path: Path, hours: int = 6, config: dict | None = None
         jcols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
         since = ("COALESCE(eligible_time, submit_time)" if "eligible_time" in jcols
                  else "submit_time")
+        # Not a later task of a job array: its "wait" is its array's age (1.53.3).
+        from nomad.db.jobkeys import later_task_sql
+        later = later_task_sql(jcols) or "0"
         waits: dict[str, list[float]] = {}
         for r in conn.execute(f"""
             SELECT partition,
-                   (julianday(start_time) - julianday({since})) * 86400 AS wait
+                   CASE WHEN {later} THEN NULL
+                        ELSE (julianday(start_time) - julianday({since})) * 86400 END AS wait
             FROM jobs
             WHERE end_time >= ? AND start_time IS NOT NULL AND submit_time IS NOT NULL
         """, (cutoff,)):

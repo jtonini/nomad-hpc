@@ -92,7 +92,7 @@ ended in the window:
 | `memory.used_pct` | memory at peak over memory requested, by memory-hours, over the jobs measured |
 | `memory.set_aside` | peaks larger than any node at the job's site: not measurements (Slurm's `jobacct_gather/linux` counts shared memory once per process) |
 | `gpus.jobs`, `gpus.gpu_hours_requested` | GPUs asked for; their use per job is not measured here |
-| `wait_minutes.median`, `.p90` | time from submission to start |
+| `wait_minutes.median`, `.p90` | time from when the job could start (its eligible time, else its submission) to its start; a job array counts once, by its first task (1.53.3) |
 
 ## sites
 
@@ -228,7 +228,11 @@ one lab by its group), each cluster with node readings in the window (1.30.0):
   limits, a dependency, a hold, nodes down) and stopped waiting (started, or
   were cancelled) in the window: each counts on the day it stopped, and its
   wait is measured the same in every window (its last 30 days at most); a job
-  still waiting counts the day it stops. `others`: other people's, how many
+  still waiting counts the day it stops. A later task of a job array (one
+  whose array had a task start before it) waited for room only from when
+  nomad saw its array wait for room, if it did: every task carries the
+  array's submission, so an array sent five weeks ago would have counted
+  five weeks for each task that starts today (1.53.3). `others`: other people's, how many
   and the average wait. `behind_lab`: those that waited while the lab's jobs
   ran on the nodes they could use, off the lab's own condo (its own nodes are
   its own): how many, their hours of waiting while the lab ran there (added

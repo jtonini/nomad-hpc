@@ -230,13 +230,18 @@ def typical_waits(conn: sqlite3.Connection, site: str | None, names: list, now: 
         where, args = " AND source_site = ?", [site]
     marks = ",".join("?" * len(names))
     since = (now - timedelta(days=days)).strftime("%Y-%m-%d")
+    # From when each could start, and not a later task of a job array (its
+    # "wait" is its array's age): nomad.db.jobkeys.queue_wait_sql (1.53.3).
+    from nomad.db.jobkeys import queue_wait_sql
+    wait_sql = queue_wait_sql(cols)
     out: dict = {}
     try:
         for part, wait in conn.execute(
-                f"SELECT partition, wait_time_seconds FROM jobs WHERE partition IN ({marks}) "
-                f"AND start_time >= ? AND wait_time_seconds IS NOT NULL AND wait_time_seconds >= 0{where}",
+                f"SELECT partition, {wait_sql} AS w FROM jobs WHERE partition IN ({marks}) "
+                f"AND start_time >= ? AND wait_time_seconds IS NOT NULL{where}",
                 [*names, since, *args]):
-            out.setdefault(part, []).append(wait)
+            if wait is not None and wait >= 0:
+                out.setdefault(part, []).append(wait)
     except sqlite3.Error:
         return {}
     return {p: int(statistics.median(v)) for p, v in out.items() if len(v) >= 5}
