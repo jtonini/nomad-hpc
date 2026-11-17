@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.53.1 (November 2026)
+
+From the dashboard's first morning on real data:
+
+- **The median wait counts from when a job could start** (its eligible
+  time, as the condo figures count it): time spent waiting for another job
+  to end, or for a start time it asked for, is not waiting in the queue.
+  One such job had made a partition's median look like weeks.
+- **The dashboard**: the tiles show the value now (from Prometheus's first
+  read) and say "no data", not "none", when there is none; a single number
+  shows alone, not under its query; the collectors tables are wider, site
+  first; charts with a line per node don't list every node under them
+  (hovering does, the slowest clock first); its link goes to the metrics
+  page of the docs.
+
 ## v1.53.0 (November 2026)
 
 - **A Grafana dashboard for `nomad metrics`**: `nomad metrics dashboard`

@@ -56,18 +56,24 @@ class _Layout:
 
 
 def stat(title: str, expr: str, description: str, unit: str, thresholds: dict, legend: str = "",
-         no_value: str = "none") -> dict:
-    return {"type": "stat", "title": title, "description": description, "targets": [_target(expr, legend)],
+         no_value: str = "no data") -> dict:
+    """The value now (an instant query: it shows from Prometheus's first read); one tile per series,
+    named by ``legend`` (none: the number alone, the title says what it is)."""
+    target = _target(expr, legend) | {"range": False, "instant": True}
+    return {"type": "stat", "title": title, "description": description, "targets": [target],
             "fieldConfig": {"defaults": {"unit": unit, "thresholds": thresholds, "color": {"mode": "thresholds"},
                                          "noValue": no_value, "mappings": []}, "overrides": []},
             "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
                         "colorMode": "background", "graphMode": "none", "justifyMode": "auto",
-                        "orientation": "auto", "textMode": "value_and_name", "wideLayout": True,
-                        "showPercentChange": False}}
+                        "orientation": "auto", "textMode": "value_and_name" if legend else "value",
+                        "wideLayout": True, "showPercentChange": False}}
 
 
 def series(title: str, expr: str, description: str, unit: str, legend: str, lo=None, hi=None,
-           thresholds: dict | None = None, line_at: bool = False) -> dict:
+           thresholds: dict | None = None, line_at: bool = False, show_legend: bool = True,
+           tooltip_sort: str = "desc") -> dict:
+    """A line per series. A chart with a line per node hides its legend (dozens of names); hovering
+    lists them, ``tooltip_sort`` first."""
     defaults = {"unit": unit, "color": {"mode": "palette-classic"},
                 "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 0, "showPoints": "never",
                            "spanNulls": False, "axisPlacement": "auto",
@@ -79,12 +85,12 @@ def series(title: str, expr: str, description: str, unit: str, legend: str, lo=N
         defaults["max"] = hi
     return {"type": "timeseries", "title": title, "description": description,
             "targets": [_target(expr, legend)], "fieldConfig": {"defaults": defaults, "overrides": []},
-            "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
-                        "tooltip": {"mode": "multi", "sort": "desc"}}}
+            "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": show_legend},
+                        "tooltip": {"mode": "multi", "sort": tooltip_sort}}}
 
 
 def table(title: str, expr: str, description: str, value_name: str | None, unit: str = "none",
-          thresholds: dict | None = None, sort_desc: bool = True) -> dict:
+          thresholds: dict | None = None, sort_desc: bool = True, order: tuple = ()) -> dict:
     hide = {"Time": True, "__name__": True, "job": True, "instance": True}
     rename = {}
     if value_name is None:
@@ -94,7 +100,8 @@ def table(title: str, expr: str, description: str, value_name: str | None, unit:
     p = {"type": "table", "title": title, "description": description,
          "targets": [_target(expr, table=True)],
          "transformations": [{"id": "organize", "options": {"excludeByName": hide, "renameByName": rename,
-                                                             "indexByName": {}}}],
+                                                             "indexByName": {k: i for i, k in enumerate(
+                                                                 order + (("Value",) if order else ()))}}}],
          "fieldConfig": {"defaults": {"unit": unit, "thresholds": thresholds or _steps("text"),
                                       "custom": {"align": "auto", "cellOptions": {"type": "color-text"}},
                                       "mappings": []}, "overrides": []},
@@ -131,22 +138,24 @@ def dashboard() -> dict:
     L.add(stat("Since the hub last pulled each site", f"time() - nomad_site_last_pull_timestamp_seconds{{{SITE}}}",
                "How old each site's data on the hub is. The hub pulls every few minutes; much longer means "
                "the hub can't reach the site, or the site stopped.", "s",
-               _steps("green", (900, "orange"), (3600, "red")), "{{site}}"), x=0, w=8, h=5)
+               _steps("green", (900, "orange"), (3600, "red")), "{{site}}"), x=0, w=12, h=5)
     L.add(stat("Readings left out as too old", f"sum by (site) (nomad_readings_too_old{{{SITE}}})",
                "Readings nomad left out because their next one was due and didn't come: what stopped shows "
                "as a gap, not as old figures. The collectors' table says which.", "short",
-               _steps("green", (1, "orange")), "{{site}}"), x=8, w=8, h=5)
+               _steps("green", (1, "orange")), "{{site}}"), x=12, w=12, h=5)
+    L.down(5)
     L.add(table("Collectors: since their last success",
                 f"time() - nomad_collector_last_success_timestamp_seconds{{{SITE}}}",
                 "Each collector at each site, and how long since it last ran without an error.",
-                "since last success", "s", _steps("green", (3600, "orange"), (86400, "red"))), x=16, w=8, h=10)
+                "since last success", "s", _steps("green", (3600, "orange"), (86400, "red")),
+                order=("site", "collector")), x=0, w=12, h=8)
     L.add(table("Collectors whose last run failed",
                 f"(nomad_collector_last_run_timestamp_seconds{{{SITE}}} - "
                 f"nomad_collector_last_success_timestamp_seconds{{{SITE}}}) > 0",
                 "A collector that ran after its last success, so its latest run failed; the number is how "
                 "long it has been failing.", "failing for", "s", _steps("orange", (3600, "red"))),
-          x=0, w=16, h=5, y=L.y + 5)
-    L.down(10)
+          x=12, w=12, h=8)
+    L.down(8)
 
     L.row("Nodes")
     L.add(bars("Nodes by condition", f"sum by (condition) (nomad_node_condition{{{SITE}}})",
@@ -179,8 +188,8 @@ def dashboard() -> dict:
     L.add(series("CPU clock, of what it should give", f"nomad_node_cpu_clock_ratio{{{SITE}}}",
                  "Each node's CPU clock when busy, as a share of what it should give (its own usual, nodes "
                  "like it, its top clock). Far below the line (half): braked.", "percentunit",
-                 "{{site}} {{node}}", lo=0, thresholds=_steps("red", (0.5, "green")), line_at=True),
-          x=12, w=12, h=6)
+                 "{{site}} {{node}}", lo=0, thresholds=_steps("red", (0.5, "green")), line_at=True,
+                 show_legend=False, tooltip_sort="asc"), x=12, w=12, h=6)
     L.down(6)
     L.add(table("Power problems by node", f"nomad_node_power_problems{{{SITE}}} > 0",
                 "Each node with a problem its board reports, by part.", "problems", "short",
@@ -193,7 +202,8 @@ def dashboard() -> dict:
     L.row("GPUs")
     L.add(series("GPUs busy (DCGM)", f"avg by (site, node) (nomad_gpu_busy_ratio{{{SITE}}})",
                  "How busy each node's GPUs were, as DCGM measures it (nvidia-smi's figure is not used; a node "
-                 "without DCGM has no line).", "percentunit", "{{site}} {{node}}", lo=0, hi=1), x=0, w=12, h=8)
+                 "without DCGM has no line).", "percentunit", "{{site}} {{node}}", lo=0, hi=1,
+                 show_legend=False), x=0, w=12, h=8)
     L.add(series("GPU memory in use",
                  f"sum by (site) (nomad_gpu_memory_used_bytes{{{SITE}}}) / "
                  f"sum by (site) (nomad_gpu_memory_total_bytes{{{SITE}}})",
@@ -201,7 +211,7 @@ def dashboard() -> dict:
           x=12, w=6, h=8)
     L.add(series("Hottest GPU", f"max by (site, node) (nomad_gpu_temperature_celsius{{{SITE}}})",
                  "Each node's hottest GPU.", "celsius", "{{site}} {{node}}",
-                 thresholds=_steps("green", (85, "red")), line_at=True), x=18, w=6, h=8)
+                 thresholds=_steps("green", (85, "red")), line_at=True, show_legend=False), x=18, w=6, h=8)
     L.down(8)
 
     L.row("Queues")
@@ -212,7 +222,8 @@ def dashboard() -> dict:
     L.add(series("Median wait of the jobs that started lately",
                  f"nomad_partition_wait_median_seconds{{{SITE}}}",
                  "The median wait of the jobs that started in each partition in the last [metrics] wait_hours "
-                 "(24 by default).", "s", "{{site}} {{partition}}", lo=0), x=16, w=8, h=8)
+                 "(24 by default), from when each could start (a dependency or a start time asked for is not "
+                 "waiting). Few jobs started: one job can be the median.", "s", "{{site}} {{partition}}", lo=0), x=16, w=8, h=8)
     L.down(8)
 
     L.row("Filesystems")
@@ -235,7 +246,7 @@ def dashboard() -> dict:
         "timezone": "browser",
         "time": {"from": "now-24h", "to": "now"},
         "refresh": "1m",
-        "links": [{"title": "nomad metrics", "type": "link", "url": "https://github.com/jtonini/nomad-hpc",
+        "links": [{"title": "nomad metrics", "type": "link", "url": "https://github.com/jtonini/nomad-hpc/blob/main/docs/metrics.md",
                    "targetBlank": True, "icon": "doc", "tooltip": "", "asDropdown": False, "includeVars": False,
                    "keepTime": False, "tags": []}],
         "annotations": {"list": [{"builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},

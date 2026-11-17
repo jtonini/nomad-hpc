@@ -104,7 +104,8 @@ CATALOG = {
     "nomad_partition_jobs": ("Jobs in the partition now, by state (pending, running).",
                              ("site", "partition", "state")),
     "nomad_partition_wait_median_seconds": (
-        "The median wait of the jobs that started in the partition in the last wait_hours ([metrics], 24).",
+        "The median wait of the jobs that started in the partition in the last wait_hours ([metrics], 24), "
+        "from when each could start (its eligible time).",
         ("site", "partition")),
     "nomad_partition_jobs_started": (
         "Jobs that started in the partition in the last wait_hours ([metrics], 24).", ("site", "partition")),
@@ -562,6 +563,7 @@ class _Reader:
         if not {"partition", "start_time", "submit_time"} <= cols:
             return
         wait = "wait_time_seconds" if "wait_time_seconds" in cols else "NULL"
+        elig = "eligible_time" if "eligible_time" in cols else "NULL"
         since = self.now - timedelta(hours=self.s.wait_hours)
         for site in self.sites:
             if "node_state" in self.tables and site not in self.current:
@@ -575,15 +577,20 @@ class _Reader:
                 continue
             by: dict = {}
             for r in self.rows(
-                    f"SELECT partition, submit_time, start_time, {wait} AS wait FROM jobs WHERE {w}"
+                    f"SELECT partition, submit_time, start_time, {elig} AS eligible, {wait} AS wait FROM jobs WHERE {w}"
                     "submit_time >= ? AND start_time >= ? AND start_time <= ?",
                     a + [_bound(since - timedelta(days=WAIT_SUBMIT_DAYS), sample), _bound(since, sample),
                          _bound(self.now, sample)]):
                 if not r["partition"]:
                     continue
-                v = num(r.get("wait"))
+                # from when it could start (its eligible time, as the condo figures count it): a dependency
+                # or a start time asked for is not waiting; else Slurm's own wait, else from its submission
+                s0, s1, e = parse_time(r["submit_time"]), parse_time(r["start_time"]), parse_time(r.get("eligible"))
+                ref = e if e is not None and (s0 is None or e >= s0) else None
+                v = (s1 - ref).total_seconds() if ref is not None and s1 is not None and s1 >= ref else None
+                if v is None:
+                    v = num(r.get("wait"))
                 if v is None or v < 0:
-                    s0, s1 = parse_time(r["submit_time"]), parse_time(r["start_time"])
                     v = (s1 - s0).total_seconds() if s0 and s1 and s1 >= s0 else None
                 if v is not None:
                     by.setdefault(str(r["partition"]), []).append(v)

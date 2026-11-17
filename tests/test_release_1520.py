@@ -47,7 +47,7 @@ def hub(tmp_path):
         CREATE TABLE queue_state (id INTEGER PRIMARY KEY, source_site TEXT, timestamp TEXT, partition TEXT,
             pending_jobs INTEGER, running_jobs INTEGER, total_jobs INTEGER);
         CREATE TABLE jobs (id INTEGER PRIMARY KEY, source_site TEXT, job_id TEXT, user_name TEXT, partition TEXT,
-            submit_time TEXT, start_time TEXT, wait_time_seconds INTEGER, state TEXT);
+            submit_time TEXT, start_time TEXT, wait_time_seconds INTEGER, state TEXT, eligible_time TEXT);
         CREATE TABLE filesystems (id INTEGER PRIMARY KEY, source_site TEXT, timestamp TEXT, path TEXT,
             total_bytes INTEGER, used_bytes INTEGER, available_bytes INTEGER, used_percent REAL);
         CREATE TABLE group_membership (username TEXT, group_name TEXT);
@@ -103,13 +103,15 @@ def hub(tmp_path):
                    ("alpha", "n02", "FAN3", "fans", "has stopped"),
                    ("alpha", "n01", "PSU1 Status", "power supply", None)])
     jobs = [("1", "kim", "standard", 60, 60), ("2", "pat", "standard", 120, 300), ("3", "kim", "standard", 600, 30),
-            ("4", "pat", "gpu", None, 90)]
+            ("4", "pat", "gpu", None, 90), ("8", "pat", "standard", 86400, 45)]
     for jid, user, part, wait, started in jobs:
         start = NOW - timedelta(minutes=started)
         sub = start - timedelta(seconds=wait if wait is not None else 45)
+        # job 8 waited a day for another to end (a dependency): eligible 90 seconds before it started
+        elig = (start - timedelta(seconds=90)).isoformat() if jid == "8" else None
         c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, "
-                  "wait_time_seconds, state) VALUES (?,?,?,?,?,?,?,?)",
-                  ("alpha", jid, user, part, sub.isoformat(), start.isoformat(), wait, "RUNNING"))
+                  "wait_time_seconds, state, eligible_time) VALUES (?,?,?,?,?,?,?,?,?)",
+                  ("alpha", jid, user, part, sub.isoformat(), start.isoformat(), wait, "RUNNING", elig))
     c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, state) "
               "VALUES (?,?,?,?,?,?,?)", ("alpha", "5", "kim", "standard", t(20), "Unknown", "PENDING"))
     c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, "
@@ -218,8 +220,9 @@ def test_partitions_and_waits(hub):
     p = page_of(hub)
     assert one(p, "nomad_partition_jobs", partition="standard", state="pending") == 12
     assert one(p, "nomad_partition_jobs", partition="gpu", state="running") == 4
-    assert one(p, "nomad_partition_wait_median_seconds", partition="standard") == 120
-    assert one(p, "nomad_partition_jobs_started", partition="standard") == 3   # not the one two days ago
+    # 60, 120, 600 and job 8's 90 from when it could start (not its day waiting for another job)
+    assert one(p, "nomad_partition_wait_median_seconds", partition="standard") == 105
+    assert one(p, "nomad_partition_jobs_started", partition="standard") == 4   # not the one two days ago
     assert one(p, "nomad_partition_wait_median_seconds", partition="gpu") == 45  # from its times
     assert not values(p, "nomad_partition_jobs", site="beta")
     assert not values(p, "nomad_partition_wait_median_seconds", site="beta")  # beta isn't current
