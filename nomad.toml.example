@@ -1252,6 +1252,16 @@ carbon_source = "epa_egrid"   # epa_egrid | iea | manual
 carbon_region = "SRVC"        # eGRID subregion (Virginia); or country code if iea
 # carbon_intensity_g_per_kwh = 380   # manual override; use with carbon_source = "manual"
 
+[metrics]
+# What nomad publishes for Prometheus (nomad metrics, 1.52.0): nothing about one person.
+# enabled = false                 # nomad metrics serve answers only when true
+# listen = "127.0.0.1:10062"      # another address needs token_file
+# token_file = "/home/nomad/.config/nomad/metrics_token"   # Prometheus sends it (nomad metrics token --apply)
+# grace_minutes = 30              # a reading counts until its next is due plus this (default: the hub's pull + 10)
+# wait_hours = 24                 # the median wait: jobs that started in this many hours
+# cache_seconds = 30              # asks within this get the same page
+# site = "mycluster"              # a site's own database: its name (default: the host's)
+
 # [impact]
 # What changed after NØMAÐ (nomad impact status | report | backfill).
 # launch = 2026-10-19            # when people started getting NØMAÐ's feedback

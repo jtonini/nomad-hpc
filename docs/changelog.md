@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.52.0 (November 2026)
+
+What nomad knows, for Prometheus and Grafana: `nomad metrics`.
+
+- **`nomad metrics`** prints, in Prometheus's text format, each site's last
+  pull and each collector's last run and last success; each node's
+  condition (up, draining, drained, down), cores and cores allocated, CPU
+  clock against what it should give, and the problems its board reports
+  (power supplies, voltages, fans); each GPU's use (DCGM's measure only),
+  memory, temperature and power; each partition's pending and running jobs
+  and the median wait of the jobs that started in it lately; each
+  filesystem's size, use and free space. Nothing about one person: no
+  user, job or lab label.
+- **Gaps instead of old figures:** a reading counts until its next one was
+  due, plus `grace_minutes`; then it is left out, so a collector that
+  stopped shows as a gap in Grafana, and `nomad_readings_too_old` says how
+  many were left out where.
+- **`nomad metrics --summary`** counts only (no node, partition or path
+  names); `--catalog` lists each name and what it is; `--out FILE.prom`
+  writes the page for node_exporter's textfile collector.
+- **`nomad metrics serve`** answers Prometheus at `/metrics`, only with
+  `[metrics] enabled = true`; on an address other hosts can reach, only
+  with `token_file` (a bearer token: `nomad metrics token --apply` writes
+  one, never printing it). `nomad metrics service --apply` runs it from
+  systemd. See [Prometheus metrics](metrics.md).
+
 ## v1.51.0 (November 2026)
 
 What a year of jobs said about why they fail: most failures stop within

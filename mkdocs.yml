@@ -66,6 +66,7 @@ nav:
     - Impact: impact.md
     - Actions: actions.md
     - Facts: facts.md
+    - Prometheus Metrics: metrics.md
     - Insight Engine: insights.md
     - System Dynamics: dynamics.md
     - Cloud Monitoring: cloud.md

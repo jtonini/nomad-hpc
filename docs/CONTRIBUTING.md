@@ -217,7 +217,7 @@ nomad/
 
 ### High Priority
 - [ ] Additional SLURM metrics collection
-- [ ] Prometheus export format
+- [x] Prometheus export format (`nomad metrics`, 1.52.0)
 - [ ] Grafana dashboard templates
 - [ ] More comprehensive test coverage
 

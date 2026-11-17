@@ -11862,6 +11862,9 @@ cli.add_command(notices_group)
 # What the Console's /api/v1 answers: sites, a person, a lab.
 from nomad.facts.cli import facts_group  # noqa: E402
 cli.add_command(facts_group)
+# What nomad publishes for Prometheus (1.52.0).
+from nomad.metrics_cli import metrics_group  # noqa: E402
+cli.add_command(metrics_group)
 from nomad.config.course_cli import course_group, interactive_group  # noqa: E402
 cli.add_command(course_group)
 cli.add_command(interactive_group)
