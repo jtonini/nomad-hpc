@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.53.2 (November 2026)
+
+- **A job array counts once in the median wait**, by its first task: the
+  wait until the array began. Its later tasks start at the array's own pace
+  (as many at a time as it allows, or as its own tasks free the nodes), and
+  each carries the array's eligible time, so a five-week-old array's task
+  that starts today counted five weeks of waiting: one such array had made
+  a partition's median look like five weeks. The jobs started still count
+  every task.
+
 ## v1.53.1 (November 2026)
 
 From the dashboard's first morning on real data:

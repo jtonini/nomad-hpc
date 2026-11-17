@@ -31,8 +31,8 @@ place where each lab sees only its own.
 | `nomad_gpu_memory_used_bytes`, `nomad_gpu_memory_total_bytes` | GPU memory in use, and the GPU's memory | site, node, gpu |
 | `nomad_gpu_temperature_celsius`, `nomad_gpu_power_watts` | The GPU's temperature and power draw | site, node, gpu |
 | `nomad_partition_jobs` | Jobs in the partition now | site, partition, state (pending, running) |
-| `nomad_partition_wait_median_seconds` | The median wait of the jobs that started in the partition in the last `wait_hours` | site, partition |
-| `nomad_partition_jobs_started` | How many jobs started there in that time | site, partition |
+| `nomad_partition_wait_median_seconds` | The median wait of the jobs that started in the partition in the last `wait_hours`, from when each could start; a job array counts once, by its first task | site, partition |
+| `nomad_partition_jobs_started` | How many jobs started there in that time (each task of an array) | site, partition |
 | `nomad_filesystem_size_bytes`, `_used_bytes`, `_avail_bytes` | Each watched filesystem's size, use and free space | site, path |
 
 All are gauges. `nomad metrics --catalog` prints the same list.

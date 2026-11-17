@@ -114,6 +114,20 @@ def hub(tmp_path):
                   ("alpha", jid, user, part, sub.isoformat(), start.isoformat(), wait, "RUNNING", elig))
     c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, state) "
               "VALUES (?,?,?,?,?,?,?)", ("alpha", "5", "kim", "standard", t(20), "Unknown", "PENDING"))
+    # Two job arrays on gpu (1.53.2). Array 90, five weeks old: its first task started then, three more
+    # in the last hours, each "eligible" since the array's submission; and the rest still waiting.
+    old = (NOW - timedelta(days=35)).isoformat()
+    arr = [("90_1", old, t(35 * 1440 - 30)), ("90_2", old, t(50)), ("90_3", old, t(40)), ("90_4", old, t(30)),
+           ("90_[5-9%3]", old, "Unknown"),
+           # array 91, sent three hours ago: two tasks began together after two hours, a third later
+           ("91_1", t(180), t(60)), ("91_2", t(180), t(60)), ("91_3", t(180), t(20))]
+    for jid, sub, start in arr:
+        c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, state, "
+                  "eligible_time) VALUES (?,?,?,?,?,?,?,?)",
+                  ("alpha", jid, "ann", "gpu", sub, start, "PENDING" if start == "Unknown" else "RUNNING", sub))
+    # the same number at beta, another array: not array 91's first task
+    c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, state, "
+              "eligible_time) VALUES (?,?,?,?,?,?,?,?)", ("beta", "91_1", "ann", "gpu", t(900), t(800), "RUNNING", t(900)))
     c.execute("INSERT INTO jobs (source_site, job_id, user_name, partition, submit_time, start_time, "
               "wait_time_seconds, state) VALUES (?,?,?,?,?,?,?,?)",
               ("alpha", "6", "kim", "standard", t(3000), t(2900), 6000, "COMPLETED"))      # two days ago
@@ -223,7 +237,10 @@ def test_partitions_and_waits(hub):
     # 60, 120, 600 and job 8's 90 from when it could start (not its day waiting for another job)
     assert one(p, "nomad_partition_wait_median_seconds", partition="standard") == 105
     assert one(p, "nomad_partition_jobs_started", partition="standard") == 4   # not the one two days ago
-    assert one(p, "nomad_partition_wait_median_seconds", partition="gpu") == 45  # from its times
+    # job 4 (45 s, from its times) and array 91 once (two hours, by its first tasks); array 90's tasks of
+    # today follow the array's pace (it began five weeks ago): not five weeks of waiting each
+    assert one(p, "nomad_partition_wait_median_seconds", partition="gpu") == (45 + 7200) / 2
+    assert one(p, "nomad_partition_jobs_started", partition="gpu") == 7       # every task that started
     assert not values(p, "nomad_partition_jobs", site="beta")
     assert not values(p, "nomad_partition_wait_median_seconds", site="beta")  # beta isn't current
     assert one(p, "nomad_readings_too_old", site="beta", source="queue_state") == 1

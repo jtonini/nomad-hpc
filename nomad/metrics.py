@@ -42,6 +42,7 @@ collectors' last runs say why. A node missing from its site's latest reading
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import sqlite3
 import statistics
@@ -60,6 +61,7 @@ USUAL_FACTOR = 1.5        # ...a reading counts this many of them (plus grace) a
 DEFAULT_USUAL_MINUTES = 60
 COLLECTOR_DAYS = 7        # collectors that ran in this many days
 WAIT_SUBMIT_DAYS = 60     # jobs that started lately were submitted within this (an index's range)
+ARRAY_TASK = re.compile(r"^(\d+)_\d+$")   # a task of a job array (123_4): the array counts once
 CONDITIONS = ("up", "draining", "drained", "down")
 POWER_PARTS = (("power supply", "power_supply"), ("voltage", "voltage"), ("fans", "fans"))
 POWER_FILE_MINUTES = 20   # the power collector's max_age_minutes: how old the helper's file may be
@@ -105,10 +107,12 @@ CATALOG = {
                              ("site", "partition", "state")),
     "nomad_partition_wait_median_seconds": (
         "The median wait of the jobs that started in the partition in the last wait_hours ([metrics], 24), "
-        "from when each could start (its eligible time).",
+        "from when each could start (its eligible time). A job array counts once, when its first task starts: "
+        "its later tasks follow the array's own pace.",
         ("site", "partition")),
     "nomad_partition_jobs_started": (
-        "Jobs that started in the partition in the last wait_hours ([metrics], 24).", ("site", "partition")),
+        "Jobs that started in the partition in the last wait_hours ([metrics], 24), each task of an array too.",
+        ("site", "partition")),
     "nomad_filesystem_size_bytes": ("The filesystem's size.", ("site", "path")),
     "nomad_filesystem_used_bytes": ("Space used on the filesystem.", ("site", "path")),
     "nomad_filesystem_avail_bytes": ("Space free on the filesystem.", ("site", "path")),
@@ -556,7 +560,13 @@ class _Reader:
     def waits(self) -> None:
         """The jobs that started in the last wait_hours, by partition: how
         many, and their median wait. Only for a site whose node readings are
-        in time (its jobs are as current as they are)."""
+        in time (its jobs are as current as they are).
+
+        A job array counts once in the median, by its first task: the wait
+        until the array began. Its later tasks start at the array's own pace
+        (as many at a time as it allows, or as its own tasks free the nodes),
+        and the eligible time of each is the array's, so a five-week-old
+        array's task starting today would count five weeks (1.53.2)."""
         if "jobs" not in self.tables:
             return
         cols = columns(self.conn, "jobs")
@@ -576,13 +586,18 @@ class _Reader:
             if sample is None:
                 continue
             by: dict = {}
+            started: dict = {}
+            arrays: dict = {}                     # (array, submit) -> (start, wait, partition) of its first here
             for r in self.rows(
-                    f"SELECT partition, submit_time, start_time, {elig} AS eligible, {wait} AS wait FROM jobs WHERE {w}"
+                    f"SELECT job_id, partition, submit_time, start_time, {elig} AS eligible, {wait} AS wait "
+                    f"FROM jobs WHERE {w}"
                     "submit_time >= ? AND start_time >= ? AND start_time <= ?",
                     a + [_bound(since - timedelta(days=WAIT_SUBMIT_DAYS), sample), _bound(since, sample),
                          _bound(self.now, sample)]):
                 if not r["partition"]:
                     continue
+                part = str(r["partition"])
+                started[part] = started.get(part, 0) + 1
                 # from when it could start (its eligible time, as the condo figures count it): a dependency
                 # or a start time asked for is not waiting; else Slurm's own wait, else from its submission
                 s0, s1, e = parse_time(r["submit_time"]), parse_time(r["start_time"]), parse_time(r.get("eligible"))
@@ -592,13 +607,30 @@ class _Reader:
                     v = num(r.get("wait"))
                 if v is None or v < 0:
                     v = (s1 - s0).total_seconds() if s0 and s1 and s1 >= s0 else None
-                if v is not None:
-                    by.setdefault(str(r["partition"]), []).append(v)
+                if v is None:
+                    continue
+                task = ARRAY_TASK.match(str(r.get("job_id") or ""))
+                if task is None:
+                    by.setdefault(part, []).append(v)
+                    continue
+                key = (task.group(1), r["submit_time"])
+                if key not in arrays or (s1 is not None and (arrays[key][0] is None or s1 < arrays[key][0])):
+                    arrays[key] = (s1, v, part)
+            for (array, submit), (s1, v, part) in arrays.items():
+                # its first task anywhere (the same submission: job numbers come round again)
+                first = self.conn.execute(
+                    f"SELECT MIN(start_time) FROM jobs WHERE {w}job_id >= ? AND job_id < ? AND submit_time = ? "
+                    "AND start_time IS NOT NULL", a + [f"{array}_", f"{array}`", submit]).fetchone()[0]
+                t0 = parse_time(first)
+                if s1 is not None and t0 is not None and t0 < s1:
+                    continue                      # it began before: this task follows the array's pace
+                by.setdefault(part, []).append(v)
             label = self.label(site)
-            for part, values in sorted(by.items()):
+            for part in sorted(started):
                 labels = {"site": label, "partition": part}
-                self.page.add("nomad_partition_jobs_started", labels, len(values))
-                self.page.add("nomad_partition_wait_median_seconds", labels, statistics.median(values))
+                self.page.add("nomad_partition_jobs_started", labels, started[part])
+                if by.get(part):
+                    self.page.add("nomad_partition_wait_median_seconds", labels, statistics.median(by[part]))
 
     def filesystems(self) -> None:
         if "filesystems" not in self.tables:

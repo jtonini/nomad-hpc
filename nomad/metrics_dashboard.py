@@ -223,7 +223,9 @@ def dashboard() -> dict:
                  f"nomad_partition_wait_median_seconds{{{SITE}}}",
                  "The median wait of the jobs that started in each partition in the last [metrics] wait_hours "
                  "(24 by default), from when each could start (a dependency or a start time asked for is not "
-                 "waiting). Few jobs started: one job can be the median.", "s", "{{site}} {{partition}}", lo=0), x=16, w=8, h=8)
+                 "waiting). A job array counts once, by its first task: its later tasks follow the array's own "
+                 "pace. Few jobs started: one job can be the median.", "s", "{{site}} {{partition}}", lo=0),
+          x=16, w=8, h=8)
     L.down(8)
 
     L.row("Filesystems")
