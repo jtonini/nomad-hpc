@@ -25,6 +25,7 @@ place where each lab sees only its own.
 | `nomad_node_cpus_allocated` | Cores allocated to jobs on the node | site, node |
 | `nomad_node_cpu_clock_ratio` | The CPU's clock when busy, as a share of what it should give (1: as it should) | site, node |
 | `nomad_node_cpu_throttled` | 1 when the clock has read low on reading after reading | site, node |
+| `nomad_node_power_watched` | 1 when the node's board was read; 0 when it can't be read from the system (no `/dev/ipmi0`): its supplies aren't seen | site, node |
 | `nomad_node_power_problems` | Problems the node's board reports now, by part | site, node, part (power_supply, voltage, fans) |
 | `nomad_gpu_busy_ratio` | How busy the GPU was, as DCGM measures it (nvidia-smi's figure is not used) | site, node, gpu |
 | `nomad_gpu_memory_used_bytes`, `nomad_gpu_memory_total_bytes` | GPU memory in use, and the GPU's memory | site, node, gpu |
@@ -44,7 +45,9 @@ its usual interval (as its own readings show it, or a collector's
 `sync_interval_minutes` and 10 more, or 30). After that it is left out
 rather than repeated. When a collector or a site stops, Grafana shows a gap
 instead of a flat line that looks fine, and `nomad_readings_too_old` and the
-collectors' last runs say what stopped. A node Slurm no longer lists (missing
+collectors' last runs say what stopped. A power reading counts 20 minutes
+longer: the root helper writes its file on its own cron, so it can be that
+old when the collector reads it. A node Slurm no longer lists (missing
 from its site's latest reading) is left out too. The partitions' waits are
 given only for a site whose node readings are current.
 
@@ -101,6 +104,23 @@ scrape_configs:
 
 The numbers change every few minutes (as the sites collect and the hub
 pulls), so a scrape every minute is plenty.
+
+## A Grafana dashboard
+
+```
+nomad metrics dashboard --out nomad.json
+```
+
+writes a dashboard for what nomad publishes. In Grafana, Dashboards > New >
+Import, and choose the Prometheus that scrapes nomad; or put the file in a
+folder Grafana provisions dashboards from. It asks which sites (all by
+default) and has rows for sites and collectors (how long since the hub
+last pulled each site, which collectors' last run failed), nodes (by
+condition, cores allocated, those out of service), CPU clock and power
+(throttled CPUs, problems the boards report, boards nothing watches), GPUs
+(busy by DCGM's measure, memory, temperature), queues (waiting, running,
+the median wait) and filesystems. Lines are not drawn across missing
+readings: a gap is what nomad left out, or a scrape that failed.
 
 ## node_exporter instead
 

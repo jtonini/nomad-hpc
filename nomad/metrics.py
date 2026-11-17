@@ -62,6 +62,7 @@ COLLECTOR_DAYS = 7        # collectors that ran in this many days
 WAIT_SUBMIT_DAYS = 60     # jobs that started lately were submitted within this (an index's range)
 CONDITIONS = ("up", "draining", "drained", "down")
 POWER_PARTS = (("power supply", "power_supply"), ("voltage", "voltage"), ("fans", "fans"))
+POWER_FILE_MINUTES = 20   # the power collector's max_age_minutes: how old the helper's file may be
 CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
 # name: (help, labels). The page's order, and the catalog `nomad metrics --catalog` prints.
@@ -87,6 +88,9 @@ CATALOG = {
         ("site", "node")),
     "nomad_node_cpu_throttled": (
         "1 when the CPU's clock has read low on reading after reading (throttled), else 0.", ("site", "node")),
+    "nomad_node_power_watched": (
+        "1 when the node's board was read; 0 when it can't be read from the system (no /dev/ipmi0, or "
+        "ipmitool failing there): its power supplies aren't seen.", ("site", "node")),
     "nomad_node_power_problems": (
         "Problems the node's board reports now, by part (power_supply, voltage, fans).",
         ("site", "node", "part")),
@@ -437,7 +441,11 @@ class _Reader:
 
     def power(self) -> None:
         """power_hosts (each host's last read) and power_sensors (each sensor
-        now): the problems by part, for each host read in time."""
+        now): for each host read in time, whether its board could be read
+        (watched) and, when it could, its problems by part. The root helper
+        writes its file on its own cron and the collector reads it on its
+        own, so a reading may be POWER_FILE_MINUTES old when stored (the
+        collector's own max_age_minutes): it counts that much longer."""
         if "power_hosts" not in self.tables:
             return
         import json
@@ -454,7 +462,7 @@ class _Reader:
             if not hosts:
                 continue
             self.page.looked(label, "power")
-            lim = self.limit(self.log_usual(site, ("power",)))
+            lim = self.limit(self.log_usual(site, ("power",))) + POWER_FILE_MINUTES
             counts: dict = {}
             if {"node", "subject", "problem"} <= scols:
                 sw, sa = self.where(scols, site)
@@ -463,8 +471,13 @@ class _Reader:
                     counts[(r["node"], r["subject"])] = int(r["n"] or 0)
             for h in hosts:
                 age = self.age(parse_time(h["read_at"]))
-                if h.get("error") or age is None or age > lim:
+                if age is None or age > lim:
                     self.page.left_out(label, "power")
+                    continue
+                node = {"site": label, "node": str(h["node"])}
+                # its board can't be read (no /dev/ipmi0, ipmitool failing): not watched, which is not "fine"
+                self.page.add("nomad_node_power_watched", node, 0 if h.get("error") else 1)
+                if h.get("error"):
                     continue
                 loose: dict = {}
                 try:
@@ -474,8 +487,7 @@ class _Reader:
                 except (TypeError, ValueError):
                     pass
                 for subject, part in POWER_PARTS:
-                    self.page.add("nomad_node_power_problems",
-                                  {"site": label, "node": str(h["node"]), "part": part},
+                    self.page.add("nomad_node_power_problems", {**node, "part": part},
                                   counts.get((h["node"], subject), 0) + loose.get(subject, 0))
 
     def gpus(self) -> None:

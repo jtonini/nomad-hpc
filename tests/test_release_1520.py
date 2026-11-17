@@ -95,7 +95,9 @@ def hub(tmp_path):
                   [("alpha", "n01", t(4), None, 0, None),
                    ("alpha", "n02", t(4), None, 3, json.dumps([{"subject": "power supply", "severity": "critical",
                                                                "problem": "one supply carries the node"}])),
-                   ("alpha", "n04", t(4), "ipmitool: no answer", None, None)])
+                   ("alpha", "n04", t(4), "Could not open device at /dev/ipmi0", None, None),
+                   ("alpha", "n05", t(120), None, 0, None),                      # its helper stopped
+                   ("alpha", "n06", t(55), None, 0, None)])     # the helper's file read late: still in time
     c.executemany("INSERT INTO power_sensors (source_site, node, sensor, subject, problem) VALUES (?,?,?,?,?)",
                   [("alpha", "n02", "PSU1 Status", "power supply", "has no input power"),
                    ("alpha", "n02", "FAN3", "fans", "has stopped"),
@@ -194,7 +196,11 @@ def test_clock_and_power(hub):
     parts = {lab["part"]: v for lab, v in p.samples["nomad_node_power_problems"] if lab["node"] == "n02"}
     assert parts == {"power_supply": 2, "voltage": 0, "fans": 1}             # a sensor's and the host's own
     assert set(values(p, "nomad_node_power_problems", node="n01").values()) == {0}
-    assert not values(p, "nomad_node_power_problems", node="n04")           # its board didn't answer
+    assert not values(p, "nomad_node_power_problems", node="n04")           # its board can't be read...
+    assert one(p, "nomad_node_power_watched", node="n04") == 0              # ...so it is said: not watched
+    assert one(p, "nomad_node_power_watched", node="n02") == 1
+    assert not values(p, "nomad_node_power_watched", node="n05")            # two hours old: a gap
+    assert one(p, "nomad_node_power_watched", node="n06") == 1              # 1.5 x 10 + 30 + the file's 20
     assert one(p, "nomad_readings_too_old", site="alpha", source="power") == 1
 
 
@@ -352,3 +358,58 @@ def test_times_written_with_a_space_across_midnight():
     assert one(p, "nomad_collector_last_run_timestamp_seconds", collector="node_state") == (
         now - timedelta(minutes=2)).timestamp()
     assert one(p, "nomad_readings_too_old", source="node_state") == 0
+
+
+# -- 1.53.0: the Grafana dashboard ---------------------------------------------------------------
+
+def test_the_dashboard_asks_only_for_what_nomad_publishes():
+    import re as _re
+
+    from nomad.metrics_dashboard import dashboard, exprs
+    d = dashboard()
+    names = set()
+    for e in exprs(d):
+        names |= set(_re.findall(r"\bnomad_[a-z_]+\b", e))
+    assert names and names <= set(M.CATALOG), names - set(M.CATALOG)
+    variable = next(v for v in d["templating"]["list"] if v["name"] == "site")
+    assert _re.search(r"label_values\((nomad_[a-z_]+), site\)", variable["definition"]).group(1) in M.CATALOG
+    for e in exprs(d):
+        assert 'site=~"$site"' in e, e                # every panel follows the site chosen
+
+
+def test_the_dashboards_queries_parse():
+    promql = pytest.importorskip("promql_parser")
+    from nomad.metrics_dashboard import exprs
+    for e in exprs():
+        promql.parse(e.replace("$site", ".*"))
+
+
+def test_the_dashboards_panels_fit_and_dont_overlap():
+    from nomad.metrics_dashboard import dashboard
+    d = dashboard()
+    ids = [p["id"] for p in d["panels"]]
+    assert len(ids) == len(set(ids))
+    cells = {}
+    for p in d["panels"]:
+        g = p["gridPos"]
+        assert 0 <= g["x"] and g["x"] + g["w"] <= 24 and g["h"] >= 1
+        for x in range(g["x"], g["x"] + g["w"]):
+            for y in range(g["y"], g["y"] + g["h"]):
+                assert (x, y) not in cells, (p["title"], cells.get((x, y)))
+                cells[(x, y)] = p["title"]
+        if p["type"] != "row":
+            assert p["description"] and p["datasource"]["uid"] == "${datasource}"
+            for t in p["targets"]:
+                assert t["datasource"]["uid"] == "${datasource}"
+            assert p["fieldConfig"]["defaults"].get("custom", {}).get("spanNulls", False) is False
+
+
+def test_the_dashboard_command(tmp_path):
+    from nomad.cli import cli
+    r = CliRunner().invoke(cli, ["metrics", "dashboard"])
+    assert r.exit_code == 0, r.output
+    d = json.loads(r.output)
+    assert d["uid"] == "nomad-hpc" and d["title"] == "NØMAÐ"
+    out = tmp_path / "nomad.json"
+    r = CliRunner().invoke(cli, ["metrics", "dashboard", "--out", str(out)])
+    assert r.exit_code == 0 and json.loads(out.read_text(encoding="utf-8")) == d

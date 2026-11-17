@@ -71,6 +71,7 @@ def metrics_group(ctx, show_summary, catalog, out, db):
     nomad metrics --summary       counts only (safe to share)
     nomad metrics --catalog       each name and what it is
     nomad metrics --out FILE.prom for node_exporter's textfile collector
+    nomad metrics dashboard       a Grafana dashboard for it (JSON)
     nomad metrics serve           answer Prometheus ([metrics] enabled = true)
     nomad metrics token [--apply] a token for Prometheus to send
     nomad metrics service [--apply]  run `serve` from systemd
@@ -111,6 +112,32 @@ def metrics_group(ctx, show_summary, catalog, out, db):
             raise click.ClickException(f"{target}: {e.strerror or e}") from None
         return
     sys.stdout.write(text)
+
+
+@metrics_group.command("dashboard")
+@click.option("--out", "out", type=click.Path(dir_okay=False), help="Write it to this file instead.")
+@click.pass_context
+def dashboard_cmd(ctx, out):
+    """A Grafana dashboard for what nomad publishes, as JSON: import it
+    (Dashboards > New > Import) or put it in a provisioning folder. It asks
+    which Prometheus, and which sites."""
+    import json
+
+    from nomad.metrics_dashboard import dashboard
+    text = json.dumps(dashboard(), indent=2, ensure_ascii=False) + "\n"
+    if not out:
+        sys.stdout.write(text)
+        return
+    target = Path(out).expanduser()
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        tmp.chmod(0o644)
+        os.replace(tmp, target)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        raise click.ClickException(f"{target}: {e.strerror or e}") from None
+    click.echo(f"Wrote {target}.")
 
 
 @metrics_group.command("serve")

@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.53.0 (November 2026)
+
+- **A Grafana dashboard for `nomad metrics`**: `nomad metrics dashboard`
+  prints it (`--out FILE`), for Grafana's Dashboards > Import or a
+  provisioning folder. It asks which Prometheus and which sites; rows for
+  sites and collectors, nodes, CPU clock and power, GPUs, queues and
+  filesystems; lines are not drawn across missing readings.
+- **`nomad_node_power_watched`**: 1 when a node's board was read, 0 when it
+  can't be read from the system (no `/dev/ipmi0`, or ipmitool failing
+  there). Such a node was counted in `nomad_readings_too_old`, which it
+  isn't: it is read in time, and its supplies aren't seen.
+- **A power reading counts 20 minutes longer** (the power collector's
+  `max_age_minutes`): the root helper writes its file on its own cron, so a
+  reading can be that old when the collector stores it.
+
 ## v1.52.0 (November 2026)
 
 What nomad knows, for Prometheus and Grafana: `nomad metrics`.
