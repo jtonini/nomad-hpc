@@ -8932,6 +8932,9 @@ def config_check(ctx):
     from nomad.notices import config_problems as _notices_problems
     for problem in _notices_problems(data):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
+    from nomad.licenses import config_problems as _licenses_problems
+    for problem in _licenses_problems(data):
+        click.echo(click.style(f"  ! {problem}", fg='yellow'))
     from nomad.sync_timer import config_problems as _sync_timer_problems
     for problem in _sync_timer_problems(data):
         click.echo(click.style(f"  ! {problem}", fg='yellow'))
@@ -11858,6 +11861,8 @@ cli.add_command(maintenance_group)
 # The weekly email to each person about their own use (1.39.0).
 from nomad.notices_cli import notices_group  # noqa: E402
 cli.add_command(notices_group)
+from nomad.licenses_cli import licenses_group  # noqa: E402
+cli.add_command(licenses_group)
 
 # What the Console's /api/v1 answers: sites, a person, a lab.
 from nomad.facts.cli import facts_group  # noqa: E402

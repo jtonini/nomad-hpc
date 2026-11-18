@@ -227,28 +227,41 @@ check_services = ["slurmd", "munge"]
 # LICENSE COLLECTOR
 # ============================================
 
-[collectors.licenses]
-interval = 300  # Every 5 minutes
-# License servers to monitor
-
-[[collectors.licenses.servers]]
-name = "matlab"
-type = "flexlm"           # flexlm, rlm, or custom
-host = "license.example.edu"
-port = 27000
-timeout = 10
-
-[[collectors.licenses.servers]]
-name = "gaussian"
-type = "flexlm"
-host = "license.example.edu"
-port = 27001
-
-# [[collectors.licenses.servers]]
-# name = "custom_software"
-# type = "custom"
-# command = "/usr/local/bin/check_license.sh"
-# parse_regex = "Available: (\\d+)/(\\d+)"
+# When this machine's licenses end (1.56.0, docs/licenses.md): each read where
+# the software keeps the date, a few times a day; the hub lists them and emails
+# the center before each ends ([licenses] below). `nomad licenses find` shows
+# what a machine has, as `nomad licenses add` lines.
+# [collectors.licenses]
+# enabled = true
+# min_hours = 6
+#
+# [[collectors.licenses.items]]
+# name = "Posit Workbench"
+# kind = "posit"                 # posit | flexlm | gurobi | cert | command | date
+# program = "/usr/lib/rstudio-server/bin/rstudio-server"   # license-manager status, through sudo -n
+# about = "RStudio in the browser; renewed through Posit"
+#
+# [[collectors.licenses.items]]
+# name = "Ansys and Lumerical"
+# kind = "flexlm"
+# file = "/opt/ansys_inc/shared_files/licensing/license_files/*.lic"   # a renewal's new file is read too
+#
+# [[collectors.licenses.items]]
+# name = "Gurobi"
+# kind = "gurobi"
+# file = "/opt/gurobi_server/linux64/gurobi.lic"
+#
+# [[collectors.licenses.items]]
+# name = "Web certificate"
+# kind = "cert"
+# host = "nomad.example.edu"     # port = 443
+#
+# [[collectors.licenses.items]]
+# name = "Gaussian 16"
+# kind = "date"
+# ends = "never"                 # or a date: "2027-06-30"
+# renew = false                  # not being renewed: listed, never reminded
+# remind_days = [90, 30, 7]      # this one's own (default: the hub's)
 
 # ============================================
 # JOB COLLECTOR
@@ -546,6 +559,13 @@ from = "hpc@your-institution.edu"   # must be an address the server accepts;
 # password_file = ""         # a file holding that password, readable only by
                              # you -- never the password itself
 
+# Sizes in the Console: TB, GB and MB in 1000s, as disks are sold
+# and as most people read them ("decimal", the default), or TiB, GiB and MiB
+# in 1024s ("binary"). Each person may choose the other on My storage; their
+# choice holds in their browser. Memory stays as Slurm counts it (1G = 1024M).
+# [console]
+# size_units = "decimal"
+
 # ─── Console access ──────────────────────────────────────────────
 # Who may see what in the Console, on the machine that runs it. Anyone not
 # named who signs in is a viewer: their own work. Check with
@@ -702,6 +722,16 @@ institution = "Your Institution"     # shown in reports and system information
 # review_to = []                        # while set, every email for a person goes here instead
 # link = "https://nomad.example.edu/help"   # the Ask page, in the emails
 # per_hour = 5                          # requests a person may open in an hour
+
+# Licenses (1.56.0, docs/licenses.md), on the hub: one email to the center
+# before each license ends (`nomad licenses remind --send`; every morning:
+# `nomad licenses timer --apply`). The licenses are listed on each machine,
+# in [[collectors.licenses.items]].
+# [licenses]
+# remind_days = [60, 30, 14, 7, 1]    # days before each ends; each reminder goes once
+# to = ["hpc-support@your-institution.edu"]   # default: [support] email
+# send_from = "nomad@your-institution.edu"    # default: [mail] from
+# link = "https://nomad.example.edu/licenses" # default: [alerts] link + /licenses
 
 # My files (1.55.0, docs/files.md): files put on a cluster from the browser,
 # and taken back, as the person, through its nomad-gate -- only where its key

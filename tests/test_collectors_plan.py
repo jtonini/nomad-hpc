@@ -380,7 +380,7 @@ def test_iperf3_without_a_server_is_no_reading(monkeypatch):
 def test_one_stale_name_in_minus_c_does_not_stop_collection():
     assert plan_mod.parse_only(("disk", "nodes")) == {"disk"}
     with pytest.raises(ValueError):
-        plan_mod.parse_only(("nodes", "licenses"))
+        plan_mod.parse_only(("nodes", "jobs"))
 
 
 def test_the_aws_collector_is_found_under_the_name_it_logs(tmp_path, db):

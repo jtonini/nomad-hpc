@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.56.0 (November 2026)
+
+- **Licenses: when each ends, and the center reminded before**
+  (`nomad.licenses`, docs/licenses.md; the Console's fix 137). Each machine
+  reads its own licenses where the software keeps the date -- Posit's
+  `license-manager status` (through one sudo line), FlexLM license files
+  (the first feature still in force; a renewal's new file read with the
+  old), a Gurobi license file, a web certificate, a command's output, or a
+  date typed in (`never` for perpetual ones) -- a few times a day (the
+  `licenses` collector, `[[collectors.licenses.items]]`), keeping only the
+  date and a few words. The hub lists every site's (`nomad licenses`) and
+  emails the center once for each reminder (`[licenses] remind_days`, 60,
+  30, 14, 7 and 1 days by default), for a license that ended lately, one
+  that can't be read for two days, and a machine whose readings are three
+  days old; `renew = false` keeps a license listed without reminders.
+  `nomad licenses find | add | renew | read | remind | timer`. Nothing
+  changes a license.
+- The old example's `[[collectors.licenses.servers]]`, read by nothing, is
+  gone; `nomad config check` says so where it is still written.
+- `[console] size_units` ("decimal", the default, or "binary") is in
+  nomad.toml.example.
+
 ## v1.55.0 (November 2026)
 
 - **My files: moving files from the browser** (`nomad.submit.files`,
