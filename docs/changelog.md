@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.54.0 (November 2026)
+
+- **Ask: help requests from the Console** (`nomad.help_requests`,
+  docs/help-requests.md; the Console's fix 134). A request gets a number from
+  the account requests' sequence (`ARC-0042`), what it is about, the person's
+  message and the context they chose after reading it in full (their job as
+  nomad read it, the end of its output from its cluster as them, their
+  storage, the page they came from). The center is emailed with the number in
+  the subject, the person gets a copy, and the conversation is kept: their
+  messages, the center's answers (emailed), the center's notes (staff only).
+  Kept in lab_check.db; `[console.help]` for the addresses, a person's mail
+  domain, review_to and the rate.
+- **The computing center's name is the site's**: `[support] team` ("Ask
+  ARC"; default "Research Computing"), used in the Ask page, its emails and
+  the Console's hints; nothing of one institution in nomad.
+- `nomad.tickets`: the kind "help".
+
 ## v1.53.3 (November 2026)
 
 - **A job array's later tasks no longer count its age as their wait.**

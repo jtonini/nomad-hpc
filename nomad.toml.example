@@ -682,12 +682,26 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # note = "the Smith lab's head node: collects its workstations"
 
 # ─── Support ─────────────────────────────────────────────────────
-# Where people's questions go, e.g. the Console's "Contact support".
+# Where people's questions go: the Console's Ask page (1.54.0).
 [support]
 email = "hpc-support@your-institution.edu"
 institution = "Your Institution"     # shown in reports and system information
+# team = "Research Computing"        # the computing center as people call it: the
+                                     # Console's "Ask Research Computing" page, its emails
 # user_email_domain = "your-institution.edu"   # replies go to
                                                # <username>@<this domain>
+
+# Ask (1.54.0, docs/help-requests.md): a request from the Console with a number
+# from [console.tickets], what the person chose to attach (their job, the end of
+# its output, their storage), and the conversation kept. Emailed to the center
+# ([support] email unless notify says) and a copy to the person.
+# [console.help]
+# notify = ["hpc@example.edu"]          # the center's addresses (default: [support] email)
+# mail_domain = "example.edu"           # a person's address: NETID@this (default: [support] user_email_domain)
+# send_from = "nomad@example.edu"       # default: [mail] from
+# review_to = []                        # while set, every email for a person goes here instead
+# link = "https://nomad.example.edu/help"   # the Ask page, in the emails
+# per_hour = 5                          # requests a person may open in an hour
 
 # ─── Issue reporting ─────────────────────────────────────────────
 # Bug reports and feature requests to the NØMAÐ project on GitHub

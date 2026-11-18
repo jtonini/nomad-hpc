@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
-KINDS = {"accounts": "Account request", "data": "Data case"}
+KINDS = {"accounts": "Account request", "data": "Data case", "help": "Help request"}   # help: 1.54.0
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tickets (
     number INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, at TEXT NOT NULL);
