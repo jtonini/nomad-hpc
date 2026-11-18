@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.55.0 (November 2026)
+
+- **My files: moving files from the browser** (`nomad.submit.files`,
+  docs/files.md; the Console's fix 135). A person puts files of theirs on a
+  cluster (dropped on the page, or chosen) and takes them back, as
+  themselves, through the cluster's nomad-gate: in pieces of 8 MB, each
+  checked, the whole file's sha256 checked before it is put in place, never
+  over a file unless they say Replace, never a hidden file or folder. A
+  break costs nothing: it goes on from where it stopped. Up to 2 GB a file
+  by default; past that, the page gives the rsync (and scp) command with the
+  cluster's login host. `[console.files]`: open, max_mb, piece_mb, folders,
+  only_in_folders, and per cluster its folders and login host.
+- `nomad-gate`: `put`, `put-status`, `put-cancel` and `get` (only with
+  `serve --edit`, as saving scripts); a piece goes on as the bytes it is
+  (`remote.call(..., data=)`); two files move at once on a cluster's
+  account, the rest of the gate's requests never kept waiting by them; a
+  file's pieces in the middle aren't logged one by one.
+- `nomad gate test` tries moving files as the person where editing is on,
+  leaving nothing behind.
+
 ## v1.54.0 (November 2026)
 
 - **Ask: help requests from the Console** (`nomad.help_requests`,

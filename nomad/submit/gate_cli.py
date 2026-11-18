@@ -163,7 +163,8 @@ def test_cmd(ctx, site_name, user):
         if "edit" in a:
             here = "on" if a["edit"] else "off (install-key --edit turns it on)"
             hub_says = "on" if remote.editing(s) else "off (edit = true in its [[hub.sites]])"
-            click.echo(f"       saving scripts from the Console: the cluster {here}; the hub {hub_says}")
+            click.echo(f"       saving scripts and moving files from the Console: the cluster {here}; "
+                       f"the hub {hub_says}")
     if user and a.get("ok"):
         b = say(f"it acts as {user}", remote.call(s, "version", user, hub=hub))
         if b.get("ok") and b.get("account") != user:
@@ -173,8 +174,39 @@ def test_cmd(ctx, site_name, user):
             c = say(f"{user}'s jobs now", remote.call(s, "jobs", user, hub=hub))
             if c.get("ok"):
                 click.echo(f"       {len(c.get('jobs') or [])} job(s)")
+        # Moving files (1.55.0), where both sides have editing on: nothing is left behind.
+        if b.get("ok") and a.get("edit") and remote.editing(s):
+            say("moving files as them (half a file sent, seen and removed; a piece of one taken)",
+                files_check(remote, s, hub, user, b.get("home")))
     if not ok:
         sys.exit(1)
+
+
+def files_check(remote, s, hub, user, home) -> dict:
+    """My files' requests, as ``user``, leaving nothing: the first half of a
+    tiny file sent to their home (only its hidden part is written), how much
+    of it is there, that part removed; then a few bytes of a file everyone
+    may read (/etc/os-release) taken back."""
+    import secrets
+    if not isinstance(home, str) or not home.startswith("/"):
+        return {"ok": False, "error": "the gate didn't say where their home is"}
+    up = secrets.token_hex(8)
+    path = f"{home.rstrip('/')}/nomad-gate-test-{up}.txt"
+    older = "the cluster's nomad-gate is older than 1.55.0 (not something the gate does: put)"
+    sent = remote.call(s, "put", user, hub=hub, data=b"ok", path=path, upload=up, offset=0, total=4)
+    if not sent.get("ok"):
+        err = str(sent.get("error") or "")
+        return {"ok": False, "error": older if "not something the gate does" in err else f"sending: {err}"}
+    seen = remote.call(s, "put-status", user, hub=hub, path=path, upload=up)
+    gone = remote.call(s, "put-cancel", user, hub=hub, path=path, upload=up)
+    if not seen.get("ok") or seen.get("have") != 2:
+        return {"ok": False, "error": f"how much is there: {seen.get('error') or seen.get('have')}"}
+    if not gone.get("removed"):
+        return {"ok": False, "error": f"removing it: {gone.get('error') or 'not removed'}"}
+    took = remote.call(s, "get", user, hub=hub, path="/etc/os-release", length=16)
+    if not took.get("ok"):
+        return {"ok": False, "error": f"taking a piece back: {took.get('error')}"}
+    return {"ok": True}
 
 
 @gate_group.command("ask", context_settings={"ignore_unknown_options": True, "allow_interspersed_args": False})

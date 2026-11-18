@@ -703,6 +703,18 @@ institution = "Your Institution"     # shown in reports and system information
 # link = "https://nomad.example.edu/help"   # the Ask page, in the emails
 # per_hour = 5                          # requests a person may open in an hour
 
+# My files (1.55.0, docs/files.md): files put on a cluster from the browser,
+# and taken back, as the person, through its nomad-gate -- only where its key
+# line runs `nomad-gate serve --edit` and its [[hub.sites]] says edit = true.
+# [console.files]
+# open = "submit"          # who: "submit" (as Submit a job), "staff", "everyone", "off"
+# max_mb = 2048            # the largest file; bigger: the rsync command is shown
+# folders = ["~"]          # where it opens: ~ their home, {user} their name
+# only_in_folders = false  # true: only in those folders and below
+# [console.files.sites.CLUSTER]
+# folders = ["~", "/scratch/{user}"]
+# login = "cluster.example.edu"   # the host for rsync (default: its [[hub.sites]] host)
+
 # ─── Issue reporting ─────────────────────────────────────────────
 # Bug reports and feature requests to the NØMAÐ project on GitHub
 # (`nomad issue`, and the Console's Report Issue page for administrators).

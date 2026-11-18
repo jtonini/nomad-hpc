@@ -186,10 +186,11 @@ def request(op: str, user: str | None = None, **options) -> list:
 
 
 def ask(site: dict, words: list, hub: dict | None = None, *, run_=None, timeout: int = SSH_TIMEOUT,
-        body: str | None = None) -> dict:
+        body: str | None = None, data: bytes | None = None) -> dict:
     """The site's gate's answer to ``words`` (a dict with "ok", "error"
     when not ok, and "where": hub, ssh or site when it went wrong before the
-    gate answered). Never raises for what ssh or the gate said."""
+    gate answered). Never raises for what ssh or the gate said. ``data``: a
+    piece of a file put sends (1.55.0), as the bytes it is."""
     run_ = run_ or subprocess.run
     try:
         gate.parse(list(words))
@@ -201,10 +202,16 @@ def ask(site: dict, words: list, hub: dict | None = None, *, run_=None, timeout:
     later = " (it may have been submitted: check the jobs before sending it again)" if sends else ""
     if (body is not None) != (bool(words) and words[0] in gate.WITH_BODY):
         return {"ok": False, "error": f"{words[0] if words else '?'}: a body goes with save alone", "where": "hub"}
-    given = {"input": body} if body is not None else {"stdin": subprocess.DEVNULL}
+    if (data is not None) != (bool(words) and words[0] in getattr(gate, "WITH_BYTES", ())):
+        return {"ok": False, "error": f"{words[0] if words else '?'}: a file's piece goes with put alone",
+                "where": "hub"}
+    sent = body if body is not None else data
+    given = {"input": sent} if sent is not None else {"stdin": subprocess.DEVNULL}
+    mode = {} if data is not None else {"text": True, "errors": "replace"}
     try:
-        r = run_(ssh_argv(s, words, body=body is not None), stdout=subprocess.PIPE,
-                 stderr=subprocess.PIPE, text=True, errors="replace", timeout=timeout, env=SSH_ENV(), **given)
+        r = run_(ssh_argv(s, words, body=sent is not None), stdout=subprocess.PIPE,
+                 stderr=subprocess.PIPE, timeout=timeout, env=SSH_ENV(), **mode, **given)
+        r = gate._as_text(r)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"{s['name']}: no answer in {timeout} s{later}", "where": "ssh", **maybe}
     except OSError as e:
@@ -259,17 +266,20 @@ def _why(s: dict, r) -> str:
 
 
 def call(site: dict, op: str, user: str | None = None, hub: dict | None = None, *, run_=None,
-         timeout: int = SSH_TIMEOUT, body: str | None = None, **options) -> dict:
+         timeout: int = SSH_TIMEOUT, body: str | None = None, data: bytes | None = None, **options) -> dict:
     """Ask the site's gate ``op`` as ``user`` (see request and ask); body:
-    the text a save writes (its sha256 goes with it as --body-sha256)."""
+    the text a save writes (its sha256 goes with it as --body-sha256);
+    data: the piece of a file a put writes (1.55.0; as --piece-sha256)."""
+    import hashlib
     if body is not None:
-        import hashlib
         options["body_sha256"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    if data is not None:
+        options["piece_sha256"] = hashlib.sha256(data).hexdigest()
     try:
         words = request(op, user, **options)
     except gate.Refused as e:
         return {"ok": False, "error": str(e), "where": "hub"}
-    return ask(site, words, hub, run_=run_, timeout=timeout, body=body)
+    return ask(site, words, hub, run_=run_, timeout=timeout, body=body, data=data)
 
 
 # ── the gate's key, on the hub and on a site ────────────────────────────────

@@ -39,6 +39,18 @@ list:
                                 (with --cpus --mem --time --gpus), in each partition: sbatch
                                 --test-only, nothing submitted; and their nodes' states (1.25.4)
            --job N --sha256 HEX ...  for a job of theirs that ran, as again would send it
+    put    --path PATH --upload ID --offset N --total N --piece-sha256 HEX [--sha256 HEX] [--replace]
+                                a piece of a file of theirs sent from the browser (on standard
+                                input, at most 16 MB), written as the person beside its place
+                                until whole; the last piece's --sha256 is the whole file's,
+                                checked before it is put in place, never over a file there
+                                unless --replace (1.55.0); only with serve --edit, as save
+    put-status --path PATH --upload ID   how much of it is here (to go on after a break)
+    put-cancel --path PATH --upload ID   the part sent, removed
+    get    --path PATH [--offset N] [--length N]
+                                a piece of a file the person can read (base64 in the answer, with
+                                its sha256 and the file's size and version), for the browser to
+                                save; --length 0: only what the file is (1.55.0); with serve --edit
 
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
@@ -90,8 +102,17 @@ CHECKED_FOR = 60                # seconds a passed install check is taken as sti
 # The most a request can take here; the hub waits a minute more (remote.SSH_TIMEOUT).
 LONGEST = WAIT_FOR_SLOT + PREFLIGHT_TIMEOUT + SERVE_TIMEOUT
 GATE = "nomad-gate"
+# Moving files from the browser (1.55.0): a piece at most (the Console sends 8 MB), the largest file
+# (the hub's [console.files] max_mb says less), a piece taken when no --length is given, how long a
+# piece given up is kept beside its place, and how many pieces move here at once (the rest stay free).
+MAX_PIECE = 16 * 1024 * 1024
+MAX_FILE = 1024 ** 4
+GET_PIECE = 8 * 1024 * 1024
+UPLOAD_KEEP_DAYS = 7
+FILES_HERE = 2
+WAIT_FOR_FILES = 10
 
-_NAME = re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
+_NAME =re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
 _JOB = re.compile(r"[0-9]{1,12}(?:_[0-9]{1,9})?")
 _INT = re.compile(r"[0-9]{1,5}")
 _MEM = re.compile(r"[0-9]{1,7}(?:\.[0-9]{1,3})?[KMGTkmgt]?")
@@ -106,10 +127,14 @@ _SHA = re.compile(r"[0-9a-f]{64}")
 _VID = re.compile(r"[0-9]{8}T[0-9]{6}-[0-9a-f]{12}")       # an earlier version kept (1.25.3)
 _PARTS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(,[A-Za-z0-9][A-Za-z0-9._-]{0,63}){0,11}")   # 1.25.4
 _KIT = re.compile(r"[a-z0-9][a-z0-9-]{1,47}")                                                     # 1.35.0
+_BYTES = re.compile(r"0|[1-9][0-9]{0,14}")                                                        # 1.55.0
+_UPID = re.compile(r"[0-9a-f]{16,32}")
 _KIND_WORDS = {"parts": "a list of up to 12 partitions, comma between,", "vid": "a version id",
-               "kit": "a practice kit's name"}
+               "kit": "a practice kit's name", "bytes": "a number of bytes",
+               "upid": "an upload's id (16 to 32 of 0-9 a-f)"}
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
-          "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS, "kit": _KIT}
+          "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS, "kit": _KIT, "bytes": _BYTES,
+          "upid": _UPID}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
@@ -142,18 +167,37 @@ OPS = {
     "kits": {"--kits-dir": "path"},
     "practice": {"--kit": "kit", "--dir": "path", "--kits-dir": "path"},
     "mkdir": {"--dir": "path"},
+    # Moving files from the browser (1.55.0): a file of theirs sent in pieces (put: each on standard
+    # input), kept beside its place as a hidden file until whole, checked (--sha256, with the last
+    # piece), then put in place; how much of one is here (put-status), one given up (put-cancel),
+    # and a piece of a file they can read (get).
+    "put": {"--path": "path", "--upload": "upid", "--offset": "bytes", "--total": "bytes",
+            "--piece-sha256": "sha", "--sha256": "sha", "--replace": "flag"},
+    "put-status": {"--path": "path", "--upload": "upid"},
+    "put-cancel": {"--path": "path", "--upload": "upid"},
+    "get": {"--path": "path", "--offset": "bytes", "--length": "bytes"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
             "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
             "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"],
             "starts": ["--sha256", "--partitions"], "read": ["--path"], "practice": ["--kit", "--dir"],
-            "mkdir": ["--dir"]}
+            "mkdir": ["--dir"], "put": ["--path", "--upload", "--offset", "--total", "--piece-sha256"],
+            "put-status": ["--path", "--upload"], "put-cancel": ["--path", "--upload"], "get": ["--path"]}
 # The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
 WITH_BODY = {"save"}
+# ... and the one whose body is bytes, not text (at most MAX_PIECE; 1.55.0).
+WITH_BYTES = {"put"}
+# The ones that move a file's bytes: FILES_HERE at once (1.55.0).
+MOVES = {"put", "get"}
 
 
 class Refused(Exception):
-    """A request the gate won't do: said in the answer, never done."""
+    """A request the gate won't do: said in the answer, never done. ``said``:
+    more for the answer (where an upload is, that a file is there already)."""
+
+    def __init__(self, why: str = "", **said):
+        super().__init__(why)
+        self.said = said
 
 
 def answer(doc: dict, code: int = 0) -> int:
@@ -162,8 +206,8 @@ def answer(doc: dict, code: int = 0) -> int:
     return code
 
 
-def refuse(why: str, code: int = 2) -> int:
-    return answer({"ok": False, "error": why}, code)
+def refuse(why: str, code: int = 2, **said) -> int:
+    return answer({**said, "ok": False, "error": why}, code)
 
 
 def parse(words: list) -> tuple:
@@ -209,6 +253,10 @@ def parse(words: list) -> tuple:
         raise Refused("--cpus: 1 to 4096")
     if "--gpus" in got and int(got["--gpus"]) > 64:
         raise Refused("--gpus: at most 64")
+    if op == "put" and not int(got["--offset"]) <= int(got["--total"]) <= MAX_FILE:
+        raise Refused(f"put: --offset within --total, at most {MAX_FILE // 1024 ** 3} GB")
+    if "--length" in got and int(got["--length"]) > MAX_PIECE:
+        raise Refused(f"--length: at most {MAX_PIECE} (a piece)")
     return op, got
 
 
@@ -591,6 +639,23 @@ def _sudo() -> str:
     raise Refused("no sudo here")
 
 
+def _read_piece(stream) -> bytes:
+    """A piece of a file (1.55.0): at most MAX_PIECE bytes, whatever they are."""
+    out, left = [], MAX_PIECE + 1
+    while left > 0 and stream is not None:
+        got = stream.read(min(left, 1024 * 1024))
+        if not got:
+            break
+        if isinstance(got, str):
+            got = got.encode("utf-8", errors="surrogateescape")
+        out.append(got)
+        left -= len(got)
+    data = b"".join(out)
+    if len(data) > MAX_PIECE:
+        raise Refused(f"a piece is at most {MAX_PIECE // (1024 * 1024)} MB")
+    return data
+
+
 def _read_body(stream) -> str:
     """A request's body (1.25.3): at most MAX_SCRIPT bytes of UTF-8 text."""
     data = stream.read(MAX_SCRIPT + 1) if stream is not None else b""
@@ -608,7 +673,30 @@ def _read_body(stream) -> str:
 # job scripts for it, or the earlier texts saving kept (1.25.4): served only
 # with `serve --edit`, the cluster's own say (the hub's [[hub.sites]]
 # edit = true is the hub's).
-EDITS = {"save", "read", "versions", "recall", "practice", "mkdir"}    # practice, mkdir: they write (1.35.0)
+EDITS = {"save", "read", "versions", "recall", "practice", "mkdir",    # practice, mkdir: they write (1.35.0)
+         "put", "put-status", "put-cancel", "get"}                      # files from and to the browser (1.55.0)
+
+
+def _quiet(op: str, got: dict, doc: dict | None = None) -> bool:
+    """A piece of a file in the middle of one (1.55.0): not logged, so a
+    file of 2 GB isn't 256 lines; its first and last piece are, and any
+    piece not taken."""
+    if op == "put":
+        return got.get("--offset") != "0" and not (doc or {}).get("done") and (doc or {}).get("ok", True)
+    if op == "get":
+        return got.get("--offset", "0") != "0" and (doc or {}).get("ok", True)
+    return False
+
+
+def _as_text(r):
+    """A finished run's output as text (a run given bytes answers bytes)."""
+    out, err = r.stdout, r.stderr
+    if isinstance(out, bytes) or isinstance(err, bytes):
+        r = subprocess.CompletedProcess(
+            r.args, r.returncode,
+            out.decode("utf-8", errors="replace") if isinstance(out, bytes) else out,
+            err.decode("utf-8", errors="replace") if isinstance(err, bytes) else err)
+    return r
 
 
 def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False) -> int:
@@ -641,9 +729,9 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
                       "authorized_keys line for the hub's key runs nomad-gate serve, not nomad-gate serve "
                       "--edit: nomad gate install-key --edit)")
     body = None
-    if op in WITH_BODY:
+    if op in WITH_BODY or op in WITH_BYTES:
         try:
-            body = _read_body(stdin)
+            body = _read_body(stdin) if op in WITH_BODY else _read_piece(stdin)
         except Refused as e:
             _log(f"user={who} {asked}: refused: {e}")
             return refuse(str(e))
@@ -658,6 +746,12 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
                 _log(f"user={who} {asked}: busy (starts)")
                 return refuse(f"busy: {STARTS_HERE} people are asking where a job would start here; ask "
                               "again in a minute", 4)
+        elif op in MOVES:
+            # files move FILES_HERE at once: the rest are never kept waiting by them (1.55.0)
+            long = slot_() if slot_ else _slot(kind="files", n=FILES_HERE, wait=WAIT_FOR_FILES)
+            if long is None:
+                return answer({"ok": False, "busy": True, "error": f"busy: {FILES_HERE} files are moving here "
+                               "just now; the piece is sent again in a moment"}, 4)
         slot = slot_() if slot_ else _slot()
     except OSError as e:
         if long is not None:
@@ -688,9 +782,12 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
                           "do it for them: they can paste the command on the cluster instead", 5)
         argv = [sudo, "-n", "-u", pw.pw_name, me, "run"] + words_of(op, got)
         given = {"input": body} if body is not None else {"stdin": subprocess.DEVNULL}
+        # a piece of a file goes on as the bytes it is (1.55.0); the answer is read as text either way
+        mode = {} if isinstance(body, bytes) else {"text": True, "errors": "replace"}
         try:
             r = run_(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                     text=True, errors="replace", timeout=SERVE_TIMEOUT, env=plain, **given)
+                     timeout=SERVE_TIMEOUT, env=plain, **mode, **given)
+            r = _as_text(r)
         except subprocess.TimeoutExpired:
             _log(f"user={pw.pw_name} {asked}: no answer in {SERVE_TIMEOUT} s")
             if sends:
@@ -726,7 +823,10 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
     if op == "save" and doc.get("ok"):
         old = got.get("--sha256", "new")[:12]
         done = f" -> {old} => {str(doc.get('sha256'))[:12]}" + (f", kept {doc['kept']}" if doc.get("kept") else "")
-    _log(f"user={pw.pw_name} {asked}: {'ok' if doc.get('ok') else 'not done'}{done}")
+    if op == "put" and doc.get("done"):
+        done = f" -> whole, {doc.get('size')} bytes, {str(doc.get('sha256'))[:12]}"
+    if not _quiet(op, got, doc):
+        _log(f"user={pw.pw_name} {asked}: {'ok' if doc.get('ok') else 'not done'}{done}")
     if op == "version":
         doc["edit"] = bool(edit)                    # the cluster's say on saving (1.25.3)
     return answer(doc, r.returncode)
@@ -983,6 +1083,18 @@ def run(words: list, me: str, run_=None) -> int:
             return answer({"ok": True, **practice_copy(got["--kit"], got["--dir"], got.get("--kits-dir"))})
         if op == "mkdir":
             return answer({"ok": True, **new_folder(got["--dir"])})
+        if op == "put":
+            piece = _read_piece(sys.stdin.buffer)
+            return answer({"ok": True, **put(got["--path"], got["--upload"], piece, offset=int(got["--offset"]),
+                                            total=int(got["--total"]), piece_sha=got["--piece-sha256"],
+                                            sha=got.get("--sha256"), replace="--replace" in got)})
+        if op == "put-status":
+            return answer({"ok": True, **put_status(got["--path"], got["--upload"])})
+        if op == "put-cancel":
+            return answer({"ok": True, **put_cancel(got["--path"], got["--upload"])})
+        if op == "get":
+            return answer({"ok": True, **get_piece(got["--path"], int(got.get("--offset", 0)),
+                                                   int(got.get("--length", GET_PIECE)))})
         if op == "size":
             if "--script" in got:
                 script_bytes(got["--script"])
@@ -1027,7 +1139,7 @@ def run(words: list, me: str, run_=None) -> int:
             return answer({"ok": code == 0, "job": got["--job"], "exit": code, "said": said.strip()[-2000:]},
                           0 if code == 0 else 6)
     except Refused as e:
-        return refuse(str(e))
+        return refuse(str(e), **e.said)
     return refuse(f"{op}: not done")
 
 
@@ -1709,6 +1821,335 @@ def _new_in_place(dfd: int, name: str, path: str, data: bytes) -> None:
         raise
     finally:
         os.close(nfd)
+
+
+# ── files from and to the browser (1.55.0) ─────────────────────────────────
+# A file of the person's sent from the browser in pieces, as them: written
+# beside its place under a hidden name of its own (.NAME.nomad-upload-ID,
+# theirs alone) until all of it is there, then read back whole and its
+# sha256 checked against the browser's, then put in place in one step --
+# never over a file there unless --replace (then with that file's group,
+# permissions and access lists, as a save keeps them), never through a link,
+# never in a hidden folder (as given, nor as it really is) nor as a hidden
+# file. A new file is shared as its folder is (read by its group, or by
+# anyone, only where the folder lets them in), and written by them alone.
+# A break costs nothing: put-status says how much is here, and the rest is
+# sent from there; a piece sent again is written again. What was sent of
+# one given up is removed (put-cancel), and one left UPLOAD_KEEP_DAYS is
+# removed when another starts in that folder. A piece of a file they can
+# read is given back the same way (get), with the file's version (device,
+# inode, size, time), so the hub can tell it changed while being taken.
+
+_UPLOADING = re.compile(r"\..+\.nomad-upload-[0-9a-f]{16,32}", re.S)
+NAME_MAX = 255
+_RW = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+
+
+def _file_place(path: str) -> tuple:
+    """(folder, name) of a file to send or take: a full path, no part of it hidden."""
+    if not path.startswith("/") or path.endswith("/"):
+        raise Refused(f"{path}: give the file's full path")
+    if any(part.startswith(".") for part in path.split("/") if part):
+        raise Refused(f"{path}: not a hidden file or folder")
+    return os.path.split(path)
+
+
+def _open_folder(folder: str) -> int:
+    try:
+        dfd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError as e:
+        raise Refused(f"{folder}: {e.strerror}") from None
+    real = _real_folder(dfd, folder)
+    if any(part.startswith(".") for part in real.split("/") if part):
+        os.close(dfd)
+        raise Refused(f"{folder} is really {real}: not a hidden folder")
+    return dfd
+
+
+def _upload_name(name: str, upload: str) -> str:
+    tmp = f".{name}.nomad-upload-{upload}"
+    if len(tmp.encode("utf-8", errors="surrogateescape")) > NAME_MAX:
+        raise Refused(f"{name[:60]}...: the name is too long to send from the browser")
+    return tmp
+
+
+def _what_is(dfd: int, name: str, path: str):
+    """The stat of what is at ``name`` (a link's own), or None: nothing there."""
+    try:
+        return os.stat(name, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise Refused(f"{path}: {e.strerror}") from None
+
+
+def _replaceable(dfd: int, name: str, path: str) -> tuple:
+    """(stat, access lists) of the file a new one replaces: theirs, a file
+    of its own (not a link, not another name of one)."""
+    st = _what_is(dfd, name, path)
+    if st is None:
+        return None, {}
+    if stat.S_ISLNK(st.st_mode):
+        raise Refused(f"{path} is a link: not replaced from here")
+    if stat.S_ISDIR(st.st_mode):
+        raise Refused(f"{path} is a folder: send the file under another name")
+    if not stat.S_ISREG(st.st_mode):
+        raise Refused(f"{path} isn't a file: not replaced")
+    if st.st_uid != _uid():
+        raise Refused(f"{path} isn't yours: not replaced")
+    if st.st_nlink > 1:
+        raise Refused(f"{path} has other names (a hard link): not replaced from here")
+    acl = {}
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError:
+        return st, acl
+    try:
+        for attr in ACL_ATTRS:
+            try:
+                acl[attr] = os.getxattr(fd, attr)
+            except (OSError, AttributeError):
+                pass
+    finally:
+        os.close(fd)
+    return st, acl
+
+
+def _shared_as_folder(dfd: int) -> int:
+    """A new file's permissions: theirs to read and write; its group's or
+    anyone's to read only where the folder lets them in (r and x)."""
+    m = stat.S_IMODE(os.fstat(dfd).st_mode)
+    return 0o600 | (0o040 if m & 0o050 == 0o050 else 0) | (0o004 if m & 0o005 == 0o005 else 0)
+
+
+def _who_reads(mode: int) -> str:
+    return "anyone" if mode & 0o004 else "group" if mode & 0o040 else "you"
+
+
+def _tidy(dfd: int) -> None:
+    """What was sent of files given up more than UPLOAD_KEEP_DAYS ago, here: removed."""
+    cutoff = time.time() - UPLOAD_KEEP_DAYS * 86400
+    try:
+        with os.scandir(dfd) as it:
+            for e in it:
+                if not (e.name.startswith(".") and ".nomad-upload-" in e.name and _UPLOADING.fullmatch(e.name)):
+                    continue
+                st = e.stat(follow_symlinks=False)
+                if stat.S_ISREG(st.st_mode) and st.st_uid == _uid() and st.st_mtime < cutoff:
+                    os.unlink(e.name, dir_fd=dfd)
+    except OSError:
+        pass
+
+
+def _write_at(fd: int, data: bytes, offset: int) -> None:
+    view = memoryview(data)
+    while view:
+        n = os.pwrite(fd, view, offset)
+        view, offset = view[n:], offset + n
+
+
+def _sha_of(fd: int) -> tuple:
+    """(sha256, size) of what fd holds, read from its start."""
+    import hashlib
+    h, at = hashlib.sha256(), 0
+    while True:
+        got = os.pread(fd, GET_PIECE, at)
+        if not got:
+            return h.hexdigest(), at
+        h.update(got)
+        at += len(got)
+
+
+def _room(dfd: int) -> int | None:
+    try:
+        v = os.fstatvfs(dfd)
+        return v.f_bavail * v.f_frsize
+    except OSError:
+        return None
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1024 ** 3:.1f} GB" if n >= 1024 ** 3 else f"{n / 1024 ** 2:.1f} MB"
+
+
+def put(path: str, upload: str, piece: bytes, *, offset: int, total: int, piece_sha: str,
+        sha: str | None = None, replace: bool = False) -> dict:
+    """Write one piece of the file the browser sends as ``path`` (see above)."""
+    if _sha(piece) != piece_sha:
+        raise Refused("the piece didn't arrive whole (its sha256 differs): it is sent again")
+    end = offset + len(piece)
+    if end > total:
+        raise Refused("the piece goes past the file's size")
+    if not piece and total:
+        raise Refused("an empty piece")
+    if end == total and not sha:
+        raise Refused("the last piece needs --sha256 (the whole file's)")
+    folder, name = _file_place(path)
+    tmp = _upload_name(name, upload)
+    dfd = _open_folder(folder)
+    try:
+        return _put_in(dfd, name, tmp, path, upload, piece, offset, total, sha, replace)
+    except OSError as e:
+        if e.errno == errno.EDQUOT:
+            raise Refused(f"{path}: over your quota there: nothing more was written") from None
+        if e.errno == errno.ENOSPC:
+            raise Refused(f"{path}: no room left there: nothing more was written") from None
+        raise Refused(f"{path}: {e.strerror or e}") from None
+    finally:
+        os.close(dfd)
+
+
+def _put_in(dfd: int, name: str, tmp: str, path: str, upload: str, piece: bytes, offset: int, total: int,
+            sha: str | None, replace: bool) -> dict:
+    end = offset + len(piece)
+    if offset == 0:
+        if _what_is(dfd, name, path) is not None:
+            if not replace:
+                raise Refused(f"{path} is there already", exists=True)
+            _replaceable(dfd, name, path)                   # said now, before the rest is sent
+        _tidy(dfd)
+        room = _room(dfd)
+        if room is not None and room < total:
+            raise Refused(f"not enough room there: {_gb(room)} free, the file is {_gb(total)}")
+        try:
+            fd = os.open(tmp, _RW | os.O_CREAT, 0o600, dir_fd=dfd)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise Refused(f"{tmp} is a link: remove it, or send the file under another name") from None
+            raise Refused(f"can't write in {os.path.dirname(path) or '/'}: {e.strerror}") from None
+    else:
+        try:
+            fd = os.open(tmp, _RW, dir_fd=dfd)
+        except FileNotFoundError:
+            raise Refused("what was sent of it isn't there any more: it is sent from the start", have=0) from None
+    placed = False
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1 or st.st_uid != _uid():
+            raise Refused(f"{tmp} isn't nomad's own part of it: remove it, or send the file under another name")
+        if st.st_size < offset:
+            raise Refused(f"only {st.st_size} bytes of it are there: it is sent from there", have=st.st_size)
+        if st.st_size != offset:
+            os.ftruncate(fd, offset)                         # the first piece, or one sent again
+        _write_at(fd, piece, offset)
+        if end < total:
+            return {"path": path, "upload": upload, "have": end, "done": False}
+        os.fsync(fd)
+        whole, size = _sha_of(fd)
+        if size != total or whole != sha:
+            os.unlink(tmp, dir_fd=dfd)
+            raise Refused("the file didn't arrive whole (its sha256 differs): it is sent again from the start",
+                          have=0)
+        before, acl = _replaceable(dfd, name, path)          # again, just before it is put in place
+        if before is not None and not replace:
+            raise Refused(f"{path} is there now", exists=True, have=end)    # kept: Replace sends the last piece again
+        notes = []
+        if before is not None:
+            _as_before(fd, before, acl, notes)
+        else:
+            os.fchmod(fd, _shared_as_folder(dfd))
+        if before is not None:
+            os.replace(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+        else:
+            try:
+                os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+            except FileExistsError:
+                raise Refused(f"{path} is there now", exists=True, have=end) from None
+            except OSError:                                  # no hard links here (some shared file systems)
+                if _what_is(dfd, name, path) is not None:
+                    raise Refused(f"{path} is there now", exists=True, have=end) from None
+                os.rename(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd)
+            else:
+                os.unlink(tmp, dir_fd=dfd)
+        placed = True
+        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+    if placed:
+        try:
+            os.fsync(dfd)
+        except OSError:
+            pass
+    return {"path": path, "upload": upload, "have": total, "done": True, "size": total, "sha256": whole,
+            "replaced": before is not None, "mode": f"{mode:04o}", "reads": _who_reads(mode), "notes": notes}
+
+
+def put_status(path: str, upload: str) -> dict:
+    """How much of the file being sent as ``path`` is there (to go on from
+    there), what is at ``path`` now, and the room there."""
+    folder, name = _file_place(path)
+    tmp = _upload_name(name, upload)
+    dfd = _open_folder(folder)
+    try:
+        have = 0
+        st = _what_is(dfd, tmp, path)
+        if st is not None and stat.S_ISREG(st.st_mode) and st.st_uid == _uid():
+            have = st.st_size
+        now = _what_is(dfd, name, path)
+        kind = (None if now is None else "link" if stat.S_ISLNK(now.st_mode) else "folder"
+                if stat.S_ISDIR(now.st_mode) else "file" if stat.S_ISREG(now.st_mode) else "other")
+        return {"path": path, "upload": upload, "have": have, "started": st is not None, "there": kind,
+                "exists": kind is not None, "free": _room(dfd)}
+    finally:
+        os.close(dfd)
+
+
+def put_cancel(path: str, upload: str) -> dict:
+    """What was sent of the file, removed (never anything else)."""
+    folder, name = _file_place(path)
+    tmp = _upload_name(name, upload)
+    dfd = _open_folder(folder)
+    try:
+        st = _what_is(dfd, tmp, path)
+        if st is None or not stat.S_ISREG(st.st_mode) or st.st_uid != _uid():
+            return {"path": path, "upload": upload, "removed": False}
+        try:
+            os.unlink(tmp, dir_fd=dfd)
+        except OSError as e:
+            raise Refused(f"what was sent of {path} couldn't be removed: {e.strerror}") from None
+        return {"path": path, "upload": upload, "removed": True}
+    finally:
+        os.close(dfd)
+
+
+def get_piece(path: str, offset: int = 0, length: int = GET_PIECE) -> dict:
+    """A piece of a file the person can read (base64), with its sha256 and
+    the file's size and version; a link is followed, but never to a hidden
+    file or folder."""
+    import base64
+    folder, name = _file_place(path)
+    dfd = _open_folder(folder)
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK, dir_fd=dfd)
+    except OSError as e:
+        raise Refused(f"{path}: {e.strerror}") from None
+    finally:
+        os.close(dfd)
+    try:
+        try:
+            real = os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            real = os.path.realpath(path)
+        if any(part.startswith(".") for part in real.split("/") if part):
+            raise Refused(f"{path} is really {real}: not a hidden file or folder")
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused(f"{path} isn't a file")
+        parts, at = [], offset
+        while length and at < offset + length:
+            got = os.pread(fd, offset + length - at, at)
+            if not got:
+                break
+            parts.append(got)
+            at += len(got)
+        data = b"".join(parts)
+    except OSError as e:
+        raise Refused(f"{path}: {e.strerror or e}") from None
+    finally:
+        os.close(fd)
+    return {"path": path, "size": st.st_size, "mtime": int(st.st_mtime), "mine": st.st_uid == _uid(),
+            "version": f"{st.st_dev}:{st.st_ino}:{st.st_size}:{st.st_mtime_ns}", "offset": offset,
+            "length": len(data), "sha256": _sha(data), "data": base64.b64encode(data).decode("ascii")}
 
 
 USAGE = """usage: nomad-gate serve            (run by sshd for the hub's key)
