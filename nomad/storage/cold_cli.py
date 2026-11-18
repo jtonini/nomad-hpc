@@ -75,6 +75,7 @@ def cold_group(ctx):
     nomad storage cold open PERSON SERVER:/PATH [--note "..."] a case, to contact them
     nomad storage cold case ARC-0013 [STATE] [--note "..."]    it moves on, or a note
     nomad storage cold show ARC-0013                           one case and its notes
+    nomad storage cold letter PERSON [--as NETID] [--send]     the email to them about it (1.57.0)
     nomad storage cold digest [--send]                         the weekly email to Research Computing
     nomad storage cold timer [--apply]                         send it weekly (a systemd timer)
 
@@ -177,6 +178,44 @@ def cold_show(ctx, number, as_json):
     for x in c["notes"]:
         click.echo(f"  {x['at'][:16].replace('T', ' ')} {x['by']}: " + (C.SAID[x["state"]] if x["state"] else "note")
                    + (f": {x['note']}" if x["note"] else ""))
+
+
+@cold_group.command("letter")
+@click.argument("person")
+@click.option("--as", "sender", help="Who writes (their NetID: the replies go to them; default: who runs this).")
+@click.option("--send", is_flag=True, help="Send it as it is (else print it).")
+@click.pass_context
+def cold_letter(ctx, person, sender, send):
+    """The email PERSON gets about their data on the list: to them, a copy to
+    their faculty sponsor (the PI of each lab they are in, unless they lead
+    one) and to Research Computing; their storage page; replies to whoever
+    writes and to Research Computing. --send sends it as printed, keeps it,
+    and moves their cases to "contacted". The Console's Write to them lets
+    you change it first."""
+    import getpass
+    config, cs, conn, rec_path, s = _ctx(ctx)
+    rec = _write(rec_path) if send else C.open_records(rec_path)
+    got = C.listing(conn, rec, config, s)
+    who = (sender or getpass.getuser()).strip().lower()
+    try:
+        d = C.draft(got, person, s, cs, config, sender=who, rec=rec)
+    except C.CaseError as exc:
+        raise click.ClickException(str(exc)) from None
+    for p in d["problems"]:
+        click.echo(f"note: {p}", err=True)
+    if not send:
+        click.echo(f"From: {d['from'] or '([mail] from)'}\nTo: {', '.join(d['to']) or '(no address)'}")
+        click.echo(f"Cc: {', '.join(d['cc']) or '(none)'}\nReply-To: {', '.join(d['reply_to']) or '(none)'}")
+        click.echo(f"Subject: {d['subject']}\n\n{d['text']}", nl=False)
+        for x in d["letters"]:
+            click.echo(f"(written to before: {x['at'][:10]} by {x['by']}: {x['subject']})")
+        return
+    try:
+        out = C.send_letter(config, cs, s, rec, got, person, d["to"], d["cc"], d["subject"], d["text"], by=who)
+    except C.CaseError as exc:
+        raise click.ClickException(str(exc)) from None
+    click.echo(f"Sent to {', '.join(out['to'])}" + (f", copy {', '.join(out['cc'])}" if out["cc"] else "")
+               + f"; {', '.join(out['cases'])} contacted.")
 
 
 @cold_group.command("digest")

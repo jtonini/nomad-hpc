@@ -160,6 +160,7 @@ sudo -u nomad nomad storage cold [--server fs1] [--json | --csv]
 sudo -u nomad nomad storage cold open jdoe fs1:/home --note "emailed"
 sudo -u nomad nomad storage cold case ARC-0013 contacted --note "moving it to the archive"
 sudo -u nomad nomad storage cold digest [--send]          # the weekly email; `timer` sends it weekly
+sudo -u nomad nomad storage cold letter jdoe --as rc1 [--send]   # the email to them about it (1.57.0)
 ```
 
 See [Storage use](storage.md).

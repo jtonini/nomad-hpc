@@ -435,6 +435,44 @@ In the Console it is under Diagnostics, Storage, for operators and
 administrators: the same list, a case opened or moved on from each row, and
 the spreadsheet.
 
+### Writing to them (1.57.0)
+
+**Write to them**, on a row of the list and on a lab member's storage line
+(Labs, a member's details), opens the email that person would get, for
+staff to read and change before it goes:
+
+- **to** them (NETID@`mail_domain`, the [lab check](lab-check.md)'s);
+- **a copy** to their faculty sponsor -- the PI of each lab they are in,
+  unless they lead a lab themselves -- and to Research Computing
+  (`notify`). Someone in no lab group has no sponsor nomad knows: the box
+  says so, and one can be typed in;
+- **what it says**: each place with how much of theirs hasn't changed in a
+  year, a link to their own storage page (which folders, once they sign
+  in), what they can do (remove what they no longer need, move it
+  somewhere better suited to keeping it, such as their lab's storage), and
+  that a reply is welcome. Greeted by their first name when the campus
+  directory (`[directory]`) can say it;
+- **replies** go to whoever sent it and to Research Computing; it comes
+  from the lab check's `send_from` (else `[mail] from`).
+
+Sending it keeps it whole (with who sent it, when, to whom) and moves the
+person's cases on: each of their places on the list gets a case
+"contacted" (opened where there was none), the email noted in it. Nothing is
+kept unless the email went.
+
+When they were written to `quiet_days` ago or more (30) and their data is
+still there (90% of what was unchanged then, on places with an open case),
+the list says to write again, and so does the weekly email. Every email is
+sent by a person: nomad never writes to people about this on its own.
+
+The email says "hasn't changed", not "hasn't been used": the scans know when
+a file was last changed, not whether anyone read it.
+
+```
+sudo -u nomad nomad storage cold letter jdoe --as rc1             # the email, printed
+sudo -u nomad nomad storage cold letter jdoe --as rc1 --send      # sent as printed
+```
+
 ```toml
 [console.cold_data]
 min_tb = 1.0                 # listed from this much unchanged data on one path (decimal TB)
@@ -443,6 +481,8 @@ full_share = 0.85            # a path this full is said first
 quiet_days = 30              # an open case not updated this long is called out
 notify = ["hpc@example.edu"] # the weekly email (default: [console.labs.accounts] notify)
 link = "https://nomad.example.edu/diagnostics?tab=storage"   # the list, in the email
+storage_link = "https://nomad.example.edu/storage"           # a person's storage page, in a letter
+                             # (default: link's address, else [alerts] link, + /storage)
 ```
 
 The cases are kept in lab_check.db, beside combined.db (the nomad account's),

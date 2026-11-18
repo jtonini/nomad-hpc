@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.57.0 (November 2026)
+
+- **Writing to someone about their data unchanged for a year**
+  (`nomad.storage.cold`, docs/storage.md; the Console's fix 138: Write to
+  them). The email a person gets, for staff to read and change before it
+  goes: to them, a copy to their faculty sponsor (the PI of each lab they
+  are in, unless they lead one) and to Research Computing; each place with
+  how much of theirs hasn't changed in a year, their storage page, what
+  they can do; replies to whoever sent it and to Research Computing. Sent,
+  it is kept whole and their cases move to "contacted" (opened where there
+  was none). Thirty days on (`quiet_days`), if the data is still there, the
+  list and the weekly email say to write again. `nomad storage cold letter
+  NETID [--as NETID] [--send]`; `[console.cold_data] storage_link`.
+- `nomad.directory`: a person's first name, for a greeting.
+
 ## v1.56.0 (November 2026)
 
 - **Licenses: when each ends, and the center reminded before**

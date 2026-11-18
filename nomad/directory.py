@@ -198,6 +198,22 @@ class Directory:
                     out[uid] = name_of(e) or uid
         return out
 
+    def first_names(self, netids) -> dict:
+        """{netid: given name} for the NetIDs the directory knows (1.57.0: a
+        letter's greeting); those it doesn't know are left out."""
+        want = sorted({n.strip().lower() for n in netids if isinstance(n, str) and NETID.match(n.strip().lower())})
+        out = {}
+        for i in range(0, len(want), CHUNK):
+            part = want[i:i + CHUNK]
+            filt = "(|" + "".join(f"(uid={escape(n)})" for n in part) + ")"
+            entries, _ = self.search(filt, limit=len(part) * 2)
+            for e in entries:
+                uid = (e.get("uid") or [""])[0].strip().lower()
+                given = (e.get("givenname") or [""])[0].strip()
+                if uid in want and given:
+                    out[uid] = given
+        return out
+
     def by_name(self, first: str, last: str) -> tuple[list[dict], bool]:
         """([{netid, name}], too_many) for a first and a last name: in the
         surname and given-name fields, or both in a full name."""
