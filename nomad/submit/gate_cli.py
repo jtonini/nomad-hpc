@@ -124,24 +124,53 @@ def jump_key_cmd(pubkey, to, origins, from_anywhere, apply):
         click.echo(ln)
 
 
+def _machines(ctx) -> list:
+    """[[console.files.machines]] (1.58.0): machines with the gate alone."""
+    from nomad.actions.remote import _config
+    from nomad.submit import files as F
+    return list(F.settings(_config(ctx.obj.get("config_target") if ctx.obj else None)).machines)
+
+
 def _site(ctx, name):
     from nomad.submit import remote
     sites, hub = remote.hub_sites(ctx.obj.get("config_target") if ctx.obj else None)
-    s = remote.site_named(sites, name)
+    s = remote.site_named(sites, name) or remote.site_named(_machines(ctx), name)
     if s is None:
         known = ", ".join(x["name"] for x in sites) or "none"
-        raise click.ClickException(f"{name!r} isn't one of the hub's [[hub.sites]] (they are: {known})")
+        raise click.ClickException(f"{name!r} isn't one of the hub's [[hub.sites]] (they are: {known}) nor "
+                                   "of its [[console.files.machines]]")
     return s, hub
 
 
 @gate_group.command("test")
-@click.option("--site", "site_name", required=True, help="One of the hub's sites.")
+@click.option("--site", "site_name", help="One of the hub's sites, or of its [[console.files.machines]].")
+@click.option("--machines", "all_machines", is_flag=True,
+              help="Each of [[console.files.machines]] (lab machines with the gate alone), one after another.")
 @click.option("--user", help="Someone the gate should act as (you, say): asks as them too.")
 @click.pass_context
-def test_cmd(ctx, site_name, user):
+def test_cmd(ctx, site_name, all_machines, user):
     """Is the gate there, and may it act as --user? Asks it its version
-    (as itself, then as the person) and the person's jobs now. Changes
-    nothing."""
+    (as itself, then as the person) and the person's jobs now (not on a
+    machine with the gate alone: it runs no jobs); where moving files is on,
+    sends half a file and removes it. Changes nothing."""
+    if bool(site_name) == bool(all_machines):
+        raise click.UsageError("--site NAME, or --machines")
+    if all_machines:
+        machines = _machines(ctx)
+        if not machines:
+            raise click.ClickException("no [[console.files.machines]] in this nomad.toml")
+        bad = []
+        for m in machines:
+            try:
+                ctx.invoke(test_cmd, site_name=m["name"], all_machines=False, user=user)
+            except SystemExit as e:
+                if e.code:
+                    bad.append(m["name"])
+        click.echo(f"{len(machines) - len(bad)} of {len(machines)} machine(s) ok"
+                   + (f"; not: {', '.join(bad)}" if bad else ""))
+        if bad:
+            sys.exit(1)
+        return
     from nomad.submit import remote
     s, hub = _site(ctx, site_name)
     ok = True
@@ -163,6 +192,8 @@ def test_cmd(ctx, site_name, user):
         if "edit" in a:
             here = "on" if a["edit"] else "off (install-key --edit turns it on)"
             hub_says = "on" if remote.editing(s) else "off (edit = true in its [[hub.sites]])"
+            if s.get("machine"):
+                hub_says = "on (a machine of [[console.files.machines]])"
             click.echo(f"       saving scripts and moving files from the Console: the cluster {here}; "
                        f"the hub {hub_says}")
     if user and a.get("ok"):
@@ -170,7 +201,7 @@ def test_cmd(ctx, site_name, user):
         if b.get("ok") and b.get("account") != user:
             ok = False
             click.echo(click.style(f"  no   it answered as {b.get('account')}, not {user}", fg="red"))
-        if b.get("ok"):
+        if b.get("ok") and not s.get("machine"):
             c = say(f"{user}'s jobs now", remote.call(s, "jobs", user, hub=hub))
             if c.get("ok"):
                 click.echo(f"       {len(c.get('jobs') or [])} job(s)")
@@ -178,8 +209,21 @@ def test_cmd(ctx, site_name, user):
         if b.get("ok") and a.get("edit") and remote.editing(s):
             say("moving files as them (half a file sent, seen and removed; a piece of one taken)",
                 files_check(remote, s, hub, user, b.get("home")))
+            # Copying a folder (1.58.0): the gate lists what is under one (their home, the first 5)
+            if s.get("machine") or _at_least(a.get("nomad"), (1, 58, 0)):
+                t = remote.call(s, "tree", user, hub=hub, dir=b.get("home") or "/", most=5)
+                say("listing a folder for copying it (their home, the first few)", t if t.get("ok") or
+                    "not something the gate does" not in str(t.get("error") or "") else
+                    {"ok": False, "error": "the gate is older than 1.58.0"})
     if not ok:
         sys.exit(1)
+
+
+def _at_least(version, want: tuple) -> bool:
+    try:
+        return tuple(int(x) for x in str(version).split(".")[:3]) >= want
+    except ValueError:
+        return False
 
 
 def files_check(remote, s, hub, user, home) -> dict:

@@ -35,6 +35,40 @@ Settings, in the hub's nomad.toml::
     [console.files.sites.spydur]   # one cluster's own (optional)
     folders = ["~", "/scratch/{user}"]
     login = "spydur.example.edu"   # the host people use for rsync (default: its [[hub.sites]] host)
+
+**Copying between machines (1.58.0).** A file or a whole folder of theirs
+copied from one machine to another -- cluster to cluster, a lab workstation
+to a cluster and back -- by the hub, as the person on both (nomad.submit.copies):
+read in pieces from the one's gate, each checked, written through the
+other's, the whole file's sha256 checked there before it is put in place.
+It goes on on the hub when the browser is closed, and after a restart.
+
+    copy = true              # false: no copying between machines
+    copy_max_gb = 200        # the most one copy moves (more: the rsync command, from one machine to the other)
+    copy_files_max = 20000   # the most files and folders in one copy
+    copies_at_once = 2       # copies running at once on the hub (one a person)
+
+A lab workstation (or any machine people's files are on that isn't one of
+the hub's sites) is one of the machines with its gate alone
+(install_nomad_for_users.sh with NOMAD_GATE_ONLY=1, gate_site.sh) and an
+entry here::
+
+    [[console.files.machines]]
+    name = "ws-kim-01"             # as people know it
+    host = "ws-kim-01.example.edu"
+    gate_user = "nomad"            # the account its gate runs as (default: nomad)
+    # gate_jump = "zeus@jumphost"  # reached only through that host
+    folders = ["~", "/scratch/{user}", "/shared"]
+    # login = "..."                # the host for rsync (default: host)
+
+Who may use a machine from the Console (staff always may): the members of
+its lab, as nomad's workstation collector knows it (the lab of
+``workstation``, by default the host's first name); or, said here,
+``groups = ["kim$"]`` (members of these groups), or ``groups = ["*"]``
+(everyone My files is open to). A machine nomad knows no lab of, and no
+groups said: staff only. The gate runs as the person, so they never see
+more than they could logged in there; this keeps people who can't log in
+there (a lab's machines are for its members) from seeing even that.
 """
 from __future__ import annotations
 
@@ -51,6 +85,10 @@ MAX_MB_CAP = 1024 * 1024                         # the gate's MAX_FILE
 PIECE_MB = 8
 PIECE_MB_CAP = 16                                # the gate's MAX_PIECE
 DEFAULT_FOLDERS = ("~",)
+COPY_MAX_GB = 200
+COPY_FILES_MAX = 20000                           # the gate's MAX_TREE
+COPIES_AT_ONCE = 2
+GATE_USER = "nomad"
 _HOST = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*")
 _SITE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 _USER = re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
@@ -70,6 +108,11 @@ class Settings:
     only_in_folders: bool = False
     sites: dict = field(default_factory=dict)        # site -> {"folders": (...), "login": "host"}
     problems: tuple = ()
+    copy: bool = True
+    copy_max_bytes: int = COPY_MAX_GB * 1000 ** 3
+    copy_files_max: int = COPY_FILES_MAX
+    copies_at_once: int = COPIES_AT_ONCE
+    machines: tuple = ()                             # ({name, host, gate_user, submit, edit, groups, ...}, ...)
 
     @property
     def max_mb(self) -> int:
@@ -137,8 +180,132 @@ def settings(config: dict | None) -> Settings:
             else:
                 problems.append(f"[console.files.sites.{name}] login: a host name")
         sites[name] = entry
+    copy = raw.get("copy", True)
+    if not isinstance(copy, bool):
+        problems.append("copy: true or false (true used)")
+        copy = True
+    gb = _whole(raw, "copy_max_gb", COPY_MAX_GB, 1, 100000, problems)
+    most = _whole(raw, "copy_files_max", COPY_FILES_MAX, 1, COPY_FILES_MAX, problems)
+    at_once = _whole(raw, "copies_at_once", COPIES_AT_ONCE, 1, 8, problems)
+    machines = _machines(raw.get("machines"), problems, sites)
     return Settings(open=open_, max_bytes=max_mb * 1024 * 1024, piece=piece_mb * 1024 * 1024, folders=folders,
-                    only_in_folders=only, sites=sites, problems=tuple(problems))
+                    only_in_folders=only, sites=sites, problems=tuple(problems), copy=copy,
+                    copy_max_bytes=gb * 1000 ** 3, copy_files_max=most, copies_at_once=at_once,
+                    machines=tuple(machines))
+
+
+def _whole(raw: dict, key: str, default: int, low: int, high: int, problems: list) -> int:
+    v = raw.get(key, default)
+    if isinstance(v, bool) or not isinstance(v, int) or not low <= v <= high:
+        problems.append(f"{key}: a whole number, {low} to {high} ({default} used)")
+        return default
+    return v
+
+
+_GROUP = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.$@ -]{0,63}")
+
+
+def _machines(raw, problems: list, sites: dict) -> list:
+    """[[console.files.machines]] as gate sites ({name, host, gate_user,
+    submit = "gate", edit = true, ...}) the hub copies to and from (1.58.0);
+    their folders and login go in ``sites``."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        problems.append("[[console.files.machines]]: entries ([[...]]), each a machine")
+        return []
+    out, seen = [], set()
+    for i, m in enumerate(raw, 1):
+        where = f"[[console.files.machines]] #{i}"
+        if not isinstance(m, dict):
+            problems.append(f"{where}: a table (name = ..., host = ...)")
+            continue
+        name, host = m.get("name"), m.get("host", m.get("name"))
+        if not (isinstance(name, str) and _SITE.fullmatch(name)):
+            problems.append(f"{where}: name, as people know the machine (letters, digits, . _ -)")
+            continue
+        if name in seen:
+            problems.append(f"{where}: {name} is there twice (the first is used)")
+            continue
+        if not (isinstance(host, str) and _HOST.fullmatch(host)):
+            problems.append(f"{where} ({name}): host should be a host name")
+            continue
+        user = m.get("gate_user", GATE_USER)
+        if not (isinstance(user, str) and _USER.fullmatch(user)):
+            problems.append(f"{where} ({name}): gate_user should be an account name")
+            continue
+        groups = m.get("groups")
+        groups = [groups] if isinstance(groups, str) else groups
+        if groups is not None and not (isinstance(groups, list) and groups and all(
+                isinstance(g, str) and (g == "*" or _GROUP.fullmatch(g)) for g in groups)):
+            problems.append(f"{where} ({name}): groups should be a list of group names, or [\"*\"] for everyone")
+            continue
+        ws = m.get("workstation", host.split(".")[0])
+        if not (isinstance(ws, str) and _SITE.fullmatch(ws)):
+            problems.append(f"{where} ({name}): workstation should be a machine's name, as nomad collects it")
+            continue
+        entry = {"name": name, "host": host, "gate_user": user, "submit": "gate", "edit": True,
+                 "machine": True, "groups": None if groups is None else tuple(groups), "workstation": ws}
+        if m.get("gate_jump") not in (None, ""):
+            entry["gate_jump"] = str(m["gate_jump"])
+        if m.get("port") is not None:
+            entry["port"] = m["port"]
+        unknown = sorted(set(m) - {"name", "host", "gate_user", "gate_jump", "port", "groups", "workstation",
+                                   "folders", "login"})
+        if unknown:
+            problems.append(f"{where} ({name}): nomad doesn't read {', '.join(unknown)}")
+        per = {}
+        f = _folders(m.get("folders"), f"{where} ({name})", problems)
+        if f:
+            per["folders"] = f
+        login = m.get("login")
+        if login is not None:
+            if isinstance(login, str) and _HOST.fullmatch(login.strip()):
+                per["login"] = login.strip()
+            else:
+                problems.append(f"{where} ({name}) login: a host name")
+        if per:
+            sites.setdefault(name, {}).update(per)
+        seen.add(name)
+        out.append(entry)
+    return out
+
+
+def machine_labs(db, machines) -> dict:
+    """{workstation: lab} for these machines, from the hub's combined
+    database (``db``: an open sqlite3 connection): the lab nomad's
+    workstation collector last saw each in. None when it can't say."""
+    names = sorted({m["workstation"] for m in machines if m.get("groups") is None})
+    if not names:
+        return {}
+    low = {n.lower(): n for n in names}                # a host name in any case is the same machine
+    try:
+        rows = db.execute(
+            "SELECT hostname, department FROM workstation_state w WHERE lower(hostname) IN "
+            f"({','.join('?' * len(low))}) AND timestamp = (SELECT MAX(timestamp) FROM workstation_state "
+            "WHERE hostname = w.hostname) ORDER BY timestamp", list(low)).fetchall()
+    except Exception:                                  # noqa: BLE001 -- no workstations collected here
+        return {}
+    return {low[h.lower()]: d for h, d in rows if d and h.lower() in low}
+
+
+def machines_open_to(s: Settings, groups, staff: bool, labs: dict | None = None) -> list:
+    """The machines (with their gate alone) this person may use (see the
+    module's notes): every one for staff; else those of a lab of theirs
+    (``labs``: machine_labs), those whose groups take one of theirs, and
+    those open to all (groups = ["*"])."""
+    mine, labs = set(groups or ()), labs or {}
+    out = []
+    for m in s.machines:
+        if staff:
+            out.append(m)
+        elif m["groups"] is None:
+            lab = labs.get(m["workstation"])
+            if lab and lab in mine:
+                out.append(m)
+        elif "*" in m["groups"] or mine & set(m["groups"]):
+            out.append(m)
+    return out
 
 
 def opens_to(s: Settings, role: str | None, submit_open: str) -> bool:

@@ -111,6 +111,8 @@ GET_PIECE = 8 * 1024 * 1024
 UPLOAD_KEEP_DAYS = 7
 FILES_HERE = 2
 WAIT_FOR_FILES = 10
+# Copying a folder from one machine to another (1.58.0): the most of its files and folders listed at once.
+MAX_TREE = 20000
 
 _NAME =re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
 _JOB = re.compile(r"[0-9]{1,12}(?:_[0-9]{1,9})?")
@@ -176,13 +178,16 @@ OPS = {
     "put-status": {"--path": "path", "--upload": "upid"},
     "put-cancel": {"--path": "path", "--upload": "upid"},
     "get": {"--path": "path", "--offset": "bytes", "--length": "bytes"},
+    # A folder's files and folders under it, for copying it to another machine (1.58.0).
+    "tree": {"--dir": "path", "--most": "int"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
             "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
             "save": ["--script", "--body-sha256"], "versions": ["--script"], "recall": ["--script", "--id"],
             "starts": ["--sha256", "--partitions"], "read": ["--path"], "practice": ["--kit", "--dir"],
             "mkdir": ["--dir"], "put": ["--path", "--upload", "--offset", "--total", "--piece-sha256"],
-            "put-status": ["--path", "--upload"], "put-cancel": ["--path", "--upload"], "get": ["--path"]}
+            "put-status": ["--path", "--upload"], "put-cancel": ["--path", "--upload"], "get": ["--path"],
+            "tree": ["--dir"]}
 # The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
 WITH_BODY = {"save"}
 # ... and the one whose body is bytes, not text (at most MAX_PIECE; 1.55.0).
@@ -520,7 +525,9 @@ def self_check(me: str) -> str | None:
         owners = {0, os.stat(me).st_uid}
     except OSError as e:
         return f"{me}: {e.strerror}"
-    for p in (me, os.path.join(os.path.dirname(me), "nomad"), sys.executable):
+    beside = os.path.join(os.path.dirname(me), "nomad")
+    # the gate alone (1.58.0: a lab workstation) has no nomad beside it
+    for p in (me, beside, sys.executable) if os.path.lexists(beside) else (me, sys.executable):
         why = unsafe(p, owners)
         if why:
             return why
@@ -674,7 +681,8 @@ def _read_body(stream) -> str:
 # with `serve --edit`, the cluster's own say (the hub's [[hub.sites]]
 # edit = true is the hub's).
 EDITS = {"save", "read", "versions", "recall", "practice", "mkdir",    # practice, mkdir: they write (1.35.0)
-         "put", "put-status", "put-cancel", "get"}                      # files from and to the browser (1.55.0)
+         "put", "put-status", "put-cancel", "get",                      # files from and to the browser (1.55.0)
+         "tree"}                                                        # copying a folder elsewhere (1.58.0)
 
 
 def _quiet(op: str, got: dict, doc: dict | None = None) -> bool:
@@ -1053,6 +1061,8 @@ def run(words: list, me: str, run_=None) -> int:
                            "sha256": sha256_of(data), "utf8": is_utf8(data), **_warning(got["--script"])})
         if op == "ls":
             return answer({"ok": True, **listing(got["--dir"])})
+        if op == "tree":
+            return answer({"ok": True, **tree(got["--dir"], int(got.get("--most", MAX_TREE)))})
         if op == "save":
             text = _read_body(sys.stdin.buffer)
             return answer(save(got["--script"], text, body_sha=got["--body-sha256"], old_sha=got.get("--sha256"),
@@ -1327,6 +1337,67 @@ def listing(path: str) -> dict:
     return {"dir": os.path.normpath(path), "entries": rows[:MAX_LS], "more": len(rows) > MAX_LS}
 
 
+def tree(path: str, most: int = MAX_TREE) -> dict:
+    """A folder's files and folders under it, as the person sees them, to
+    copy it to another machine (1.58.0): each one's path from the folder,
+    kind, size and time, a folder before what is in it; hidden ones, links
+    and other kinds left out and counted, as are folders that can't be read;
+    at most ``most`` (more: True)."""
+    _not_hidden(path)
+    most = max(1, min(int(most), MAX_TREE))
+    try:
+        st = os.stat(path)
+    except OSError as e:
+        raise Refused(f"{path}: {e.strerror}") from None
+    if not stat.S_ISDIR(st.st_mode):
+        raise Refused(f"{path} isn't a folder")
+    entries, skipped = [], {"hidden": 0, "links": 0, "other": 0, "unreadable": 0}
+    files = folders = total = 0
+    more = False
+    stack = [""]
+    while stack and not more:
+        rel = stack.pop()
+        here = os.path.join(path, rel) if rel else path
+        try:
+            with os.scandir(here) as it:
+                items = sorted(it, key=lambda e: e.name)
+        except OSError:
+            skipped["unreadable"] += 1
+            continue
+        subs = []
+        for e in items:
+            if e.name.startswith("."):
+                skipped["hidden"] += 1
+                continue
+            try:
+                s = e.stat(follow_symlinks=False)
+            except OSError:
+                skipped["unreadable"] += 1
+                continue
+            if stat.S_ISLNK(s.st_mode):
+                skipped["links"] += 1
+                continue
+            kind = "folder" if stat.S_ISDIR(s.st_mode) else "file" if stat.S_ISREG(s.st_mode) else None
+            if kind is None:
+                skipped["other"] += 1
+                continue
+            if len(entries) >= most:
+                more = True
+                break
+            r = f"{rel}/{e.name}" if rel else e.name
+            entries.append({"path": r, "kind": kind, "size": s.st_size if kind == "file" else 0,
+                             "mtime": int(s.st_mtime)})
+            if kind == "folder":
+                folders += 1
+                subs.append(r)
+            else:
+                files += 1
+                total += s.st_size
+        stack.extend(reversed(subs))
+    return {"dir": os.path.normpath(path), "entries": entries, "files": files, "folders": folders,
+            "bytes": total, "skipped": skipped, "more": more}
+
+
 # ── practice runs (1.35.0) ─────────────────────────────────────────────────
 # A kit's files copied, as the person, into a folder of theirs that is new
 # or empty (never over a file: nomad.demos.kits.copy), from nomad's own kits
@@ -1398,7 +1469,9 @@ def new_folder(path: str) -> dict:
     try:
         os.mkdir(path)
     except FileExistsError:
-        raise Refused(f"{path} is there already") from None
+        # said, for a copy that goes into a folder there already (1.58.0)
+        raise Refused(f"{path} is there already", exists=True, folder=os.path.isdir(path)
+                      and not os.path.islink(path)) from None
     except OSError as e:
         raise Refused(f"{path}: {e.strerror or e}") from None
     return {"dir": os.path.normpath(path)}
@@ -2155,6 +2228,9 @@ def get_piece(path: str, offset: int = 0, length: int = GET_PIECE) -> dict:
 USAGE = """usage: nomad-gate serve            (run by sshd for the hub's key)
        nomad-gate run OP [OPTIONS]  (as yourself: what the hub would get)
        nomad-gate version | check   (check: whether it would serve as installed)
+       nomad-gate install-key KEY --from ADDRESS [--edit] [--apply]
+                                    (as this account: the hub's gate key let in for this gate
+                                     alone, as nomad gate install-key does; 1.58.0)
        nomad-gate exec NAME ARGS    (squeue, scancel, scontrol, sacct: as your PATH finds it,
                                      unless someone else could have put it there)
 """
@@ -2175,8 +2251,34 @@ def main(argv: list | None = None, me: str | None = None) -> int:
     if argv == ["check"]:
         why = self_check(me)
         return answer({"ok": why is None, **({"error": why} if why else {})}, 0 if why is None else 3)
+    if argv[:1] == ["install-key"]:
+        return install_key_main(argv[1:], me)
     sys.stderr.write((__doc__ or "").split("\n\n", 1)[1].split("\n\nInstalled beside")[0] + "\n\n" + USAGE)
     return 2
+
+
+def install_key_main(argv: list, me: str) -> int:
+    """nomad-gate install-key (1.58.0): `nomad gate install-key` for a
+    machine with the gate alone (no bin/nomad there, nor its libraries):
+    the hub's gate key let in for ``me`` only, from ``--from``."""
+    import argparse
+    p = argparse.ArgumentParser(prog="nomad-gate install-key",
+                                description="Let the hub's gate key run this nomad-gate (serve), and nothing else.")
+    p.add_argument("pubkey", help="the hub's gate key (its public line, in quotes)")
+    p.add_argument("--from", dest="origins", required=True,
+                   help="the hub's address as this machine sees it (sshd's from=)")
+    p.add_argument("--edit", action="store_true", help="serve --edit: files moved and saved as people (My files)")
+    p.add_argument("--apply", action="store_true", help="write it (otherwise show what would change)")
+    a = p.parse_args(argv)
+    from nomad.submit import remote
+    try:
+        _status, lines = remote.install_key(a.pubkey, origins=a.origins, gate_path=me, apply=a.apply, edit=a.edit)
+    except (ValueError, OSError) as e:
+        sys.stderr.write(f"nomad-gate install-key: {e}\n")
+        return 1
+    for line in lines:
+        print(line)
+    return 0
 
 
 if __name__ == "__main__":

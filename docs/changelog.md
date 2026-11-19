@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.58.0 (November 2026)
+
+- **Copying between machines** (`nomad.submit.copies`, docs/files.md; the
+  Console's fix 139: Copy to...). A file or a whole folder of theirs copied
+  from one machine to another by the hub, as the person on both, through
+  each machine's gate: read in pieces, each checked, written in pieces, each
+  whole file's sha256 checked before it is put in place. It goes on with the
+  browser closed and after a Console restart; a file there already is
+  skipped, replaced or kept beside ("name (2).ext"); too big
+  (`copy_max_gb`) or too many files (`copy_files_max`): rsync instead; a
+  busy machine waited for, one that doesn't answer asked again, then
+  stopped, to start again from where it stopped; Cancel between pieces.
+  `[console.files] copy, copy_max_gb, copy_files_max, copies_at_once`.
+- **Lab workstations as My files' machines, with the gate alone**:
+  `[[console.files.machines]]` (name, host, gate_user, gate_jump, folders,
+  groups, workstation). Who may use one: staff, and the members of its lab
+  as nomad's workstation collector knows it (or `groups`).
+  `install_nomad_for_users.sh` with `NOMAD_GATE_ONLY=1`: nomad's own files
+  without its libraries, no bin/nomad; `nomad-gate install-key` lets the
+  hub's key in where there is no bin/nomad. The gate checks itself without a
+  bin/nomad beside it there.
+- nomad-gate: `tree` (what is under a folder, for copying it); `mkdir` says
+  when a folder is there already (`exists`, `folder`).
+- `nomad gate test --machines` (or `--site` one of them): each lab machine's
+  gate, as the person (no jobs asked there); a folder listed too, from 1.58.0.
+
 ## v1.57.1 (November 2026)
 
 - `nomad licenses add` without `--no-renew` lists a license as being

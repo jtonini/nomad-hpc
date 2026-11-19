@@ -471,12 +471,14 @@ def test_a_site_database_without_source_site(tmp_path):
 def test_the_command(data):
     path, _ = data
     from nomad.cli import cli
-    r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--days", "30", "--each"])
+    # the command reads up to now: a window that reaches back to the data (written a month ago or more)
+    days = str((datetime.now() - NOW).days + 30)
+    r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--days", days, "--each"])
     assert r.exit_code == 0, r.output
     assert "hpc1 (cluster)" in r.output and "most CPUs allocated at once" in r.output
     assert "not tracked" in r.output and "teach (interactive)" in r.output
     assert "lab (workstations in no lab, collected by lab)" in r.output and "ws-c" in r.output
-    r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--mask", "--each"])
+    r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--days", days, "--mask", "--each"])
     assert r.exit_code == 0 and "ws-" not in r.output and str(path) not in r.output
     r = CliRunner().invoke(cli, ["facts", "busy", "--db", str(path), "--json"])
     assert json.loads(r.output)["kind"] == "busy"

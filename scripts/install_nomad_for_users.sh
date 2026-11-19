@@ -34,6 +34,11 @@
 #   account's sudo). It runs the same release as bin/nomad and is switched
 #   with it; it refuses to serve if anything it runs could be changed by
 #   anyone but this account or root.
+# - NOMAD_GATE_ONLY=1 (1.58.0): the gate alone, for a machine people don't
+#   run nomad on (a lab workstation the Console copies files to and from):
+#   nomad's own files without the libraries its other commands need, and no
+#   bin/nomad nor check_current.sh (its own Python and nomad's files: about 160 MB with uv).
+#     ssh OWNER@HOST 'NOMAD_USERS_DIR=/path NOMAD_GATE_ONLY=1 bash -s 1.58.0' < scripts/install_nomad_for_users.sh
 set -euo pipefail
 V=${1:?give the version, e.g. 1.18.1}
 UVV=0.13.5
@@ -41,6 +46,12 @@ UV_SHA256_x86_64=f68d291c75783122dad58ab77def0e13f3233f358731db5d6d7e8715603b928
 UV_SHA256_aarch64=4bb69cf95ed13f23713bb7bc09f241896ea0c75b7c557e615a20604b82f9c403
 DEFAULT_D=/usr/local/sw/nomad
 D=${NOMAD_USERS_DIR:-$DEFAULT_D}
+GATE_ONLY=""
+case "${NOMAD_GATE_ONLY:-}" in
+    ""|0) ;;
+    1) GATE_ONLY=yes ;;
+    *) echo "NOMAD_GATE_ONLY is 1 or nothing: stopping" >&2; exit 1 ;;
+esac
 umask 022
 unset PYTHONHOME PYTHONPATH VIRTUAL_ENV CONDA_PREFIX
 export UV_NO_CONFIG=1 UV_LINK_MODE=copy UV_MANAGED_PYTHON=1
@@ -63,6 +74,9 @@ if ! printf '%s\n' "$V" | grep -Eq '^[0-9]+(\.[0-9]+)*(\.post[0-9]+)?$'; then
 fi
 if [ "$(printf '%s\n' 1.18.0 "$V" | sort -V | head -1)" != 1.18.0 ]; then
     stop "nomad-hpc $V has no nomad size and nomad submit (1.18.0 or later)"
+fi
+if [ -n "$GATE_ONLY" ] && [ "$(printf '%s\n' 1.58.0 "$V" | sort -V | head -1)" != 1.58.0 ]; then
+    stop "the gate alone comes with nomad-hpc 1.58.0 and later"
 fi
 
 # The folder: this account's, and nomad's (or empty, or new). Everything in
@@ -192,19 +206,28 @@ if ! grep -q "^home = $R/python/" "$R/venv/pyvenv.cfg"; then
 fi
 # Wheels only: nothing is compiled here, and on an older system (RHEL 7's glibc 2.17) uv takes the newest
 # releases that have wheels for it (numpy 2.2 rather than a 2.3 it would try to build from source).
-"$UV" pip install --quiet --compile-bytecode --only-binary :all: --python "$R/venv/bin/python" "nomad-hpc==$V" </dev/null
+# The gate alone (NOMAD_GATE_ONLY): nomad's own files, none of the libraries its other commands need.
+"$UV" pip install --quiet --compile-bytecode --only-binary :all: ${GATE_ONLY:+--no-deps} \
+    --python "$R/venv/bin/python" "nomad-hpc==$V" </dev/null
 chmod -R go-w "$R"
 chmod -R a+rX "$R"
 if [ -n "$(find "$R" -not -type l -perm /022 -print -quit)" ]; then stop "$R: still writable by others"; fi
 if [ -n "$(find "$R" -not -user "$me" -print -quit)" ]; then stop "$R: owned by others than $me"; fi
-if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$R/venv/bin/python" -I -B \
+if [ -n "$GATE_ONLY" ]; then
+    if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$R/venv/bin/python" -I -B \
+            -c 'import nomad.submit.gate' </dev/null 2>&1); then
+        echo "$out" | tail -5 >&2
+        stop "nomad-hpc $V's gate doesn't start in releases/$new (the gate here stays as it is)"
+    fi
+elif ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$R/venv/bin/python" -I -B \
         -c 'import sys; sys.argv[0] = "nomad"; from nomad.cli import main; sys.exit(main())' \
         size --help </dev/null 2>&1); then
     echo "$out" | tail -5 >&2
     stop "nomad-hpc $V doesn't start in releases/$new (users keep the one they have)"
 fi
 
-# The command users run, and the weekly check: written beside, checked.
+# The command users run, and the weekly check: written beside, checked (not for the gate alone).
+if [ -z "$GATE_ONLY" ]; then
 cat > "$D/bin/nomad.new" <<EOF
 #!/bin/sh
 # nomad for users ($V). Its Python runs isolated (-I): PYTHONHOME, PYTHONPATH
@@ -254,6 +277,7 @@ if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad.new" --
     echo "$out" | tail -5 >&2
     stop "the new bin/nomad doesn't start (users keep the one they have)"
 fi
+fi
 # The gate (1.25.0 and later): the same release, given its own path (python
 # -c has none); switched with bin/nomad.
 # A release that has it must start it (a release without it, before 1.25.0, has none).
@@ -275,22 +299,30 @@ EOF
         stop "the new bin/nomad-gate doesn't start (users keep the nomad they have)"
     fi
 fi
+if [ -n "$GATE_ONLY" ] && [ -z "$gate" ]; then stop "nomad-hpc $V has no gate"; fi
 
 # Switch: bin/nomad is replaced in one step; then current and the check.
 # The release before is the one bin/nomad runs now (not what current says).
 before=""
-if [ -f "$D/bin/nomad" ]; then
-    before=$(sed -n "s|^exec \"$D/releases/\([^/]*\)/venv/bin/python\".*|\1|p" "$D/bin/nomad" | head -1 || true)
+runs="$D/bin/nomad"
+if [ -n "$GATE_ONLY" ]; then runs="$D/bin/nomad-gate"; fi
+if [ -f "$runs" ]; then
+    before=$(sed -n "s|^exec \"$D/releases/\([^/]*\)/venv/bin/python\".*|\1|p" "$runs" | head -1 || true)
 fi
 if [ -n "$before" ] && [ ! -x "$D/releases/$before/venv/bin/python" ]; then before=""; fi
-if [ -n "$before" ]; then cp -p "$D/bin/nomad" "$D/bin/nomad.before.new"; fi
+if [ -n "$before" ] && [ -z "$GATE_ONLY" ]; then cp -p "$D/bin/nomad" "$D/bin/nomad.before.new"; fi
 if [ -n "$before" ] && [ -f "$D/bin/nomad-gate" ]; then cp -p "$D/bin/nomad-gate" "$D/bin/nomad-gate.before.new"; fi
 switched=yes
-mv -f "$D/bin/nomad.new" "$D/bin/nomad"
+if [ -n "$GATE_ONLY" ]; then
+    # the gate alone: no nomad for people here (an earlier one, if any, would point at a release removed below)
+    rm -f "$D/bin/nomad" "$D/bin/nomad.before" "$D/check_current.sh"
+else
+    mv -f "$D/bin/nomad.new" "$D/bin/nomad"
+fi
 if [ -n "$gate" ]; then mv -f "$D/bin/nomad-gate.new" "$D/bin/nomad-gate"; else rm -f "$D/bin/nomad-gate"; fi
 ln -sfn "releases/$new" "$D/current.new"
 mv -Tf "$D/current.new" "$D/current"
-mv -f "$D/check_current.sh.new" "$D/check_current.sh"
+if [ -z "$GATE_ONLY" ]; then mv -f "$D/check_current.sh.new" "$D/check_current.sh"; fi
 if [ -f "$D/bin/nomad.before.new" ]; then mv -f "$D/bin/nomad.before.new" "$D/bin/nomad.before"; fi
 if [ -z "$before" ]; then rm -f "$D/bin/nomad.before"; fi
 if [ -f "$D/bin/nomad-gate.before.new" ]; then mv -f "$D/bin/nomad-gate.before.new" "$D/bin/nomad-gate.before"
@@ -324,11 +356,18 @@ fi
 if [ -e "$D/.nomad-removed" ]; then gone "$D/.nomad-removed"; fi
 
 # Nothing writable but by the owner, nor owned by anyone else.
-chmod go-w "$D" "$D/bin" "$D/releases" "$D/uv" "$D/bin/nomad" "$D/check_current.sh"
-chmod a+rX "$D" "$D/bin" "$D/releases" "$D/uv" "$D/bin/nomad" "$D/check_current.sh"
+chmod go-w "$D" "$D/bin" "$D/releases" "$D/uv"
+chmod a+rX "$D" "$D/bin" "$D/releases" "$D/uv"
+if [ -z "$GATE_ONLY" ]; then
+    chmod go-w "$D/bin/nomad" "$D/check_current.sh"
+    chmod a+rX "$D/bin/nomad" "$D/check_current.sh"
+fi
 if [ -n "$gate" ]; then chmod 755 "$D/bin/nomad-gate"; fi
 back=""
-if [ -n "$before" ] && [ "$before" != "$new" ]; then
+if [ -n "$before" ] && [ "$before" != "$new" ] && [ -n "$GATE_ONLY" ]; then
+    back="ln -sfn releases/$before $D/current.new && mv -Tf $D/current.new $D/current"
+    if [ -f "$D/bin/nomad-gate.before" ]; then back="$back && mv -f $D/bin/nomad-gate.before $D/bin/nomad-gate"; fi
+elif [ -n "$before" ] && [ "$before" != "$new" ]; then
     back="mv -f $D/bin/nomad.before $D/bin/nomad && ln -sfn releases/$before $D/current.new && mv -Tf $D/current.new $D/current"
     if [ -f "$D/bin/nomad-gate.before" ]; then back="$back && mv -f $D/bin/nomad-gate.before $D/bin/nomad-gate"
     elif [ -n "$gate" ]; then back="$back && rm -f $D/bin/nomad-gate"; fi
@@ -341,7 +380,14 @@ theirs=$(find "$D" -not -user "$me" 2>/dev/null | head -5 || true)
 if [ -n "$theirs" ]; then problem="$problem
 owned by others than $me:
 $theirs"; fi
-if ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad" --version </dev/null 2>&1); then
+if [ -n "$GATE_ONLY" ]; then
+    if ! got=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad-gate" version </dev/null 2>&1) \
+            || ! printf '%s\n' "$got" | grep -q '"ok": true'; then
+        problem="$problem
+$D/bin/nomad-gate doesn't start: $(echo "$got" | tail -2)"
+    fi
+    out="the gate alone, nomad $V"
+elif ! out=$(PYTHONHOME=/nonexistent PYTHONPATH=/nonexistent "$D/bin/nomad" --version </dev/null 2>&1); then
     problem="$problem
 $D/bin/nomad doesn't start: $(echo "$out" | tail -2)"
 fi
@@ -371,6 +417,9 @@ if [ -n "$left" ]; then
 fi
 echo "   $D: $(du -sh "$D" 2>/dev/null | cut -f1), owner $me; releases/$new${before:+ (kept: releases/$before)}$left"
 
+if [ -n "$GATE_ONLY" ]; then
+    echo "   The gate alone: bin/nomad-gate for the hub's gate key; no nomad for people here."
+else
 cat <<EOF
 
 Users need $D/bin on their PATH (it holds nomad, and nomad-gate for the hub). Either:
@@ -383,6 +432,7 @@ To hear when a newer release is out, in this account's crontab (crontab -e):
     MAILTO=you@your.edu
     17 7 * * 1 $D/check_current.sh
 EOF
+fi
 if [ -n "$back" ]; then
     cat <<EOF
 

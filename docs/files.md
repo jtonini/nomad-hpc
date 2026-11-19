@@ -1,6 +1,6 @@
 # My files: moving files from the browser
 
-*nomad 1.55.0, with the Console's fix 135.*
+*nomad 1.55.0, with the Console's fix 135; whole folders, copying between machines and lab workstations: nomad 1.58.0, fix 139.*
 
 People put files on a cluster, and take files back, from the Console's **My
 files** page: drag files onto the page (or **Choose files**), and they go to
@@ -31,6 +31,112 @@ file they couldn't write or read by logging in, they can't here either.
 - Up to 2 GB a file by default (`max_mb`). For bigger files, many files or
   whole folders, the page shows the `rsync` command to type on one's own
   computer (it goes on where it stopped too), and the `scp` one for Windows.
+
+## Whole folders (fix 139)
+
+A folder dropped on the page (or **Choose a folder**) goes whole: each of
+its folders made there first (one there already is gone into), then each
+file, as above. A file there already: **Replace**, **Skip** or **Keep both**
+("name (2).ext"), once for all of them if they like. Hidden files and
+folders, and links, are left out, and the page says how many.
+
+## Copying between machines (1.58.0)
+
+**Copy to...** beside a file or a folder copies it to a folder of theirs on
+another machine: another cluster, or a lab workstation and back. The hub
+does it, as the person on both, through each machine's gate: read in
+pieces from the one (each checked), written in pieces on the other (each
+checked), each whole file's sha256 checked there before it is put in place.
+Nothing is kept on the hub.
+
+- It goes on on the hub: the browser can be closed. **Copies** on the page
+  says how far each is, and lists what wasn't copied and why. After a
+  Console restart it goes on from the file it was at.
+- A file there already by its name: left as it is (**Skip**), replaced
+  (**Replace**: only a file of theirs), or both kept (**Keep both**: the new
+  one as "name (2).ext"). A folder there already is gone into; with **Keep
+  both** the copied folder gets a name of its own ("results (2)").
+- Not started when it is too big for this way (`copy_max_gb`, 200 GB by
+  default) or has too many files and folders (`copy_files_max`, 20 000):
+  the page says to use rsync from one machine to the other. Nor when the
+  machine it goes to hasn't room for all of it.
+- A file that changes while it is being copied isn't copied (said so). A
+  machine busy moving other files is waited for; one that doesn't answer is
+  asked again over a minute and a half, then the copy stops and **Start
+  again** goes on from where it stopped (and tries the files that failed).
+- **Cancel** stops it between pieces: what was sent of the file it was at
+  is removed, what was copied before stays.
+- Two copies at once on the hub (`copies_at_once`), one a person; every
+  copy asked, stopped and ended is in the audit log.
+
+Each piece goes through the hub, one ssh request at a time, so this is for
+the size of a project folder: many thousands of small files take a while.
+
+```toml
+[console.files]
+copy = true              # false: no Copy to...
+copy_max_gb = 200
+copy_files_max = 20000
+copies_at_once = 2
+```
+
+## Lab workstations: the gate alone (1.58.0)
+
+A machine people keep files on that isn't one of the hub's sites (a lab's
+workstations, and the network storage they mount) becomes one of My
+files' machines with nomad's gate alone on it: no nomad for people there,
+nor the libraries its other commands need (its own Python and nomad's files,
+about 160 MB with uv).
+
+1. Its account (a local system account, keys only, e.g. `nomad`), and as
+   it the gate alone in a folder it owns:
+
+   ```bash
+   NOMAD_USERS_DIR=/opt/nomad-gate NOMAD_GATE_ONLY=1 bash install_nomad_for_users.sh 1.58.0
+   ```
+
+2. sudo for that account to act as people, through the gate only
+   (`visudo -f /etc/sudoers.d/nomad-gate`):
+
+   ```text
+   Defaults:nomad !requiretty
+   nomad ALL=(ALL,!root) NOPASSWD: /opt/nomad-gate/bin/nomad-gate run, /opt/nomad-gate/bin/nomad-gate run *
+   ```
+
+3. The hub's gate key let in, from the hub alone, as that account:
+
+   ```bash
+   /opt/nomad-gate/bin/nomad-gate install-key "$(cat gate_key.pub)" --from HUB-ADDRESS --edit --apply
+   ```
+
+4. On the hub, its host key in the nomad account's `known_hosts`, and an
+   entry for it:
+
+   ```toml
+   [[console.files.machines]]
+   name = "ws-kim"               # as people know it
+   host = "ws-kim.example.edu"
+   # gate_user = "nomad"         # the account of step 1 (default: nomad)
+   # gate_jump = "zed@jumphost"  # reached only through that host
+   folders = ["~", "/scratch/{user}", "/shared"]
+   # groups = ["kim$"]           # who may use it (below)
+   # workstation = "ws-kim"      # its name in nomad's workstation collector (default: host's first name)
+   ```
+
+5. Then, on the hub: `nomad gate test --machines --user YOU` asks each
+   machine's gate as you (its version, half a file sent and removed, a
+   folder listed); `--site NAME` asks one.
+
+Who may use it from the Console: staff, and the members of its lab as
+nomad's workstation collector knows it (the lab nomad last saw it in). Or,
+said in its entry, the members of `groups`, or everyone My files is open to
+with `groups = ["*"]`. A machine nomad knows no lab of, with no groups said:
+staff only. The gate acts as the person, so no one sees more there than they
+could logged in; this keeps people who can't log in there from seeing even
+that.
+
+Where several workstations mount the same home and storage, the gate on one
+of them reaches it all.
 
 ## Turning it on
 
@@ -71,6 +177,8 @@ or the Console.
 | `put-status --path P --upload ID` | how much of it is there, what is at P, the room there |
 | `put-cancel --path P --upload ID` | what was sent of it, removed |
 | `get --path P [--offset N] [--length N]` | a piece of a file they can read, in base64 with its sha256 and the file's version; `--length 0`: only its size and version |
+| `mkdir --dir P` | a new folder of theirs; one there already is said so (`exists`, and `folder` when it is one; 1.58.0) |
+| `tree --dir P [--most N]` | what is under a folder, a folder before what is in it, each with its kind, size and time; hidden ones, links and other kinds left out and counted (1.58.0; at most 20 000) |
 
 Two files move at once on a cluster's account; the rest of the gate's
 requests are never kept waiting by them.
