@@ -281,21 +281,22 @@ def _write(ctx, name: str, item: L.Item, replace: bool, apply: bool, tag: str) -
 @click.option("--pattern", help="command: where the date is in what it prints (a regular expression).")
 @click.option("--ends", help="date: when it ends (2027-06-30), or never.")
 @click.option("--about", help="What it is, who renews it: a few words.")
-@click.option("--no-renew", "renew", flag_value=False, default=True, help="Not being renewed: listed, no reminders.")
-@click.option("--no-sudo", "sudo", flag_value=False, default=None, help="posit: run license-manager without sudo.")
+# Plain flags: click 8.3 reads a flag whose value is False as False when it isn't given (1.57.1).
+@click.option("--no-renew", "no_renew", is_flag=True, help="Not being renewed: listed, no reminders.")
+@click.option("--no-sudo", "no_sudo", is_flag=True, help="posit: run license-manager without sudo.")
 @click.option("--remind-days", help="Its own reminders, such as 90,30,7 (default: the hub's).")
 @click.option("--timeout", type=int, help="posit, command: seconds to wait (default 60).")
 @click.option("--replace", is_flag=True, help="Replace the entry of that name.")
 @click.option("--apply", is_flag=True, help="Write it (otherwise only show it).")
 @click.pass_context
-def licenses_add(ctx, name, kind, program, file, host, port, command, pattern, ends, about, renew, sudo, remind_days,
-                 timeout, replace, apply):
+def licenses_add(ctx, name, kind, program, file, host, port, command, pattern, ends, about, no_renew, no_sudo,
+                 remind_days, timeout, replace, apply):
     """List a license in this machine's nomad.toml: a
     [[collectors.licenses.items]] entry (and [collectors.licenses] enabled
     = true when it isn't set). Shows it first; --apply writes it, with a copy
     of the file before, and reads it once."""
-    body = _options_body(kind, program, file, host, port, list(command), pattern, ends, about, renew, sudo,
-                         remind_days, timeout)
+    body = _options_body(kind, program, file, host, port, list(command), pattern, ends, about, not no_renew,
+                         False if no_sudo else None, remind_days, timeout)
     problems: list = []
     item = L.item_from({"name": name, **body}, "the entry", problems)
     if item is None or problems:

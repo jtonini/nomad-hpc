@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.57.1 (November 2026)
+
+- `nomad licenses add` without `--no-renew` lists a license as being
+  renewed again. Click 8.3 reads a flag whose value is False as False when
+  it isn't given, so with it every license was added with `renew = false`:
+  listed as not being renewed, and never reminded. `--no-renew` and
+  `--no-sudo` are plain flags now. An entry added that way is put right by
+  adding it again with `--replace` (the kit's licenses_site.sh does).
+
 ## v1.57.0 (November 2026)
 
 - **Writing to someone about their data unchanged for a year**
