@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.58.1 (November 2026)
+
+- nomad-gate `jobs`: each job's partition, and the cores and GPUs it asked
+  for (squeue `%P %C %b`, after the fields there were), so the Console's My
+  jobs now shows where a job runs and what it asked for before nomad's next
+  reading (Console fix 140). Not its memory: squeue's `%m` is per core for a
+  job sent with `--mem-per-cpu`, without saying so. A line of the first eight
+  fields is still read.
+
 ## v1.58.0 (November 2026)
 
 - **Copying between machines** (`nomad.submit.copies`, docs/files.md; the

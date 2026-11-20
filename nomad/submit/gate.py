@@ -1039,8 +1039,10 @@ def _home() -> str:
         return os.path.expanduser("~")
 
 
-JOB_FIELDS = ("job", "name", "state", "time", "limit", "nodes", "where", "workdir")
-_SQUEUE = "\x1f".join(("%i", "%j", "%T", "%M", "%l", "%D", "%R", "%Z"))
+# 1.58.1: its partition, its cores and its GPUs (gres), at the end (older hubs read the first eight). Not its
+# memory: squeue's %m is per core for a job sent with --mem-per-cpu, and says nothing of which it is.
+JOB_FIELDS = ("job", "name", "state", "time", "limit", "nodes", "where", "workdir", "partition", "cpus", "gres")
+_SQUEUE = "\x1f".join(("%i", "%j", "%T", "%M", "%l", "%D", "%R", "%Z", "%P", "%C", "%b"))
 
 
 def run(words: list, me: str, run_=None) -> int:
@@ -1139,8 +1141,9 @@ def run(words: list, me: str, run_=None) -> int:
                                   run_=run_)
             if code != 0:
                 raise Refused(f"squeue: {said.strip()[-300:]}")
+            # the first eight at least (a Slurm that leaves a field out: the rest as it gives them)
             rows = [dict(zip(JOB_FIELDS, f)) for f in (line.split("\x1f") for line in said.splitlines())
-                    if len(f) == len(JOB_FIELDS)]
+                    if 8 <= len(f) <= len(JOB_FIELDS)]
             return answer({"ok": True, "jobs": rows})
         if op == "job":
             return answer(dict(ok=True, **job_details(got["--job"], run_=run_, me=me)))
