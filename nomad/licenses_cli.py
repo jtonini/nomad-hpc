@@ -90,6 +90,7 @@ def licenses_group(ctx, here=False, as_json=False):
     nomad licenses renew NAME no      not being renewed: listed, no reminders; --apply
     nomad licenses remind [--send]    on the hub: what is due, and the email
     nomad licenses timer [--apply]    on the hub: remind every morning, from systemd
+    nomad licenses tries              whether licensed programs run on the lab machines (1.59.0)
 
     KIND: posit, flexlm, gurobi, cert, command, date. Settings: docs/licenses.md."""
     if ctx.invoked_subcommand is not None:
@@ -354,9 +355,14 @@ def licenses_remind(ctx, send, show_text):
         raise click.ClickException(f"{combined} can't be read")
     rec = L.open_record(rec_path, write=send)
     out = L.remind(conn, s, rec, datetime.now(), dry=not send, config=_config(ctx))
-    if not out["notes"]:
+    if not out["notes"] and not out.get("tries"):
         click.echo("Nothing due now.")
         return
+    from nomad import license_tries as T
+    for n in out.get("tries") or []:
+        r = n["row"]
+        said = f"doesn't run: {r.get('reason') or r['result']}" if n["why"] == "notrun" else "runs again"
+        click.echo(f"  {r.get('site') or ''}: {T.label(r)} on {r['machine']}: {said}")
     for n in out["notes"]:
         r = n.row
         what = {"ends": L.ends_words(r), "ended": L.ends_words(r), "unread": f"can't be read: {r['problem']}",
@@ -384,3 +390,193 @@ def licenses_timer(ctx, account, when, apply, force):
     from nomad.timers import install
     install(ctx, "nomad-licenses", "NOMAD license reminders", "licenses remind --send", when, account, apply,
             force)
+
+
+# -- whether licensed programs run on the lab machines (1.59.0) ---------------------------------
+
+TRIES = ("collectors", "license_tries", "programs")
+
+
+def _tries_settings(ctx):
+    """The site's [collectors.license_tries], with the workstations it would try."""
+    from nomad import license_tries as T
+    from nomad.collectors.plan import plan
+    for p in plan(_config(ctx)):
+        if p.name == "license_tries":
+            return T.settings(p.config), p.enabled
+    return T.settings({}), False
+
+
+def _when(at) -> str:
+    try:
+        d = datetime.fromisoformat(str(at))
+    except (TypeError, ValueError):
+        return str(at or "")
+    return f"{d.day} {d.strftime('%b')} {d.strftime('%H:%M')}"
+
+
+def _print_tries(data: dict, hub: bool) -> None:
+    from nomad import license_tries as T
+    groups = T.summary(data)
+    if not groups:
+        click.echo("No tries kept yet." + ("" if hub else " Set [collectors.license_tries] "
+                                           "(nomad licenses tries setup), then nomad licenses tries now."))
+    for g in groups:
+        where = f"{g['site']}: " if hub and g["site"] else ""
+        n = len(g["runs"]) + len(g["not"])
+        click.echo(f"{g['label']} ({where}{g['install']}): runs on {len(g['runs'])} of {n}")
+        by: dict = {}
+        for m, res, why, since in g["not"]:
+            by.setdefault((res, why), []).append((m, since))
+        for (res, why), ms in sorted(by.items(), key=lambda kv: -len(kv[1])):
+            verb = "doesn't start on" if res == "nostart" else "doesn't run on"
+            first = min((s for _m, s in ms if s), default=None)
+            click.echo(f"   {verb} {len(ms)}: {', '.join(m for m, _s in ms)}: {why}"
+                       + (f" (since {_when(first)})" if first else ""))
+    gone = [h for h in data.get("hosts", []) if not h.get("reached")]
+    if gone:
+        click.echo("Not reached at the last try: " + ", ".join(
+            f"{h['machine']}" + (f" (since {_when(h['reached_at'])})" if h.get("reached_at") else "")
+            for h in sorted(gone, key=lambda h: h["machine"])))
+    last = max((h.get("tried_at") or "" for h in data.get("hosts", [])), default="")
+    if last:
+        click.echo(f"Tried last: {_when(last)}.")
+
+
+@licenses_group.group("tries", invoke_without_command=True)
+@click.option("--site", help="On the hub: only this site's.")
+@click.option("--json", "as_json", is_flag=True, help="As JSON.")
+@click.pass_context
+def licenses_tries(ctx, site, as_json):
+    """Whether licensed programs run on the lab machines: a tiny job with each
+    install of each program listed, on each workstation, twice a day
+    ([collectors.license_tries], docs/licenses.md).
+
+    \b
+    nomad licenses tries              what ran where, at the last try (on the hub: every site's)
+    nomad licenses tries now          on the site: try now (and keep it)
+    nomad licenses tries setup NAME RECIPE --min-version 6 [--apply]
+                                      on the site: list a program to try (RECIPE: qchem)"""
+    if ctx.invoked_subcommand is not None:
+        return
+    from nomad import license_tries as T
+    combined = _combined(ctx)
+    path = combined or _site_db(ctx)
+    conn = _open_ro(path) if path.exists() else None
+    data = T.listing(conn, site)
+    if as_json:
+        click.echo(json.dumps(data, indent=1, default=str))
+        return
+    if combined is None:
+        s, on = _tries_settings(ctx)
+        for p in s.problems:
+            click.echo(f"note: {p}", err=True)
+        if s.programs and not on:
+            click.echo("note: [collectors.license_tries] isn't enabled: nothing is tried on its own", err=True)
+    _print_tries(data, hub=combined is not None)
+
+
+@licenses_tries.command("now")
+@click.option("--machine", "machines", multiple=True, metavar="HOST", help="Only this machine (again for more).")
+@click.pass_context
+def licenses_tries_now(ctx, machines):
+    """On the site: try each program on each machine now (not waiting for the
+    collector's turn), keep what came, and say it."""
+    from nomad import license_tries as T
+    s, _on = _tries_settings(ctx)
+    for p in s.problems:
+        click.echo(f"note: {p}", err=True)
+    if not s.programs:
+        raise click.ClickException("no [[collectors.license_tries.programs]] here (nomad licenses tries setup)")
+    if machines:
+        unknown = [m for m in machines if m not in s.machines]
+        if unknown:
+            raise click.ClickException(f"not among this site's machines: {', '.join(unknown)}")
+        s.machines = list(machines)
+    if not s.machines:
+        raise click.ClickException("no machines: [collectors.workstation] workstations, or machines = [...]")
+    click.echo(f"Trying {', '.join(p.name for p in s.programs)} on {len(s.machines)} machine(s), "
+               f"{min(s.at_once, len(s.machines))} at a time...")
+    db = _site_db(ctx)
+    try:
+        db.parent.mkdir(parents=True, exist_ok=True)
+        with T.one_round(db):
+            results = T.try_all(s)
+            conn = sqlite3.connect(str(db), timeout=30)
+            try:
+                T.store(conn, results, s.programs, keep_others=bool(machines))
+                data = T.listing(conn, machines=None if not machines else {m.split(".")[0].lower() for m in machines})
+            finally:
+                conn.close()
+    except T.Busy:
+        raise click.ClickException("another round of tries is going on (the collector's): "
+                                   "nomad licenses tries shows it once it ends") from None
+    except sqlite3.Error as e:
+        raise click.ClickException(f"{db}: {e}") from None
+    _print_tries(data, hub=False)
+
+
+@licenses_tries.command("setup")
+@click.argument("name")
+@click.argument("recipe")
+@click.option("--min-version", help="Leave out installs older than this (6: Q-Chem 6.0 and newer).")
+@click.option("--replace", is_flag=True, help="Replace the entry of that name.")
+@click.option("--apply", is_flag=True, help="Write it (otherwise only show it).")
+@click.pass_context
+def licenses_tries_setup(ctx, name, recipe, min_version, replace, apply):
+    """List a program to try on this site's lab machines: a
+    [[collectors.license_tries.programs]] entry (and [collectors.license_tries]
+    enabled = true when it isn't set). Shows it first; --apply writes it, with
+    a copy of the file before."""
+    from nomad import license_tries as T
+    from nomad.cli import _lab_edit
+    from nomad.config.edit import loads, table_text
+    body: dict = {"name": name, "recipe": recipe.lower()}
+    if min_version:
+        body["min_version"] = str(min_version)
+    s = T.settings({"programs": [body]})
+    if s.problems or not s.programs:
+        raise click.UsageError("; ".join(s.problems) or "not an entry nomad reads")
+    edit = _lab_edit(ctx)
+
+    def listed(d) -> list:
+        c = d.get("collectors") if isinstance(d.get("collectors"), dict) else {}
+        sec = c.get("license_tries") if isinstance(c.get("license_tries"), dict) else {}
+        return [e for e in (sec.get("programs") or []) if isinstance(e, dict)
+                and str(e.get("name", "")).strip().lower() == name.strip().lower()]
+
+    old = listed(edit.data)
+    if old:
+        if {k: old[0].get(k) for k in body} == body and set(old[0]) <= set(body):
+            click.echo(f"{name} is listed already, as said. Nothing to change.")
+            return
+        if not replace:
+            raise click.ClickException(f"{name} is listed already, differently: --replace to replace it")
+        edit.remove_entries(TRIES, name=old[0]["name"])
+    sec = ((edit.data.get("collectors") or {}).get("license_tries") or {})
+    if "enabled" not in sec:
+        edit.insert_key(TRIES[:2], "enabled", True)
+    elif sec.get("enabled") is not True:
+        click.echo("note: [collectors.license_tries] says enabled = false: nothing is tried on its own "
+                   "until it is true", err=True)
+    edit.add_entry(TRIES, body)
+
+    def check(d):
+        got = listed(d)
+        return len(got) == 1 and {k: got[0].get(k) for k in body} == body
+
+    if not check(loads(edit.text)):
+        raise click.ClickException("the edit didn't read back as meant: nothing written")
+    if not apply:
+        click.echo(f"Would {'replace' if old else 'add'}, in {edit.path}:\n")
+        click.echo(table_text(TRIES, body, array=True))
+        click.echo("Run again with --apply to write it.")
+        return
+    try:
+        keep = edit.save(check, tag="license-tries")
+    except ValueError as e:
+        raise click.ClickException(f"nothing written: {e}") from None
+    click.echo(f"{'Replaced' if old else 'Added'} {name} in {edit.path}"
+               + (f" (the file before: {keep.name})" if keep else "") + ".")
+    st, _on = _tries_settings(ctx)
+    click.echo(f"It will be tried on {len(st.machines)} machine(s) twice a day; now: nomad licenses tries now")

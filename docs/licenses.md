@@ -135,6 +135,61 @@ What is due goes in one email:
 The emails name licenses and machines, never people, and link to the
 Console's list.
 
+## Whether a program runs on the lab machines
+
+A license can be in force and still not cover a machine. A program licensed
+machine by machine (Q-Chem's node-locked license) refuses to start on a
+workstation added after its license was made, and its license file says
+nothing a script can read about which machines it covers. So nomad tries:
+twice a day, on each workstation a site collects from, a tiny job with each
+install of each program listed. For Q-Chem it is two hydrogen atoms,
+Hartree-Fock, the smallest basis: a few seconds. It runs as an unprivileged
+account (`run_as`, the gate's `nomad`; `nobody` where there is none), in a
+folder under /tmp that is removed after.
+
+On the site that reaches the machines (the workstation collector's):
+
+    [collectors.license_tries]
+    enabled = true
+    # min_hours = 11              # try at most this often (twice a day)
+    # machines = []               # default: [collectors.workstation] workstations
+    # ssh_user = "root"           # the account ssh logs in as on each machine
+    # run_as = "nomad"            # the account each tiny job runs as (else nobody)
+    # timeout = 120               # seconds one tiny job may take
+    # at_once = 6                 # machines tried at the same time
+
+    [[collectors.license_tries.programs]]
+    name = "Q-Chem"
+    recipe = "qchem"              # how to try it (nomad knows: qchem)
+    min_version = "6"             # older installs are left out
+    # roots = ["/opt", "/usr/local", "/software", "/apps", "/usr/local/sw", "/share/apps"]
+
+    nomad licenses tries setup Q-Chem qchem --min-version 6 [--apply]   list it (shown first)
+    nomad licenses tries now          try now on every machine (or --machine HOST), and keep it
+    nomad licenses tries              what ran where at the last try (on the hub: every site's)
+
+For each machine and install, one of:
+
+- **runs**;
+- **license**: the program refused its license, and why in a few words:
+  "the license expired on 12 Sep 2026", "this machine isn't in the license";
+- **doesn't start**: "its setup says it is in /usr/local/qchem70, which isn't
+  on this machine";
+- **still running** after `timeout`, or **failed** (its last line).
+
+Q-Chem's installs are the folders named qchem* (or q-chem*) two levels under
+the `roots` that hold `qcaux/license/qchem.license.dat`; a folder's version
+is the digits in its name (qchem64: 6.4, qchem611: 6.1.1). Nothing the
+program prints is kept beyond those words: its license keys and the
+machine's ids are never stored or sent. A machine that doesn't answer keeps
+its last results, marked not reached.
+
+The daily license email (`nomad licenses remind`) says each change once: a
+program that doesn't run on a machine (the first email lists every one
+then), and one that runs there again. In the Console, staff see every
+machine on the Licenses page, and each lab's people see their own machines
+on their lab's page.
+
 ## In the Console
 
 Staff see every license on the Licenses page: when each ends, in days, as

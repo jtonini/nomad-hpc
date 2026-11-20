@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.59.0 (November 2026)
+
+- **Whether licensed programs run on the lab machines** (`nomad.license_tries`,
+  the `license_tries` collector, docs/licenses.md). Twice a day, on each
+  workstation a site collects from (over the ssh its workstation collector
+  uses), a tiny job with each install of each program listed, as an
+  unprivileged account in a folder under /tmp removed after. Q-Chem first
+  (`recipe = "qchem"`, `min_version`): a node-locked license refuses a
+  machine added after it was made, and its file can't say which machines it
+  covers. Kept per machine and install: runs, license refused (expired on a
+  date; this machine isn't in the license), doesn't start (its setup points
+  at a folder not on this machine), still running, failed: in nomad's
+  words, never the program's keys or ids. `nomad licenses tries` (the hub:
+  every site's), `tries now`, `tries setup NAME RECIPE --min-version
+  [--apply]`. The daily license email says each change once: a program that
+  stops running on a machine, one that runs again.
+
 ## v1.58.1 (November 2026)
 
 - nomad-gate `jobs`: each job's partition, and the cores and GPUs it asked

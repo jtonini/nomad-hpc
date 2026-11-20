@@ -89,6 +89,10 @@ SPECS: tuple[Spec, ...] = (
     Spec("licenses", "licenses", "LicensesCollector", False,
          "a machine whose licensed software (or web certificate) is read there", (), (),
          ("license_status",)),
+    # Whether licensed programs run on the lab machines (1.59.0): a tiny job on each (nomad.license_tries).
+    Spec("license_tries", "license_tries", "LicenseTriesCollector", False,
+         "a site that reaches its lab workstations over SSH (as the workstation collector does)", ("ssh",), (),
+         ("license_tries", "license_try_hosts")),
     # Power supplies, voltages and fans (1.25.8): the root helper's files (scripts/power_root_probe.py).
     Spec("power", "power", "PowerCollector", False,
          "a host whose root runs the power helper (scripts/power_root_probe.py)", (), (),
@@ -211,6 +215,12 @@ def plan(config: dict) -> list[Planned]:
         if spec.name in ("temps", "clock"):
             cfg.setdefault("alert_rules", (config.get("alerts") or {}).get(spec.name) or {})
             # workstations = true: the workstation collector's own list (its table's, or the top level's)
+            ws = (config.get("collectors", {}) or {}).get("workstation", {}) or {}
+            listed = ws.get("workstations") or config.get("workstations") or []
+            cfg.setdefault("workstation_hosts", [w.get("hostname") for w in listed
+                                                 if isinstance(w, dict) and w.get("hostname")])
+        if spec.name == "license_tries":
+            # machines: its own list, else the workstation collector's
             ws = (config.get("collectors", {}) or {}).get("workstation", {}) or {}
             listed = ws.get("workstations") or config.get("workstations") or []
             cfg.setdefault("workstation_hosts", [w.get("hostname") for w in listed

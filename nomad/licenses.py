@@ -1113,9 +1113,21 @@ def _shown_day(at: str | None) -> str:
     return f"{d.day} {d.strftime('%b %Y')}"
 
 
-def letter(notes: list[Note], s: Settings, today: date | None = None) -> tuple[str, str]:
-    """(subject, text) of the one email for these notes. It names no people."""
+def letter(notes: list[Note], s: Settings, today: date | None = None, tries: list | None = None) -> tuple[str, str]:
+    """(subject, text) of the one email for these notes, and (1.59.0) the
+    licensed programs that stopped running on a lab machine or run again
+    (``tries``, nomad.license_tries.due). It names no people."""
+    from nomad import license_tries as T
     today = today or date.today()
+    t_subject, t_lines = T.section(tries or [])
+    if not notes:
+        lines = ["Hello,", ""] + t_lines
+        if s.link:
+            lines += [f"Every license, and where each program runs: {s.link}", ""]
+        lines += ["nomad tries each listed program on the lab machines twice a day "
+                  "([collectors.license_tries]) and says each change once (docs/licenses.md).", "",
+                  f"-- nomad, for {s.team}"]
+        return "NOMAD: " + t_subject, "\n".join(lines) + "\n"
     endings = sorted((n for n in notes if n.why == "ends"), key=lambda n: n.days)
     ended = [n for n in notes if n.why == "ended"]
     bits = []
@@ -1131,6 +1143,8 @@ def letter(notes: list[Note], s: Settings, today: date | None = None) -> tuple[s
                     else f"{len(ended)} license{'s' if len(ended) != 1 else ''} ended")
     if not bits:
         bits.append(f"{len(notes)} license{'s' if len(notes) != 1 else ''} nomad can't read")
+    if t_subject:
+        bits.append(t_subject)
     subject = "NOMAD: " + "; ".join(bits)
     lines = ["Hello,", ""]
     for n in notes:
@@ -1152,6 +1166,7 @@ def letter(notes: list[Note], s: Settings, today: date | None = None) -> tuple[s
         if r["about"]:
             lines.append(f"  {r['about']}")
         lines.append("")
+    lines += t_lines
     if s.link:
         lines += [f"Every license: {s.link}", ""]
     days = ", ".join(str(d) for d in s.remind_days[:-1]) + (f" and {s.remind_days[-1]}" if len(s.remind_days) > 1
@@ -1166,14 +1181,17 @@ def remind(conn, s: Settings, rec, now: datetime | None = None, dry: bool = True
            config: dict | None = None) -> dict:
     """What is due now, and (``dry`` False) the email that says it, kept so
     nothing goes twice. {"notes": [...], "subject", "text", "status", "error"}."""
+    from nomad import license_tries as T
     now = (now or datetime.now()).replace(microsecond=0)
     rows = listing(conn, now) if conn is not None else []
-    notes = due(rows, s, told(rec), now)
-    out: dict = {"notes": notes, "subject": "", "text": "", "status": "nothing due", "error": None,
+    done = told(rec)
+    notes = due(rows, s, done, now)
+    tries = T.due(T.listing(conn), done) if conn is not None else []
+    out: dict = {"notes": notes, "tries": tries, "subject": "", "text": "", "status": "nothing due", "error": None,
                  "to": list(s.to)}
-    if not notes:
+    if not notes and not tries:
         return out
-    out["subject"], out["text"] = letter(notes, s, now.date())
+    out["subject"], out["text"] = letter(notes, s, now.date(), tries)
     out["status"] = "would send"
     if dry:
         return out
@@ -1204,8 +1222,11 @@ def remind(conn, s: Settings, rec, now: datetime | None = None, dry: bool = True
             for what, st in tuple((n.what, st) for st in n.steps) + n.extra:
                 rec.execute("INSERT OR IGNORE INTO license_told (site, name, what, step, at) VALUES (?, ?, ?, ?, ?)",
                             (n.row["site"], n.row["name"], what, st, at))
+        for n in tries:
+            rec.execute("INSERT OR IGNORE INTO license_told (site, name, what, step, at) VALUES (?, ?, ?, ?, ?)",
+                        (n["row"].get("site") or "", T.told_name(n["row"]), n["what"], "once", at))
         rec.execute("INSERT INTO license_mail (at, sent_to, subject, notes) VALUES (?, ?, ?, ?)",
-                    (at, ", ".join(s.to), out["subject"], len(notes)))
+                    (at, ", ".join(s.to), out["subject"], len(notes) + len(tries)))
     out["status"] = "sent"
     return out
 
