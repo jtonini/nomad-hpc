@@ -11,7 +11,7 @@ says each change in the daily license email.
     [[collectors.license_tries.programs]]
     name = "Q-Chem"
     recipe = "qchem"
-    min_version = "6"
+    min_version = "6.4"
 """
 from __future__ import annotations
 

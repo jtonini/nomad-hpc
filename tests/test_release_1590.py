@@ -68,7 +68,7 @@ def test_settings():
                                  {"name": "X", "recipe": "unknown"}, {"recipe": "qchem"},
                                  {"name": "Y", "recipe": "qchem", "min_version": "six"}],
                     "workstation_hosts": ["ws1", "ws1", "bad host"], "run_as": "Bad Name", "timeout": 5})
-    assert [p.name for p in s.programs] == ["Q-Chem", "Y"] and s.programs[0].min_major == 6
+    assert [p.name for p in s.programs] == ["Q-Chem", "Y"] and s.programs[0].min_version == "6.4"
     assert s.machines == ["ws1"] and s.run_as == "nomad" and s.ssh_user == "root" and s.timeout == 10
     assert any("unknown" in p for p in s.problems) and any("needs a name" in p for p in s.problems)
     assert any("'bad host'" in p for p in s.problems) and any("six" in p for p in s.problems)

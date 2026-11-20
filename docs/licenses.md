@@ -161,10 +161,10 @@ On the site that reaches the machines (the workstation collector's):
     [[collectors.license_tries.programs]]
     name = "Q-Chem"
     recipe = "qchem"              # how to try it (nomad knows: qchem)
-    min_version = "6"             # older installs are left out
+    min_version = "6.4"           # older installs are left out (6.1, 6.3, ...)
     # roots = ["/opt", "/usr/local", "/software", "/apps", "/usr/local/sw", "/share/apps"]
 
-    nomad licenses tries setup Q-Chem qchem --min-version 6 [--apply]   list it (shown first)
+    nomad licenses tries setup Q-Chem qchem --min-version 6.4 [--apply]   list it (shown first)
     nomad licenses tries now          try now on every machine (or --machine HOST), and keep it
     nomad licenses tries              what ran where at the last try (on the hub: every site's)
 
@@ -179,7 +179,9 @@ For each machine and install, one of:
 
 Q-Chem's installs are the folders named qchem* (or q-chem*) two levels under
 the `roots` that hold `qcaux/license/qchem.license.dat`; a folder's version
-is the digits in its name (qchem64: 6.4, qchem611: 6.1.1). Nothing the
+is the digits in its name (qchem64: 6.4, qchem611: 6.1.1), and those older
+than `min_version` are left out (6.4 leaves out 6.1, 6.1.1 and 6.3; once
+left out, their rows go at the next try). Nothing the
 program prints is kept beyond those words: its license keys and the
 machine's ids are never stored or sent. A machine that doesn't answer keeps
 its last results, marked not reached.

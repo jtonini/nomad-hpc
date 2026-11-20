@@ -362,7 +362,7 @@ def licenses_remind(ctx, send, show_text):
     for n in out.get("tries") or []:
         r = n["row"]
         said = f"doesn't run: {r.get('reason') or r['result']}" if n["why"] == "notrun" else "runs again"
-        click.echo(f"  {r.get('site') or ''}: {T.label(r)} on {r['machine']}: {said}")
+        click.echo(f"  {r.get('site') or ''}: {T.label(r)} on {r['machine']} ({r['install']}): {said}")
     for n in out["notes"]:
         r = n.row
         what = {"ends": L.ends_words(r), "ended": L.ends_words(r), "unread": f"can't be read: {r['problem']}",
@@ -455,7 +455,7 @@ def licenses_tries(ctx, site, as_json):
     \b
     nomad licenses tries              what ran where, at the last try (on the hub: every site's)
     nomad licenses tries now          on the site: try now (and keep it)
-    nomad licenses tries setup NAME RECIPE --min-version 6 [--apply]
+    nomad licenses tries setup NAME RECIPE --min-version 6.4 [--apply]
                                       on the site: list a program to try (RECIPE: qchem)"""
     if ctx.invoked_subcommand is not None:
         return
@@ -519,7 +519,7 @@ def licenses_tries_now(ctx, machines):
 @licenses_tries.command("setup")
 @click.argument("name")
 @click.argument("recipe")
-@click.option("--min-version", help="Leave out installs older than this (6: Q-Chem 6.0 and newer).")
+@click.option("--min-version", help="Leave out installs older than this (6.4: Q-Chem 6.4 and newer).")
 @click.option("--replace", is_flag=True, help="Replace the entry of that name.")
 @click.option("--apply", is_flag=True, help="Write it (otherwise only show it).")
 @click.pass_context

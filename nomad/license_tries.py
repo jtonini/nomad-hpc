@@ -40,7 +40,7 @@ the unprivileged account). On the site that reaches them (its nomad.toml)::
     [[collectors.license_tries.programs]]
     name = "Q-Chem"
     recipe = "qchem"              # how to try it (nomad knows: qchem)
-    min_version = "6"             # older installs are left out
+    min_version = "6.4"           # older installs are left out (6.1, 6.3, ...)
     # roots = ["/opt", "/usr/local", "/software", "/apps", "/usr/local/sw", "/share/apps"]
 
 The hub gets the rows with everything else (``nomad sync``), lists them
@@ -86,7 +86,7 @@ class TriesError(ValueError):
 class Program:
     name: str
     recipe: str
-    min_major: int = 0
+    min_version: str = "0"        # "6.4": installs older than 6.4 are left out
     roots: tuple = ROOTS
 
 
@@ -102,14 +102,16 @@ class Settings:
     problems: list = field(default_factory=list)
 
 
-def _major(value, where: str, problems: list) -> int:
+def _min_version(value, where: str, problems: list) -> str:
+    """min_version as nomad compares it: "6.4" (from "6.4", 6.4 or 6; 1.59.0 read
+    only the first number, so 6.4 meant 6)."""
     if value in (None, ""):
-        return 0
-    m = re.match(r"^\s*(\d+)", str(value))
-    if not m:
+        return "0"
+    m = re.fullmatch(r"\s*(\d+(?:\.\d+)*)\s*", str(value))
+    if not m or isinstance(value, bool):
         problems.append(f"{where} min_version {value!r} is not a version (6, 6.4, ...)")
-        return 0
-    return int(m.group(1))
+        return "0"
+    return ".".join(str(int(x)) for x in m.group(1).split("."))
 
 
 def settings(section: dict | None) -> Settings:
@@ -137,7 +139,7 @@ def settings(section: dict | None) -> Settings:
         elif not (isinstance(roots, list) and all(isinstance(r, str) and r.startswith("/") for r in roots)):
             p.append(f"{where} ({name}): roots should be a list of folders (\"/opt\", ...)")
             roots = ROOTS
-        s.programs.append(Program(name, recipe, _major(raw.get("min_version"), where, p),
+        s.programs.append(Program(name, recipe, _min_version(raw.get("min_version"), where, p),
                                   tuple(r.rstrip("/") or "/" for r in roots)))
     listed = sec.get("machines")
     if listed:
@@ -195,9 +197,21 @@ echo "@host	$(hostname -s 2>/dev/null || hostname)	${RUNAS:-$(id -un)}"
 '''
 
 _QCHEM = r'''
-# ---- QCHEM: PROGRAM, MINMAJOR, ROOTS
+# ---- QCHEM: PROGRAM, MINVERSION, ROOTS
+# older DIGITS MIN: is the install DIGITS names (64 = 6.4, 611 = 6.1.1, as
+# nomad reads a folder's name) older than MIN (6.4)?
+older() {
+    local digits=$1 i a b m
+    IFS=. read -r -a m <<<"$2"
+    for ((i = 0; i < ${#m[@]} || i < ${#digits}; i++)); do
+        a=${digits:i:1}; b=${m[i]:-0}
+        ((10#${a:-0} < 10#$b)) && return 0
+        ((10#${a:-0} > 10#$b)) && return 1
+    done
+    return 1
+}
 try_qchem() {
-    local prog=$1 minmajor=$2; shift 2
+    local prog=$1 minversion=$2; shift 2
     local roots=() d q lic
     for d in "$@"; do [ -d "$d" ] && roots+=("$d"); done
     [ ${#roots[@]} -gt 0 ] || return 0
@@ -223,7 +237,7 @@ $end
     local t run rc t0 secs st digits
     while IFS= read -r q; do
         digits=$(basename "$q" | grep -o '[0-9][0-9]*' | head -1)
-        if [ -n "$digits" ] && [ "${digits:0:1}" -lt "$minmajor" ]; then continue; fi
+        if [ -n "$digits" ] && older "$digits" "$minversion"; then continue; fi
         t=$(mktemp -d /tmp/nomad-tries.XXXXXX) || { echo "@try	$prog	qchem	$q	failed	0"; echo "@said	no folder could be made in /tmp"; continue; }
         printf '%s' "$input" > "$t/h2.in"
         [ -n "$RUNAS" ] && chown -R "$RUNAS" "$t" 2>/dev/null
@@ -268,7 +282,7 @@ def script(s: Settings) -> str:
     calls = []
     for p in s.programs:
         if p.recipe == "qchem":
-            calls.append("try_qchem " + " ".join(shlex.quote(x) for x in (p.name, str(p.min_major), *p.roots)))
+            calls.append("try_qchem " + " ".join(shlex.quote(x) for x in (p.name, p.min_version, *p.roots)))
     return _SCRIPT_HEAD + _QCHEM + "\n".join(calls) + "\nexit 0\n"
 
 

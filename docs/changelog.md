@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.59.1 (November 2026)
+
+- `[[collectors.license_tries.programs]]` `min_version` is the whole version:
+  `"6.4"` leaves out Q-Chem 6.1, 6.1.1 and 6.3 (1.59.0 read only the first
+  number, so 6.4 meant 6.0). Once left out, an install's rows go at the next
+  try, and the license email doesn't name it again. `nomad licenses tries
+  setup NAME RECIPE --min-version 6.4 --replace --apply` changes it.
+- `nomad licenses remind`: each program line names the install too (a
+  machine with three installs of one version was named three times alike).
+
 ## v1.59.0 (November 2026)
 
 - **Whether licensed programs run on the lab machines** (`nomad.license_tries`,
