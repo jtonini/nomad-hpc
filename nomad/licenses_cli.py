@@ -90,7 +90,7 @@ def licenses_group(ctx, here=False, as_json=False):
     nomad licenses renew NAME no      not being renewed: listed, no reminders; --apply
     nomad licenses remind [--send]    on the hub: what is due, and the email
     nomad licenses timer [--apply]    on the hub: remind every morning, from systemd
-    nomad licenses tries              whether licensed programs run on the lab machines (1.59.0)
+    nomad licenses tries              whether licensed programs run on the lab machines or nodes (1.59.0)
 
     KIND: posit, flexlm, gurobi, cert, command, date. Settings: docs/licenses.md."""
     if ctx.invoked_subcommand is not None:
@@ -137,25 +137,7 @@ def licenses_read(ctx, name=None):
         if not items:
             raise click.ClickException(f"no license named {name!r} here")
     readings = {it.name: L.read(it) for it in items}
-    db = _site_db(ctx)
-    try:
-        db.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db), timeout=30)
-        try:
-            all_items = L.items_of(_section(ctx))[0]
-            if name is not None:
-                # only these read: the others stay as they were
-                conn.executescript(L.SCHEMA)
-                keep = {r[0] for r in conn.execute(f"SELECT name FROM {L.TABLE}")}
-                kept = [it for it in all_items if it.name in keep or it.name in readings]
-                L.store(conn, kept, readings)
-            else:
-                L.store(conn, all_items, readings)
-            rows = [r for r in L.listing(conn) if r["name"] in readings]
-        finally:
-            conn.close()
-    except sqlite3.Error as e:
-        raise click.ClickException(f"{db}: {e}") from None
+    rows = _keep(ctx, L.items_of(_section(ctx))[0], readings, only=name is not None)
     _print_rows(rows, hub=False)
     if any(r["problem"] for r in rows):
         sys.exit(1)
@@ -222,6 +204,28 @@ def _same_name(entry, name: str) -> bool:
         " ".join(entry["name"].split()).lower() == name.lower()
 
 
+def _keep(ctx, all_items: list, readings: dict, only: bool) -> list:
+    """Keep these readings in this machine's database; ``only``: the others
+    stay as they were (those not read now). The rows read, as listed."""
+    db = _site_db(ctx)
+    try:
+        db.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(db), timeout=30)
+        try:
+            if only:
+                conn.executescript(L.SCHEMA)
+                keep = {r[0] for r in conn.execute(f"SELECT name FROM {L.TABLE}")}
+                kept = [it for it in all_items if it.name in keep or it.name in readings]
+                L.store(conn, kept, readings)
+            else:
+                L.store(conn, all_items, readings)
+            return [r for r in L.listing(conn) if r["name"] in readings]
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        raise click.ClickException(f"{db}: {e}") from None
+
+
 def _write(ctx, name: str, item: L.Item, replace: bool, apply: bool, tag: str) -> None:
     from nomad.cli import _lab_edit
     from nomad.config.edit import loads
@@ -264,11 +268,16 @@ def _write(ctx, name: str, item: L.Item, replace: bool, apply: bool, tag: str) -
         raise click.ClickException(f"nothing written: {e}") from None
     click.echo(f"{'Replaced' if old else 'Added'} {name} in {edit.path}" + (f" (the file before: {keep.name})"
                                                                             if keep else "") + ".")
-    if tag == "licenses-add":
-        rd = L.read(item)
-        said = L.ends_words({"ends": rd.ends, "never": rd.never}) if not rd.problem else f"can't: {rd.problem}"
-        click.echo(f"Read now: {said}" + (f" [{rd.detail}]" if rd.detail and item.kind != "date" else ""))
-        click.echo("The collector keeps it from its next run (or now: nomad licenses read).")
+    # Read and kept at once (1.59.2): the Licenses page has it after the hub's next sync,
+    # not after the collector's next reading hours later.
+    now_items = L.items_of((loads(edit.text).get("collectors") or {}).get("licenses") or {})[0]
+    mine = next((it for it in now_items if _same_name({"name": it.name}, name)), item)
+    rd = L.read(mine)
+    _keep(ctx, now_items, {mine.name: rd}, only=True)
+    said = L.ends_words({"ends": rd.ends, "never": rd.never}) if not rd.problem else f"can't: {rd.problem}"
+    click.echo(f"Read now and kept: {said}" + (f" [{rd.detail}]" if rd.detail and mine.kind != "date" else "")
+               + ("" if mine.renew else " (not being renewed: no reminders)"))
+    click.echo("The hub has it after its next sync.")
 
 
 @licenses_group.command("add")
@@ -418,7 +427,11 @@ def _when(at) -> str:
 def _print_tries(data: dict, hub: bool) -> None:
     from nomad import license_tries as T
     groups = T.summary(data)
-    if not groups:
+    reached = [h for h in data.get("hosts", []) if h.get("reached")]
+    if not groups and reached:
+        click.echo(f"No install of the programs listed (as new as min_version) on the {len(reached)} "
+                   "machine(s) reached.")
+    elif not groups:
         click.echo("No tries kept yet." + ("" if hub else " Set [collectors.license_tries] "
                                            "(nomad licenses tries setup), then nomad licenses tries now."))
     for g in groups:
@@ -448,15 +461,16 @@ def _print_tries(data: dict, hub: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="As JSON.")
 @click.pass_context
 def licenses_tries(ctx, site, as_json):
-    """Whether licensed programs run on the lab machines: a tiny job with each
-    install of each program listed, on each workstation, twice a day
-    ([collectors.license_tries], docs/licenses.md).
+    """Whether licensed programs run on the lab machines (or a cluster's
+    nodes): a tiny job with each install of each program listed, on each
+    machine, twice a day ([collectors.license_tries], docs/licenses.md).
 
     \b
     nomad licenses tries              what ran where, at the last try (on the hub: every site's)
     nomad licenses tries now          on the site: try now (and keep it)
-    nomad licenses tries setup NAME RECIPE --min-version 6.4 [--apply]
-                                      on the site: list a program to try (RECIPE: qchem)"""
+    nomad licenses tries setup NAME RECIPE --min-version 6.4 [--nodes] [--apply]
+                                      on the site: list a program to try (RECIPE: qchem);
+                                      --nodes: on every node of this cluster's Slurm"""
     if ctx.invoked_subcommand is not None:
         return
     from nomad import license_tries as T
@@ -488,13 +502,17 @@ def licenses_tries_now(ctx, machines):
         click.echo(f"note: {p}", err=True)
     if not s.programs:
         raise click.ClickException("no [[collectors.license_tries.programs]] here (nomad licenses tries setup)")
+    why = T.resolve(s)
+    if why:
+        raise click.ClickException(why)
     if machines:
         unknown = [m for m in machines if m not in s.machines]
         if unknown:
             raise click.ClickException(f"not among this site's machines: {', '.join(unknown)}")
         s.machines = list(machines)
     if not s.machines:
-        raise click.ClickException("no machines: [collectors.workstation] workstations, or machines = [...]")
+        raise click.ClickException('no machines: [collectors.workstation] workstations, machines = [...] '
+                                   'or "slurm"')
     click.echo(f"Trying {', '.join(p.name for p in s.programs)} on {len(s.machines)} machine(s), "
                f"{min(s.at_once, len(s.machines))} at a time...")
     db = _site_db(ctx)
@@ -520,13 +538,15 @@ def licenses_tries_now(ctx, machines):
 @click.argument("name")
 @click.argument("recipe")
 @click.option("--min-version", help="Leave out installs older than this (6.4: Q-Chem 6.4 and newer).")
+@click.option("--nodes", is_flag=True, help='Try on every node of this cluster\'s Slurm (machines = "slurm").')
 @click.option("--replace", is_flag=True, help="Replace the entry of that name.")
 @click.option("--apply", is_flag=True, help="Write it (otherwise only show it).")
 @click.pass_context
-def licenses_tries_setup(ctx, name, recipe, min_version, replace, apply):
-    """List a program to try on this site's lab machines: a
-    [[collectors.license_tries.programs]] entry (and [collectors.license_tries]
-    enabled = true when it isn't set). Shows it first; --apply writes it, with
+def licenses_tries_setup(ctx, name, recipe, min_version, nodes, replace, apply):
+    """List a program to try on this site's lab machines (or, with --nodes,
+    on every node of its cluster): a [[collectors.license_tries.programs]]
+    entry (and [collectors.license_tries] enabled = true when it isn't set;
+    machines = "slurm" with --nodes). Shows it first; --apply writes it, with
     a copy of the file before."""
     from nomad import license_tries as T
     from nomad.cli import _lab_edit
@@ -546,13 +566,25 @@ def licenses_tries_setup(ctx, name, recipe, min_version, replace, apply):
                 and str(e.get("name", "")).strip().lower() == name.strip().lower()]
 
     old = listed(edit.data)
+    sec0 = ((edit.data.get("collectors") or {}).get("license_tries") or {})
+    wants_nodes = nodes and str(sec0.get("machines", "")).strip().lower() != "slurm"
     if old:
-        if {k: old[0].get(k) for k in body} == body and set(old[0]) <= set(body):
+        if {k: old[0].get(k) for k in body} == body and set(old[0]) <= set(body) and not wants_nodes:
             click.echo(f"{name} is listed already, as said. Nothing to change.")
             return
-        if not replace:
+        if not replace and not ({k: old[0].get(k) for k in body} == body and set(old[0]) <= set(body)):
             raise click.ClickException(f"{name} is listed already, differently: --replace to replace it")
         edit.remove_entries(TRIES, name=old[0]["name"])
+    if wants_nodes:
+        for i, table, k in edit.key_lines():
+            if table == TRIES[:2] and k == ("machines",):
+                try:
+                    edit.remove_line(i)
+                except ValueError:
+                    raise click.ClickException("[collectors.license_tries] machines goes on over several lines: "
+                                               'set machines = "slurm" by hand') from None
+                break
+        edit.insert_key(TRIES[:2], "machines", "slurm")
     sec = ((edit.data.get("collectors") or {}).get("license_tries") or {})
     if "enabled" not in sec:
         edit.insert_key(TRIES[:2], "enabled", True)
@@ -563,12 +595,17 @@ def licenses_tries_setup(ctx, name, recipe, min_version, replace, apply):
 
     def check(d):
         got = listed(d)
-        return len(got) == 1 and {k: got[0].get(k) for k in body} == body
+        ok = len(got) == 1 and {k: got[0].get(k) for k in body} == body
+        if nodes:
+            ok = ok and str(((d.get("collectors") or {}).get("license_tries") or {}).get("machines")) == "slurm"
+        return ok
 
     if not check(loads(edit.text)):
         raise click.ClickException("the edit didn't read back as meant: nothing written")
     if not apply:
         click.echo(f"Would {'replace' if old else 'add'}, in {edit.path}:\n")
+        if wants_nodes:
+            click.echo('[collectors.license_tries]\nmachines = "slurm"\n')
         click.echo(table_text(TRIES, body, array=True))
         click.echo("Run again with --apply to write it.")
         return
@@ -578,5 +615,8 @@ def licenses_tries_setup(ctx, name, recipe, min_version, replace, apply):
         raise click.ClickException(f"nothing written: {e}") from None
     click.echo(f"{'Replaced' if old else 'Added'} {name} in {edit.path}"
                + (f" (the file before: {keep.name})" if keep else "") + ".")
-    st, _on = _tries_settings(ctx)
-    click.echo(f"It will be tried on {len(st.machines)} machine(s) twice a day; now: nomad licenses tries now")
+    from nomad.collectors.plan import plan
+    st = next((T.settings(p.config) for p in plan(loads(edit.text)) if p.name == "license_tries"), T.settings({}))
+    T.resolve(st)
+    where = "node(s) (Slurm's, asked again each time)" if st.slurm else "machine(s)"
+    click.echo(f"It will be tried on {len(st.machines)} {where} twice a day; now: nomad licenses tries now")

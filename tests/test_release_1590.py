@@ -200,14 +200,14 @@ def test_told_once_each_change(tmp_path):
     rec = L.open_record(tmp_path / "licenses.db", write=True)
     sent = []
     out = L.remind(conn, s, rec, datetime(2026, 11, 21, 8, 20), dry=False, sender=lambda m, c: sent.append(m))
-    assert out["status"] == "sent" and out["subject"] == "NOMAD: Q-Chem doesn't run on some lab machines"
+    assert out["status"] == "sent" and out["subject"] == "NOMAD: Q-Chem doesn't run on some machines"
     assert "Q-Chem 6.4 (jonimitchell) doesn't run on 1 machine: erica. Why: this machine isn't in the license." \
         in out["text"] and "kevin" not in out["text"]
     assert L.remind(conn, s, rec, datetime(2026, 11, 21, 20), dry=False, sender=lambda m, c: sent.append(m))["status"] \
         == "nothing due"
     conn.execute(f"UPDATE {T.TABLE} SET result = 'runs', reason = '', since = '2026-11-22T08:00:00' WHERE machine = 'erica'")
     out = L.remind(conn, s, rec, datetime(2026, 11, 22, 8, 20), dry=False, sender=lambda m, c: sent.append(m))
-    assert out["subject"] == "NOMAD: licensed programs run again on lab machines" and "runs again on erica" in out["text"]
+    assert out["subject"] == "NOMAD: licensed programs run again on some machines" and "runs again on erica" in out["text"]
     assert L.remind(conn, s, rec, datetime(2026, 11, 23), dry=True)["status"] == "nothing due"
     conn.execute(f"UPDATE {T.TABLE} SET result = 'license', since = '2026-11-24T08:00:00' WHERE machine = 'erica'")
     assert L.remind(conn, s, rec, datetime(2026, 11, 24), dry=True)["status"] == "would send"
@@ -222,8 +222,8 @@ def test_with_a_license_ending_one_email(tmp_path):
                       "version": "6.4", "result": "license", "reason": "this machine isn't in the license"},
               "why": "notrun", "what": "license:x"}]
     subject, text = L.letter(notes, L.settings({}), datetime(2026, 11, 20).date(), tries)
-    assert subject == "NOMAD: Gurobi (spydur) ends in 11 days; Q-Chem doesn't run on some lab machines"
-    assert text.index("Gurobi (spydur)") < text.index("Licensed programs on the lab machines")
+    assert subject == "NOMAD: Gurobi (spydur) ends in 11 days; Q-Chem doesn't run on some machines"
+    assert text.index("Gurobi (spydur)") < text.index("Licensed programs on the machines")
 
 
 def test_the_commands(lab, tmp_path):

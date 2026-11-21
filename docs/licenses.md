@@ -97,8 +97,10 @@ The commands do the same without editing by hand, on that machine:
 
 `add` shows the entry first; `--apply` writes it (with `[collectors.licenses]
 enabled = true` if that isn't set), keeping a copy of the file before
-(`nomad.toml.bak-licenses-add-...`), and reads it once. An entry of that name
-already there, the same: nothing to do; different: `--replace`.
+(`nomad.toml.bak-licenses-add-...`), and reads and keeps it at once (so
+does `renew --apply`): the hub has it after its next sync, not hours later
+at the collector's next reading. An entry of that name already there, the
+same: nothing to do; different: `--replace`.
 
 `find` looks for Posit's programs, FlexLM and Gurobi license files in the
 usual software folders (never under /home; `--root FOLDER` for others) and
@@ -152,7 +154,9 @@ On the site that reaches the machines (the workstation collector's):
     [collectors.license_tries]
     enabled = true
     # min_hours = 11              # try at most this often (twice a day)
-    # machines = []               # default: [collectors.workstation] workstations
+    # machines = []               # default: [collectors.workstation] workstations;
+    #                             # "slurm": every node of this cluster (below)
+    # skip = []                   # machines left out (a node in repair)
     # ssh_user = "root"           # the account ssh logs in as on each machine
     # run_as = "nomad"            # the account each tiny job runs as (else nobody)
     # timeout = 120               # seconds one tiny job may take
@@ -164,7 +168,7 @@ On the site that reaches the machines (the workstation collector's):
     min_version = "6.4"           # older installs are left out (6.1, 6.3, ...)
     # roots = ["/opt", "/usr/local", "/software", "/apps", "/usr/local/sw", "/share/apps"]
 
-    nomad licenses tries setup Q-Chem qchem --min-version 6.4 [--apply]   list it (shown first)
+    nomad licenses tries setup Q-Chem qchem --min-version 6.4 [--nodes] [--apply]   list it (shown first)
     nomad licenses tries now          try now on every machine (or --machine HOST), and keep it
     nomad licenses tries              what ran where at the last try (on the hub: every site's)
 
@@ -178,7 +182,8 @@ For each machine and install, one of:
 - **still running** after `timeout`, or **failed** (its last line).
 
 Q-Chem's installs are the folders named qchem* (or q-chem*) two levels under
-the `roots` that hold `qcaux/license/qchem.license.dat`; a folder's version
+the `roots` that hold `qcaux/license/qchem.license.dat` and a `bin/qchem` (a
+folder that only holds the versions isn't tried); a folder's version
 is the digits in its name (qchem64: 6.4, qchem611: 6.1.1), and those older
 than `min_version` are left out (6.4 leaves out 6.1, 6.1.1 and 6.3; once
 left out, their rows go at the next try). Nothing the
@@ -191,6 +196,26 @@ program that doesn't run on a machine (the first email lists every one
 then), and one that runs there again. In the Console, staff see every
 machine on the Licenses page, and each lab's people see their own machines
 on their lab's page.
+
+### On a cluster's nodes
+
+The same tries on every compute node of a cluster, the condo nodes too (a
+license made for the nodes there when it was bought may not cover a node
+added later). On the cluster's head node, in the site's nomad.toml:
+
+    [collectors.license_tries]
+    enabled = true
+    machines = "slurm"            # every node Slurm knows, asked again at each round
+    # skip = ["node17"]           # left out
+    # ssh_user                    # default: the account nomad runs as here
+
+`nomad licenses tries setup Q-Chem qchem --min-version 6.4 --nodes --apply`
+writes both. The nodes are reached over ssh as that account, which needs to
+be let in on a node without a job there (where Slurm's pam_slurm_adopt keeps
+people out of nodes they have no job on, it can't: then list it in
+`skip`, or try lab machines only). The tiny job runs outside Slurm, on one
+core, for a few seconds. When Slurm gives no nodes, nothing is tried and
+nothing kept is dropped.
 
 ## In the Console
 

@@ -372,7 +372,7 @@ def test_add_shows_then_writes_once_and_renew_no(tmp_path):
     assert "[[collectors.licenses.items]]" in out.output and "Chem suite" not in cfg.read_text()
     out = run.invoke(cli, args + ["--apply"])
     assert out.exit_code == 0, out.output
-    assert "Read now: ends" in out.output
+    assert "Read now and kept: ends" in out.output
     text = cfg.read_text()
     assert "[collectors.licenses]\nenabled = true" in text and 'name = "Chem suite"' in text
     assert "already" in run.invoke(cli, args + ["--apply"]).output

@@ -1124,7 +1124,7 @@ def letter(notes: list[Note], s: Settings, today: date | None = None, tries: lis
         lines = ["Hello,", ""] + t_lines
         if s.link:
             lines += [f"Every license, and where each program runs: {s.link}", ""]
-        lines += ["nomad tries each listed program on the lab machines twice a day "
+        lines += ["nomad tries each listed program on the machines it is set to, twice a day "
                   "([collectors.license_tries]) and says each change once (docs/licenses.md).", "",
                   f"-- nomad, for {s.team}"]
         return "NOMAD: " + t_subject, "\n".join(lines) + "\n"

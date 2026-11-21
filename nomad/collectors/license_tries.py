@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
 """Whether licensed programs run on the lab machines this site reaches
-(1.59.0): twice a day, a tiny job with each install of each program listed,
-on each workstation (nomad.license_tries says how). The hub lists them and
-says each change in the daily license email.
+(1.59.0), or on its cluster's nodes (machines = "slurm", 1.59.2): twice a
+day, a tiny job with each install of each program listed, on each machine
+(nomad.license_tries says how). The hub lists them and says each change in
+the daily license email.
 
     [collectors.license_tries]
     enabled = true
@@ -28,10 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 class LicenseTriesCollector(BaseCollector):
-    """Whether licensed programs run on the lab machines, twice a day."""
+    """Whether licensed programs run on the lab machines or the cluster's nodes, twice a day."""
 
     name = "license_tries"
-    description = "Whether licensed programs run on the lab machines (a tiny job on each)"
+    description = "Whether licensed programs run on the lab machines or nodes (a tiny job on each)"
     default_interval = 3600
 
     def __init__(self, config: dict[str, Any], db_path):
@@ -55,11 +56,15 @@ class LicenseTriesCollector(BaseCollector):
         if not self.s.programs:
             self.note = "no [[collectors.license_tries.programs]]"
             return []
-        if not self.s.machines:
-            self.note = "no machines: [collectors.workstation] workstations, or machines = [...]"
-            return []
         if self.s.min_hours > 0 and self._recent():
             self.note = f"tried less than {self.s.min_hours:g} h ago"
+            return []
+        why = T.resolve(self.s)
+        if why:
+            self.note = why
+            return []
+        if not self.s.machines:
+            self.note = 'no machines: [collectors.workstation] workstations, machines = [...] or "slurm"'
             return []
         try:
             with T.one_round(self.db_path):

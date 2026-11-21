@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.59.2 (November 2026)
+
+- License tries on a cluster's nodes: `[collectors.license_tries] machines =
+  "slurm"` tries every node Slurm knows (asked again at each round, so a
+  condo node added later is tried too), less `skip = [...]`, over ssh as
+  the account nomad runs as (`ssh_user`). `nomad licenses tries setup NAME
+  RECIPE --nodes --apply` sets it.
+- A folder holding Q-Chem's versions (qcaux and a license, no `bin/qchem`)
+  isn't tried as an install.
+- The license email says "machines", not "lab machines": a cluster's nodes
+  are tried too.
+- `nomad licenses add --apply` and `renew --apply` read and keep the license
+  at once, so the hub (and the Console's Licenses page) has it after its
+  next sync rather than at the collector's next reading.
+
 ## v1.59.1 (November 2026)
 
 - `[[collectors.license_tries.programs]]` `min_version` is the whole version:

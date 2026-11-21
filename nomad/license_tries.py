@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Whether licensed programs run on the lab machines (1.59.0).
+"""Whether licensed programs run on the lab machines (1.59.0), and on a
+cluster's nodes (1.59.2).
 
 A license file can be in force and still not cover a machine: a program
 licensed node by node (Q-Chem's node-locked license) refuses to start on a
@@ -31,8 +32,11 @@ the unprivileged account). On the site that reaches them (its nomad.toml)::
     [collectors.license_tries]
     enabled = true
     # min_hours = 11              # try at most this often (twice a day)
-    # machines = []               # default: [collectors.workstation] workstations
+    # machines = []               # default: [collectors.workstation] workstations;
+    #                             # "slurm": every node the cluster's Slurm knows (1.59.2)
+    # skip = []                   # machines left out (a node in repair)
     # ssh_user = "root"           # the account ssh logs in as on each machine
+    #                             # (with machines = "slurm": the account nomad runs as)
     # run_as = "nomad"            # the account each tiny job runs as (else nobody)
     # timeout = 120               # seconds one tiny job may take
     # at_once = 6                 # machines tried at the same time
@@ -94,6 +98,8 @@ class Program:
 class Settings:
     programs: list = field(default_factory=list)
     machines: list = field(default_factory=list)
+    slurm: bool = False           # machines = "slurm": the nodes Slurm knows, asked at each round
+    skip: list = field(default_factory=list)
     ssh_user: str = "root"
     run_as: str = "nomad"
     timeout: int = TIMEOUT
@@ -142,20 +148,23 @@ def settings(section: dict | None) -> Settings:
         s.programs.append(Program(name, recipe, _min_version(raw.get("min_version"), where, p),
                                   tuple(r.rstrip("/") or "/" for r in roots)))
     listed = sec.get("machines")
-    if listed:
+    if isinstance(listed, str) and listed.strip().lower() == "slurm":
+        s.slurm, hosts = True, []
+    elif listed:
         hosts = listed if isinstance(listed, list) else []
         if not hosts:
-            p.append("[collectors.license_tries] machines should be a list of host names")
+            p.append('[collectors.license_tries] machines should be a list of host names, or "slurm"')
     else:
         hosts = sec.get("workstation_hosts") or []
-    s.machines = []
-    for h in hosts:
-        if isinstance(h, str) and _HOST.match(h.strip()):
-            if h.strip() not in s.machines:
-                s.machines.append(h.strip())
-        else:
-            p.append(f"[collectors.license_tries] machine {h!r} is not a host name")
-    for key, default in (("ssh_user", "root"), ("run_as", "nomad")):
+    s.machines = _hosts(hosts, "machine", p)
+    skip = sec.get("skip") or []
+    if not isinstance(skip, list):
+        p.append("[collectors.license_tries] skip should be a list of host names")
+        skip = []
+    s.skip = _hosts(skip, "skip", p)
+    s.machines = [h for h in s.machines if h not in s.skip]
+    ssh_default = _me() if s.slurm else "root"
+    for key, default in (("ssh_user", ssh_default), ("run_as", "nomad")):
         v = str(sec.get(key) or default).strip()
         if not _ACCOUNT.match(v):
             p.append(f"[collectors.license_tries] {key} {v!r} is not an account name")
@@ -173,6 +182,49 @@ def settings(section: dict | None) -> Settings:
     except (TypeError, ValueError):
         p.append("[collectors.license_tries] min_hours should be a number")
     return s
+
+
+def _hosts(hosts, what: str, p: list) -> list:
+    out = []
+    for h in hosts:
+        if isinstance(h, str) and _HOST.match(h.strip()):
+            if h.strip() not in out:
+                out.append(h.strip())
+        else:
+            p.append(f"[collectors.license_tries] {what} {h!r} is not a host name")
+    return out
+
+
+def _me() -> str:
+    import getpass
+    try:
+        return getpass.getuser()
+    except Exception:                  # noqa: BLE001 -- no name for this uid
+        return "root"
+
+
+def slurm_nodes(run: Callable = subprocess.run) -> list[str]:
+    """The nodes this cluster's Slurm knows (sinfo), each once; [] if Slurm doesn't answer."""
+    try:
+        r = run(["sinfo", "-h", "-N", "-o", "%N"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if getattr(r, "returncode", 1) != 0:
+        return []
+    return sorted({n.strip() for n in (r.stdout or "").splitlines() if _HOST.fullmatch(n.strip())})
+
+
+def resolve(s: Settings, run: Callable = subprocess.run) -> str | None:
+    """With machines = "slurm": the nodes Slurm knows now, less skip, as s.machines.
+    A note when Slurm doesn't answer (s.machines left empty: nothing is tried,
+    nothing kept is dropped)."""
+    if not s.slurm:
+        return None
+    nodes = slurm_nodes(run)
+    s.machines = [n for n in nodes if n not in s.skip]
+    if not nodes:
+        return 'machines = "slurm", but Slurm (sinfo) gave no nodes here'
+    return None
 
 
 # -- what each machine runs ---------------------------------------------------------------------
@@ -218,7 +270,9 @@ try_qchem() {
     local found=()
     while IFS= read -r d; do
         while IFS= read -r lic; do
-            q=$(readlink -f "${lic%/qcaux/license/qchem.license.dat}") && [ -n "$q" ] && found+=("$q")
+            q=$(readlink -f "${lic%/qcaux/license/qchem.license.dat}") && [ -n "$q" ] || continue
+            # a folder holding qcaux and the versions isn't an install itself (1.59.2)
+            [ -e "$q/bin/qchem" ] && found+=("$q")
         done < <(find -H "$d" -maxdepth 4 -path '*/qcaux/license/qchem.license.dat' -type f 2>/dev/null)
     done < <(find "${roots[@]}" -mindepth 1 -maxdepth 2 \( -iname 'qchem*' -o -iname 'q-chem*' \) -xtype d 2>/dev/null)
     [ ${#found[@]} -gt 0 ] || return 0
@@ -651,7 +705,7 @@ def section(notes: list[dict]) -> tuple[str, list[str]]:
             g["notrun"].setdefault(r.get("reason") or r["result"], []).append(r["machine"])
         else:
             g["again"].append(r["machine"])
-    lines = ["Licensed programs on the lab machines (nomad tries each twice a day):", ""]
+    lines = ["Licensed programs on the machines nomad tries them on (each twice a day):", ""]
     stopped: dict = {}
     for (site, lab, install), g in sorted(by.items()):
         where = f" ({site})" if site else ""
@@ -668,9 +722,9 @@ def section(notes: list[dict]) -> tuple[str, list[str]]:
         progs = sorted(stopped)
         if len(progs) == 1:
             n = len(stopped[progs[0]])
-            subj = f"{progs[0]} doesn't run on some lab machines" + (f" ({n} versions)" if n > 1 else "")
+            subj = f"{progs[0]} doesn't run on some machines" + (f" ({n} versions)" if n > 1 else "")
         else:
-            subj = f"{len(progs)} programs don't run on some lab machines"
+            subj = f"{len(progs)} programs don't run on some machines"
     else:
-        subj = "licensed programs run again on lab machines"
+        subj = "licensed programs run again on some machines"
     return subj, lines
