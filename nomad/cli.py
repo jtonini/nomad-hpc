@@ -11881,6 +11881,9 @@ from nomad.submit.gate_cli import gate_group  # noqa: E402
 cli.add_command(size_cmd)
 cli.add_command(submit_cmd)
 cli.add_command(gate_group)
+# Who the Console's My files is open to (1.60.0).
+from nomad.submit.files_cli import files_group  # noqa: E402
+cli.add_command(files_group)
 # What the policy watch found on login and compute nodes (1.19).
 from nomad.watch.cli import watch_group  # noqa: E402
 cli.add_command(watch_group)

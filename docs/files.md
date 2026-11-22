@@ -153,7 +153,9 @@ is written), how much of it is there, that part removed, and a few bytes of
 ```toml
 [console.files]
 open = "submit"          # who: "submit" (whoever may Submit a job: [console] submit),
-                         #   "staff", "everyone" signed in with the campus sign-in, or "off"
+                         #   "staff", "everyone" signed in with the campus sign-in, "labs" (below), or "off"
+# labs = ["kim$"]        # with open = "labs": staff, and these labs' people (1.60.0)
+# active_days = 365      # with open = "labs": only those seen at work this lately; 0: all of them
 max_mb = 2048            # the largest file moved from the browser
 # piece_mb = 8           # a piece, 1 to 16
 folders = ["~"]          # where My files opens, as shortcuts: ~ their home, {user} their name
@@ -166,6 +168,36 @@ login = "spydur.example.edu"       # the host people use for rsync (default: its
 
 Every name is the site's; nothing about one institution is written into nomad
 or the Console.
+
+## Open to some labs first (1.60.0)
+
+To open My files to a few labs before everyone, `open = "labs"` and the labs'
+groups in `labs`. Besides staff, it is then open to each lab's people:
+
+- its members now: in the lab's group on any site, as My lab counts them;
+- anyone its PI said is in the lab on My lab's check (someone who used the
+  lab's condo without being in its group: "in my lab");
+- not those its PI said have left or aren't in the lab;
+- and, with `active_days` (365 by default), only those nomad saw at work in
+  that many days: a job on a cluster, a session on a lab machine, use of a
+  login node or of a notebook server. A lab group goes on listing people long
+  after they leave; this leaves them out until the PIs have said.
+
+Once the PIs have said who is in their labs and the groups follow it,
+`active_days = 0` opens it to all of each lab's people. The Console asks
+again every ten minutes, so someone who starts working is let in soon after.
+
+```
+nomad files status [--names]                         who it is open to, and how many
+nomad files open labs 'kim$' --active-days 365       what it would set, and how many it would open to
+nomad files open labs 'kim$' --active-days 365 --apply
+nomad files open staff --apply                       back to staff only (labs kept for another time)
+```
+
+On the hub, as the account the Console runs as (it reads the combined
+database and the lab check's answers): `sudo -H -u nomad nomad -c
+/etc/nomad/nomad.toml files status`. The lab machines offered stay as they
+were: each to its own lab's people, and staff.
 
 ## Through the gate
 

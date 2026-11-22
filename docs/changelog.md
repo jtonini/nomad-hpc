@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.60.0 (November 2026)
+
+- **My files open to some labs first**: `[console.files] open = "labs"` with
+  `labs = ["kim$"]` opens it, besides staff, to those labs' people: their
+  members now and anyone their PI said is in the lab on My lab's check, less
+  those their PI said have left or aren't in it; with `active_days` (365 by
+  default) only those nomad saw at work that lately (a job on a cluster, a
+  session on a lab machine, a login node or a notebook server).
+  `active_days = 0` once the PIs have said and the groups follow it.
+- `nomad files status [--names]`: who My files is open to, and with labs how
+  many of each lab's people and why the others aren't. `nomad files open
+  labs 'kim$' [--active-days N] [--apply]` (or staff, everyone, submit, off)
+  sets it, with a copy of the file before.
+- Needs the Console's fix 142 to let them in; an older Console keeps it to
+  staff.
+
 ## v1.59.2 (November 2026)
 
 - License tries on a cluster's nodes: `[collectors.license_tries] machines =

@@ -739,7 +739,9 @@ institution = "Your Institution"     # shown in reports and system information
 # and taken back, as the person, through its nomad-gate -- only where its key
 # line runs `nomad-gate serve --edit` and its [[hub.sites]] says edit = true.
 # [console.files]
-# open = "submit"          # who: "submit" (as Submit a job), "staff", "everyone", "off"
+# open = "submit"          # who: "submit" (as Submit a job), "staff", "everyone", "labs", "off"
+# labs = ["kim$"]          # open = "labs" (1.60.0): staff and these labs' people (nomad files status)
+# active_days = 365        # open = "labs": only those seen at work this lately; 0: all of them
 # max_mb = 2048            # the largest file; bigger: the rsync command is shown
 # folders = ["~"]          # where it opens: ~ their home, {user} their name
 # only_in_folders = false  # true: only in those folders and below

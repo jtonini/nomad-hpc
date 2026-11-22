@@ -26,7 +26,11 @@ Settings, in the hub's nomad.toml::
 
     [console.files]
     open = "submit"          # who may: "submit" (whoever may Submit a job: [console] submit),
-                             #   "staff", "everyone" signed in with the campus sign-in, or "off"
+                             #   "staff", "everyone" signed in with the campus sign-in, "labs"
+                             #   (staff and the people of the labs below), or "off"
+    labs = ["kim$"]          # with open = "labs": these labs' people (1.60.0)
+    active_days = 365        # with open = "labs": only those nomad saw at work in the last this
+                             #   many days; 0: all of them
     max_mb = 2048            # the largest file moved from the browser (up to 1 TB)
     piece_mb = 8             # a piece (1 to 16)
     folders = ["~"]          # where My files opens, as shortcuts: ~ is their home, {user} their name
@@ -35,6 +39,18 @@ Settings, in the hub's nomad.toml::
     [console.files.sites.spydur]   # one cluster's own (optional)
     folders = ["~", "/scratch/{user}"]
     login = "spydur.example.edu"   # the host people use for rsync (default: its [[hub.sites]] host)
+
+**Open to some labs (1.60.0).** With ``open = "labs"``, besides staff, My
+files is open to the people of the labs in ``labs``: their members now (in
+the lab's group on any site, as My lab counts them), and anyone their PI
+said is in the lab on My lab's check (a condo's user, "in my lab"); not
+those their PI said have left or aren't in the lab. With ``active_days``
+(365 by default), only those nomad saw at work in that many days: a job on
+a cluster, a session on a lab machine, use of a login node or of a notebook
+server (``last_active``). Once the PIs have said who is in their labs and
+the groups follow it, ``active_days = 0`` opens it to all of each lab's
+people. ``nomad files status`` says how many it is open to, and
+``nomad files open labs 'kim$' --apply`` sets it.
 
 **Copying between machines (1.58.0).** A file or a whole folder of theirs
 copied from one machine to another -- cluster to cluster, a lab workstation
@@ -79,7 +95,15 @@ import re
 import shlex
 from dataclasses import dataclass, field
 
-OPENS = ("submit", "staff", "everyone", "off")
+OPENS = ("submit", "staff", "everyone", "labs", "off")
+ACTIVE_DAYS = 365                                # open = "labs": seen at work in the last this many days
+ACTIVE_DAYS_CAP = 3650
+# Where nomad sees someone at work (1.60.0): (table, whose, when) -- a job on
+# a cluster, a session on a lab machine, use of a login node, a notebook server.
+ACTIVITY = (("jobs", "user_name", "submit_time"),
+            ("workstation_user_snapshot", "username", "timestamp"),
+            ("per_user_daily", "username", "day"),
+            ("interactive_sessions", "user", "timestamp"))
 MAX_MB = 2048
 MAX_MB_CAP = 1024 * 1024                         # the gate's MAX_FILE
 PIECE_MB = 8
@@ -113,6 +137,8 @@ class Settings:
     copy_files_max: int = COPY_FILES_MAX
     copies_at_once: int = COPIES_AT_ONCE
     machines: tuple = ()                             # ({name, host, gate_user, submit, edit, groups, ...}, ...)
+    labs: tuple = ()                                 # open = "labs": whose people (1.60.0)
+    active_days: int = ACTIVE_DAYS                   # open = "labs": seen at work this lately; 0: any time
 
     @property
     def max_mb(self) -> int:
@@ -188,10 +214,19 @@ def settings(config: dict | None) -> Settings:
     most = _whole(raw, "copy_files_max", COPY_FILES_MAX, 1, COPY_FILES_MAX, problems)
     at_once = _whole(raw, "copies_at_once", COPIES_AT_ONCE, 1, 8, problems)
     machines = _machines(raw.get("machines"), problems, sites)
+    labs = raw.get("labs", [])
+    labs = [labs] if isinstance(labs, str) else labs
+    if not isinstance(labs, list) or not all(isinstance(g, str) and _LAB.fullmatch(g.strip()) for g in labs):
+        problems.append('labs: a list of labs\' groups, e.g. ["kim$"]')
+        labs = []
+    labs = tuple(dict.fromkeys(g.strip() for g in labs))
+    active = _whole(raw, "active_days", ACTIVE_DAYS, 0, ACTIVE_DAYS_CAP, problems)
+    if open_ == "labs" and not labs:
+        problems.append('open = "labs" needs labs = ["..."], the labs whose people may: staff only until then')
     return Settings(open=open_, max_bytes=max_mb * 1024 * 1024, piece=piece_mb * 1024 * 1024, folders=folders,
                     only_in_folders=only, sites=sites, problems=tuple(problems), copy=copy,
                     copy_max_bytes=gb * 1000 ** 3, copy_files_max=most, copies_at_once=at_once,
-                    machines=tuple(machines))
+                    machines=tuple(machines), labs=labs, active_days=active)
 
 
 def _whole(raw: dict, key: str, default: int, low: int, high: int, problems: list) -> int:
@@ -203,6 +238,8 @@ def _whole(raw: dict, key: str, default: int, low: int, high: int, problems: lis
 
 
 _GROUP = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.$@ -]{0,63}")
+_LAB = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.$@-]{0,63}")
+_DAY = re.compile(r"\d{4}-\d\d-\d\d")
 
 
 def _machines(raw, problems: list, sites: dict) -> list:
@@ -308,9 +345,10 @@ def machines_open_to(s: Settings, groups, staff: bool, labs: dict | None = None)
     return out
 
 
-def opens_to(s: Settings, role: str | None, submit_open: str) -> bool:
+def opens_to(s: Settings, role: str | None, submit_open: str, in_labs: bool = False) -> bool:
     """Whether My files is open to someone of this role (the Console checks
-    the rest: a campus sign-in, not viewing as someone)."""
+    the rest: a campus sign-in, not viewing as someone). ``in_labs``: with
+    open = "labs", whether they are one of lab_people's (1.60.0)."""
     staff = role in ("admin", "operator")
     if s.open == "off":
         return False
@@ -318,7 +356,108 @@ def opens_to(s: Settings, role: str | None, submit_open: str) -> bool:
         return staff
     if s.open == "everyone":
         return True
+    if s.open == "labs":
+        return staff or (bool(in_labs) and bool(s.labs))
     return staff or submit_open == "everyone"             # "submit": as Submit a job
+
+
+def last_active(db, names, since: str | None = None) -> dict:
+    """netid -> the day (YYYY-MM-DD) nomad last saw them at work on a
+    machine it watches (ACTIVITY), from the hub's combined database (``db``,
+    an open sqlite3 connection); not listed: never on record (with
+    ``since``, a day: not since then -- only the records since are read)."""
+    import sqlite3
+    names = sorted({n for n in names if n})
+    out: dict = {}
+    if db is None or not names:
+        return out
+    for table, who, when in ACTIVITY:
+        try:
+            cols = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        except sqlite3.Error:
+            continue
+        if not {who, when} <= cols:
+            continue
+        for i in range(0, len(names), 400):
+            chunk = names[i:i + 400]
+            recent = f" AND {when} >= ?" if since else ""
+            try:
+                rows = db.execute(f"SELECT {who}, MAX({when}) FROM {table} WHERE {who} IN "
+                                  f"({','.join('?' * len(chunk))}){recent} GROUP BY {who}",
+                                  chunk + ([since] if since else [])).fetchall()
+            except sqlite3.Error:
+                continue
+            for user, t in rows:
+                day = str(t or "")[:10]
+                if user and _DAY.fullmatch(day) and day > out.get(user, ""):
+                    out[user] = day
+    return out
+
+
+def lab_people(db, s: Settings, rec=None, today=None) -> dict:
+    """Who My files is open to besides staff with open = "labs" (1.60.0;
+    the module's notes): ``db`` the hub's combined database, ``rec`` the lab
+    check's answers (nomad.lab_check.open_records; None: no answers).
+
+    {"open": {netid, ...}, "since": "YYYY-MM-DD" or None (active_days 0),
+     "last": {netid: day last seen at work},
+     "labs": {lab: {"people", "members", "claimed", "left", "quiet", "open"}}}
+    -- each lab's people (members now and those their PI said are in it,
+    less those their PI said have left or aren't in it), and of them those
+    not seen at work since ``since`` (quiet) and the rest (open)."""
+    from datetime import date, timedelta
+
+    from nomad import lab_check as L
+    today = today or date.today()
+    since = (today - timedelta(days=s.active_days)).isoformat() if s.active_days else None
+    groups = L.by_site(db) if db is not None else {}
+    said: dict = {}
+    if rec is not None:
+        try:
+            for (lab, netid), row in L._latest(rec).items():
+                said.setdefault(lab, {})[netid] = row.get("answer")
+        except Exception:                                      # noqa: BLE001 -- no answers kept yet
+            said = {}
+    labs: dict = {}
+    for lab in s.labs:
+        members = L._members(groups.get(lab, {}))
+        answers = said.get(lab, {})
+        claimed = {n for n, a in answers.items() if a == "mine"} - members
+        left = {n for n in members | claimed if answers.get(n) in ("left", "not_mine")}
+        labs[lab] = {"people": (members | claimed) - left, "members": members, "claimed": claimed, "left": left}
+    everyone = set().union(*(x["people"] for x in labs.values())) if labs else set()
+    last = last_active(db, everyone, since) if since else {}
+    opened: set = set()
+    for x in labs.values():
+        x["open"] = {n for n in x["people"] if since is None or last.get(n, "") >= since}
+        x["quiet"] = x["people"] - x["open"]
+        opened |= x["open"]
+    return {"open": opened, "since": since, "last": last, "labs": labs}
+
+
+def lab_people_here(s: Settings, config: dict | None, config_target=None, db_path=None, today=None) -> dict:
+    """lab_people from the hub's own databases: combined.db (``db_path``,
+    else the hub's) and the lab check's answers beside it (or its ``db``)."""
+    from nomad import lab_check as L
+    from nomad.facts import open_readonly
+    db = rec = None
+    try:
+        if db_path is None:
+            from nomad.actions.remote import hub_settings
+            db_path = hub_settings(config_target)["combined_db"]
+        try:
+            db = open_readonly(db_path)
+        except FileNotFoundError:
+            db = None
+        try:
+            rec = L.open_records(L.db_path(L.settings(config or {}), config_target))
+        except Exception:                                      # noqa: BLE001 -- no answers: none said
+            rec = None
+        return lab_people(db, s, rec, today)
+    finally:
+        for c in (db, rec):
+            if c is not None:
+                c.close()
 
 
 def folders_for(s: Settings, site: str, user: str, home: str) -> list:
