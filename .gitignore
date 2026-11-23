@@ -105,3 +105,5 @@ ruff-fixes.patch
 
 # Integration backups from one-shot patch scripts
 *.bak.idea18
+*.bak2
+*.theme_bak

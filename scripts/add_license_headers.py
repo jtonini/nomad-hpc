@@ -7,8 +7,8 @@ Add SPDX license headers to all Python source files.
 Addresses reviewer concern: "Is it included in the source code? No."
 
 Usage:
-    python3 add_license_headers.py /path/to/nomad/nomad/
-    python3 add_license_headers.py /path/to/nomad/nomad/ --dry-run
+    python3 scripts/add_license_headers.py /path/to/nomad/nomad/
+    python3 scripts/add_license_headers.py /path/to/nomad/nomad/ --dry-run
 """
 
 import sys
@@ -73,7 +73,7 @@ def add_header(path: Path, dry_run: bool = False) -> bool:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 add_license_headers.py /path/to/nomad/ [--dry-run]")
+        print("Usage: python3 scripts/add_license_headers.py /path/to/nomad/ [--dry-run]")
         sys.exit(1)
     
     base_dir = Path(sys.argv[1])
