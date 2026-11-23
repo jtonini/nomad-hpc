@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.63.0 (November 2026)
+
+- **Keep rules, part 1** (`nomad.keep_rules`): full detail for 90 days
+  (`detail_days`), then less detail kept for good, in the same tables. CPU
+  busy per core and disk activity per device: an hour's averages per core
+  (device) for a year (`hourly_days`), then a day's. Lab machines' mounts:
+  what each day was (its last run, each mount's last reading and last
+  trouble). Collector runs: a count a day in `collection_log_daily`, and each
+  collector's first run. Jobs, groups, alerts and usage are never trimmed.
+- `nomad db keep [--apply] [--no-vacuum]`: the first time by hand (a table
+  with more than `keep_max_rows` rows due is taken out of the change log,
+  so the hub copies it whole; then the database is vacuumed); after that
+  the databases collector goes through it once a day.
+- `nomad db status --sites` lists what each site found at its latest
+  reading (a database removed since was still listed from before).
+
 ## v1.62.0 (November 2026)
 
 - **The weekly email, laid out**: formatted (HTML) with a plain copy;

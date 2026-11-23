@@ -851,6 +851,8 @@ disk, rows each table writes a day; an alert when one grows unusually in a
 day; a weekly incremental vacuum where a database is set for it. See
 [nomad's own databases](databases.md).
 
+
+(1.63.0) Once a day it also goes through the keep rules on the database nomad collects into, once `nomad db keep --apply` has run there: older readings rolled up to hours and days ([keep rules](databases.md#keeping-less-the-keep-rules-1630)).
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

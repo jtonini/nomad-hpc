@@ -239,6 +239,12 @@ check_services = ["slurmd", "munge"]
 # growth_factor = 4
 # incremental_vacuum = true
 # keep_days = 400
+# keep_rules = true          # (1.63.0) old detail rolled up once a day, after nomad db keep --apply once
+# detail_days = 90           # full detail this long
+# hourly_days = 365          # then hours this long, then days (CPU per core, disk per device)
+# keep_max_rows = 1000000    # a daily run with more due waits for nomad db keep --apply
+# [collectors.databases.keep]          # a table's own, to differ
+# mpstat_core = { detail_days = 180 }
 
 # ============================================
 # LICENSE COLLECTOR

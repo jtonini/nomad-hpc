@@ -5,10 +5,14 @@ size, free space inside and on its disk, and each table's highest row
 number (nomad.db_health says which databases and how). Warns when one grew
 unusually in a day; gives free space back once a week where a database is
 set for incremental vacuuming. On by default wherever nomad collects.
+(1.63.0) Once a day it goes through the keep rules (nomad.keep_rules) on
+the database nomad collects into, once ``nomad db keep --apply`` has run on
+it, and never more than ``keep_max_rows`` rows at once.
 
     [collectors.databases]
     # enabled = true
     # every_hours = 6
+    # keep_rules = true
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from nomad import db_health as H
+from nomad import keep_rules as K
 
 from .base import BaseCollector
 
@@ -37,6 +42,7 @@ class DatabasesCollector(BaseCollector):
     def __init__(self, config: dict[str, Any], db_path):
         super().__init__(config, db_path)
         self.s = H.settings(self.config)
+        self.k = K.settings(self.config)
         # what nomad.toml says of where the databases are (passed by the plan)
         self.where = {k: self.config.get(k) for k in ("general", "database", "hub") if self.config.get(k)}
 
@@ -45,7 +51,7 @@ class DatabasesCollector(BaseCollector):
         return not (self.s.every_hours > 0 and last and datetime.now() - last < timedelta(hours=self.s.every_hours))
 
     def collect(self) -> list[dict[str, Any]]:
-        for p in self.s.problems:
+        for p in (*self.s.problems, *self.k.problems):
             logger.warning("databases: %s", p)
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         try:
@@ -70,6 +76,7 @@ class DatabasesCollector(BaseCollector):
             H.prune(conn, self.s.keep_days, now)
             conn.commit()
             alerts = self._growth_alerts(conn, readings)
+            kept = self._keep(conn, now) if self.k.enabled else ""
             freed = self._weekly_vacuum(conn, readings, now) if self.s.incremental_vacuum else 0
             conn.commit()
         finally:
@@ -83,6 +90,8 @@ class DatabasesCollector(BaseCollector):
             bits.append(f"{copies} old cop(ies) or empty: nomad db tidy")
         if alerts:
             bits.append(f"{alerts} growing unusually")
+        if kept:
+            bits.append(kept)
         if freed:
             bits.append(f"{H.size(freed)} given back")
         self.note = "; ".join(bits)
@@ -116,6 +125,32 @@ class DatabasesCollector(BaseCollector):
             except Exception as e:                        # noqa: BLE001 -- a note, never the reading
                 logger.warning("databases: growth alert not sent: %s", e)
         return n
+
+    def _keep(self, conn, now) -> str:
+        """The keep rules, once a day, on the database nomad collects into:
+        only once nomad db keep --apply has gone through it by hand (the
+        first run removes many rows at once), and a table with more rows due
+        than keep_max_rows waits for it again."""
+        try:
+            K.ensure(conn)
+            conn.commit()
+            if not K.ran_by_hand(conn):
+                return ""
+            last = K.last_run(conn)
+            if last and now - last < timedelta(hours=20):
+                return ""
+            done = K.run(conn, self.k, "daily", now.date(), limit=self.k.max_rows)
+        except sqlite3.Error as e:
+            logger.info("databases: keep rules not gone through: %s", e)
+            return ""
+        gone = sum(max(0, d["before"] - d["after"]) for d in done if not d["note"])
+        waits = [d["table"] for d in done if d["note"]]
+        bits = []
+        if gone:
+            bits.append(f"{gone:,} older readings rolled up")
+        if waits:
+            bits.append(f"{', '.join(waits)}: nomad db keep --apply")
+        return "; ".join(bits)
 
     def _weekly_vacuum(self, conn, readings, now) -> int:
         freed = 0

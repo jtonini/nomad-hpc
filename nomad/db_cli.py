@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import click
@@ -52,6 +52,7 @@ def db_group():
     nomad db tidy [FILE...] [--apply]      old copies and empty databases removed (an old copy only
                                            when the live database holds everything in it)
     nomad db vacuum [FILE] [--full] [--apply]   free space given back
+    nomad db keep [--apply] [--no-vacuum]  older readings rolled up by the keep rules (1.63.0)
     """
 
 
@@ -135,10 +136,12 @@ def _sites(config):
         if "source_site" not in cols:
             click.echo("No site has sent its databases' readings yet (nomad 1.61.0 at the sites, then a sync).")
             return
+        # 1.63.0: what each site found at its latest reading (one time a run), so a database
+        # removed since isn't listed from its last reading before
         rows = c.execute("SELECT f.source_site, f.path, f.role, f.bytes, f.free_bytes, f.disk_free, f.timestamp "
-                         "FROM db_files f JOIN (SELECT source_site, path, MAX(timestamp) AS t FROM db_files "
-                         "GROUP BY source_site, path) m ON f.source_site = m.source_site AND f.path = m.path "
-                         "AND f.timestamp = m.t ORDER BY f.source_site, f.bytes DESC").fetchall()
+                         "FROM db_files f JOIN (SELECT source_site, MAX(timestamp) AS t FROM db_files "
+                         "GROUP BY source_site) m ON f.source_site = m.source_site AND f.timestamp = m.t "
+                         "ORDER BY f.source_site, f.bytes DESC").fetchall()
         for site, path, role, b, free, disk, ts in rows:
             g = H.growth(c, path, site=site)
             click.echo(f"{site:14} {Path(path).name:28} {role:9} {H.size(b):>10}  "
@@ -251,6 +254,113 @@ def db_vacuum(ctx, file, full, apply):
     except sqlite3.Error:
         pass
     click.echo(f"{H.size(before)} -> {H.size(after)} ({H.size(max(0, before - after))} given back, {took:.0f} s).")
+    if had_log:
+        click.echo("Its change log for the hub was taken out: the hub copies this database whole at its next "
+                   "sync, then goes on as before.")
+
+
+@db_group.command("keep")
+@click.option("--apply", is_flag=True, help="Do it (otherwise only say what is due).")
+@click.option("--no-vacuum", is_flag=True, help="Leave the space it frees inside the database.")
+@click.pass_context
+def db_keep(ctx, apply, no_vacuum):
+    """The keep rules on the database nomad collects into here (1.63.0):
+    readings older than detail_days (90) rolled up -- CPU per core and disk
+    per device to hours, then days past hourly_days (365); lab machines'
+    mounts to what each day was; collector runs to a count a day -- so
+    history stays, at less detail. Jobs, groups, alerts and usage are never
+    trimmed (docs/databases.md).
+
+    \b
+    The first time it removes many rows: each table with more than
+    keep_max_rows due is taken out of the change log first (the hub copies
+    it whole at its next sync), then the database is vacuumed (as nomad db
+    vacuum --full, the first time: the hub then copies it whole once). After
+    that the databases collector does it once a day."""
+    from datetime import date
+
+    from nomad import keep_rules as K
+    config, _ = _ctx(ctx)
+    raw = ((config.get("collectors") or {}).get("databases")) or {}
+    k = K.settings(raw)
+    for p in k.problems:
+        click.echo(f"note: {p}")
+    site = _site_db(ctx, config).resolve()
+    hub = H.hub_db(config)
+    if hub and site == Path(hub).resolve():
+        raise click.ClickException(f"{site} is the hub's combined database: it follows the sites, which keep "
+                                   "their own (run this where nomad collects)")
+    if not site.is_file():
+        raise click.ClickException(f"{site}: not there")
+    conn = sqlite3.connect(str(site), timeout=60)
+    try:
+        today = date.today()
+        due = K.todo(conn, k, today)
+        click.echo(f"{site}: {H.size(site.stat().st_size)}")
+        any_due = False
+        for td in due:
+            d, hr = k.days(td.table)
+            if not td.present:
+                continue
+            what = td.rule.what
+            if not td.levels:
+                click.echo(f"  {td.table} ({what}): nothing due (full detail {d} days)")
+                continue
+            any_due = True
+            spans = "; ".join(f"{'to hours' if lv == 'hourly' else 'to days' if lv == 'daily' else 'rolled up'} "
+                              f"{a} to {b - timedelta(days=1)}" for lv, a, b in td.levels)
+            click.echo(f"  {td.table} ({what}): {td.rows:,} rows due ({spans})")
+        if not any_due:
+            click.echo("Nothing due.")
+            if apply:
+                K.run(conn, k, "by hand", today)        # noted: the collector goes on from here daily
+            return
+        if not apply:
+            big = [td.table for td in due if td.rows > k.max_rows]
+            if big:
+                click.echo(f"With --apply, taken out of the change log first (more than {k.max_rows:,} rows due; "
+                           f"the hub copies them whole at its next sync): {', '.join(big)}.")
+            click.echo("Run again with --apply.")
+            return
+        big = [td.table for td in due if td.rows > k.max_rows]
+        out = K.untrack(conn, big)
+        if out:
+            click.echo(f"Taken out of the change log (the hub copies them whole at its next sync): {', '.join(out)}")
+        t0 = time.time()
+        done = K.run(conn, k, "by hand", today)
+        for d in done:
+            click.echo(f"  {d['table']}: {d['before']:,} -> {d['after']:,} rows ({d['days']} days, "
+                       f"{d['seconds']:.0f} s)")
+        click.echo(f"Gone through in {time.time() - t0:.0f} s.")
+    finally:
+        conn.close()
+    if no_vacuum:
+        click.echo("Not vacuumed (--no-vacuum): the space stays free inside the database, for its new readings.")
+        return
+    r = H.measure(site)
+    t0 = time.time()
+    if r["auto_vacuum"] == "incremental":
+        before, after = H.incremental(site)
+        kind, had_log = "incremental", False
+    elif r["disk_free"] >= r["bytes"] * 1.2:
+        before, after, had_log = H.full(site)
+        kind = "full"
+    else:
+        click.echo(f"Not vacuumed: a whole vacuum needs about {H.size(r['bytes'] * 1.2)} free on the disk "
+                   f"({H.size(r['disk_free'])} free).")
+        return
+    took = time.time() - t0
+    try:
+        c = sqlite3.connect(str(site), timeout=30)
+        try:
+            H.ensure(c)
+            H.vacuum_record(c, site, kind, before, after, took, datetime.now())
+            c.commit()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        pass
+    click.echo(f"Vacuumed ({kind}): {H.size(before)} -> {H.size(after)} ({took:.0f} s).")
     if had_log:
         click.echo("Its change log for the hub was taken out: the hub copies this database whole at its next "
                    "sync, then goes on as before.")
