@@ -40,12 +40,12 @@ common ones with their usual options.
 | [`nomad insights`](#insights) | NØMAÐ Insight Engine — operational narratives and analysis. ([docs](insights.md)) |
 | [`nomad interactive`](#interactive) | Interactive servers (RStudio, JupyterHub): what the interactive collector keeps. ([docs](interactive.md)) |
 | [`nomad issue`](#issue) | Report issues, request features, and ask questions. ([docs](issue.md)) |
-| [`nomad lab`](#lab) | A lab's machines and storage: what nomad collects for it, and what its PI sees. ([docs](config.md)) |
+| [`nomad lab`](#lab) | A lab's machines and storage: what nomad collects for it, and what its PI sees. Edits nomad.toml here (a backup first): each command shows the change, and --apply writes it. ([docs](config.md)) |
 | `nomad learn` | Continuous learning - retrain models as new data arrives. |
 | [`nomad licenses`](#licenses) | When the licenses of the center's software end -- read where the software keeps the date -- and an email to the center before each does. nomad never changes a license. ([docs](licenses.md)) |
 | [`nomad machine`](#machine) | What each machine is: a line nomad and the Console show beside its name. ([docs](config.md)) |
 | [`nomad maintenance`](#maintenance) | Declared maintenance: a site (or the hub) taken down on purpose. ([docs](alerts.md)) |
-| [`nomad metrics`](#metrics) | What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. ([docs](metrics.md)) |
+| [`nomad metrics`](#metrics) | What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. Nothing about one person. ([docs](metrics.md)) |
 | [`nomad ml`](#ml) | Train the model from the Console: TESSERA on a worker with a GPU. ([docs](ml-training.md)) |
 | `nomad monitor` | Monitor running jobs for I/O metrics. |
 | [`nomad node`](#node) | Drain a Slurm node, or resume it: a dry run unless --apply. ([docs](actions.md)) |
@@ -137,18 +137,18 @@ Courses: a Unix group per course, its instructors and this term's students ([con
 
 | Command | What it does |
 |---|---|
-| `nomad course add` | NETID teaches GROUP this term: when no faculty member is in the group, when several are and nomad can't tell which teaches it, or when a group is reused from an earlier term. |
-| `nomad course answer` | Record what NETID said about teaching GROUP this term, as the Console does when they answer there (say, they told you by email). |
+| `nomad course add` | NETID teaches GROUP this term: when no faculty member is in the group, when several are and nomad can't tell which teaches it, or when a group is reused from an earlier term. Whoever is added teaches it alone that term (nobody else is guessed or asked), so add each co-instructor and TA too. Decisions for a term stop applying when the term moves on (--every-term: they don't). |
+| `nomad course answer` | Record what NETID said about teaching GROUP this term, as the Console does when they answer there (say, they told you by email). Only one of the course's faculty members can answer (in its group, or a user of the environment named for it); nomad.toml's decisions still win. |
 | `nomad course answers` | What faculty members said (in the Console) about teaching their course groups' courses this term. |
-| `nomad course discover` | What here may be a course that nomad.toml doesn't say is one yet: the environments people had a session in this term (a conda environment, a Jupyter kernel), and groups with a faculty member and people active this term; then what to do about them. |
-| `nomad course env` | Whoever used ENVIRONMENT this term (a conda environment, a Jupyter kernel) is one of the course GROUP's people, for a class that uses an environment not named like its course; it makes GROUP a course. |
-| `nomad course exclude` | NETID is in GROUP and in the faculty group but doesn't teach it this term (overrides what they said and nomad's guess). |
+| `nomad course discover` | What here may be a course that nomad.toml doesn't say is one yet: the environments people had a session in this term (a conda environment, a Jupyter kernel), and groups with a faculty member and people active this term; then what to do about them. Read-only: each command it suggests shows its change first. Best a week or two into a term. |
+| `nomad course env` | Whoever used ENVIRONMENT this term (a conda environment, a Jupyter kernel) is one of the course GROUP's people, for a class that uses an environment not named like its course; it makes GROUP a course. Every term, until --remove. The interactive servers record which environment each session runs from (nomad 1.12.5 and later); `nomad course discover` lists them. |
+| `nomad course exclude` | NETID is in GROUP and in the faculty group but doesn't teach it this term (overrides what they said and nomad's guess). For someone who teaches no course at all, `nomad course not-teaching`. |
 | `nomad course ignore` | GROUP is named like a course but isn't one (a project's or a lab's group): no course view, no instructors. |
-| `nomad course list` | Each course: its instructors this term and why, and its students this term (counts). |
+| `nomad course list` | Each course: its instructors this term and why, and its students this term (counts). Courses nobody teaches this term come last. |
 | `nomad course name` | How GROUP is shown ("" to remove the name). |
 | `nomad course not-teaching` | NETID is in the faculty group but teaches no course (staff): left out of every course's instructors, unless added to one by name. |
 | `nomad course remove` | NETID off GROUP's instructors and excluded lists (this term's and every term's). |
-| `nomad course setup` | Turn courses on, or change their settings. |
+| `nomad course setup` | Turn courses on, or change their settings. In a terminal with no setting given, it asks how classes get access here (a group per course, instructors' own groups, an environment per course), which names are courses', who can teach one, when the term began and whether instructors see names, with what it finds here for each; then shows what would change, and what nomad would take as courses. |
 
 ## db
 
@@ -156,10 +156,10 @@ nomad's own databases: how big each is and how fast it grows, old copies, and th
 
 | Command | What it does |
 |---|---|
-| `nomad db keep` | The keep rules on the database nomad collects into here (1.63.0): readings older than detail_days (90) rolled up -- CPU per core and disk per device to hours, then days past hourly_days (365); lab machines' mounts to what each day was; collector runs to a count a day -- so history stays, at less detail. |
+| `nomad db keep` | The keep rules on the database nomad collects into here (1.63.0): readings older than detail_days (90) rolled up -- CPU per core and disk per device to hours, then days past hourly_days (365); lab machines' mounts to what each day was; collector runs to a count a day -- so history stays, at less detail. Jobs, groups, alerts and usage are never trimmed (docs/databases.md). |
 | `nomad db status` | Each of nomad's databases here: its size, how fast it grows, the free space inside it (what a vacuum gives back) and on its disk, and old copies or empty databases beside it. |
 | `nomad db tidy` | Old copies and empty databases removed: an old copy (FILE, or one found beside nomad's databases) only when the live database (the site's, or the hub's for a hub's copy) holds everything nomad keeps that it holds; an empty one only when nomad doesn't use it. |
-| `nomad db vacuum` | The free space inside a database given back (FILE, else the site's). |
+| `nomad db vacuum` | The free space inside a database given back (FILE, else the site's). Set for incremental vacuuming, it moves pages, never rows, and the databases collector does it once a week by itself. --full does it once: the database set for that and vacuumed whole (needs its size free on the disk, holds the database for the while; the hub then copies this site's database whole at its next sync, since a whole vacuum may renumber rows). |
 
 ## demos
 
@@ -250,11 +250,11 @@ nomad's answers about sites, a person and a lab, as the Console's /api/v1 gives 
 | Command | What it does |
 |---|---|
 | `nomad facts busy` | When each cluster, interactive server and group of workstations is busiest: the most in use at once and when, the average, a typical week and the busiest and quietest hours, over --days. |
-| `nomad facts course` | A course's students this term: the class together, each student as a row (their typical week and its range: a caterpillar plot), and when the class works. |
+| `nomad facts course` | A course's students this term: the class together, each student as a row (their typical week and its range: a caterpillar plot), and when the class works. GROUPS: the course groups (default: every course, or with --instructor the ones NETID teaches). Needs [console.courses] in nomad.toml. |
 | `nomad facts lab` | The labs NETID leads, or is a research assistant of, by nomad.toml's rules: members, their jobs taken together, workstations and storage; --each, each member too. |
 | `nomad facts me` | One person's work: jobs over --days, running and waiting now, score and advice (as the Console's My Activity). |
 | `nomad facts node` | One node over a window (the Console's node timeline): cores, load, memory, GPUs, temperatures, clock and local disk, and what happened: drained or down (and why), gaps in the readings, jobs started and ended, out-of-memory kills, power events, alerts, maintenance. |
-| `nomad facts share` | The share of each cluster of the labs NETID leads, or is a research assistant of (or of --group): its jobs' core-hours on its own condo, the shared nodes and other labs' condos, against everyone else's and the nodes' capacity; who waited for room while the lab's jobs ran there, and the lab's own waits. |
+| `nomad facts share` | The share of each cluster of the labs NETID leads, or is a research assistant of (or of --group): its jobs' core-hours on its own condo, the shared nodes and other labs' condos, against everyone else's and the nodes' capacity; who waited for room while the lab's jobs ran there, and the lab's own waits. Nodes as each cluster's latest reading has them. |
 | `nomad facts sites` | Every site now: freshness, nodes, CPU, memory, GPUs, queue, storage, alerts, workstations; and its jobs over --days. |
 
 ## files
@@ -263,7 +263,7 @@ Who the Console's My files is open to ([console.files] open), and setting it. Se
 
 | Command | What it does |
 |---|---|
-| `nomad files open` | Set who My files is open to: [console.files] open (and, with labs, labs and active_days). |
+| `nomad files open` | Set who My files is open to: [console.files] open (and, with labs, labs and active_days). Shows it first, with how many it would be open to; --apply writes it, with a copy of the file before. The Console reads it at each request: no restart. |
 | `nomad files status` | Who My files is open to now; with open = "labs", each lab: its members now, those their PI said are in it or have left, those not seen at work lately, and how many it is open to. |
 
 ## gate
@@ -276,7 +276,7 @@ The hub acting on a cluster as a person (the Console's Submit page). See [submit
 | `nomad gate install-key` | Let the hub's gate key run `nomad-gate serve` here, and nothing else. |
 | `nomad gate jump-key` | Let the hub's gate key through this host to a cluster's ssh, and nothing else (1.40.0): for a site whose [[hub.sites]] has gate_jump = "THIS-ACCOUNT@THIS-HOST". |
 | `nomad gate key` | The hub's gate key (made the first time) and how to let it in on a cluster. |
-| `nomad gate test` | Is the gate there, and may it act as --user? Asks it its version (as itself, then as the person) and the person's jobs now (not on a machine with the gate alone: it runs no jobs); where moving files is on, sends half a file and removes it. |
+| `nomad gate test` | Is the gate there, and may it act as --user? Asks it its version (as itself, then as the person) and the person's jobs now (not on a machine with the gate alone: it runs no jobs); where moving files is on, sends half a file and removes it. Changes nothing. |
 
 ## impact
 
@@ -285,10 +285,10 @@ What changed after NØMAÐ: [impact] in nomad.toml, jobs before and after launch
 | Command | What it does |
 |---|---|
 | `nomad impact backfill` | Measure the before period again from Slurm's accounting, the 1.13 way. |
-| `nomad impact extract` | The measured jobs of an older copy, into a small file for `nomad impact restore` on the site: job numbers, submit times and the measurements, no names. |
+| `nomad impact extract` | The measured jobs of an older copy, into a small file for `nomad impact restore` on the site: job numbers, submit times and the measurements, no names. Read-only on the copy. |
 | `nomad impact report` | Month by month from baseline_from, then before launch, after it and the same days a year earlier, for each part that has data: |
-| `nomad impact restore` | Bring back measurements an older copy has for jobs this site now holds unmeasured: those 1.13.0's and 1.13.1's backfill wrote "not measured" over where Slurm no longer kept the steps' usage. |
-| `nomad impact status` | The launch, the periods and events, and for each site what the jobs before and after launch have: measured, measured the 1.13 way, with an eligible time. |
+| `nomad impact restore` | Bring back measurements an older copy has for jobs this site now holds unmeasured: those 1.13.0's and 1.13.1's backfill wrote "not measured" over where Slurm no longer kept the steps' usage. Only jobs without a measurement now, and only the same job (the submit times agree). With --apply, a copy of the database is taken first (SQLite's backup: safe while the collector writes). On the site; the next sync brings them to the hub. |
+| `nomad impact status` | The launch, the periods and events, and for each site what the jobs before and after launch have: measured, measured the 1.13 way, with an eligible time. Then what to run so the before period can be compared. |
 
 ## import
 
@@ -317,11 +317,11 @@ Interactive servers (RStudio, JupyterHub): what the interactive collector keeps.
 
 | Command | What it does |
 |---|---|
-| `nomad interactive backfill` | Rebuild the daily and hourly totals for the days before nomad kept them (1.11; hours 1.11.1), from the raw snapshots: who was on and for how long, and the memory held. |
-| `nomad interactive clear` | Suspend each RStudio session, and stop each Jupyter server, idle at least --hours. |
-| `nomad interactive restart` | Restart RStudio (Workbench) or JupyterHub. |
-| `nomad interactive sessions` | The RStudio and Jupyter sessions here now, how long each has been idle, and what nomad may do about them here. |
-| `nomad interactive stop` | Suspend PERSON's RStudio session PID (R saves it; it comes back when they next open RStudio), or stop their Jupyter server or kernel PID (as them). |
+| `nomad interactive backfill` | Rebuild the daily and hourly totals for the days before nomad kept them (1.11; hours 1.11.1), from the raw snapshots: who was on and for how long, and the memory held. Not what was computing: the old snapshots can't say. Run it on the interactive server itself (the hub rebuilds its copy from the site's at the next sync). Rows written are marked rebuilt. |
+| `nomad interactive clear` | Suspend each RStudio session, and stop each Jupyter server, idle at least --hours. A dry run unless --apply. |
+| `nomad interactive restart` | Restart RStudio (Workbench) or JupyterHub. A dry run unless --apply. |
+| `nomad interactive sessions` | The RStudio and Jupyter sessions here now, how long each has been idle, and what nomad may do about them here. Changes nothing. |
+| `nomad interactive stop` | Suspend PERSON's RStudio session PID (R saves it; it comes back when they next open RStudio), or stop their Jupyter server or kernel PID (as them). A dry run unless --apply. |
 
 ## issue
 
@@ -335,36 +335,36 @@ Report issues, request features, and ask questions. See [issue.md](issue.md).
 
 ## lab
 
-A lab's machines and storage: what nomad collects for it, and what its PI sees. See [config.md](config.md).
+A lab's machines and storage: what nomad collects for it, and what its PI sees. Edits nomad.toml here (a backup first): each command shows the change, and --apply writes it. See [config.md](config.md).
 
 | Command | What it does |
 |---|---|
-| `nomad lab accounts` | A lab's PI asks for accounts for their students, on My lab in the Console: nomad says who each one is, from the campus directory, and research computing is emailed. ([docs](lab-accounts.md)) |
+| `nomad lab accounts` | A lab's PI asks for accounts for their students, on My lab in the Console: nomad says who each one is, from the campus directory, and research computing is emailed. It makes the accounts as it does now, and closes each one here (the PI is emailed). nomad makes no account itself. ([docs](lab-accounts.md)) |
 | `nomad lab accounts check` | Can nomad ask the directory? A search for no one, as the service account, with nothing printed of the password. |
-| `nomad lab accounts close` | Research computing made the account, or not (and why): the request keeps who closed it and when, and the PI is emailed (review_to while set). |
+| `nomad lab accounts close` | Research computing made the account, or not (and why): the request keeps who closed it and when, and the PI is emailed (review_to while set). REQUEST: its number, ARC-0012 (or 12). |
 | `nomad lab accounts list` | The requests, newest first, and what became of each account. |
-| `nomad lab accounts lookup` | Who each NetID, address or name is, as a PI checking a request would see it: found (and their name), several of that name, not found; and where nomad sees them with an account already. |
+| `nomad lab accounts lookup` | Who each NetID, address or name is, as a PI checking a request would see it: found (and their name), several of that name, not found; and where nomad sees them with an account already. Each TEXT is a line ("Jane Doe", "Doe, Jane", jdoe). |
 | `nomad lab accounts report` | The requests asked in a period, and what became of each account as of now: in all, by cluster, lab and month, and how long making them took (from asked to marked made). |
 | `nomad lab accounts show` | One request, by its number (ARC-0012, or 12), and what became of each account. |
 | `nomad lab add-machine` | A workstation collected here, tagged with LAB (its PI sees it). |
 | `nomad lab add-nas` | A NAS collected here over ssh (the storage collector), listed as LAB's (LAB "shared": everyone's storage, listed for no lab). |
 | `nomad lab add-storage` | Storage LAB's machines mount, listed as LAB's (on the Console's machine). |
-| `nomad lab assistant` | NETID is a research assistant of LAB: in the Console they see LAB as its PI does -- its members one by one (not the PI's own work), their jobs, the lab's machines and storage -- while they are one of its members. |
+| `nomad lab assistant` | NETID is a research assistant of LAB: in the Console they see LAB as its PI does -- its members one by one (not the PI's own work), their jobs, the lab's machines and storage -- while they are one of its members. LAB must be a lab by nomad's rules, not any group. Someone who leaves the group stops being its assistant with no edit; `nomad console roles` lists entries that no longer apply. --remove: no longer. The PI can do the same from the lab's Members page in the Console. |
 | `nomad lab check` | Each term, a lab's PI says who is still in it, on My lab in the Console; what their answers call for is research computing's to-do. nomad changes no group or account itself. ([docs](lab-check.md)) |
-| `nomad lab check answer` | Keep an answer for LAB's check this term, as its PI would give it on My lab (one they sent by email, say): a member is here, left (with --data) or not_mine; someone who used the lab's condo is mine or guest. |
-| `nomad lab check done` | Mark a to-do item done, with a note: a leaver's data moved, someone kept in a group on purpose, a lab that answered by email. |
+| `nomad lab check answer` | Keep an answer for LAB's check this term, as its PI would give it on My lab (one they sent by email, say): a member is here, left (with --data) or not_mine; someone who used the lab's condo is mine or guest. Kept as entered at the command line, by --by or who runs this. |
+| `nomad lab check done` | Mark a to-do item done, with a note: a leaver's data moved, someone kept in a group on purpose, a lab that answered by email. NETID is "-" for no_answer. |
 | `nomad lab check email` | LAB's email as its PIs would get it now (LAB: its group, e.g. smith$), whatever has been sent; nothing is sent. |
-| `nomad lab check mail` | The emails due today: when the check opens, and each reminder while a lab's PI hasn't answered. |
-| `nomad lab check name` | One PI's name, for the lab check's email: nomad lab check name jdoe Jane Doe (or Maria \| de la Cruz for a last name of more than one word). |
+| `nomad lab check mail` | The emails due today: when the check opens, and each reminder while a lab's PI hasn't answered. While review_to is set, they go there. |
+| `nomad lab check name` | One PI's name, for the lab check's email: nomad lab check name jdoe Jane Doe (or Maria \| de la Cruz for a last name of more than one word). Shows the change; --apply writes it to [console.labs.check.names]. |
 | `nomad lab check names` | How each lab's email greets its PIs, and where each name comes from: names in [console.labs.check.names], the account's full name (getent passwd), or none ("Dear colleague,"). |
 | `nomad lab check show` | What LAB's PI is asked this term (LAB: its group, e.g. smith$), and the answers so far. |
 | `nomad lab check status` | This term's check: each lab, how many asked about and answered, whether its PI sent it in, and the emails sent. |
 | `nomad lab check submit` | LAB's check is done for this term (every question answered). |
-| `nomad lab check timer` | A systemd timer that sends the day's emails (`nomad lab check mail --send`) as the nomad account (or --user). |
-| `nomad lab check todo` | What the PIs' answers leave research computing to do, a cluster at a time: who to take out of a group or put in one, what to do with a leaver's data (and where it is), and labs that didn't answer. |
-| `nomad lab hide` | LAB is not a lab, whatever nomad's rules say (1.17.10): a service account's group, a mistyped one, someone's who left. |
-| `nomad lab lead` | NETID leads LAB too (a co-PI, a lab manager, a test account): in the Console they see LAB's machines and, one by one, its members. |
-| `nomad lab name` | How LAB is shown, e.g. |
+| `nomad lab check timer` | A systemd timer that sends the day's emails (`nomad lab check mail --send`) as the nomad account (or --user). Without --apply it prints the two files. |
+| `nomad lab check todo` | What the PIs' answers leave research computing to do, a cluster at a time: who to take out of a group or put in one, what to do with a leaver's data (and where it is), and labs that didn't answer. A group change is done once nomad's groups reading shows it; mark the rest with `done`. |
+| `nomad lab hide` | LAB is not a lab, whatever nomad's rules say (1.17.10): a service account's group, a mistyped one, someone's who left. The Console doesn't show it (Labs, search, Groups), nobody leads it or assists it; nothing on the clusters changes, and its data stays. --remove: a lab again. |
+| `nomad lab lead` | NETID leads LAB too (a co-PI, a lab manager, a test account): in the Console they see LAB's machines and, one by one, its members. The PI group_pattern names needs no entry. --remove: no longer. |
+| `nomad lab name` | How LAB is shown, e.g. "Smith Lab" ("" goes back to its group). |
 | `nomad lab remove` | HOST out of LAB: no longer collected here, no longer listed. |
 | `nomad lab show` | What nomad.toml here says about labs (or about one). |
 
@@ -374,15 +374,15 @@ When the licenses of the center's software end -- read where the software keeps 
 
 | Command | What it does |
 |---|---|
-| `nomad licenses add` | List a license in this machine's nomad.toml: a [[collectors.licenses.items]] entry (and [collectors.licenses] enabled = true when it isn't set). |
-| `nomad licenses find` | What licenses this machine seems to have (Posit's programs, FlexLM and Gurobi license files, web certificates here), each as the `nomad licenses add` line that lists it. |
-| `nomad licenses read` | Read this machine's licenses now (or NAME's), keep what was read, and say it. |
+| `nomad licenses add` | List a license in this machine's nomad.toml: a [[collectors.licenses.items]] entry (and [collectors.licenses] enabled = true when it isn't set). Shows it first; --apply writes it, with a copy of the file before, and reads it once. |
+| `nomad licenses find` | What licenses this machine seems to have (Posit's programs, FlexLM and Gurobi license files, web certificates here), each as the `nomad licenses add` line that lists it. Changes nothing; shows no keys. |
+| `nomad licenses read` | Read this machine's licenses now (or NAME's), keep what was read, and say it. The collector does it a few times a day on its own. |
 | `nomad licenses remind` | On the hub: what is due now (a license ending within a reminder's days, one that ended lately, one nomad can't read), in one email to the center; --send sends it and keeps what went, so nothing goes twice. |
 | `nomad licenses renew` | Whether NAME is being renewed: no keeps it listed without reminders (renew = false in its entry); yes reminds again. |
-| `nomad licenses timer` | On the hub: a systemd timer that sends what is due every morning (`nomad licenses remind --send`) as the nomad account (or --user). |
+| `nomad licenses timer` | On the hub: a systemd timer that sends what is due every morning (`nomad licenses remind --send`) as the nomad account (or --user). Without --apply it prints the two files. |
 | `nomad licenses tries` | Whether licensed programs run on the lab machines (or a cluster's nodes): a tiny job with each install of each program listed, on each machine, twice a day ([collectors.license_tries], docs/licenses.md). |
 | `nomad licenses tries now` | On the site: try each program on each machine now (not waiting for the collector's turn), keep what came, and say it. |
-| `nomad licenses tries setup` | List a program to try on this site's lab machines (or, with --nodes, on every node of its cluster): a [[collectors.license_tries.programs]] entry (and [collectors.license_tries] enabled = true when it isn't set; machines = "slurm" with --nodes). |
+| `nomad licenses tries setup` | List a program to try on this site's lab machines (or, with --nodes, on every node of its cluster): a [[collectors.license_tries.programs]] entry (and [collectors.license_tries] enabled = true when it isn't set; machines = "slurm" with --nodes). Shows it first; --apply writes it, with a copy of the file before. |
 
 ## machine
 
@@ -399,19 +399,19 @@ Declared maintenance: a site (or the hub) taken down on purpose. See [alerts.md]
 
 | Command | What it does |
 |---|---|
-| `nomad maintenance end` | SITE's maintenance is over now: alerts about it are no longer held. |
-| `nomad maintenance start` | SITE is in maintenance from now (or --from) until --until: alerts about it are held, and the Console says so. |
+| `nomad maintenance end` | SITE's maintenance is over now: alerts about it are no longer held. One thing at a time: the window running; else the hour after one just over; else the window coming, which is called off. Shows what would end; --apply ends it. |
+| `nomad maintenance start` | SITE is in maintenance from now (or --from) until --until: alerts about it are held, and the Console says so. Declaring again changes it. Shows what it would declare; --apply declares it. |
 
 ## metrics
 
-What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. See [metrics.md](metrics.md).
+What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. Nothing about one person. See [metrics.md](metrics.md).
 
 | Command | What it does |
 |---|---|
-| `nomad metrics dashboard` | A Grafana dashboard for what nomad publishes, as JSON: import it (Dashboards > New > Import) or put it in a provisioning folder. |
-| `nomad metrics serve` | Answer Prometheus at http://ADDRESS:PORT/metrics until stopped. |
-| `nomad metrics service` | A systemd service that runs `nomad metrics serve` as the nomad account (or --user), started again if it stops. |
-| `nomad metrics token` | A new token in [metrics] token_file, readable by this account only. |
+| `nomad metrics dashboard` | A Grafana dashboard for what nomad publishes, as JSON: import it (Dashboards > New > Import) or put it in a provisioning folder. It asks which Prometheus, and which sites. |
+| `nomad metrics serve` | Answer Prometheus at http://ADDRESS:PORT/metrics until stopped. Only when [metrics] enabled = true; on an address other hosts can reach, only with [metrics] token_file (Prometheus sends it as a bearer token). The page is built again at most every cache_seconds. |
+| `nomad metrics service` | A systemd service that runs `nomad metrics serve` as the nomad account (or --user), started again if it stops. Without --apply it prints the unit. |
+| `nomad metrics token` | A new token in [metrics] token_file, readable by this account only. Run it as the account that serves (sudo -u nomad). It never prints the token: copy the file to the Prometheus host (its credentials_file). |
 
 ## ml
 
@@ -422,12 +422,12 @@ Train the model from the Console: TESSERA on a worker with a GPU. See [ml-traini
 | `nomad ml ask` | Queue a training request with [ml.train]'s settings now. |
 | `nomad ml cancel` | Cancel a queued request (one running finishes or is given up). |
 | `nomad ml check` | On the worker: reach the Console with the key, and say what it said. |
-| `nomad ml key` | The worker's key: made on the hub when there is none ([ml.train] key_file, the nomad account's, 600); on the worker, the copy of it ([ml.worker] key_file). |
-| `nomad ml preview` | What a request would be sent now, in counts only: how many jobs (after thin and max_jobs) and when they ended, how many people and how much the busiest weigh, each target, and the tests (the holdout, period by period, new people). |
+| `nomad ml key` | The worker's key: made on the hub when there is none ([ml.train] key_file, the nomad account's, 600); on the worker, the copy of it ([ml.worker] key_file). Either way only its fingerprint is said: compare them. |
+| `nomad ml preview` | What a request would be sent now, in counts only: how many jobs (after thin and max_jobs) and when they ended, how many people and how much the busiest weigh, each target, and the tests (the holdout, period by period, new people). Nothing is sent, nothing trained (hub). |
 | `nomad ml scores` | A run's riskiest jobs: those running or waiting then, or the holdout's (with what became of them). |
 | `nomad ml status` | The request queued or running, and the last result. |
 | `nomad ml timer` | On the worker: `nomad ml work` from a systemd timer (nomad-ml-worker), every 5 minutes; a run still training isn't started again. |
-| `nomad ml work` | On the worker: one pass. |
+| `nomad ml work` | On the worker: one pass. Takes the oldest queued request, if any, trains, and sends back the result (or why it failed). |
 
 ## node
 
@@ -444,9 +444,9 @@ A weekly email to each person about their own use: what of theirs a login node's
 
 | Command | What it does |
 |---|---|
-| `nomad notices mail` | The emails due now: each person with something new since the last one, at most every every_days. |
-| `nomad notices set` | NETID is emailed (on, the default) or not (off): for someone who asked by email. |
-| `nomad notices timer` | A systemd timer that sends the week's emails (`nomad notices mail --send`) as the nomad account (or --user). |
+| `nomad notices mail` | The emails due now: each person with something new since the last one, at most every every_days. While review_to is set, they go there. |
+| `nomad notices set` | NETID is emailed (on, the default) or not (off): for someone who asked by email. People choose for themselves on My activity in the Console. |
+| `nomad notices timer` | A systemd timer that sends the week's emails (`nomad notices mail --send`) as the nomad account (or --user). Without --apply it prints the two files. While review_to is set, they go there. |
 
 ## storage
 
@@ -456,8 +456,8 @@ Who uses each storage server's space, and on what. See [storage.md](storage.md).
 |---|---|
 | `nomad storage cold` | Data unchanged for a year: who holds at least [console.cold_data] min_tb of it on a path, on every scanned storage server, with their last job, labs and what the lab check said of them; and the cases Research Computing opens to talk with them about it (numbered like account requests: ARC-0013). |
 | `nomad storage cold case` | A case moves on to STATE, or gets a note (or both). |
-| `nomad storage cold digest` | The weekly email to Research Computing: any server nearly full, what is new on the list, the open cases and those not updated lately, and the largest not yet a case. |
-| `nomad storage cold letter` | The email PERSON gets about their data on the list: to them, a copy to their faculty sponsor (the PI of each lab they are in, unless they lead one) and to Research Computing; their storage page; replies to whoever writes and to Research Computing. |
+| `nomad storage cold digest` | The weekly email to Research Computing: any server nearly full, what is new on the list, the open cases and those not updated lately, and the largest not yet a case. Sending marks what was new. |
+| `nomad storage cold letter` | The email PERSON gets about their data on the list: to them, a copy to their faculty sponsor (the PI of each lab they are in, unless they lead one) and to Research Computing; their storage page; replies to whoever writes and to Research Computing. --send sends it as printed, keeps it, and moves their cases to "contacted". The Console's Write to them lets you change it first. |
 | `nomad storage cold list` | The list, largest first. |
 | `nomad storage cold open` | Open a case about PERSON's data on SERVER:/PATH, to contact them. |
 | `nomad storage cold show` | One case, and its notes. |
@@ -465,7 +465,7 @@ Who uses each storage server's space, and on what. See [storage.md](storage.md).
 | `nomad storage cron` | How to run nomad-storage.sh on a server -- as root, through sudo, as an account with only the right to read, or measuring each top folder as its owner -- and the [collectors.storage_use] part of nomad.toml that reads what it writes. |
 | `nomad storage script` | Print nomad-storage.sh, to install on a storage server. |
 | `nomad storage status` | What the storage_use collector read from each server, and when. |
-| `nomad storage use` | Who holds each path's space: now, the change over 30 days (--days), and what the scans found older than their ages; with each person's last job. |
+| `nomad storage use` | Who holds each path's space: now, the change over 30 days (--days), and what the scans found older than their ages; with each person's last job. --over 1T --list gives the plain list of who holds more than 1 TiB. |
 
 ## sync
 
@@ -473,8 +473,8 @@ Sync remote NØMAÐ databases into a combined local database. See [setup-wizard.
 
 | Command | What it does |
 |---|---|
-| `nomad sync status` | How each site's last syncs went: when its data was last brought up to date, how (only what changed, or copied whole), how many rows, and why the last one failed. |
-| `nomad sync timer` | Set the hub's sync timer to [hub] sync_interval_minutes (1.40.0): every that many minutes, two minutes after the five-minute marks the sites read themselves on. |
+| `nomad sync status` | How each site's last syncs went: when its data was last brought up to date, how (only what changed, or copied whole), how many rows, and why the last one failed. Reads only; on the hub. |
+| `nomad sync timer` | Set the hub's sync timer to [hub] sync_interval_minutes (1.40.0): every that many minutes, two minutes after the five-minute marks the sites read themselves on. Without --apply, says what it would be. |
 
 ## usage-report
 
@@ -488,10 +488,10 @@ The administrators' report: use, people, waits, GPUs, storage, capacity. See [us
 | `nomad usage-report condos set` | Change the condo settings in report.toml: [report.labs] and [report.policy] values, owners, and which condos are confirmed. |
 | `nomad usage-report condos status` | What is left to set up before the reports go out as meant. |
 | `nomad usage-report condos timer` | A systemd timer that makes and mails last month's reports on the 1st. |
-| `nomad usage-report init` | Draft report.toml from the latest node samples: tiers by hardware, partitions and their nodes. |
+| `nomad usage-report init` | Draft report.toml from the latest node samples: tiers by hardware, partitions and their nodes. Edit it before the first report. |
 | `nomad usage-report labs` | Each lab's term report for its PI, and a summary of every lab. ([docs](lab-reports.md)) |
 | `nomad usage-report labs timer` | A systemd timer that makes and mails each lab's report for the term that ended, on the first day of the next (the days in [report.labs] terms; run it again after changing them). |
-| `nomad usage-report people` | Write the period's usernames to a CSV (user, department, school) for someone to fill in; pass it back with --user-map. |
+| `nomad usage-report people` | Write the period's usernames to a CSV (user, department, school) for someone to fill in; pass it back with --user-map. Names stay in that file: nothing is printed. |
 
 ## watch
 
@@ -500,5 +500,5 @@ What the policy watch found: tunnels, miners, relays, exposed services. See [pol
 | Command | What it does |
 |---|---|
 | `nomad watch list` | Findings, the most serious and the latest first; a verified ssh forward (to a listed server) is shown too, as info. |
-| `nomad watch probe` | Look now, here or on HOST (over ssh, as the collector does). |
+| `nomad watch probe` | Look now, here or on HOST (over ssh, as the collector does). Stores nothing. |
 | `nomad watch status` | The last sweep: each host asked, and what the probe could see there. |

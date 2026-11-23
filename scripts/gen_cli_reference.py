@@ -14,6 +14,7 @@ The page is generated: edit the commands' help, or DOCS below, not the page.
 from __future__ import annotations
 
 import argparse
+import inspect
 import sys
 from pathlib import Path
 
@@ -89,9 +90,18 @@ SUB_DOCS = {
 
 
 def first_sentence(cmd: click.Command) -> str:
-    """The command's own one-line summary, as `--help` lists it."""
-    text = cmd.get_short_help_str(limit=1000).strip()
-    return text.replace("|", "\\|")
+    """The first paragraph of the command's own help, on one line.
+
+    Read from the help text itself rather than Click's short help, which
+    differs between Click versions (8.1 cuts at the first full stop, so an
+    "e.g." ends it), so every machine writes the same page."""
+    if cmd.short_help:
+        text = cmd.short_help
+    else:
+        doc = inspect.cleandoc(cmd.help or "").split("\f", 1)[0]
+        lines = [ln for ln in doc.splitlines() if ln.strip() != "\b"]
+        text = "\n".join(lines).strip().split("\n\n", 1)[0]
+    return " ".join(text.split()).replace("|", "\\|")
 
 
 def walk(group: click.Group, path: list[str]):
