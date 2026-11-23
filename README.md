@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/nomad-banner.png" alt="NØMAÐ-HPC" width="900">
+  <img src="https://raw.githubusercontent.com/jtonini/nomad-hpc/main/docs/assets/nomad_hero.jpg" alt="NØMAÐ — NØde Monitoring And Ðiagnostics" width="900">
 </p>
 
 # NØMAÐ-HPC
