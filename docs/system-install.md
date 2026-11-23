@@ -1,345 +1,185 @@
 # System Install
 
-This guide covers deploying NØMAÐ system-wide for production HPC environments.
+How to run NØMAÐ as a service on a machine other people rely on: its own
+account, settings in `/etc/nomad`, and systemd. [Installation](installation.md)
+has the roles (site, hub, Console) and the hub's layout; this page has the
+permissions and what nomad touches on the system.
 
-## Overview
+## User install or system install
 
-System install differs from user install in several ways:
+| | User install | System install |
+|---|---|---|
+| Settings | `~/.config/nomad/nomad.toml` | `/etc/nomad/nomad.toml` |
+| Data | `~/.local/share/nomad/` | `/var/lib/nomad/` (or the nomad account's home, linked from there) |
+| Logs | `~/.local/share/nomad/logs/` | `/var/log/nomad/` and the journal |
+| Runs as | you | a `nomad` system account |
+| Scheduled by | your crontab | systemd timers, or the nomad account's crontab |
 
-| Aspect | User Install | System Install |
-|--------|--------------|----------------|
-| Config location | `~/.config/nomad/` | `/etc/nomad/` |
-| Data location | `~/.local/share/nomad/` | `/var/lib/nomad/` |
-| Log location | `~/.local/share/nomad/logs/` | `/var/log/nomad/` |
-| Permissions | User only | Controlled by file permissions |
-| Service | Manual or user systemd | System systemd unit |
-| Dashboard access | localhost only | Configurable (proxy recommended) |
+nomad reads the file given with `-c`, else `~/.config/nomad/nomad.toml`, else
+`/etc/nomad/nomad.toml`. An account with no settings of its own (the `nomad`
+account) therefore reads `/etc/nomad/nomad.toml`.
 
-## Installation
+## The nomad account
 
-### Prerequisites
 ```bash
-# Install as root or with sudo
-sudo pip install nomad-hpc
-
-# Or system-wide from source
-sudo pip install /path/to/nomad/
+sudo groupadd --system nomad
+sudo useradd --system -g nomad -d /home/nomad -m -s /sbin/nologin nomad
+sudo python3.12 -m venv /opt/nomad/venv
+sudo /opt/nomad/venv/bin/pip install nomad-hpc
+sudo /opt/nomad/venv/bin/nomad init --system   # writes /etc/nomad/nomad.toml; makes /var/lib/nomad, /var/log/nomad
 ```
 
-### Initialize System Configuration
+Then give the files to the account:
+
+| Path | Owner and mode | Why |
+|---|---|---|
+| `/etc/nomad/` | `root:nomad 2770` | nomad (and the Console) can edit nomad.toml (`nomad lab`, `nomad course`, `nomad console role` with `--apply`); new files keep the group |
+| `/etc/nomad/nomad.toml` | `nomad:nomad 0640` | it may hold a mail password or tokens; group members (admins) can read it |
+| data directory | `nomad:nomad 0750` | the databases hold usernames, job names and paths |
+| `/var/log/nomad/` | `nomad:nomad 0750` | |
+
+Keep the `nomad` group to administrators. For them to run nomad as the
+account, a small `/usr/local/bin/nomad`:
+
 ```bash
-sudo nomad init --system
+#!/bin/bash
+exec sudo -u nomad -H /opt/nomad/venv/bin/nomad "$@"
 ```
 
-This creates:
+with a sudoers line letting the group do just that
+(`%nomad ALL=(nomad) NOPASSWD: /opt/nomad/venv/bin/nomad`). As root, type the
+full path: sudo's PATH has no `/usr/local/bin`.
 
-| Path | Purpose | Permissions |
-|------|---------|-------------|
-| `/etc/nomad/` | Configuration directory | `root:root 755` |
-| `/etc/nomad/nomad.toml` | Main configuration | `root:root 644` |
-| `/var/lib/nomad/` | Data directory | `root:nomad 750` |
-| `/var/lib/nomad/nomad.db` | SQLite database | `root:nomad 660` |
-| `/var/log/nomad/` | Log directory | `root:nomad 750` |
+nomad's own commands never need root, and those that would write to
+`/etc/systemd/system` (each `timer` and `service` command) print what they
+would write and write it only with `--apply`, run as root.
 
-### Required Permissions
+## Collecting from systemd
 
-**Running as root**: Full access to all paths.
+From cron, every 5 minutes, is the usual way:
 
-**Running as service user** (recommended):
-```bash
-# Create nomad group
-sudo groupadd nomad
-
-# Create service user
-sudo useradd -r -g nomad -d /var/lib/nomad -s /sbin/nologin nomad
-
-# Set ownership
-sudo chown -R nomad:nomad /var/lib/nomad
-sudo chown -R nomad:nomad /var/log/nomad
-sudo chown root:nomad /etc/nomad/nomad.toml
-sudo chmod 640 /etc/nomad/nomad.toml
+```
+*/5 * * * * /opt/nomad/venv/bin/nomad collect --once
 ```
 
-**Wheel group access** (for admin users):
-```bash
-# Allow wheel group to read config
-sudo chown root:wheel /etc/nomad/nomad.toml
-sudo chmod 640 /etc/nomad/nomad.toml
+in the nomad account's crontab (`sudo crontab -u nomad -e`). Or with a
+timer:
 
-# Allow wheel group to read database
-sudo chown nomad:wheel /var/lib/nomad/nomad.db
-sudo chmod 660 /var/lib/nomad/nomad.db
-```
-
-## Files Modified/Accessed
-
-### Configuration Files
-
-| File | Read/Write | Purpose |
-|------|------------|---------|
-| `/etc/nomad/nomad.toml` | R | Main configuration |
-| `/etc/nomad/clusters/*.toml` | R | Per-cluster configs (optional) |
-
-### Data Files
-
-| File | Read/Write | Purpose |
-|------|------------|---------|
-| `/var/lib/nomad/nomad.db` | RW | SQLite database |
-| `/var/lib/nomad/models/` | RW | ML model files |
-| `/var/lib/nomad/cache/` | RW | Temporary cache |
-
-### Log Files
-
-| File | Read/Write | Purpose |
-|------|------------|---------|
-| `/var/log/nomad/nomad.log` | W | Main application log |
-| `/var/log/nomad/collector.log` | W | Collector logs |
-| `/var/log/nomad/alerts.log` | W | Alert dispatch logs |
-
-### System Files Read
-
-| File | Purpose |
-|------|---------|
-| `/proc/*/io` | Per-process I/O stats |
-| `/proc/meminfo` | Memory information |
-| `/proc/loadavg` | System load |
-| `/sys/class/thermal/` | Temperature sensors |
-
-### External Commands Executed
-
-| Command | Package | Purpose |
-|---------|---------|---------|
-| `iostat` | sysstat | Disk I/O metrics |
-| `mpstat` | sysstat | CPU metrics |
-| `vmstat` | procps | Memory/swap metrics |
-| `df` | coreutils | Filesystem usage |
-| `nvidia-smi` | nvidia-driver | GPU metrics (optional) |
-| `nfsiostat` | nfs-utils | NFS metrics (optional) |
-| `squeue` | slurm | Job queue (optional) |
-| `sinfo` | slurm | Node info (optional) |
-| `sacct` | slurm | Job accounting (optional) |
-
-## Systemd Service
-
-### Create Service Unit
-```bash
-sudo cat > /etc/systemd/system/nomad-collector.service << 'UNIT'
+```ini
+# /etc/systemd/system/nomad-collect.service
 [Unit]
-Description=NØMAÐ HPC Monitoring Collector
-After=network.target slurmd.service
+Description=NOMAD collectors
+After=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
 User=nomad
 Group=nomad
-ExecStart=/usr/local/bin/nomad collect
-Restart=always
-RestartSec=30
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/nomad /var/log/nomad
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+ExecStart=/opt/nomad/venv/bin/nomad collect --once
 ```
 
-### Enable and Start
+```ini
+# /etc/systemd/system/nomad-collect.timer
+[Unit]
+Description=NOMAD collectors, every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable nomad-collector
-sudo systemctl start nomad-collector
-sudo systemctl status nomad-collector
+sudo systemctl enable --now nomad-collect.timer
+systemctl list-timers 'nomad-*'
+journalctl -u nomad-collect
 ```
 
-### Dashboard Service (Optional)
-```bash
-sudo cat > /etc/systemd/system/nomad-dashboard.service << 'UNIT'
-[Unit]
-Description=NØMAÐ Dashboard
-After=network.target nomad-collector.service
+The hub's sync, and its reports and emails, run the same way: see
+[Installation: as its own account](installation.md#as-its-own-account).
 
-[Service]
-Type=simple
-User=nomad
-Group=nomad
-ExecStart=/usr/local/bin/nomad dashboard --host 127.0.0.1 --port 8050
-Restart=always
-RestartSec=10
+## What nomad reads and runs
 
-[Install]
-WantedBy=multi-user.target
-UNIT
-```
+### Commands
 
-## Web Dashboard Access
+| Command | Package | For |
+|---|---|---|
+| `squeue`, `sacct`, `sinfo`, `scontrol`, `sreport`, `sacctmgr` | Slurm | jobs, queues, nodes, partitions, accounts |
+| `sstat` | Slurm | what running jobs use now (`job_live`, as Slurm's user through sudo) |
+| `iostat`, `mpstat` | sysstat | disk I/O, per-core CPU |
+| `vmstat`, `df` | procps, coreutils | memory, swap, filesystems |
+| `nvidia-smi`, `dcgmi` | NVIDIA driver, DCGM | GPUs |
+| `nfsiostat` | nfs-utils | NFS client I/O |
+| `getent` | glibc | group membership, accounts |
+| `journalctl` | systemd | out-of-memory kills (`oom`) |
+| `ssh`, `scp` | OpenSSH | nodes, workstations, storage servers, the hub's sync |
 
-### Localhost Only (Default)
+Commands are looked for on the PATH and in `/usr/sbin`, `/sbin`,
+`/usr/local/sbin` and `/usr/local/bin` (cron's PATH is only `/usr/bin:/bin`).
 
-Dashboard binds to `127.0.0.1:8050` by default. Access via SSH tunnel:
-```bash
-# On your local machine
-ssh -L 8050:localhost:8050 user@hpc-head-node
+### Files
 
-# Then open http://localhost:8050 in browser
-```
+| Path | For |
+|---|---|
+| `/proc/*/stat`, `/proc/*/io`, `/proc/*/status` | processes on login nodes and interactive servers (`per_user`, `interactive`, `policy_watch`) |
+| `/proc/meminfo`, `/proc/loadavg`, `/proc/pressure/*` | memory, load, pressure stalls |
+| `/sys/class/hwmon` | temperatures (`temps`) |
+| `/sys/fs/cgroup` | per-user CPU on login nodes |
 
-### Reverse Proxy (Recommended for Remote Access)
+### What needs root
 
-Using Apache:
-```apache
-# /etc/httpd/conf.d/nomad.conf
-<VirtualHost *:443>
-    ServerName hpc.example.edu
-    
-    SSLEngine on
-    SSLCertificateFile /etc/pki/tls/certs/server.crt
-    SSLCertificateKeyFile /etc/pki/tls/private/server.key
-    
-    <Location /nomad>
-        ProxyPass http://127.0.0.1:8050/
-        ProxyPassReverse http://127.0.0.1:8050/
-        
-        # Require authentication
-        AuthType Basic
-        AuthName "NØMAÐ Dashboard"
-        AuthUserFile /etc/httpd/.htpasswd
-        Require valid-user
-    </Location>
-</VirtualHost>
-```
+Nothing of nomad runs as root. Three readings need it, and each comes from a
+small helper that root's cron runs, that only reads, and that writes a file
+the collector then reads:
 
-Using nginx:
-```nginx
-# /etc/nginx/conf.d/nomad.conf
-server {
-    listen 443 ssl;
-    server_name hpc.example.edu;
-    
-    ssl_certificate /etc/ssl/certs/server.crt;
-    ssl_certificate_key /etc/ssl/private/server.key;
-    
-    location /nomad/ {
-        proxy_pass http://127.0.0.1:8050/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        
-        # WebSocket support (for live updates)
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Authentication
-        auth_basic "NØMAÐ Dashboard";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-    }
-}
-```
+| Reading | Helper | Docs |
+|---|---|---|
+| Power supplies, voltages, fans (IPMI) | `scripts/power_root_probe.py` | [Collectors](collectors.md#power-supplies-voltages-and-fans-power-1258) |
+| Who holds a storage server's space | `nomad storage script` (`nomad-storage.sh`) | [Storage use](storage.md) |
+| Failed `sudo`, new setuid files | `scripts/watch_root_probe.py` | [Policy watch](policy_watch.md) |
 
-## SLURM Integration
+## Slurm
 
-### Prolog/Epilog Hooks
+nomad reads Slurm with its ordinary commands, so the account needs only to see
+every user's jobs (Slurm's `PrivateData` off for jobs and usage, or the
+account an operator). Two things go further, and both are off until set up:
 
-For per-job metrics collection:
-```bash
-# Copy hook scripts
-sudo cp /path/to/nomad/scripts/prolog.sh /etc/slurm/prolog.d/nomad.sh
-sudo cp /path/to/nomad/scripts/epilog.sh /etc/slurm/epilog.d/nomad.sh
+- **Draining and resuming nodes** from the Console: the account runs
+  `scontrol update` as Slurm's user through one sudoers line
+  ([Actions](actions.md#draining-and-resuming-a-node)).
+- **A prolog that scores each job** against the trained model:
+  `nomad/hooks/prolog.py`, copied into `/etc/slurm/prolog.d/` and named in
+  `slurm.conf` (`Prolog=`); it reads `/var/lib/nomad/nomad.db` and logs
+  high-risk jobs to `/var/log/nomad/`.
 
-# Make executable
-sudo chmod +x /etc/slurm/prolog.d/nomad.sh
-sudo chmod +x /etc/slurm/epilog.d/nomad.sh
+## Security
 
-# Restart SLURM controller
-sudo systemctl restart slurmctld
-```
-
-### Prolog Script
-```bash
-#!/bin/bash
-# /etc/slurm/prolog.d/nomad.sh
-/usr/local/bin/nomad job-start $SLURM_JOB_ID 2>/dev/null || true
-```
-
-### Epilog Script
-```bash
-#!/bin/bash
-# /etc/slurm/epilog.d/nomad.sh
-/usr/local/bin/nomad job-end $SLURM_JOB_ID 2>/dev/null || true
-```
-
-## Multi-Cluster Setup
-
-For monitoring multiple clusters from one head node:
-```toml
-# /etc/nomad/nomad.toml
-
-[clusters.spydur]
-name = "Spydur"
-type = "slurm"
-ssh_host = "spydur-head"
-partitions = ["compute", "gpu", "highmem"]
-
-[clusters.arachne]
-name = "Arachne"
-type = "slurm"
-ssh_host = "arachne-head"
-partitions = ["standard", "large"]
-```
-
-## Security Considerations
-
-### Database Access
-
-The SQLite database contains job metadata including usernames. Restrict access:
-```bash
-# Only nomad user and wheel group can read
-sudo chmod 660 /var/lib/nomad/nomad.db
-sudo chown nomad:wheel /var/lib/nomad/nomad.db
-```
-
-### Configuration Secrets
-
-If using Slack/email alerts, config contains credentials:
-```bash
-# Restrict config file
-sudo chmod 640 /etc/nomad/nomad.toml
-sudo chown root:nomad /etc/nomad/nomad.toml
-```
-
-### Dashboard Authentication
-
-Always use authentication for remote dashboard access. Never expose port 8050 directly to the network.
+- **The databases** hold usernames, job names, folders and command lines.
+  Keep them readable by the nomad account and administrators only: what
+  anyone else sees of other people goes through the Console's scoping.
+- **nomad.toml** may hold a mail password or tokens: `0640`, group `nomad`.
+  Where a setting takes a file instead (`[metrics] token_file`, say), keep
+  the secret there, readable by the account only.
+- **ssh keys**: each key the hub uses on a site is held there to what it is
+  for, with `restrict` and `from=` the hub's address, and where it is for one
+  command, `command=` (the actions agent, the gate).
+- **The Console** listens on `127.0.0.1` only: reach it through a reverse
+  proxy with HTTPS, or an SSH tunnel ([Console access](console.md)).
 
 ## Troubleshooting
 
-### Permission Denied
-```
-PermissionError: [Errno 13] Permission denied: '/var/lib/nomad/nomad.db'
-```
+**Permission denied on a database**: check the data directory's owner
+(`nomad`) and that you ran the command as the account
+(`sudo -u nomad -H ...`, or the wrapper above).
 
-**Solution**: Check ownership and permissions:
-```bash
-sudo chown nomad:nomad /var/lib/nomad/nomad.db
-sudo chmod 660 /var/lib/nomad/nomad.db
-```
+**A collector collects nothing**: `nomad collectors` says what it needs that
+this host lacks, and how its last runs went.
 
-### Collector Not Starting
+**Slurm's commands fail as the account**: try them as it
+(`sudo -u nomad squeue`); the account may need to be a Slurm operator, or
+Slurm's `PrivateData` may hide other users' jobs.
 
-Check systemd logs:
-```bash
-sudo journalctl -u nomad-collector -f
-```
-
-### SLURM Commands Failing
-
-Ensure the nomad user can run SLURM commands:
-```bash
-sudo -u nomad squeue
-```
-
-May need to add nomad user to appropriate groups or configure SLURM ACLs.
+**nomad.toml doesn't read**: `nomad config check` names the line.

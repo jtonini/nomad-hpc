@@ -189,7 +189,7 @@ Console's Trajectory and My Activity pages. With `--detailed`:
   Top issues across your measured jobs:
   ────────────────────────────────────────────────────────
 
-  [HIGH]     CPU Efficiency (spydur/basic) — ↑ improving
+  [HIGH]     CPU Efficiency (hpc1/basic) — ↑ improving
     5/7 jobs scored below threshold (avg score: 21.8)
     Jobs: 4521, 4519, 4502, 4498, 4470 (newest first; nomad edu explain JOB for one)
 
@@ -266,7 +266,7 @@ better way, with the commands:
 On the login nodes (last 30 days)
 
   A long computation on the login node
-    python3 on spydur, 2026-11-09 14:10, for 1 h 20 min (1.6 cores)
+    python3 on hpc1, 2026-11-09 14:10, for 1 h 20 min (1.6 cores)
     python3 fit_model.py --all
     One program kept the processor busy for a long time on the login node, ...
       Run it as a job: in the Console, Submit a job; or start a session on a compute node
@@ -309,28 +309,26 @@ nomad collect -C groups --once
 nomad edu report cs301
 ```
 
-### Option 3: Manual group file
+### Option 3: Courses
 
-Create a CSV file and import:
-```csv
-username,group_name,gid,cluster
-alice,cs301,3001,spydur
-bob,cs301,3001,spydur
-```
+A course is a Unix group per course, with this term's students and its
+instructors; `nomad course` finds them (from the groups, the instructors' own
+groups and the environments people used) and records what instructors say
+they teach. See [Configuration: courses](config.md#courses-nomad-course).
 ```bash
-nomad edu import-groups groups.csv
+nomad course discover          # what may be a course that nomad.toml doesn't list yet
+nomad course list              # each course: its instructors this term, and its students
 ```
 
-## Dashboard Integration
+## In the Console
 
-The dashboard includes an Education tab showing:
-
-- Class-wide proficiency distributions
-- Individual student progress
-- Common problem areas
-- Improvement trends over time
-
-Access via: `nomad dashboard` → Education tab
+The same analysis is in the Console, each person seeing what their role
+allows: My Activity (their own jobs, score, trend and advice, as
+`nomad edu me`), Recommendations (which jobs each recommendation is about),
+Trajectory, and Group Reports for a lab's PI or a course's instructor (as
+`nomad edu report`). The [standalone dashboard](dashboard.md)'s Education
+tab shows class-wide distributions and each student's progress from one
+database.
 
 ## Best Practices
 

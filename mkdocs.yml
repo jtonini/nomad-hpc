@@ -1,6 +1,6 @@
 site_name: NØMAÐ-HPC Documentation
 site_url: https://jtonini.github.io/nomad-hpc/
-site_description: Lightweight HPC monitoring, visualization, and predictive analytics
+site_description: Monitoring, diagnostics and plain-language guidance for research computing
 site_author: João Tonini
 
 repo_url: https://github.com/jtonini/nomad-hpc
@@ -38,57 +38,66 @@ theme:
 nav:
   - Home: index.md
   - Getting Started:
-    - Installation: installation.md
     - Quick Start: quickstart.md
+    - Installation: installation.md
     - Setup Wizard: setup-wizard.md
     - System Install: system-install.md
     - Configuration: config.md
     - Collectors: collectors.md
-  - Features:
-    - Dashboard: dashboard.md
     - Console Access: console.md
-    - GPU Monitoring: gpu.md
-    - Educational Analytics: edu.md
-    - Sizing and Submitting: submit.md
+  - People and Labs:
+    - For people who run jobs:
+      - Sizing and Submitting: submit.md
+      - Practice Runs: demos.md
+      - My Files: files.md
+      - Ask (Help Requests): help-requests.md
+      - Weekly Notices: notices.md
+      - Educational Analytics: edu.md
+    - For faculty:
+      - Lab Reports: lab-reports.md
+      - Condo Reports: condo-reports.md
+      - Lab Membership Check: lab-check.md
+      - Account Requests: lab-accounts.md
+  - Operations:
     - Alerts: alerts.md
-    - Interactive Sessions: interactive.md
-    - Data Readiness: readiness.md
-    - Diagnostics: diagnostics.md
-    - Usage Report: usage-report.md
-    - Condo Reports: condo-reports.md
-    - Lab Reports: lab-reports.md
-    - Lab Membership Check: lab-check.md
-    - Account Requests: lab-accounts.md
-    - Ask (Help Requests): help-requests.md
-    - My files (from the browser): files.md
-    - Licenses (when each ends): licenses.md
-    - nomad's own databases: databases.md
-    - Weekly Notices: notices.md
-    - Practice Runs: demos.md
-    - Storage Use: storage.md
-    - Policy Watch: policy_watch.md
-    - Impact: impact.md
     - Actions: actions.md
-    - Facts: facts.md
+    - Infrastructure: infrastructure.md
+    - Diagnostics: diagnostics.md
+    - GPU Monitoring: gpu.md
+    - Interactive Sessions: interactive.md
+    - Storage Use: storage.md
+    - Licenses: licenses.md
+    - Policy Watch: policy_watch.md
     - Prometheus Metrics: metrics.md
+    - nomad's Databases: databases.md
+    - Data Readiness: readiness.md
+    - Cloud Monitoring: cloud.md
+  - Reports and Analysis:
+    - Usage Report: usage-report.md
+    - Impact: impact.md
+    - Facts: facts.md
     - Insight Engine: insights.md
     - System Dynamics: dynamics.md
-    - Cloud Monitoring: cloud.md
-    - Issue Reporting: issue.md
-    - Infrastructure: infrastructure.md
-  - Technical:
-    - Developer Toolchain: dev.md
-    - Architecture: ARCHITECTURE.md
-    - Network Methodology: network.md
     - ML Framework: ml.md
-    - Training the model: ml-training.md
+    - Training the Model: ml-training.md
     - Proficiency Scoring: proficiency.md
+    - Network Methodology: network.md
+  - Reference:
     - CLI Reference: cli.md
+    - All Commands: cli-commands.md
+    - Architecture: ARCHITECTURE.md
     - Reference System: reference.md
+    - Standalone Dashboard: dashboard.md
+    - Issue Reporting: issue.md
   - Development:
     - Contributing: CONTRIBUTING.md
+    - Developer Toolchain: dev.md
     - Extending NØMAÐ: extending.md
     - Changelog: changelog.md
+
+validation:
+  anchors: warn
+  unrecognized_links: warn
 
 markdown_extensions:
   - pymdownx.highlight:

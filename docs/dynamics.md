@@ -9,7 +9,7 @@ Every command takes `--db PATH`, `--hours N` and `--site NAME`. On a hub's combi
 ### Full Summary
 ```bash
 nomad dyn summary --db nomad.db
-nomad dyn summary --db ~/.local/share/nomad/combined.db --site spydur
+nomad dyn summary --db ~/.local/share/nomad/combined.db --site hpc1
 ```
 Generates a comprehensive narrative combining all dynamics metrics.
 

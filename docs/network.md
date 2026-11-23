@@ -149,7 +149,7 @@ NØMAÐ tests whether observed patterns exceed random chance using permutation t
 
 ## Visualization
 
-The dashboard provides a 3D force-directed network visualization:
+The [standalone dashboard](dashboard.md) draws the network in 3D (force-directed):
 
 - **Node color**: Green (healthy) to Red (failed)
 - **Node position**: Fruchterman-Reingold layout

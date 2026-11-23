@@ -32,8 +32,8 @@ Research Computing as before. On My lab, under **Request accounts**, the PI:
    | too many of that name | give the NetID |
    | not found | no one in the directory by that NetID or name |
    | a surname alone | add the first name (a surname alone is hundreds of people) |
-   | has an account on spydur | nomad has their jobs, logins or groups there already |
-   | already asked for on spydur | an earlier request for them is still open |
+   | has an account on hpc1 | nomad has their jobs, logins or groups there already |
+   | already asked for on hpc1 | an earlier request for them is still open |
 
 4. sends the ones they mean, with a note if they like.
 
@@ -56,8 +56,8 @@ From the hub's shell, as the account the Console runs as:
 sudo -u nomad nomad lab accounts list --open
 sudo -u nomad nomad lab accounts list --find jdoe
 sudo -u nomad nomad lab accounts show ARC-0012
-sudo -u nomad nomad lab accounts close ARC-0012 jdoe spydur made
-sudo -u nomad nomad lab accounts close ARC-0012 asmith spydur not_made --note "not enrolled this term"
+sudo -u nomad nomad lab accounts close ARC-0012 jdoe hpc1 made
+sudo -u nomad nomad lab accounts close ARC-0012 asmith hpc1 not_made --note "not enrolled this term"
 sudo -u nomad nomad lab accounts lookup "Jane Doe" jdoe --file students.csv
 sudo -u nomad nomad lab accounts check
 ```
@@ -66,7 +66,7 @@ sudo -u nomad nomad lab accounts check
 
 Each request has a number, shown as `ARC-0012`: on the PI's card, first in
 the subject of both emails (`[ARC-0012] Account request: doelab, 3 people on
-spydur`, `[ARC-0012] The account for jdoe on spydur is ready`), on the Admin
+hpc1`, `[ARC-0012] The account for jdoe on hpc1 is ready`), on the Admin
 page and in the log. A reply keeps the subject, so the number comes back
 with it. Requests made before nomad 1.44.0 keep their number: #12 is
 ARC-0012.
@@ -89,7 +89,7 @@ list --find TEXT`, or the search box on the Admin page.
 ```
 sudo -u nomad nomad lab accounts report                                   # the last year
 sudo -u nomad nomad lab accounts report --since 2026-07-01 --until 2027-06-30
-sudo -u nomad nomad lab accounts report --cluster spydur --json
+sudo -u nomad nomad lab accounts report --cluster hpc1 --json
 sudo -u nomad nomad lab accounts report --since 2026-07-01 --csv > account-requests.csv
 ```
 
@@ -136,7 +136,7 @@ places above, printing nothing of the password.
 ```toml
 [console.labs.accounts]
 enabled = true                       # default: true once [directory] is set
-sites = ["spydur", "arachne"]        # where a PI may ask (default: each site with Slurm nodes read this week)
+sites = ["hpc1", "hpc2"]             # where a PI may ask (default: each site with Slurm nodes read this week)
 notify = ["hpc@example.edu"]         # new requests are emailed here
 most = 100                           # people in one request
 link = "https://nomad.example.edu/diagnostics?tab=labs"   # the Admin page, in the email to ARC

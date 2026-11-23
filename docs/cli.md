@@ -1,5 +1,7 @@
 # CLI Reference
 
+The commands most people use, with their usual options. [All commands](cli-commands.md) lists every one, from the CLI's own help; `nomad COMMAND --help` has each one's options.
+
 ## Core Commands
 
 | Command | Description |
@@ -7,18 +9,18 @@
 | `nomad init` | Setup wizard |
 | `nomad collect` | Start data collection |
 | `nomad collectors` | Which collectors run here, why, and how their runs went |
-| `nomad dashboard` | Launch web interface |
+| `nomad dashboard` | The [standalone dashboard](dashboard.md) on one database (the Console replaces it) |
 | `nomad console launch` | Open the Console in your browser through an SSH tunnel ([Console access](console.md)) |
 | `nomad console roles [NETID]` | Who may see what in the Console, as nomad.toml says; with NETID, what that person sees |
 | `nomad console role NETID ROLE` | Make one person admin, operator or viewer in nomad.toml's `[console.roles]`, or `none` (`--apply` writes it) ([Configuration](config.md)) |
 | `nomad lab lead LAB NETID` | NETID leads LAB too: a co-PI, a lab manager (`--remove`: no longer; `--apply` writes it) ([Configuration](config.md)) |
 | `nomad lab assistant LAB NETID` | NETID is a research assistant of LAB: sees it as its PI does while one of its members (`--remove`: no longer; `--apply` writes it) |
 | `nomad demos ...` | Practice runs: small inputs, known to work, that show how a job runs ([Practice runs](demos.md)) |
-| `nomad lab check ...` | Each term, a lab's PI says who is still in it; ARC's to-do from the answers ([Lab membership check](lab-check.md)) |
-| `nomad lab accounts ...` | A lab's PI asks ARC for accounts; who each one is, from the campus directory; ARC closes each; each request numbered ARC-0012; `report` for a period, `--csv` one row per account ([Account requests](lab-accounts.md)) |
+| `nomad lab check ...` | Each term, a lab's PI says who is still in it; research computing's to-do from the answers ([Lab membership check](lab-check.md)) |
+| `nomad lab accounts ...` | A lab's PI asks research computing for accounts; who each one is, from the campus directory; staff close each; each request numbered (ARC-0012 by default); `report` for a period, `--csv` one row per account ([Account requests](lab-accounts.md)) |
 | `nomad notices` | A weekly email to each person about their own use (login nodes, jobs asking far more than they use): `mail [--send]`, `set NETID on|off`, `timer`; review first ([Notices](notices.md)) |
 | `nomad maintenance` | Declared maintenance windows: `start SITE --until WHEN --reason WHY`, `end SITE` (`--apply` does it); alerts about the site are held, the hub's and its own ([Alerts](alerts.md#declared-maintenance-1370)) |
-| `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as (quickstart.md) |
+| `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as ([Quick Start](quickstart.md)) |
 | `nomad status` | System status |
 | `nomad syscheck` | Verify requirements |
 | `nomad config check` | Does nomad.toml read? If not, the line and what is wrong ([Configuration](config.md)) |
@@ -33,6 +35,7 @@
 
 | Command | Description |
 |---------|-------------|
+| `nomad edu me` | Your own jobs: score, trend and what to change |
 | `nomad edu explain <job_id>` | Analyze job with recommendations |
 | `nomad edu trajectory <user>` | User proficiency over time |
 | `nomad edu report <group>` | Group/course report |
@@ -66,8 +69,8 @@ Read by admins (1.19; [details](policy_watch.md)):
 
 | Command | Description |
 |---------|-------------|
-| `nomad disk <path>` | Filesystem trends |
-| `nomad jobs` | Job history |
+| `nomad analyze -p PATH` | A filesystem's trend, and when it fills |
+| `nomad facts me NETID` | One person's jobs, running and waiting, score and advice |
 | `nomad similarity` | Network analysis |
 | `nomad alerts` | View alerts |
 
@@ -221,13 +224,16 @@ nomad facts me NETID --mask       # without the NetID, for sharing
 
 ## Global Options
 
+Given before the command (`nomad -c FILE sync`):
+
 | Option | Description |
 |--------|-------------|
-| `--config PATH` | Config file path |
-| `--db PATH` | Database path |
-| `--verbose` / `-v` | Verbose output |
-| `--quiet` / `-q` | Suppress output |
+| `-c`, `--config PATH` | The nomad.toml to read (default: `~/.config/nomad/nomad.toml`, else `/etc/nomad/nomad.toml`) |
+| `-v`, `--verbose` | Debug logging |
+| `--version` | nomad's version |
 | `--help` | Show help |
+
+Most commands that read a database also take `--db PATH`, after the command.
 
 ## Insight Engine
 
@@ -260,12 +266,11 @@ nomad facts me NETID --mask       # without the NetID, for sharing
 
 | Command | Description |
 |---------|-------------|
-| `nomad cloud collect` | Collect metrics from cloud providers |
-| `nomad cloud status` | Current resource utilization |
-| `nomad cloud diag` | Cost and performance diagnostics |
-| `nomad cloud edu` | Usage recommendations |
-
-**Options**: `--provider {aws,azure,gcp}`, `--db PATH`
+| `nomad cloud collect` | Run the cloud collectors once |
+| `nomad cloud instances` | The cloud instances found |
+| `nomad cloud status` | Whether the collectors connect and authenticate |
+| `nomad diag cloud INSTANCE` | One instance's cost and performance |
+| `nomad edu cloud` | How well cloud resources are used, with advice |
 
 
 ## Reference
@@ -331,7 +336,7 @@ DCGM health alerts.
 ```
 nomad insights gpu
 nomad insights gpu --hours 12
-nomad insights gpu --node spdr16
+nomad insights gpu --node gpu01
 ```
 
 **Options:**

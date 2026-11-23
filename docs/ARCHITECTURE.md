@@ -1,145 +1,170 @@
-# NØMAÐ Architecture Summary
+# Architecture
 
-## Data Collection Overview
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                         NØMAÐ Data Collection v0.2.0                         │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  SYSTEM COLLECTORS (every 60s):                                              │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ disk         │ Filesystem usage (total, used, free, projections)       │  │
-│  │ iostat       │ Device I/O: %iowait, utilization, latency               │  │
-│  │ mpstat       │ Per-core CPU: utilization, imbalance detection          │  │
-│  │ vmstat       │ Memory pressure, swap activity, blocked processes       │  │
-│  │ nfs          │ NFS I/O: ops/sec, throughput, RTT, retransmissions      │  │
-│  │ gpu          │ NVIDIA GPU: utilization, memory, temperature, power     │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  SLURM COLLECTORS (every 60s):                                               │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ slurm        │ Queue state: pending, running, partition stats          │  │
-│  │ job_metrics  │ sacct data: CPU/mem efficiency, health scores           │  │
-│  │ node_state   │ Node allocation, drain reasons, CPU load, memory        │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-│  JOB MONITOR (every 30s):                                                    │
-│  ┌──────────────┬─────────────────────────────────────────────────────────┐  │
-│  │ job_monitor  │ Per-job I/O: NFS vs local writes from /proc/[pid]/io    │  │
-│  └──────────────┴─────────────────────────────────────────────────────────┘  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Feature Vector (19 dimensions)
+NØMAÐ is one Python package, `nomad-hpc`, and a web interface, the Console.
+The same package runs on every machine; what a machine does depends on which
+sections its `nomad.toml` has.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Feature Vector for Similarity Analysis                   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  FROM SACCT (job outcome):              FROM IOSTAT (system I/O):           │
-│  ┌────────────────────────────────┐     ┌────────────────────────────────┐  │
-│  │  1. health_score        [0-1]  │     │ 11. avg_iowait_percent   [0-1] │  │
-│  │  2. cpu_efficiency      [0-1]  │     │ 12. peak_iowait_percent  [0-1] │  │
-│  │  3. memory_efficiency   [0-1]  │     │ 13. avg_device_util      [0-1] │  │
-│  │  4. used_gpu            [0,1]  │     └────────────────────────────────┘  │
-│  │  5. had_swap            [0,1]  │                                         │
-│  └────────────────────────────────┘     FROM MPSTAT (CPU cores):            │
-│                                         ┌────────────────────────────────┐  │
-│  FROM JOB_MONITOR (I/O behavior):       │ 14. avg_core_busy        [0-1] │  │
-│  ┌────────────────────────────────┐     │ 15. core_imbalance_ratio [0-1] │  │
-│  │  6. total_write_gb      [0-1]  │     │ 16. max_core_busy        [0-1] │  │
-│  │  7. write_rate_mbps     [0-1]  │     └────────────────────────────────┘  │
-│  │  8. nfs_ratio           [0-1]  │                                         │
-│  │  9. runtime_minutes     [0-1]  │     FROM VMSTAT (memory pressure):      │
-│  │ 10. write_intensity     [0-1]  │     ┌────────────────────────────────┐  │
-│  └────────────────────────────────┘     │ 17. avg_memory_pressure  [0-1] │  │
-│                                         │ 18. peak_swap_activity   [0-1] │  │
-│                                         │ 19. avg_procs_blocked    [0-1] │  │
-│                                         └────────────────────────────────┘  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+ SITES (each keeps its own SQLite database)
+ ┌─────────────────────────┐ ┌─────────────────────────┐ ┌─────────────────────────┐
+ │ cluster head node       │ │ interactive server      │ │ lab head / storage host │
+ │ nomad collect --once    │ │ nomad collect --once    │ │ nomad collect --once    │
+ │ (cron, every 5 minutes) │ │ RStudio, Jupyter        │ │ workstations, NAS (ssh) │
+ │        nomad.db         │ │        nomad.db         │ │        nomad.db         │
+ └────────────┬────────────┘ └────────────┬────────────┘ └────────────┬────────────┘
+              │      ssh: the hub's exporter, run with python3,       │
+              └───────────── only the rows that changed ──────────────┘
+                                          │
+ HUB                                      ▼
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ nomad sync (systemd timer)  ──►  combined.db  (every site's rows,          │
+ │                                               tagged with source_site)     │
+ │ timers: alerts, weekly notices, lab check, term and condo reports,         │
+ │         license reminders, cold data, Prometheus exporter                  │
+ │                                                                            │
+ │ Console: FastAPI + React on 127.0.0.1:8000, behind a reverse proxy (HTTPS) │
+ │          reads combined.db and nomad.toml; signs people in; scopes answers │
+ └──────────┬───────────────────────────────────────────────┬─────────────────┘
+            │ ssh, forced commands                          │ HTTPS
+            ▼                                               ▼
+  sites: nomad agent (actions)                     browsers: people, PIs, staff
+         nomad-gate (as the person)
 ```
 
-## Collector Details
+## Roles
 
-| # | Collector | Source | Key Data | Graceful Skip |
-|---|-----------|--------|----------|---------------|
-| 1 | `disk` | `shutil.disk_usage` | total/used/free, fill rate projections | No |
-| 2 | `slurm` | `squeue`, `sinfo` | pending/running jobs, partition stats | No |
-| 3 | `job_metrics` | `sacct` | CPU/mem efficiency, exit codes, health | No |
-| 4 | `iostat` | `iostat -x` | %iowait, device util, r/w latency | No |
-| 5 | `mpstat` | `mpstat -P ALL` | per-core CPU, imbalance ratio | No |
-| 6 | `vmstat` | `vmstat` | swap, memory pressure, blocked procs | No |
-| 7 | `node_state` | `scontrol show node` | allocation, drain reasons, load | No |
-| 8 | `gpu` | `nvidia-smi` | util, memory, temp, power | Yes (if no GPU) |
-| 9 | `nfs` | `nfsiostat` | ops/sec, throughput, RTT | Yes (if no NFS) |
-| 10 | `job_monitor` | `/proc/[pid]/io` | per-job NFS vs local I/O | No |
+| Role | Section in nomad.toml | What it runs |
+|---|---|---|
+| Site | `[collectors.*]` (and `[clusters.*]`) | `nomad collect --once`, from cron or a timer |
+| Hub | `[hub]` with `[[hub.sites]]` | `nomad sync`, and the scheduled reports and emails |
+| Console | `[console.*]` | the web interface, on the machine with the combined database |
 
-## Database Tables
+A machine with no `[hub]` is a site only. A hub can be a site of its own (a
+`localhost` site in `[[hub.sites]]`, read without ssh), which is how lab
+workstations and storage servers that no cluster reaches are collected. A
+center with one cluster can run all three roles on one machine.
 
-### System Metrics
-- `filesystems` - disk usage snapshots
-- `iostat_cpu` - system %iowait
-- `iostat_device` - per-device I/O stats
-- `mpstat_core` - per-core CPU stats
-- `mpstat_summary` - CPU imbalance metrics
-- `vmstat` - memory pressure, swap
-- `node_state` - SLURM node allocation
-- `gpu_stats` - NVIDIA GPU metrics
-- `nfs_stats` - NFS I/O metrics
+## Collection
 
-### Job Data
-- `jobs` - job metadata from sacct
-- `job_metrics` - time-series job stats
-- `job_io_samples` - per-job I/O snapshots
-- `job_summary` - health scores, feature vectors
+`nomad collect --once` runs the collectors this machine's nomad.toml turns
+on. Each one reads one kind of thing with the standard tool for it, writes
+its own tables, and logs each run (`collection_log`), so that
+`nomad collectors` can say what ran, what it needs that this host lacks, and
+whether it collected anything.
 
-### Analysis
-- `job_similarity` - pairwise similarity edges
-- `clusters` - job cluster profiles
-- `alerts` - alert history
-- `collection_log` - collector run history
+| Area | Collectors |
+|---|---|
+| Slurm: jobs, queues, nodes | `slurm`, `job_metrics`, `job_live`, `node_state`, `slurm_usage`, `preemptions` |
+| The machine itself | `disk`, `iostat`, `mpstat`, `vmstat`, `pressure`, `nfs` |
+| Node hardware | `gpu` (nvidia-smi and DCGM), `temps`, `power`, `clock`, `node_disks` |
+| People and their sessions | `groups`, `per_user` (login nodes), `oom`, `interactive` (RStudio, Jupyter), `workstation` |
+| Storage | `storage` (ZFS and NFS servers), `storage_use` (who holds the space) |
+| Software | `modules` (Lmod), `licenses`, `license_tries` |
+| Security | `policy_watch` (tunnels, miners, relays, exposed services, AI-agent misuse) |
+| nomad itself | `databases` |
+| Elsewhere | `network_perf`, `cloud` |
 
-## CLI Commands
+[Collectors](collectors.md) has what each one reads, where it belongs and the
+tables it writes. Readings that need root (board sensors, storage scans,
+failed `sudo`) come from small helpers that root's cron runs and that only
+read; the collector reads the file they write.
 
-```bash
-# Core commands
-nomad status              # Full system overview
-nomad syscheck            # Verify requirements
-nomad collect --once      # Single collection cycle
-nomad collect -i 60       # Continuous (every 60s)
-nomad monitor -i 30       # Job I/O monitor (every 30s)
+Jobs from before nomad was installed can be loaded from Slurm's accounting
+with `nomad import sacct`.
 
-# Analysis
-nomad disk /home          # Filesystem trends
-nomad jobs --user X       # Job history
-nomad similarity          # Similarity analysis
-nomad alerts              # View alerts
+## The hub's sync
 
-# Bash helpers (source scripts/nomad.sh)
-nstatus    nwatch    ndisk    njobs    nsimilarity
-nalerts    ncollect  nmonitor nsyscheck nlog
-```
+Each site keeps a log of the rows its collectors add, change and delete
+(triggers on its own tables). Each `nomad sync` sends the site a small
+exporter over ssh, runs it there with `python3`, and applies what it returns
+to the combined database in place, one transaction per site. A run writes
+megabytes; nothing on the site needs installing for it. A site is copied
+whole only the first time, after its database was replaced or restored, or
+when the hub has fallen too far behind.
 
-## Quick Start
+`sync_sites` records, for each site, when it was last brought up to date,
+how, and why not. A site that stops answering, or answers but has stopped
+collecting, raises an alert from the hub, and every page shows how old each
+site's data is. A site taken down on purpose is declared with
+`nomad maintenance start`, which holds its alerts.
 
-```bash
-# 1. Initialize database
-sqlite3 /var/lib/nomad/nomad.db < nomad/db/schema.sql
+The details are in
+[Setup Wizard: multi-site setup](setup-wizard.md#multi-site-setup).
 
-# 2. Verify system
-nomad syscheck
+## The Console
 
-# 3. Test collection
-nomad collect --once
+The Console reads the combined database and the hub's nomad.toml. It imports
+nomad's own code for its answers (the same functions `nomad facts`,
+`nomad edu` and `nomad size` use), so the command line and the web interface
+give the same figures. Its JSON API (`/api/v1`) is what
+[`nomad facts`](facts.md) prints.
 
-# 4. Start continuous collection
-nohup nomad collect -i 60 > /tmp/nomad-collect.log 2>&1 &
-nohup nomad monitor -i 30 > /tmp/nomad-monitor.log 2>&1 &
+Who sees what is decided on the server, from nomad.toml
+([Configuration: Console access](config.md#console-access)):
 
-# 5. Check status
-nomad status
-```
+| Who | Sees |
+|---|---|
+| Everyone signed in | the clusters' capacity, queues and waits; their own jobs, scores and advice |
+| A lab's PI, leads and research assistants | that lab's members one by one, their work, its workstations and storage |
+| An instructor | the courses they teach this term |
+| Operators | everything; change no settings |
+| Admins | everything, settings included |
+
+Non-staff pages keep the staff pages' structure and drill-downs, scoped to
+what the person may see.
+
+The Console never reaches a cluster directly. Two keys of the hub's, each held
+on the site by sshd to one forced command, do it for it:
+
+- **Actions** (`nomad agent`): a fixed catalog of commands staff may start
+  from the Console, such as draining a node or clearing stale Jupyter
+  sessions. Each is a dry run unless asked otherwise, and each is recorded
+  with who asked. See [Actions](actions.md).
+- **The gate** (`nomad-gate`): acting on a cluster as the person signed in,
+  with the cluster account's own `sudo -u PERSON`, never as root. It sizes
+  and submits their jobs, copies their files, and cancels their jobs. See
+  [Sizing and submitting](submit.md#from-the-console-nomad-gate) and
+  [My files](files.md).
+
+## Databases
+
+| Database | Where | Holds |
+|---|---|---|
+| `nomad.db` (or the site's name) | each site | what that site's collectors read, and its change log |
+| `combined.db` | the hub | every site's rows, with `source_site`; `sync_sites` |
+| `notices.db`, `lab_check.db`, and others beside it | the hub | what people answered and what was sent: notices, the lab check, account and help requests, cold-data cases, course answers |
+
+All are SQLite. Their size and growth, and old copies left beside them, are
+watched by the `databases` collector and `nomad db`
+([nomad's own databases](databases.md)).
+
+## Analysis
+
+| Module | What | Docs |
+|---|---|---|
+| `nomad.facts` | The figures every page and command shares: sites, a person, a lab, a course, a node over a window | [Facts](facts.md) |
+| `nomad.edu` | Each job scored on CPU, memory, time, I/O and GPU use, with advice in plain language | [Educational analytics](edu.md), [Proficiency scoring](proficiency.md) |
+| `nomad.submit` | What a job should ask for, and where it starts soonest | [Sizing and submitting](submit.md) |
+| `nomad.alerts` | Thresholds, forecasts (a disk filling), stale sources, the hub's alerts for its sites | [Alerts](alerts.md) |
+| `nomad.insights` | Signals from every source, linked into findings, as sentences | [Insight Engine](insights.md) |
+| `nomad.dynamics` | Diversity, niche overlap, capacity, resilience, externalities | [System dynamics](dynamics.md) |
+| `nomad.usage` | The administrators' report, condo and lab reports | [Usage report](usage-report.md) |
+| `nomad.ml` | Job failure prediction with TESSERA; training on a GPU worker | [ML framework](ml.md), [Training the model](ml-training.md) |
+| `nomad.metrics` | What nomad knows, for Prometheus and Grafana | [Prometheus metrics](metrics.md) |
+
+## Code layout
+
+| Path | What |
+|---|---|
+| `nomad/cli.py` and `nomad/*_cli.py` | the `nomad` command |
+| `nomad/collectors/` | one module per collector; `base.py` has `BaseCollector` and the registry |
+| `nomad/db/` | the schema, migrations, and the sync's site exporter (`delta_site.py`) |
+| `nomad/config/` | the packaged defaults (`default.toml`) and the config reader |
+| `nomad/facts/`, `nomad/edu/`, `nomad/submit/`, `nomad/usage/` | the analysis above |
+| `nomad/actions/`, `nomad/console/` | the actions catalog and agent; `nomad console launch` |
+| `nomad/demos/` | the practice-run kits |
+| `nomad/viz/` | the standalone dashboard (`nomad dashboard`) |
+| `scripts/` | the install for users, and the root helpers |
+| `tests/` | the test suite (`pytest`) |
+
+[Extending NØMAÐ](extending.md) shows how to add a collector.

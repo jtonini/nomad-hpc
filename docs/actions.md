@@ -180,7 +180,7 @@ With `--apply`, that command runs, and the node is read again to say what
 Slurm made of it. It is done only when Slurm shows the change.
 
 **Who runs scontrol.** Slurm lets only its administrators drain a node. Set in
-the nomad.toml of the account the site's agent runs as (installer, zeus or
+the nomad.toml of the account the site's agent runs as (hpcadmin, monitor or
 nomad, say):
 
 ```toml
@@ -194,7 +194,7 @@ line, which root adds (`visudo -f /etc/sudoers.d/nomad-node`). The dry run print
 it with the account's name and scontrol's path:
 
 ```
-zeus ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\=* State\=DRAIN Reason\=*, /usr/bin/scontrol update NodeName\=* State\=RESUME
+monitor ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\=* State\=DRAIN Reason\=*, /usr/bin/scontrol update NodeName\=* State\=RESUME
 ```
 
 It lets the account update nodes as Slurm's account, and run no other
@@ -219,7 +219,7 @@ doesn't run, and the answer says so, with the NOPASSWD line that would do.
 sets it), the agent, which has none, can't use it. nomad runs sudo without
 a terminal by hand too (in a session of its own), so the dry run in a
 terminal says what the Console would meet: then root adds
-`Defaults:zeus !requiretty` beside the sudo line.
+`Defaults:monitor !requiretty` beside the sudo line.
 
 **One environment.** sudo drops `SLURM_*` settings for the change, so every
 Slurm program here runs without them (`SLURM_CONF`, `SLURM_CLUSTERS`): what
@@ -229,7 +229,7 @@ only through `SLURM_CONF` can't be changed this way.
 **What Slurm keeps.** Slurm records the account that ran scontrol as the
 reason's author (`slurm`, through sudo from the Console; by hand in a
 terminal, the login name), so the reason itself says who asked:
-`disk errors (jtonini via nomad)`. Who asked is what the hub's request says
+`disk errors (rcadmin via nomad)`. Who asked is what the hub's request says
 (the Console's signed-in administrator): a site trusts the hub's key for it.
 Slurm drops a node's reason when it resumes, so a reason given to `resume`
 goes to the logs only.

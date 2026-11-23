@@ -122,12 +122,12 @@ uses; it is not described as waste.
 **Readings no node could hold are not scored.** Slurm's `jobacct_gather/linux`
 adds up the RSS of every process in a job, so memory the processes share (a
 data loader's forked workers, a memory-mapped dataset) is counted once per
-process -- one arachne job reported 7 TB. A peak above the largest node's
+process -- one hpc2 job reported 7 TB. A peak above the largest node's
 memory at that site (from `node_state`) is shown as "not a measurement" and
 left out. Readings inflated less than that can't be told apart; the fix is at
 the source: `JobAcctGatherParams=UsePss` in `slurm.conf`, which counts shared
 memory in proportion. (`jobacct_gather/cgroup` avoids the multiplying too, but
-on Slurm 22.05 with cgroup v2 it counts transparent huge pages twice: arachne
+on Slurm 22.05 with cgroup v2 it counts transparent huge pages twice: hpc2
 reported 2.0 GB for a job the kernel measured at 1.0 GB. With `UsePss` the
 same job read 1.0 GB.)
 
@@ -424,4 +424,4 @@ For automatic scoring, add to SLURM epilog:
 nomad edu explain $SLURM_JOB_ID --json >> /var/log/nomad/edu.log 2>&1
 ```
 
-Users can then view their proficiency in the dashboard or via CLI.
+Users then see their proficiency in the Console (My Activity) or with `nomad edu me`.

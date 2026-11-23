@@ -15,8 +15,8 @@ automatically and falls back to `nvidia-smi` silently.
 | DCGM | All of the above + Real Util, pipeline counters, hardware health | Datacenter GPUs with DCGM installed |
 
 The `data_source` column in `gpu_stats` records which source was used for each
-record. The dashboard shows a **DCGM** pill next to the GPU name when enhanced
-metrics are active.
+record. The [standalone dashboard](dashboard.md) shows a **DCGM** pill next
+to the GPU name when enhanced metrics are active.
 
 ---
 
@@ -144,7 +144,7 @@ For headnode deployments where GPUs are on compute nodes, configure SSH mode:
 ```toml
 [collectors.gpu]
 enabled = true
-ssh_user = "zeus"
+ssh_user = "monitor"
 gpu_nodes = ["node51", "node52", "node53"]
 ```
 
@@ -155,7 +155,7 @@ remotely. The same fallback logic applies per node.
 
 ## SLURM / CUDA GPU Visibility
 
-User-facing commands (`nomad edu explain_job`, etc.) filter GPU data to the
+User-facing commands (`nomad edu explain`, etc.) filter GPU data to the
 GPUs visible to the current job. Detection priority:
 
 1. `CUDA_VISIBLE_DEVICES`
@@ -188,7 +188,7 @@ than Real Util.
 ```
 nomad insights gpu                # All nodes, last 6h
 nomad insights gpu --hours 12     # Longer window
-nomad insights gpu --node spdr16  # Specific node
+nomad insights gpu --node gpu01   # Specific node
 ```
 
 ---
@@ -283,7 +283,7 @@ the relevant data is present in the database.
 > compute and data transfer.
 
 **GPU Workload Pattern — productive (INFO):**
-> spdr16 is running tensor-heavy compute workloads 72% of the time — GPU
+> gpu01 is running tensor-heavy compute workloads 72% of the time — GPU
 > resources are being used effectively.
 
 **GPU Hardware Health — CRITICAL:**
@@ -291,7 +291,7 @@ the relevant data is present in the database.
 > This GPU should be removed from production and scheduled for replacement.
 
 **GPU Hardware Health — NOTICE:**
-> spdr17 GPU 0 is logging PCIe replay errors (0.023/s). This indicates link
+> gpu02 GPU 0 is logging PCIe replay errors (0.023/s). This indicates link
 > instability — check the PCIe slot, riser card, or cable. Left unaddressed,
 > this typically escalates to link failure.
 

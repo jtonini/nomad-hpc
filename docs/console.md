@@ -1,11 +1,17 @@
 # Console access
 
 The Console, NØMAÐ's web interface, listens only on the machine that serves it
-(`127.0.0.1:8000` by default). Nothing on the network can reach it directly,
-and that is deliberate: the Console asks for passwords, and until it sits
-behind HTTPS they must not cross the network where they could be read. People
-reach it through an SSH tunnel instead, which encrypts everything, passwords
-included.
+(`127.0.0.1:8000` by default). Nothing on the network reaches it directly,
+and that is deliberate: the Console asks for passwords, which must never
+cross the network where they could be read. There are two ways in:
+
+- **A web address** (`https://nomad.example.edu`): a reverse proxy on the
+  same machine, with a certificate, passes requests to the Console. People
+  open the address in a browser and sign in; nothing needs installing. This
+  is the way in once it is set up ([below](#a-web-address)).
+- **An SSH tunnel**, which encrypts everything, passwords included: for a
+  Console not yet behind HTTPS, for staff, and from where the address isn't
+  open (off campus without the VPN, say). The rest of this page is about it.
 
 ## Opening it from your own computer
 
@@ -83,7 +89,7 @@ prints the one line to run on your own computer, through the cluster:
 
 ```
 $ nomad console
-A browser started on spydur would not be on your screen. On your own computer, run:
+A browser started on hpc1 would not be on your screen. On your own computer, run:
 
     ssh -N nomad-console
 
@@ -91,13 +97,13 @@ It opens the Console in your browser; that window keeps it open, and Ctrl-C ther
 
 The first time on that computer (Mac or Linux), set it up once there with:
 
-    bash -c "$(ssh NETID@spydur.example.edu /usr/local/sw/bin/nomad console --key-setup)"
+    bash -c "$(ssh NETID@hpc1.example.edu /usr/local/sw/bin/nomad console --key-setup)"
 
 and send the line it prints to your research computing contact.
 
 Until then, or on Windows, this works with your password:
 
-    ssh -N -L 8000:localhost:8000 ... -J NETID@spydur.example.edu NETID@console-host.example.edu
+    ssh -N -L 8000:localhost:8000 ... -J NETID@hpc1.example.edu NETID@console-host.example.edu
 ...
 ```
 
@@ -206,8 +212,48 @@ restrict,port-forwarding,permitopen="localhost:8000",permitopen="127.0.0.1:8000"
 
 A key in the account's own home is not read. Passwords keep working.
 
-## Later: a web address
+## A web address
 
-The tunnel is the way in until the Console sits behind HTTPS on a named host:
-a reverse proxy with a certificate, ideally with campus single sign-on. Then
-people open an address and nothing needs installing.
+Once the Console sits behind HTTPS on a name of its own, people open that
+address and sign in; the tunnel is then for staff and for where the address
+isn't open. The Console itself stays on `127.0.0.1:8000`; a reverse proxy on
+the same machine holds the certificate and passes requests on. With Apache:
+
+```apache
+<VirtualHost *:443>
+    ServerName nomad.example.edu
+    SSLEngine on
+    SSLCertificateFile    /etc/pki/tls/certs/nomad.example.edu.crt
+    SSLCertificateKeyFile /etc/pki/tls/private/nomad.example.edu.key
+
+    ProxyPreserveHost On
+    ProxyPass        / http://127.0.0.1:8000/
+    ProxyPassReverse / http://127.0.0.1:8000/
+    RequestHeader set X-Forwarded-Proto "https"
+
+    # who may reach it at all: the campus network and its VPN, say
+    <Location />
+        Require ip 192.0.2.0/24 198.51.100.0/24
+    </Location>
+</VirtualHost>
+
+<VirtualHost *:80>
+    ServerName nomad.example.edu
+    Redirect permanent / https://nomad.example.edu/
+</VirtualHost>
+```
+
+With nginx, the same is a `server` block listening on 443 with
+`proxy_pass http://127.0.0.1:8000;` and the same headers. Then:
+
+- **Sign-in** is the Console's own: its local accounts, or people's campus
+  accounts checked against Kerberos or LDAP, so access follows the campus
+  account's life. The proxy needs no authentication of its own.
+- **The links in nomad's emails** (weekly notices, the lab check, account and
+  help requests, cold data) point at this address: set it as `link` in their
+  settings (`https://nomad.example.edu/me`, `.../lab`, ...).
+- **Who sees what** is the Console's, from nomad.toml
+  ([Configuration: Console access](config.md#console-access)).
+
+Keep the tunnel's sshd settings above for the machine's other users: the web
+address doesn't need them, and they don't get in its way.

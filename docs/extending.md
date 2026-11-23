@@ -3,6 +3,10 @@
 This guide explains how to add new modules to NØMAÐ-HPC, including collectors, diagnostics, and alert backends.
 
 ## Architecture Overview
+
+[Architecture](ARCHITECTURE.md) has the whole picture: sites, the hub, the
+Console, and how a collector's tables reach the hub. The modules a new piece
+fits into:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                           NØMAÐ-HPC Architecture                        │
@@ -410,6 +414,11 @@ api_key = "your-api-key"
 ---
 
 ## Adding a Dashboard Tab
+
+This is a tab in the [standalone dashboard](dashboard.md). A page in the
+Console is added in the Console's own code; what it shows should come from a
+function in nomad (`nomad.facts`, say) that a command prints too, so that the
+command line and the Console give the same figures.
 
 ### Step 1: Add API Endpoint
 

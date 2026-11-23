@@ -78,7 +78,7 @@ and nothing has been changed: this is only to help.
 
 1. Some of your jobs stopped within a minute
 
-On vadur, 186 of your jobs this week stopped with an error within a minute of starting.
+On hpc3, 186 of your jobs this week stopped with an error within a minute of starting.
 Jobs: array 13213 (180 tasks) and array 12269 (6 tasks)
 
 What to do: Look at the first lines of the output file of one of these jobs (slurm-JOBID.out, ...): they usually say what was missing.
@@ -87,7 +87,7 @@ Why: A job that stops this soon usually could not find or start something: ...
 
 2. Your jobs ask for more time than they use
 
-On vadur (cpu), 15 of your last 15 jobs asked for more time than they ran: they typically asked for 365 days; most ran about 2 h 10 min, the longest 6 days 10 h.
+On hpc3 (cpu), 15 of your last 15 jobs asked for more time than they ran: they typically asked for 365 days; most ran about 2 h 10 min, the longest 6 days 10 h.
 They waited about 3 h 20 min to start (the median). Jobs of the same size on the same partition, sent in the same days, that asked for about the time they ran waited about 4 min (the median of 37 jobs).
 Jobs: array 13212 (15 tasks)
 Ask for this instead:
@@ -119,8 +119,8 @@ its tasks counted (1.62.0).
   assistant) and not in the faculty group. `courses = true` includes them.
   Someone nomad knows no groups for is emailed.
 - System accounts (`root`, `slurm`, ...) and `skip_users` never are: list
-  the site's own service and admin accounts there (`skip_users = ["zeus",
-  "installer"]`), whose builds and installs on a login node are the job. An
+  the site's own service and admin accounts there (`skip_users = ["monitor",
+  "hpcadmin"]`), whose builds and installs on a login node are the job. An
   address is the NetID at `mail_domain`.
 
 ## Review first

@@ -214,7 +214,7 @@ For running jobs:
 
 When risk is elevated, NØMAÐ provides specific recommendations based on which features contribute most:
 ```
-⚠️ Job 12345 has elevated failure risk (0.72)
+[WARNING] Job 12345 has elevated failure risk (0.72)
 
 Contributing factors:
   • High NFS write ratio (0.89) — 3x normal

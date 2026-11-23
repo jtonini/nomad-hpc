@@ -4,10 +4,12 @@ The `nomad diag` commands provide targeted analysis for common HPC issues, helpi
 
 ## Commands
 ```bash
-nomad diag network    # Network performance analysis
-nomad diag storage    # Storage health and I/O patterns
-nomad diag node       # Node-level resource bottlenecks
-nomad diag workstation HOST   # A departmental workstation's latest reading
+nomad diag network             # Network performance between hosts
+nomad diag nas HOST            # A storage server: capacity, pools, NFS, fill rate
+nomad diag node CLUSTER NODE   # Node-level resource bottlenecks
+nomad diag gpu                 # GPUs: utilization, workloads, hardware health (GPU Monitoring)
+nomad diag workstation HOST    # A departmental workstation's latest reading
+nomad diag cloud INSTANCE      # A cloud instance (Cloud Monitoring)
 ```
 
 ---
@@ -17,8 +19,8 @@ nomad diag workstation HOST   # A departmental workstation's latest reading
 Analyze network performance between nodes.
 ```bash
 nomad diag network
-nomad diag network --src node01 --dst node02
-nomad diag network --threshold 100   # Flag if <100 MB/s
+nomad diag network --source node01 --dest node02
+nomad diag network --hours 24 --json
 ```
 
 ### What It Checks
@@ -62,11 +64,12 @@ Summary:
 
 ## Storage Diagnostics
 
-Examine storage health and I/O patterns.
+Examine a storage server's health and I/O patterns, from what the `storage`
+collector read ([Infrastructure](infrastructure.md#storage-servers)).
 ```bash
-nomad diag storage
-nomad diag storage --path /home
-nomad diag storage --detailed
+nomad diag nas nas1
+nomad diag nas nas1 --hours 168
+nomad diag nas nas1 --json
 ```
 
 ### What It Checks
@@ -113,9 +116,9 @@ Recommendations:
 
 Drill into node-level resource bottlenecks.
 ```bash
-nomad diag node
-nomad diag node gpu-01
-nomad diag node --all
+nomad diag node                       # the nodes it knows, by cluster
+nomad diag node hpc1 gpu01            # one node, the last 24 hours
+nomad diag node hpc1/gpu01 --hours 48 --json
 ```
 
 ### What It Checks

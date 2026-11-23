@@ -93,9 +93,9 @@ A job on one node runs through its node's own disk (1.24): faster for the progra
 4. when the script ends, stops what it left running in the background (as Slurm would at the job's end), then copies **what is new or changed** back to the folder it ran from, as if it had run there: what it didn't change isn't written again, and each file is written beside and renamed in place, so a copy cut short never leaves half a file. Files it deleted or renamed there aren't deleted or renamed in the folder. **What changed in the folder while the job ran is never undone**: a file the person or another job changed there meanwhile is left as it is, and the job's version goes in `nomad-conflicts-JOBID/` in the job's folder (the job then ends with exit code 75, and its `.out` says which); a file of lines both only added to at its end (a log, a table of rows) gets the job's new lines added after the others' (never a file that was empty, or whose beginning either one changed); a file only touched or `chmod`ed there meanwhile (the same content) isn't a conflict, and keeps its new mode. Jobs from one folder copy back one at a time (a lock on the folder's `.nomad-lock`, which stays there, hidden, writable by all so a lab's members' jobs take turns too). Where that lock can't be shared between nodes (NFS mounted `nolock` or `local_lock=`), can't be had, or another job holds it for over 15 minutes, the copy back goes file by file and checks each one just before it goes in;
 5. checks each file it copied back (sha256 of both copies, the one on `/scratch` read back from the server, not the node's cache; a link's target; a folder), copies again what doesn't match, and only then removes the local folder (and keeps it while any process still works in it). What still doesn't match stays on the node, the job's `.out` says what and where, a job pinned to that node brings it back once this one ends (see below), and a job that had succeeded ends with exit code 75, so Slurm records it as failed.
 
-The job's `.out` says what it did (`nomad-stage: copied ... to /localscratch/amy/job_4242 on spdr05 in 12s`, `copied back 3 new or changed item(s) (1.2 GB) ... and checked each (sha256)`). It uses `rsync` where the node has it (else Python's own copy) and the node's own `python3` (`/usr/bin/python3`, isolated: `-I`, so a cluster's `PYTHONHOME` or `PYTHONPATH` don't reach it); nothing of nomad's is needed on the node. nomad's own steps run without the job's `LD_LIBRARY_PATH` and `LD_PRELOAD` (a login environment's can break system tools: 1.24.1); the script gets them back as they were.
+The job's `.out` says what it did (`nomad-stage: copied ... to /localscratch/amy/job_4242 on n005 in 12s`, `copied back 3 new or changed item(s) (1.2 GB) ... and checked each (sha256)`). It uses `rsync` where the node has it (else Python's own copy) and the node's own `python3` (`/usr/bin/python3`, isolated: `-I`, so a cluster's `PYTHONHOME` or `PYTHONPATH` don't reach it); nothing of nomad's is needed on the node. nomad's own steps run without the job's `LD_LIBRARY_PATH` and `LD_PRELOAD` (a login environment's can break system tools: 1.24.1); the script gets them back as they were.
 
-**Time limits and stops.** nomad asks Slurm to warn the job before its limit (`#SBATCH --signal=B:USR1@600`, a sixth of a limit under an hour but at least 5 minutes; not when the script sets its own `--signal`). At the warning the job stops the program (TERM to it and everything it started, KILL after a minute), copies back what it has, checks it, then waits for the limit, so Slurm still records the job as `TIMEOUT` (and nomad's sizing reads it as one). `scancel -b -s USR1 JOBID` does the same at any time and ends the job there. A job cancelled (`scancel`) or preempted: Slurm has already sent TERM to all of it and KILLs it after `KillWait` (30 s on spydur); the program keeps 15 s of that, the copy back the rest. A script's own `--signal=B:SIG` still reaches it (nomad's script passes it on).
+**Time limits and stops.** nomad asks Slurm to warn the job before its limit (`#SBATCH --signal=B:USR1@600`, a sixth of a limit under an hour but at least 5 minutes; not when the script sets its own `--signal`). At the warning the job stops the program (TERM to it and everything it started, KILL after a minute), copies back what it has, checks it, then waits for the limit, so Slurm still records the job as `TIMEOUT` (and nomad's sizing reads it as one). `scancel -b -s USR1 JOBID` does the same at any time and ends the job there. A job cancelled (`scancel`) or preempted: Slurm has already sent TERM to all of it and KILLs it after `KillWait` (30 s on hpc1); the program keeps 15 s of that, the copy back the rest. A script's own `--signal=B:SIG` still reaches it (nomad's script passes it on).
 
 **What a stopped job leaves.** When a job is stopped, or its copy back fails, it first sends a small job of its own (`nomad-recover-JOBID`: one CPU, 1 GB, 2 hours, pinned to that node with `-w`, `--dependency=afterany:JOBID`, its output in the job's folder). That job, once the first has ended, brings back what is still on the node; so does the person's next staged job on that node (up to three such folders, when it has 15 minutes left). Either one takes only a folder whose lock is free (its job is gone), and puts what it brings back in a folder of its own, `nomad-recovered-NODE-TIME/`, in the job's folder (`/scratch/USER/jobs/JOBID-NAME/`, beside its `.out`; else where the job ran): **nothing recovered ever overwrites anything**. A folder an earlier run of the same job left (a job requeued onto the same node) is moved aside for that, never copied over the new run's results.
 
@@ -143,7 +143,7 @@ The Console's Submit page (and Run it again) sends a person's job **as that pers
 - **Text files (1.25.4).** Besides job scripts, the Console opens and saves a person's own text files with an extension on `TEXT_EXTENSIONS` (`.py .R .m .jl .sh .in .inp .com .gjf .yaml .yml .json .toml .cfg .conf .txt .md`, any case): `read --path PATH` gives one's text and sha256 (only with `serve --edit`, as `save`, and where the hub's `edit = true`), `save` writes one with the same rules as a script (the person's own regular file, not a link, UTF-8, at most 256 KB, no NUL, no hidden part in its path nor its folder as it really is, no other name for it (a hard link: it could be any file of theirs, a hidden one too); only over the very text opened, or as a new file; the text before kept). `versions` and `recall` are behind the same switch now. `ls` marks them `text`. A file of any other kind (data, `.csv`, notebooks, binaries) isn't opened.
 - **Saving a script (1.25.3).** Off unless both sides say so: the site's `[[hub.sites]]` has `edit = true` (the Console asks `remote.editing`), and the cluster's nomad account let the hub's key in with `nomad gate install-key ... --edit` (sshd then runs `nomad-gate serve --edit`; without it the gate refuses every save). That is the cluster's choice because it changes what the hub's key can do: with it, whoever holds the key could write a person's script and send it, that is run code as anyone the gate acts for, not only send the scripts they already have. `nomad gate test --site S` says which side has it on. `save --script PATH (--sha256 HEX | --new) --body-sha256 HEX`, the text on standard input: the person's own job script, written as them, only over the very text they opened (and only UTF-8 text: `show` says `utf8`) or as a new file (mode 600: the gate can't know the umask the person's login sets), never through a link or into a hidden file or folder (as given, or as the folder really is); written beside it and put in its place in one step, keeping its mode, group and access lists (none taken from the folder's default list); the text before kept first, privately (`~/.local/share/nomad/versions`, the last 20 of each script; `versions --script PATH` lists them, `recall --script PATH --id ID` gives one back). The gate's syslog line has the sha256 before and after.
 - **The account, and the sbatch that is run (1.25.2).** `show`'s `warning` also names the first place in the person's own account others could change so as to run programs as them -- their home folder, the files bash reads when they log in (`~/.bash_profile`, `~/.bash_login`, `~/.profile`, `~/.bashrc`), and `~/.local` (`bin/` is on PATH, `lib/python*/site-packages` is read by Python at its start, `share/nomad` holds nomad's records) -- with what closes it (`chmod -R go-w ~/.local`; above the home folder, the site's). It is open with or without the Console (the person's own logins run the same files), so it is said, not refused, and it is no longer said once it is closed: nothing to change in nomad when the site changes how accounts are set up. From the Console, Slurm's programs (`sbatch`, `scontrol`, `sinfo`, `sacct`, `sacctmgr`, `squeue`, `scancel`) are each found once on the person's login PATH, before any of them runs, and run by their full paths (so nothing put earlier on PATH meanwhile runs instead); nothing runs when one of them, a folder above it or a link on the way to it (each link followed in turn) belongs to an account other than root, the person, the account nomad is installed by or Slurm's own, or could be changed by others -- someone else could have put it there, and it would act as the person (`sbatch` would be given the text they saw). The gate's own steps (`jobs`, `job`, `cancel`) go through `nomad-gate exec NAME`, in the person's login, for the same check. By hand, nomad runs them by name, as before.
-- **As the person.** The gate acts as the person with the cluster account's own sudo (`sudo -n -u PERSON nomad-gate run ...`), never as root, a system account (uid under 1000, `nobody`), the gate's own account or nomad's own accounts. It first asks sudo whether it may (`sudo -n -l`, by its exit status); where it may not (on spydur installer may act as members of `managed`), the answer says so, and the Console gives them the command to paste instead.
+- **As the person.** The gate acts as the person with the cluster account's own sudo (`sudo -n -u PERSON nomad-gate run ...`), never as root, a system account (uid under 1000, `nobody`), the gate's own account or nomad's own accounts. It first asks sudo whether it may (`sudo -n -l`, by its exit status); where it may not (on one cluster the account may act as members of one group only), the answer says so, and the Console gives them the command to paste instead.
 - **As if they typed it.** nomad runs in the person's login environment (`bash -l`, as when they log in; a tcsh or zsh user gets bash's login setup, not their own), from the script's folder (from their home folder for `again`), with nothing on its input and the login's own locale, so the job gets the environment it would by hand; it is tagged `via=console`. Each answer is one line of JSON. A job that may have been sent without the gate being able to say so (sbatch slow to answer, the connection lost on the way) is said to be maybe sent, so it isn't sent twice; sending waits up to 10 minutes.
 - **Logged.** Each request goes to the cluster's syslog (authpriv, `/var/log/secure` on RHEL), as plain text: who, what, and the job it made; sudo logs it too.
 - **Refused when it is installed wrong.** The gate doesn't serve when it, the `nomad` beside it, their Python, or anything in the release's environment and Python could be changed by anyone but its owner or root (`nomad-gate check` says what). It is a check for a mistake in how it was installed, made when it serves (a pass is kept for a minute); it can't undo a change someone already made.
@@ -173,22 +173,22 @@ nomad gate ask --site CLUSTER --user YOU size --script /scratch/YOU/run/job.sh
 
 ### A cluster reached through another host (1.40.0)
 
-A cluster the hub can reach only through another host (vadur, through jonimitchell) says so in its `[[hub.sites]]`:
+A cluster the hub can reach only through another host (hpc3, through labhead1) says so in its `[[hub.sites]]`:
 
 ```toml
 [[hub.sites]]
-name = "vadur"
-host = "vadur"                     # as the other host reaches it
+name = "hpc3"
+host = "hpc3"                      # as the other host reaches it
 ssh_user = "nomad"
 submit = "gate"
-gate_jump = "zeus@jonimitchell"    # account@host, or account@host:port
+gate_jump = "monitor@labhead1"     # account@host, or account@host:port
 ```
 
 The hub then asks the gate through that host with the gate's own key and the same settings as always (none of its account's ssh settings, so `nomad sync`'s ProxyJump is never used): the key opens a forwarded connection to the cluster's ssh there (`ssh -W`), and nothing else. On the host it jumps through, as that account, once:
 
 ```
-nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to vadur:22 --from HUB-ADDRESS
-nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to vadur:22 --from HUB-ADDRESS --apply
+nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to hpc3:22 --from HUB-ADDRESS
+nomad gate jump-key 'ssh-ed25519 AAAA... nomad-gate@hub' --to hpc3:22 --from HUB-ADDRESS --apply
 ```
 
 Its line has `restrict` (no terminal), forwarding allowed again only to `--to` (`permitopen`), `command="/bin/false"` should anyone ask it for a session, and `from=` the hub. On the cluster, `nomad gate install-key` takes the address the cluster sees the connection come from: the host jumped through, not the hub. The Console's account must know both host keys under those very names (the jump host's as `gate_jump` names it, the cluster's as `host` does), as with any gate.
@@ -253,13 +253,13 @@ other script.
 In the hub's nomad.toml:
 
 ```toml
-[submit.build.spydur]                          # a site's own settings
+[submit.build.hpc1]                            # a site's own settings
 module_paths = ["/usr/local/sw/modulefiles"]   # module use, before module load
 scratch = "/scratch/$USER/$SLURM_JOB_ID"       # {scratch}: must name the job ($SLURM_JOB_ID)
 
 [[submit.templates]]
 program = "Gaussian"
-sites = ["spydur", "arachne"]          # where it is offered (default: every site)
+sites = ["hpc1", "hpc2"]               # where it is offered (default: every site)
 modules = ["gaussian/*"]               # its versions (shell patterns)
 default = "gaussian/latest"            # chosen first, when the cluster has it (or a list)
 inputs = [".gjf", ".com"]              # the input: a file with one of these endings ...
@@ -272,7 +272,7 @@ cpus = 8                               # what to ask when nothing better is know
 mem = "16G"
 time = "1-00:00:00"
 # gpus = 1
-# partition = "gpunodes"               # or one a site: { spydur = "gpunodes" }
+# partition = "gpunodes"               # or one a site: { hpc1 = "gpunodes" }
 # parallel = "mpi"                     # cpus as --ntasks (MPI), not --cpus-per-task
 [submit.templates.run_for]
 "gaussian/g09*" = "g09 < {input} > {stem}.log"
@@ -350,8 +350,8 @@ Every made script also:
   would run on one CPU.
 
 ```
-nomad templates --site spydur --hub          each template's options, numbered
-nomad templates --site spydur --hub --make CP2K --input /home/amy/h2o.inp --choose parallel=2
+nomad templates --site hpc1 --hub          each template's options, numbered
+nomad templates --site hpc1 --hub --make CP2K --input /home/amy/h2o.inp --choose parallel=2
 ```
 A script that uses `{scratch}` stops at once when it isn't run by Slurm
 (`bash water.sh`, or sourced: its `rm -rf {scratch}` would otherwise take
@@ -362,9 +362,9 @@ that isn't a name) is said, never guessed at: `nomad templates --site S`
 lists the problems, and the Console shows them to its admins.
 
 ```
-nomad templates --site spydur --hub                                   the programs, each with its versions there
-nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf
-nomad templates --site spydur --hub --make Gaussian --input /home/amy/water.gjf --module gaussian/g16c02
+nomad templates --site hpc1 --hub                                   the programs, each with its versions there
+nomad templates --site hpc1 --hub --make Gaussian --input /home/amy/water.gjf
+nomad templates --site hpc1 --hub --make Gaussian --input /home/amy/water.gjf --module gaussian/g16c02
 ```
 
 ## Guests on condos, and the owners' first claim (1.28.0)
@@ -390,8 +390,8 @@ follows what Slurm does:
 - **`nomad partitions --site S --condos`** (on the hub) checks each
   confirmed condo of report.toml against Slurm: the owners first on their
   nodes, only their lab in their partition (report.toml's `members =
-  "group:cparish$"` against the partition's `AllowGroups`; a condo two labs
-  share names both, `"group:myang$,knolin$"`, and Slurm admits anyone in
+  "group:smith$"` against the partition's `AllowGroups`; a condo two labs
+  share names both, `"group:lee$,patel$"`, and Slurm admits anyone in
   either; or `"account:NAME"`
   (else the condo's own `account`) against `AllowAccounts`, which keeps
   others out only where Slurm enforces associations,

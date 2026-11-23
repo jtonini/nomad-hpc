@@ -1,12 +1,28 @@
 # Quick Start
 
-## Try Without HPC
+## Try it without a cluster
+
 ```bash
 pip install nomad-hpc
-nomad demo
+nomad demo --no-launch
 ```
 
-This launches a dashboard at http://localhost:8050 with synthetic data.
+writes `~/nomad_demo.db`: a made-up cluster with ten nodes (GPUs among them),
+a few weeks of jobs, storage, lab workstations and a little cloud use, with
+some trouble put in on purpose (a scratch disk filling, GPU jobs out of
+memory, a long GPU queue) so that there is something to find. Then:
+
+```bash
+D=~/nomad_demo.db
+nomad status --db $D                 # disks, queues, I/O now
+nomad facts sites --db $D            # each site: freshness, nodes, jobs, waits
+nomad insights brief --db $D         # what needs attention, in sentences
+nomad dyn summary --db $D            # system dynamics: capacity, resilience
+nomad alerts --db $D                 # the alerts the demo raised
+```
+
+`nomad demo` without `--no-launch` also opens the standalone dashboard at
+<http://localhost:8050> on the same data (see [Dashboard](dashboard.md)).
 
 ### The Console's demo (1.17.4)
 
@@ -48,52 +64,52 @@ nomad.toml, and never in your home folder (whose nomad.toml nomad reads).
 A hub never syncs a demo's marker, so a hub's database is never taken for a
 demo.
 
-## Production Setup
+## On a real machine
 
-### 1. Install
+[Installation](installation.md) has the details; in short:
+
+1. **A site** (a cluster's head node, an interactive server): install nomad,
+   run the wizard, check, and collect once by hand.
+
+    ```bash
+    pip install nomad-hpc
+    nomad init                 # writes ~/.config/nomad/nomad.toml
+    nomad syscheck             # what this machine has, and what is missing
+    nomad collect --once       # one round; each collector says what it read
+    nomad collectors           # which collectors run here, and why
+    ```
+
+    Then from cron, every 5 minutes:
+
+    ```
+    */5 * * * * /path/to/nomad collect --once
+    ```
+
+2. **The hub**: list the sites under `[hub]` in its nomad.toml and run
+   `nomad sync`; `nomad sync status` says how each site's last syncs went
+   ([Setup Wizard: multi-site](setup-wizard.md#multi-site-setup)).
+
+3. **The Console**: run it on the hub, on `127.0.0.1:8000`, and reach it
+   through an SSH tunnel or a reverse proxy with HTTPS
+   ([Console access](console.md)). Who sees what is set in nomad.toml
+   ([Configuration](config.md#console-access)).
+
+## First commands on a real site
+
 ```bash
-pip install nomad-hpc
+nomad status                       # disks, queues, I/O now
+nomad collectors                   # what runs here, and how its runs went
+nomad facts sites                  # each site, as the Console's front page has it
+nomad edu me                       # your own jobs: scores, trend, what to change
+nomad edu explain JOBID            # one job, in plain language
+nomad size job.sh                  # what a job script should ask for
+nomad insights brief               # what needs attention
+nomad alerts                       # the alerts kept
 ```
 
-### 2. Configure
-```bash
-nomad init
-```
+## Next steps
 
-Follow the wizard to configure your cluster(s).
-
-### 3. Collect Data
-```bash
-nomad collect
-```
-
-Leave running (or set up as systemd service).
-
-### 4. View Dashboard
-```bash
-nomad dashboard
-```
-
-Open http://localhost:8050
-
-## First Commands to Try
-```bash
-# System status
-nomad status
-
-# Disk usage trends
-nomad disk /home
-
-# Recent jobs
-nomad jobs --user $USER
-
-# Educational analytics (if you have job data)
-nomad edu explain <job_id>
-```
-
-## Next Steps
-
-- [Configuration](config.md) — Customize collectors and alerts
-- [Dashboard](dashboard.md) — Navigate the web interface
-- [Educational Analytics](edu.md) — Track proficiency development
-- [CLI Reference](cli.md) — All available commands
+- [Configuration](config.md): collectors, alerts, and who sees what in the Console
+- [Collectors](collectors.md): what each one reads and where it belongs
+- [Alerts](alerts.md): what is alerted on, and how it is sent
+- [CLI Reference](cli.md): every command

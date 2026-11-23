@@ -9,6 +9,11 @@ NØMAÐ uses TOML configuration files.
 | User | `~/.config/nomad/nomad.toml` |
 | System | `/etc/nomad/nomad.toml` |
 
+nomad reads the file given with `-c` (`nomad -c FILE COMMAND`), else
+`~/.config/nomad/nomad.toml`, else `/etc/nomad/nomad.toml`; with none, only
+its packaged defaults. `nomad.toml.example` in the repository is a
+commented example of the settings.
+
 ### When the file can't be read
 
 A file with a mistake in it is not read at all: nomad then runs with **none**
@@ -42,7 +47,7 @@ does; the messages name keys and tables, never values from the file.
 # nomad.toml
 
 [general]
-cluster_name = "spydur"
+cluster_name = "hpc1"
 data_dir = "/var/lib/nomad"
 log_level = "INFO"
 
@@ -103,7 +108,7 @@ runs it:
 
 ```toml
 [console.roles]
-admin = ["jtonini"]            # everything, settings included
+admin = ["rcadmin"]            # everything, settings included
 operator = []                  # everything, no settings
 viewer = []                    # named: their own work, whatever else says
 
@@ -115,7 +120,7 @@ not_labs = ["svc$"]            # never a lab, whatever else says (1.17.10)
 [console.labs.resources."NETID$"]
 name = "Smith Lab"             # how the lab is shown (else its group)
 workstations = ["adam", "eve"] # the lab's own machines
-storage = ["sarahvaughan"]     # its storage: a server, or server:/export
+storage = ["nas1"]             # its storage: a server, or server:/export
 
 [console.labs.assistants]
 "NETID$" = ["eve"]             # research assistants: see the lab as its PI does
@@ -137,7 +142,7 @@ storage = ["sarahvaughan"]     # its storage: a server, or server:/export
 # workstation_hours = 2        # a lab workstation silent this long
 
 [console.storage."10.0.0.28"]  # a storage server, as the mounts name it
-name = "sarahvaughan"
+name = "nas1"
 note = "community $HOME, all users"
 
 [console.machines."labhead1"]   # what a machine is, beside its name (1.17.7)
@@ -226,7 +231,7 @@ else `sudo nomad -c ...`).
   `nomad facts lab NETID --each` prints the same list.
 - **Storage servers:** `[console.storage."SERVER"]` gives a server a `name`
   and a `note`, shown wherever its exports are (and beside a member's data in
-  Needs attention: a note saying what it is, "spydur's /home and /scratch",
+  Needs attention: a note saying what it is, "hpc1's /home and /scratch",
   tells a PI where that is). When the storage collector
   reads that server (under its address, or under that name, as an ssh
   alias), its state, space and pools' health go on the server's line. SERVER is the server as the
@@ -590,4 +595,4 @@ Console reads the list each time it is asked: no restart.
 
 ## Collectors
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed collector documentation.
+See [Collectors](collectors.md) for what each collector reads, where it belongs, and its settings; [Architecture](ARCHITECTURE.md) for how the parts fit together.

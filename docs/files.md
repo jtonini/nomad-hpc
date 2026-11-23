@@ -161,9 +161,9 @@ max_mb = 2048            # the largest file moved from the browser
 folders = ["~"]          # where My files opens, as shortcuts: ~ their home, {user} their name
 # only_in_folders = false   # true: only in those folders and below
 
-[console.files.sites.spydur]       # one cluster's own (optional)
+[console.files.sites.hpc1]         # one cluster's own (optional)
 folders = ["~", "/scratch/{user}"]
-login = "spydur.example.edu"       # the host people use for rsync (default: its [[hub.sites]] host)
+login = "hpc1.example.edu"         # the host people use for rsync (default: its [[hub.sites]] host)
 ```
 
 Every name is the site's; nothing about one institution is written into nomad

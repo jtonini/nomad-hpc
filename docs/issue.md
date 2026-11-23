@@ -98,7 +98,7 @@ Issues submitted via the API are automatically labeled with:
 - **Category**: `bug`, `enhancement`, or `question`
 - **Component**: `component:alerts`, `component:collectors`, etc.
 - **Version**: `v1.3.1`
-- **Institution**: `inst:university-of-richmond`
+- **Institution**: `inst:example-university`
 
 ## GitHub Issue Templates
 

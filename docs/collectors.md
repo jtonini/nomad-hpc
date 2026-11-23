@@ -342,7 +342,7 @@ count never passes for the full picture.
 
 Since 1.47.1 the same login also reads the node's `/proc/meminfo`. Slurm's
 `FreeMem` is the kernel's MemFree, which counts the file cache as used: a node
-left idle after a long job reads as nearly full (spdr01: 82% "in use", 0 GB
+left idle after a long job reads as nearly full (n001: 82% "in use", 0 GB
 allocated, load 0.2), though the kernel gives that memory back as soon as a
 job asks. MemAvailable leaves it out, so total less available is what
 programs hold. Each sweep adds one `node_memory` row per node that answered:
@@ -570,7 +570,7 @@ there always is.
 What a server's own board controller (its BMC) knows about power: each
 supply's state ("Presence detected", "Power Supply AC lost", "Failure
 detected", redundancy), the power each gives, the board's voltages, the
-fans, and the board's event log. vadur's gpu09 ran on one of its two
+fans, and the board's event log. hpc3's gpu09 ran on one of its two
 supplies from February to November 2026, the other with no input power, and
 nothing said so: its board knew.
 
@@ -615,10 +615,10 @@ power, failed, predicted to fail or misconfigured; redundancy lost; a voltage
 past its board's thresholds; a fan stopped (a supply's own fan counts as the
 supply's); one supply giving 0 W while another carries the node. A threshold
 of 0 is no threshold: a supply that doesn't report its power to the board
-reads 0 W "below" it whenever the board starts reading (all of vadur's CPU
+reads 0 W "below" it whenever the board starts reading (all of hpc3's CPU
 nodes: node03's log holds 33 such entries since 2017), and that is shown, not
 alerted. A fan nomad has never seen turning is a header with no fan on it
-(vadur's CPU nodes have four, at 0 RPM on every board): said in the host's
+(hpc3's CPU nodes have four, at 0 RPM on every board): said in the host's
 notes, not alerted; a fan that turned and stops is (1.26.0). Tables:
 `power_hosts` (each host's last read), `power_sensors` (each
 sensor now: rewritten when its state changes, its reading at most hourly),
@@ -629,7 +629,7 @@ sensor now: rewritten when its state changes, its reading at most hourly),
 nomad power                       each host: what is wrong, its supplies, its log
 nomad power --host gpu09 --all    every sensor of one host
 nomad power --check --send        what would be alerted now, sent as a test
-nomad power --hub --site vadur    a site's, on the hub
+nomad power --hub --site hpc3    a site's, on the hub
 ```
 
 ## Environment modules (modules, 1.26.0)
@@ -640,7 +640,7 @@ so the job scripts nomad makes (the Console's "No script yet? Make one",
 the cluster really has. It runs in a login shell of the account collecting
 (`bash -lc`: Lmod and Environment Modules set `module` up at login), after
 `module use` for each of `module_paths`, the folders of modules a login
-doesn't add on its own (spydur's `/usr/local/sw/modulefiles`). On the
+doesn't add on its own (hpc1's `/usr/local/sw/modulefiles`). On the
 cluster's own nomad.toml:
 
 ```toml
@@ -657,12 +657,12 @@ What a login prints is not taken for modules. Tables: `modules_available`
 (each module, whether the cluster marks it its
 default, when nomad first saw it; rewritten only when the list changes) and
 `modules_status` (when it was last read, how many). Synced to the hub as any
-table. `nomad templates --site spydur` shows them, with the versions each
+table. `nomad templates --site hpc1` shows them, with the versions each
 template offers there.
 
 ## CPU clocks (clock, 1.27.0)
 
-How fast each CPU really runs when busy. arachne's node01-03 lost one power
+How fast each CPU really runs when busy. hpc2's node01-03 lost one power
 supply's input on 4 October 2026 and kept running on the other; their boards
 answered by braking the CPUs (PROCHOT) to their lowest clock, about 400 MHz
 instead of 3,700. Nothing failed, no job crashed and Slurm saw healthy nodes:
@@ -697,7 +697,7 @@ own busy readings and of the busy hosts alike now, else its CPU's rated clock
 every core at work a CPU runs far below its top clock, lower on heavy vector
 code. After `sustain` (2) low readings in a row it is throttled:
 alerted ([Alerts](alerts.md), "CPU clock"), critical when the power collector
-shows a supply problem on it. Measured on arachne, 5 Nov 2026: node02 396 MHz
+shows a supply problem on it. Measured on hpc2, 5 Nov 2026: node02 396 MHz
 (11% of 3,764; sha256 115 MB/s), node51 3,730 MHz (sha256 1,826 MB/s).
 
 ```toml
@@ -723,10 +723,10 @@ Tables: `cpu_clock` (each reading), `cpu_clock_hosts` (each host now).
 nomad clock                         each host: its clock busy, what it should give, low since
 nomad clock --host node02 --history 10
 nomad clock --check --send          what would be alerted now, sent as a test
-nomad clock --hub --site arachne    a site's, on the hub
+nomad clock --hub --site hpc2    a site's, on the hub
 ```
 
-A host whose board can't be read in-band (no `/dev/ipmi0`: arachne's node01
+A host whose board can't be read in-band (no `/dev/ipmi0`: hpc2's node01
 and node03) is shown by `nomad power` as NOT WATCHED, not as healthy: its
 supplies aren't seen, and this check is what still finds a CPU braked for
 lack of power.
@@ -811,7 +811,7 @@ than one. A job of more than one isn't scored on memory: its peak is one
 task's.
 
 The node's own figures can't say this. Slurm's "free memory" (and `free`'s
-"free") leaves out the file cache, which on spydur's spdr10 was 697 of its
+"free") leaves out the file cache, which on hpc1's n010 was 697 of its
 754 GB while the one job there held 31 GB.
 
 `sstat` shows someone else's job only to root and Slurm's own account, so on

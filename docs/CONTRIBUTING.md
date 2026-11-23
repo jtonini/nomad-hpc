@@ -251,4 +251,4 @@ Contributors will be recognized in:
 - Release notes
 - The AUTHORS file
 
-Thank you for contributing to NØMAÐ! 🎉
+Thank you for contributing to NØMAÐ!

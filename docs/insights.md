@@ -24,7 +24,7 @@ nomad insights brief --db ~/nomad_demo.db --cluster demo-cluster --hours 168
 nomad insights detail --db ~/nomad_demo.db --hours 168
 
 # One site of a hub's combined database
-nomad insights brief --db ~/.local/share/nomad/combined.db --site spydur --hours 168
+nomad insights brief --db ~/.local/share/nomad/combined.db --site hpc1 --hours 168
 
 # JSON output (for API/Console integration)
 nomad insights json --db ~/nomad_demo.db
@@ -75,7 +75,7 @@ nomad stores alerts but never marks them resolved, so none is called "active": t
 
 Next to the signals the engine keeps a **coverage** list: for each source, *measured*, *stale* (a snapshot source — nodes, filesystems, queue, workstations — whose newest reading is over 2 hours old), *stopped* (a snapshot source silent for over 7 days — a retired collector, listed with its last reading; storage counts as current while either `filesystems` or `storage_state` reports), *no data* (not collected here, or nothing in the window), or *failed* (the reader raised; the error is given). A missing table is "no data"; any other database error is reported as a failure instead of being swallowed.
 
-Health rests on it: with nothing measured it is **unknown**, not "good". A stale or failed source counts as a warning, and a `data_stale` signal names what stopped updating (`No new readings from spydur: nodes (last reading 13:05, 3h ago)`). A stopped source is not read and does not lower health: a workstation collector retired in April is not a warning every day since.
+Health rests on it: with nothing measured it is **unknown**, not "good". A stale or failed source counts as a warning, and a `data_stale` signal names what stopped updating (`No new readings from hpc1: nodes (last reading 13:05, 3h ago)`). A stopped source is not read and does not lower health: a workstation collector retired in April is not a warning every day since.
 
 Sizes are in decimal units, as on the Console's Dashboard (1 TB = 10<sup>12</sup> bytes).
 
@@ -153,7 +153,7 @@ Full report with all signals, metrics, and affected entities.
 JSON output for programmatic use:
 ```json
 {
-  "site": "spydur",
+  "site": "hpc1",
   "hours": 168,
   "measured": true,
   "overall_health": "degraded",
@@ -173,9 +173,12 @@ Slack-formatted message. Add `--webhook URL` to post directly.
 
 Email digest with `--period daily|weekly`.
 
-## Dashboard Integration
+## In the Console
 
-Available in `nomad dashboard` as the **Insights** tab, and through the `/api/insights` endpoint.
+The Console shows the same signals and findings to staff
+(`nomad insights json` is the form it reads). The
+[standalone dashboard](dashboard.md) has them as its **Insights** tab, and
+through its `/api/insights` endpoint.
 
 ## Architecture
 ```
@@ -201,7 +204,7 @@ nomad/insights/
 from nomad.insights import InsightEngine
 
 engine = InsightEngine("/path/to/nomad.db", hours=168, cluster_name="mycluster")
-engine = InsightEngine("/path/to/combined.db", hours=168, site="spydur")
+engine = InsightEngine("/path/to/combined.db", hours=168, site="hpc1")
 
 print(engine.overall_health)    # "good", "nominal", "degraded", "impaired", "unknown"
 print(engine.coverage)          # per source: measured / stale / stopped / no_data / failed

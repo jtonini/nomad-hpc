@@ -33,7 +33,7 @@ NØMAÐ supports two deployment strategies. The wizard explains both and asks ho
 
 ### Strategy A — One NØMAÐ per machine + sync
 
-Install NØMAÐ on each machine independently. Each instance monitors its own environment and stores data in its own database. Use `nomad sync` on a central machine to merge all databases into a unified dashboard.
+Install NØMAÐ on each machine independently. Each instance monitors its own environment and stores data in its own database. Use `nomad sync` on a central machine to merge all databases into one, which the Console shows.
 
 This is the **recommended approach** when each machine has a different role — for example, an HPC cluster with SLURM, an interactive server with Jupyter/RStudio, and a workstation management server.
 
@@ -43,12 +43,14 @@ In this case, answer **1** on each machine:
 - **Interactive server**: 1 cluster (HPC type, SLURM auto-skipped) — monitors sessions, disk, CPU
 - **Workstation manager**: 1 cluster (Workstation type) — monitors lab machines via SSH
 
-Then on a central machine, configure `nomad sync` to pull all databases together:
+Then on a central machine (the hub), configure `nomad sync` to pull all databases together:
 
 ```bash
-nomad sync                        # Merge all site databases
-nomad dashboard --db combined.db  # Unified view across all sites
+nomad sync                        # bring every site's new rows into combined.db
+nomad sync status                 # how each site's last syncs went
 ```
+
+The Console, on the hub, then reads the combined database ([Console access](console.md)).
 
 ### Strategy B — One NØMAÐ monitors everything
 
@@ -80,10 +82,10 @@ For each cluster, the wizard asks for a name and type.
 ### Cluster Name
 
 ```
-Cluster name [cluster-1]: spydur
+Cluster name [cluster-1]: hpc1
 ```
 
-Choose a short, descriptive name. This appears in the dashboard navigation tabs and in the combined database when using `nomad sync`. Use lowercase with no spaces.
+Choose a short, descriptive name. It is the site's name everywhere: in the Console, in alerts, and in the combined database's `source_site` when using `nomad sync`. Use lowercase with no spaces.
 
 ### Cluster Type
 
@@ -95,7 +97,7 @@ What type of system is this?
 
 **Option 1 — HPC cluster** enables SLURM collectors (`squeue`, `sacct`, `sinfo`), job metrics, node state, group membership, and job accounting. The wizard will auto-detect SLURM partitions.
 
-**Option 2 — Workstation group** disables SLURM collectors and enables the WorkstationCollector, which monitors remote machines via SSH. You will be asked for department names and hostnames. Workstation data appears in the Workstations page of the dashboard.
+**Option 2 — Workstation group** disables SLURM collectors and enables the WorkstationCollector, which monitors remote machines via SSH. You will be asked for department names and hostnames. Workstation data appears in the Console's workstation pages, and to each lab's PI for the lab's own machines.
 
 !!! info "What gets disabled for workstation groups"
     When you select workstation group, the following collectors are automatically disabled since they require SLURM: `slurm`, `job_metrics`, `node_state`. The `disk`, `vmstat`, `gpu`, `nfs`, `groups` (membership only; job accounting needs Slurm) and `workstation` collectors remain active.
@@ -208,7 +210,7 @@ attention (disk filling up, nodes going down, etc.).
 Your email address (press Enter to skip): admin@example.com
 ```
 
-Providing an email address enables the alert pipeline. Alerts are always stored in the database and visible in the dashboard regardless of email configuration.
+Providing an email address enables the alert pipeline. Alerts are always stored in the database and visible in the Console regardless of email configuration.
 
 For email delivery, NØMAÐ uses the system `mail` command if available. No SMTP server configuration is required. You can set up a daily report via cron:
 
@@ -229,7 +231,7 @@ browser to view cluster status, node health, and alerts.
 Dashboard port [8050]:
 ```
 
-The default port 8050 works for most installations. Choose a different port if 8050 is already in use.
+This is the port of the [standalone dashboard](dashboard.md) (`nomad dashboard`), not the Console's: the Console has its own settings ([Console access](console.md)). The default port 8050 works for most installations. Choose a different port if 8050 is already in use.
 
 For remote access, set up an SSH tunnel:
 
@@ -271,7 +273,7 @@ Config:  ~/.config/nomad/nomad.toml
 Data:    ~/.local/share/nomad
 
 Clusters:
-  • spydur: 5 partitions, 30 nodes (local)
+  • hpc1: 5 partitions, 30 nodes (local)
 
 Enabled: GPU monitoring, NFS monitoring
 
@@ -298,27 +300,29 @@ nomad collect --once
 
 Run a single collection cycle to verify everything works. Check for errors in the output — successful collectors show `✓` with a record count.
 
-### Start Continuous Collection
+### Collect Every 5 Minutes
 
-```bash
-nohup nomad collect > ~/.local/share/nomad/logs/collect.log 2>&1 &
+Run one round from cron every 5 minutes (`crontab -e`):
+
+```
+*/5 * * * * /path/to/nomad collect --once
 ```
 
-For production, consider running the collector as a systemd user service for automatic restart on failure.
+Each run logs what each collector did; `nomad collectors` shows it. A systemd
+timer works as well ([System Install](system-install.md#collecting-from-systemd)).
 
-### Launch the Dashboard
+### Look at It
 
-```bash
-nomad dashboard
-```
-
-Open `http://localhost:8050` in your browser.
+On one machine, `nomad status`, `nomad facts sites` and `nomad insights brief`
+read the data straight away. With a hub, the Console shows every site
+([Console access](console.md)); `nomad dashboard` opens the
+[standalone dashboard](dashboard.md) on this machine's database.
 
 ---
 
 ## Multi-Site Setup
 
-To monitor multiple sites from a single dashboard:
+To monitor multiple sites from one hub:
 
 1. Install and configure NØMAÐ on each site using `nomad init`
 2. On a central machine (the hub), list the sites under `[hub]` in its
@@ -365,17 +369,20 @@ db_path = "/var/lib/nomad/nomad.db"
    send its node alerts: `alerts = "hub"` in its `[[hub.sites]]` entry
    ([alerts](alerts.md)).
 
-3. Run sync and launch the combined dashboard:
+3. Run the first sync:
 
 ```bash
 nomad sync
-nomad dashboard --db ~/.local/share/nomad/combined.db
 ```
 
-4. Set up a cron for automatic syncing:
+   The Console reads the combined database it writes
+   (`~/.local/share/nomad/combined.db` by default).
+
+4. Sync on a schedule, from cron (keep its output: it says why a site
+   failed):
 
 ```
-*/10 * * * * /path/to/nomad sync 2>/dev/null
+*/10 * * * * /path/to/nomad sync >> ~/.local/share/nomad/logs/sync.log 2>&1
 ```
 
    Where systemd runs the syncs (a `nomad-sync.timer`), say how often in
@@ -538,7 +545,7 @@ The wizard generates `~/.config/nomad/nomad.toml`. Key sections:
 | `[collectors.nfs]` | NFS mount monitoring |
 | `[collectors.interactive]` | Jupyter/RStudio session detection |
 | `[alerts]` | Email, Slack, webhook, thresholds |
-| `[dashboard]` | Port, host binding |
+| `[dashboard]` | The standalone dashboard's port and host binding |
 | `[clusters.*]` | Cluster metadata and partition descriptions |
 
 See the [Configuration documentation](config.md) for the full reference.

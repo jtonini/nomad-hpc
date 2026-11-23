@@ -85,7 +85,7 @@ would go; `--counts` only how many, openings and reminders, with no lab or
 name (to show someone else). `--lab LAB --send` sends one lab's (to look at one in review); the
 others stay due.
 
-Each email greets the lab's PIs by name ("Dear Dr. Parish,"; `salutation`
+Each email greets the lab's PIs by name ("Dear Dr. Smith,"; `salutation`
 sets how), taken from `[console.labs.check.names]`, else from the
 account's full name (`getent passwd`, its GECOS field). A PI nomad has no
 name for is greeted "Dear colleague,".
@@ -128,11 +128,11 @@ institution), the same lines as the sign-in page and the condo reports.
 The opening email, for a lab with 132 members:
 
 ```text
-Dear Dr. Parish,
+Dear Dr. Smith,
 
 Each term, Academic Research Computing asks the faculty who lead research groups to confirm who belongs to their labs. Your answers keep access to the clusters, condo nodes and research storage up to date.
 
-For the Parish Lab (cparish$), please tell us whether each of its 132 members is still in the lab and, for anyone who has left, what should happen to their data.
+For the Smith Lab (smith$), please tell us whether each of its 132 members is still in the lab and, for anyone who has left, what should happen to their data.
 
 You can answer at https://nomad.example.edu/lab until Monday, December 14, 2026. For a long list, the page can mark everyone with no job in the past year in one step.
 
@@ -146,7 +146,7 @@ Example University
 ```
 
 A reminder starts "This is a reminder that the membership review for the
-Parish Lab (cparish$) is still open: 120 people do not have an answer yet."
+Smith Lab (smith$) is still open: 120 people do not have an answer yet."
 
 `nomad lab check timer --apply` (as root) installs a systemd timer that runs
 it every morning as the nomad account:
@@ -175,9 +175,9 @@ mail_domain = "example.edu"          # a PI's address: NETID@mail_domain
 send_from = "Research Computing <rc@example.edu>"
 review_to = ["rc@example.edu"]       # while set, every email goes here instead
 # db = "/home/nomad/.local/share/nomad/lab_check.db"   # the answers (default: beside combined.db)
-not_sites = ["spiderweb"]            # sites whose groups it leaves out (default: none)
+not_sites = ["interactive1"]         # sites whose groups it leaves out (default: none)
 salutation = "Dr. {last}"            # how a PI is greeted (default): {first}, {last} or {name}
-names = { cparish = "Carol Parish", mdelacruz = { first = "Maria", last = "de la Cruz" } }
+names = { jsmith = "Jane Smith", mdelacruz = { first = "Maria", last = "de la Cruz" } }
 # signature = ["Research Computing", "Example University"]   # default: [console.branding]
 # contact = "Questions: rc@example.edu"   # a line above the signature (default: report.toml's contact)
 # date_format = "%Y-%m-%d"           # the closing day (default: "Monday, December 14, 2026")

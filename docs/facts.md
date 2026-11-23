@@ -29,9 +29,9 @@ nomad facts share --group G       # one lab by its group (staff)
 nomad facts course --instructor NETID   # the courses NETID teaches (needs [console.courses])
 nomad facts course GROUP              # one course
 nomad facts busy --days 90 --each     # when each machine is busiest, each workstation too
-nomad facts node spydur               # spydur's nodes, by name
-nomad facts node spydur n012          # one node, the last 24 hours (--hours, or --from and --to)
-nomad facts node spydur n012 --as NETID   # as that person would see it
+nomad facts node hpc1                 # hpc1's nodes, by name
+nomad facts node hpc1 n012            # one node, the last 24 hours (--hours, or --from and --to)
+nomad facts node hpc1 n012 --as NETID     # as that person would see it
 ```
 
 They read the hub's `combined.db` when there is one, else this host's own
@@ -472,8 +472,8 @@ facts.person(conn, "jdoe", days=30, config=config, db_path=path)   # db_path: sc
 facts.labs(conn, config, "pi1", days=30, min_others=3)             # what a PI is given
 facts.labs(conn, config, groups=["pi1$"])                            # staff, by group
 facts.sites(conn, reasons=True)                                      # staff: node reasons
-facts.node(conn, "spydur", "n012", since, until, staff=True)        # one node over a window
-facts.node(conn, "spydur", "n012", since, until, user="jdoe")       # as jdoe would see it
+facts.node(conn, "hpc1", "n012", since, until, staff=True)          # one node over a window
+facts.node(conn, "hpc1", "n012", since, until, user="jdoe")         # as jdoe would see it
 facts.busy(conn, days=30, names=False)                               # machines numbered, not named
 ```
 

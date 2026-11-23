@@ -44,8 +44,8 @@ site shows it).
 as gets one sudo line for that command and nothing else, for example in
 `/etc/sudoers.d/nomad-licenses` (with `visudo -f`):
 
-    installer ALL=(root) NOPASSWD: /usr/lib/rstudio-server/bin/rstudio-server license-manager status
-    installer ALL=(root) NOPASSWD: /opt/rstudio-connect/bin/license-manager status
+    hpcadmin ALL=(root) NOPASSWD: /usr/lib/rstudio-server/bin/rstudio-server license-manager status
+    hpcadmin ALL=(root) NOPASSWD: /opt/rstudio-connect/bin/license-manager status
 
 ## Listing them
 

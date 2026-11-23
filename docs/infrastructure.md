@@ -1,182 +1,102 @@
 # Infrastructure Monitoring
 
-NØMAÐ extends beyond compute nodes to monitor research workstations and storage systems, providing a holistic view of your computing environment.
+Beyond the clusters, NØMAÐ watches the lab workstations people compute on and
+the storage servers everyone's data lives on. Each appears in the Console's
+Infrastructure page beside the clusters and interactive servers (one card per
+monitored source, with how old its data is), and to a lab's PI on My lab for
+the lab's own machines and storage.
 
-## Dashboard Views
+## Workstations
 
-Access these views from the web dashboard tabs:
-```bash
-nomad dashboard
-# Then click: Workstations | Storage
-```
+The `workstation` collector reads each machine over ssh, with a key and no
+password prompt, from the host that collects it: a lab's own head node, or
+the hub for a lab without one. Nothing is installed on the workstations: a
+small probe goes to each machine's own `python3` over the same connection.
 
----
+| Read | |
+|---|---|
+| Status | online, offline, unreachable |
+| CPU | load and use, the CPU model and cores |
+| Memory | used and total |
+| Disks | each local disk's use (and `workstation_disk` alerts at the disk thresholds) |
+| Mounts | each NFS and local mount: whether it answers, and its size, used and free space |
+| People | who is logged in, and per-person detail |
+| Processes | counts, and zombies |
+| Sessions | long computations, scored like jobs ([Educational analytics](edu.md)) |
 
-## Workstation Monitoring
+Add a lab's machine with `nomad lab add-machine` on the host that collects it
+(it turns the collector on there and says whether the machine answers over
+ssh), or list machines in nomad.toml:
 
-Track departmental workstations across your institution.
-
-### What's Monitored
-
-| Metric | Description |
-|--------|-------------|
-| Status | Online/offline/unreachable |
-| CPU Load | Current utilization percentage |
-| Memory | Used/total RAM |
-| Disk | Root filesystem usage |
-| Users | Currently logged-in users |
-| Uptime | Time since last reboot |
-
-### Dashboard View
-
-The Workstations tab shows machines grouped by department:
-```
-----------------------------------------------------------------------
- Workstations                                             14 online
-----------------------------------------------------------------------
-
- Biology (4)
- +---------+--------+--------+--------+---------+---------+
- | Machine | Status | CPU    | Memory | Disk    | Users   |
- +---------+--------+--------+--------+---------+---------+
- | bio-ws1 | UP     | 23%    | 8/32GB | 45%     | alice   |
- | bio-ws2 | UP     | 67%    | 24/32GB| 52%     | bob,chen|
- | bio-ws3 | UP     | 5%     | 4/32GB | 38%     | -       |
- | bio-ws4 | DOWN   | -      | -      | -       | -       |
- +---------+--------+--------+--------+---------+---------+
-
- Chemistry (3)
- ...
-----------------------------------------------------------------------
-```
-
-### Configuration
-
-Add workstations to your config file:
 ```toml
-# ~/.config/nomad/nomad.toml
+[collectors.workstation]
+enabled = true
 
 [[workstations]]
-name = "bio-ws1"
-host = "bio-ws1.dept.edu"
-department = "Biology"
-
-[[workstations]]
-name = "bio-ws2"
-host = "bio-ws2.dept.edu"
-department = "Biology"
-
-[[workstations]]
-name = "chem-ws1"
-host = "chem-ws1.dept.edu"
-department = "Chemistry"
+hostname = "ws-physics-01"
+department = "physics"        # a lab's group ("NETID$") assigns it to that lab
 ```
 
-Or use the collector:
 ```bash
-nomad collect workstations --discover   # Auto-discover via DNS
-nomad collect workstations --add bio-ws1.dept.edu
+nomad lab add-machine smith ws-chem-03          # shows the change
+nomad lab add-machine smith ws-chem-03 --apply
+nomad diag workstation ws-chem-03               # what was read, and what it needs
 ```
 
----
+[Collectors: workstations over SSH](collectors.md#workstations-over-ssh) and
+[workstation mounts](collectors.md#workstation-mounts) have the details;
+[Configuration](config.md#adding-machines-and-labs-nomad-lab) has
+`nomad lab`.
 
-## Storage Monitoring
+## Storage servers
 
-Monitor NFS servers, ZFS pools, and storage capacity.
+The `storage` collector reads ZFS and NFS servers over ssh: pool health
+(online, degraded, faulted), the space users have (from each pool's root
+dataset, so RAIDZ parity isn't counted), NFS exports and connected clients.
+An unreachable server is stored as `offline` with its capacity unknown, not
+as an empty server.
 
-### What's Monitored
-
-| Metric | Description |
-|--------|-------------|
-| Capacity | Total/used/available space |
-| Utilization | Percentage used |
-| ZFS Health | Pool status (online/degraded/faulted) |
-| IOPS | Read/write operations per second |
-| Throughput | MB/s read/write |
-| Latency | Average I/O response time |
-| NFS Clients | Connected client count |
-
-### Dashboard View
-
-The Storage tab displays server status and pool health:
-```
-----------------------------------------------------------------------
- Storage Servers                                          3 healthy
-----------------------------------------------------------------------
-
- storage01 - Primary Home Directories
- +-----------+---------+---------+--------+----------------+
- | Pool      | Status  | Used    | IOPS   | Clients        |
- +-----------+---------+---------+--------+----------------+
- | tank/home | ONLINE  | 45/100TB| 2.3K   | 47 connected   |
- | tank/apps | ONLINE  | 2/10TB  | 450    | 47 connected   |
- +-----------+---------+---------+--------+----------------+
-
- storage02 - Scratch Space
- +-----------+---------+---------+--------+----------------+
- | Pool      | Status  | Used    | IOPS   | Clients        |
- +-----------+---------+---------+--------+----------------+
- | scratch   | DEGRADED| 82/100TB| 5.1K   | 89 connected   |
- +-----------+---------+---------+--------+----------------+
- [!] storage02/scratch: 1 drive faulted, resilver in progress
-
-----------------------------------------------------------------------
-```
-
-### Configuration
 ```toml
-# ~/.config/nomad/nomad.toml
+[collectors.storage]
+enabled = true
 
-[[storage]]
-name = "storage01"
-host = "storage01.cluster.edu"
+[[collectors.storage.storage_devices]]
+hostname = "nas1"
+type = "zfs"
+
+[[collectors.storage.storage_devices]]
+hostname = "nfs-home"
 type = "nfs"
-pools = ["tank/home", "tank/apps"]
-
-[[storage]]
-name = "storage02"
-host = "storage02.cluster.edu"
-type = "nfs"
-pools = ["scratch"]
+paths = ["/export/home"]
 ```
 
-### Alerts
+or `nomad lab add-nas LAB HOST` (LAB `shared` for storage that is
+everyone's). The lab machines' NFS mounts also report their exports' space,
+so a lab's NAS shows its size even where nomad doesn't reach the NAS itself.
 
-Set up alerts for storage conditions:
-```toml
-[alerts.storage]
-capacity_warning = 80      # Warn at 80% full
-capacity_critical = 95     # Critical at 95% full
-inode_warning = 80
-inode_critical = 95
-latency_warning_ms = 50    # Warn if latency > 50ms
-pool_degraded = true       # Alert on ZFS degraded state
-```
+Who holds each server's space, and on what, is a separate collector,
+`storage_use`, fed by a small script on each server:
+[Storage use](storage.md).
 
----
-
-## Use Cases
-
-### Correlating Job Failures
-
-When jobs fail, check infrastructure:
-
-1. Job failed with I/O errors - Check Storage tab for NFS issues
-2. Job timed out - Check if storage latency spiked
-3. Multiple failures from one department - Check their workstations
-
-### Capacity Planning
-
-Track trends over time:
 ```bash
-nomad report storage --days 30    # 30-day storage trend
-nomad report workstations --idle  # Find underutilized machines
+nomad diag nas nas1            # a storage server's health and trend
+nomad storage use              # who holds each path's space
+nomad storage status           # what the storage_use collector read, and when
 ```
 
-### Proactive Maintenance
+## Alerts
 
-Get notified before problems occur:
+Disks filling (with a forecast of when they fill), a workstation's own disk,
+a degraded pool, and a source that stopped reporting are alerted as the
+clusters are: [Alerts](alerts.md).
 
-- Storage at 80% - Plan cleanup or expansion
-- ZFS pool degraded - Replace failing drive
-- Workstation offline - Check before users complain
+## Using it
+
+- **A job failed with I/O errors**: check the storage server's health and its
+  mounts' response times on the lab machines (`nomad diag nas`, the Console's
+  Infrastructure page).
+- **A lab's machines are idle or overloaded**: the Console's workstation
+  pages, and `nomad facts busy` for when each group of workstations is
+  busiest.
+- **Capacity**: the [usage report](usage-report.md)'s storage section, and
+  data unchanged for a year ([Storage use](storage.md#data-unchanged-for-a-year)).

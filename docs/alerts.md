@@ -46,7 +46,7 @@ filling, the reading stores the rate and when it will be full
 (`disk_forecast`) says so:
 
 ```
-[WARNING] NØMAÐ spydur: Disk /home will be full in about 45 hours (filling 2.0 TB/day over the last 6 hours; 84% used)
+[WARNING] NØMAÐ hpc1: Disk /home will be full in about 45 hours (filling 2.0 TB/day over the last 6 hours; 84% used)
 ```
 
 ```toml
@@ -201,8 +201,8 @@ nomad looks at the notes, and when a hub that read it regularly has not for
 `after_minutes`, it raises an alert through the site's own `[alerts]`
 backends, with source `hub`:
 
-> The hub mingus has not read spydur for 1 h (last at 2026-11-10 12:59): its
-> pages show spydur as of then. If it reads no site, it is down, cannot reach
+> The hub has not read hpc1 for 1 h (last at 2026-11-10 12:59): its
+> pages show hpc1 as of then. If it reads no site, it is down, cannot reach
 > the sites, or its sync has stopped.
 
 A warning, critical after a day; once, again when worse, then every
@@ -393,7 +393,7 @@ are told apart by their sensor number: "Status #60h", "Status #61h"; ignore
 them with a pattern ("r720:Status*").
 
 A site whose alerts the hub sends (`alerts = "hub"` in its [[hub.sites]]:
-vadur) gets these from the hub after each sync, through the hub's [alerts],
+hpc3) gets these from the hub after each sync, through the hub's [alerts],
 as its node alerts ("Node alerts sent by the hub"); the hub's own
 `[alerts.power]` applies. A host not read, or read more than 2 hours ago,
 is held as it was. `nomad power --check --send` sends a test.
@@ -402,14 +402,14 @@ is held as it was. `nomad power --check --send` sends a test.
 
 The `clock` collector ([Collectors](collectors.md), "CPU clocks") raises one
 alert a host whose CPU runs far below what it should give when busy (a power
-brake: arachne's node01-03 ran at 400 MHz instead of 3,700 for a month after
+brake: hpc2's node01-03 ran at 400 MHz instead of 3,700 for a month after
 a supply lost its input), after `sustain` low readings in a row, while it
 lasts: once, again when worse, then every reminder. Source `clock`, subject
 `cpu clock`, the host as host; **critical** when the host's power readings
 (the `power` collector, same site) show a supply problem too, else warning.
 A host whose CPUs are busy is judged against what it gives busy (1.49.0): with
 every core at work a CPU runs far below its top clock, and lower still on heavy
-vector code, none of it a brake (spydur's Xeon 6230Rs, one week: 3,970 MHz
+vector code, none of it a brake (hpc1's Xeon 6230Rs, one week: 3,970 MHz
 idle, about 2,700 busy, dips to 1,420; 24 alerts at the top-clock bar, none at
 this one). A brake holds the lowest clock at any load and is still found.
 The message says what it runs at, what it should, how much slower jobs run,
@@ -473,7 +473,7 @@ name -- in the subject with the problem itself, so an inbox shared by several
 sites reads at a glance:
 
 ```
-[WARNING] NØMAÐ spydur: Disk /scratch at 85.0% (1.9 TB free; threshold: 80%)
+[WARNING] NØMAÐ hpc1: Disk /scratch at 85.0% (1.9 TB free; threshold: 80%)
 ```
 
 ### Slack
@@ -551,7 +551,7 @@ Every episode of every condition is kept (`alert_episodes`: first and last
 seen, how often it was mailed, its wait; 90 days), mailed or not: the
 Console's Alerts > Now shows the last week's, still happening or over.
 `nomad alerts` says of a condition seen now but not mailed yet that it is
-waiting. spydur, one week in November 2026: 24 CPU clock alerts, each over in
+waiting. hpc1, one week in November 2026: 24 CPU clock alerts, each over in
 15 to 90 minutes.
 
 What has been raised is kept in the `alert_state` table, so this holds across

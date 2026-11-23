@@ -13,7 +13,7 @@ offers one says so.
 
 ## The kits
 
-nomad comes with these, each fitted to UR's job-script templates
+nomad comes with these, each fitted to one site's job-script templates
 (`[[submit.templates]]` in the hub's nomad.toml):
 
 | Kit | Program | Licence | What it runs |
@@ -83,7 +83,7 @@ The hub names each cluster's built kits for the Console:
 
 ```toml
 [submit.demos]
-site_dirs = { spydur = "/usr/local/sw/nomad-demos" }
+site_dirs = { hpc1 = "/usr/local/sw/nomad-demos" }
 ```
 
 The gate's `kits`, `practice` and `mkdir` requests do the work on the
@@ -127,7 +127,7 @@ wrote, in the kit's `recorded/` folder.
 
 ```toml
 [recorded]
-site = "spydur"
+site = "hpc1"
 date = "2026-11-09"
 module = "gromacs/2026.2-gpu"
 partition = "gpunodes"
@@ -147,7 +147,7 @@ copy's), and `look` on a copy ends with it, to compare. Each copy's
 `README-practice.txt` has it too. A built kit with none of its own takes
 nomad's (same program, same files); `nomad demos build` carries it along.
 
-These came from spydur on 9 November 2026 (sacct):
+These came from hpc1 on 9 November 2026 (sacct):
 
 | Kit | Where | Size | Ran | CPU time | Memory |
 |---|---|---|---|---|---|
@@ -166,8 +166,8 @@ their scripts on the hub, where the templates are, then send them on the
 cluster:
 
 ```
-nomad demos scripts --site spydur --hub --root /home/me/nomad-practice --out /tmp/kit-scripts
-# then on spydur, for each NAME:
+nomad demos scripts --site hpc1 --hub --root /home/me/nomad-practice --out /tmp/kit-scripts
+# then on hpc1, for each NAME:
 nomad demos copy NAME --to /home/me/nomad-practice/NAME
 cp /tmp/kit-scripts/NAME.sh /home/me/nomad-practice/NAME/ && cd /home/me/nomad-practice/NAME && sbatch NAME.sh
 nomad demos look NAME /home/me/nomad-practice/NAME      # once it has ended
@@ -183,8 +183,8 @@ nomad demos build gromacs-water --to /usr/local/sw/nomad-demos --module-path /us
 nomad demos build amber-peptide --to /usr/local/sw/nomad-demos --module-path /usr/local/sw/modulefiles
 ```
 
-(`--site spydur` instead of `--module-path` where the hub's nomad.toml, with
-its `[submit.build.spydur]`, is the one read.)
+(`--site hpc1` instead of `--module-path` where the hub's nomad.toml, with
+its `[submit.build.hpc1]`, is the one read.)
 
 This copies the kit to `/usr/local/sw/nomad-demos/NAME`, runs its commands
 there as you with its module loaded (`build.sh`, `build.log`), and checks that
@@ -205,9 +205,9 @@ writes itself (a folder with a `kit.toml`; see `nomad/demos/kits.py`).
 dirs = ["/usr/local/sw/nomad-demos"]   # a site's own kits (folders of kit folders)
 bundled = true                         # also the kits that come with nomad (default)
 into = "~/nomad-demos"                 # where a copy goes: a new folder each time
-partition = { spydur = "condos" }      # where practice runs with no GPU are sent (default: the template's)
+partition = { hpc1 = "condos" }        # where practice runs with no GPU are sent (default: the template's)
 gpu_partition = "gpunodes"             # and those with one (a name: every site)
-site_dirs = { spydur = "/usr/local/sw/nomad-demos" }   # the hub's: each cluster's built kits, for the Console
+site_dirs = { hpc1 = "/usr/local/sw/nomad-demos" }     # the hub's: each cluster's built kits, for the Console
 ```
 
 A practice run that waits days behind long research jobs teaches the wrong
@@ -215,7 +215,7 @@ lesson. Send them where they start within minutes: a short partition, a
 reservation, or a condo guest queue (they are short, so being put back in
 the queue hardly matters).
 
-## What the first runs found (spydur, 9 Nov 2026)
+## What the first runs found (hpc1, 9 Nov 2026)
 
 Practice runs double as a check of the cluster's own software. The first
 runs found, beyond the kits:

@@ -2,7 +2,7 @@
 
 From nomad 1.45.0 (with the Console's fix 110), an administrator trains the
 model from **Data readiness** ("Train…"). The training runs not on the hub
-but on a worker machine with a GPU (at Richmond, badenpowell), with
+but on a worker machine with a GPU, with
 [TESSERA](https://pypi.org/project/tessera-ml/) (`tessera-ml` 0.3 or later).
 
 ## How it goes
@@ -40,8 +40,8 @@ What it predicts (`predicts`):
   Recommendations judge for cores, judged as they judge them;
 - **waste**: a completed job that used less than `1 - waste_threshold` of the
   time it asked for. Where most jobs don't set `--time` and get their
-  partition's default, nearly every job counts (at the University of
-  Richmond, half the completed jobs used under 1% of the time they asked, and
+  partition's default, nearly every job counts (at the first site it was
+  trained for, half the completed jobs used under 1% of the time they asked, and
   89% would count even at 0.9): the question then says little, which is why
   it is no longer asked by default.
 
@@ -104,7 +104,7 @@ model warned about the tenth of the jobs it ranked first, how often it would
 have been right and what share of the jobs that did it those were; and a
 **simple rule** to beat, which needs no model: warn about a job when the
 same person's last job (the last one that had ended when it was sent) did
-it. On UR's clusters "their last job failed" was right about 6 times in 10
+it. On the first site's clusters "their last job failed" was right about 6 times in 10
 and caught about two thirds of the failures, where the models, from what a
 job asked for, were right about 4 times in 10. Beside the rule, each model
 warning about as many jobs. Then whether any of them is good enough to warn
@@ -123,7 +123,7 @@ thing's):
 enabled = true                   # the Console offers Train… (administrators)
 engine = "tessera"               # or "baseline": a logistic regression only
 predicts = ["failure", "idle"]   # or with "waste"
-trainer = "badenpowell"          # the worker's name, as the Console says it
+trainer = "gpuws1"               # the worker's name, as the Console says it
 jobs_days = 365
 max_jobs = 50000                 # the newest ended jobs (0: all); the similarity
                                  # network's time grows as the square of the jobs
@@ -172,7 +172,7 @@ console = "https://nomad.example.edu"   # the Console it asks
 key_file = "~/.config/nomad/ml_worker_key"
 device = "cuda"                         # or "cpu", "auto"
 # ca_file = "/etc/pki/tls/certs/campus-ca.pem"
-# name = "badenpowell"                  # default: the machine's short name
+# name = "gpuws1"                       # default: the machine's short name
 ```
 
 ## Setting it up

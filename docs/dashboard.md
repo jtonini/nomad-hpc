@@ -1,13 +1,21 @@
-# Dashboard
+# Standalone dashboard
 
-The NØMAÐ dashboard provides real-time monitoring of your HPC cluster(s).
+!!! note "The Console replaces it"
+    `nomad dashboard` is NØMAÐ's first web view: one process, one database,
+    no sign-in. The [Console](console.md) now does everything it did, for
+    many people at once and with each seeing what their role allows, so new
+    deployments should use the Console. The dashboard still ships, for
+    `nomad demo` and for a quick look at one database on one machine.
 
 ## Launching
 ```bash
-nomad dashboard
+nomad dashboard                      # the database nomad.toml names, else ~/nomad_demo.db
+nomad dashboard --db combined.db     # another database
+nomad demo                           # the demo database, then the dashboard
 ```
 
-Open http://localhost:8050 in your browser.
+Open http://localhost:8050 in your browser. It has no sign-in: keep it on
+`127.0.0.1` (the default) and reach it through an SSH tunnel.
 
 ## Tabs
 
@@ -42,21 +50,16 @@ Job activity and history:
 - Failed job categories
 - Interactive session monitoring (RStudio/Jupyter)
 
-## Planned Features
-
-- **Education Tab**: Visual proficiency trajectories and per-student breakdowns (CLI available now via `nomad edu`)
-
 ## Remote Access
 
-By default, the dashboard only listens on localhost. For remote access:
+The dashboard listens on localhost only. Reach it through an SSH tunnel:
 
-1. **SSH Tunnel** (simple):
 ```bash
-   ssh -L 8050:localhost:8050 user@hpc-head
+ssh -L 8050:localhost:8050 user@hpc-head
 ```
 
-2. **Reverse Proxy** (production):
-   See [System Install](system-install.md#reverse-proxy-recommended-for-remote-access)
+It has no sign-in and no scoping, so don't put it behind a proxy for other
+people: that is what the Console is for.
 
 ## GPU Panel
 

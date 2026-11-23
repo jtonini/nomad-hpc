@@ -1,60 +1,52 @@
-# Interactive Session Monitoring
+# Interactive Sessions
 
-Monitor RStudio and Jupyter sessions across your cluster.
+RStudio and Jupyter sessions on an interactive server: who has what open, how
+much memory each holds, which are idle or stale, and acting on them.
 
-## Overview
+## What is collected
 
-NØMAÐ tracks interactive computing sessions to identify:
-- Idle sessions consuming resources
-- Memory-heavy notebooks
-- Stale sessions (no activity for days)
-- Resource hogs
+The `interactive` collector, on the server itself, records each session at
+every run (who, which kind, its memory and CPU) and keeps each person's day
+and hour in small totals that are kept for good: sessions, time open, time
+busy, CPU, memory, and the software environment each ran from. Courses and
+the usage report are built from those totals.
+[Collectors: interactive servers](collectors.md#interactive-servers-rstudio-jupyterhub)
+has what each table holds and the settings.
 
-## Commands
+## Reports
+
 ```bash
-# Full report
-nomad report-interactive
-
-# Alerts only (idle/stale sessions)
-nomad report-interactive --quiet
-
-# JSON output
+nomad report-interactive              # every session now, and what needs attention
+nomad report-interactive --quiet      # only what needs attention
 nomad report-interactive --json
 ```
 
-## Report Output
-```
-Interactive Sessions Report
-═══════════════════════════════════════════════════════════
+It names users with many idle sessions, sessions idle longer than
+`--idle-hours` (stale), and sessions holding more memory than
+`--memory-threshold` (memory hogs).
 
-RStudio Sessions: 12 active
-  node01: 3 sessions (2 idle > 1hr)
-  node02: 5 sessions
-  node04: 4 sessions (1 idle > 4hr)
+## Acting on sessions
 
-Jupyter Sessions: 8 active
-  node01: 2 sessions
-  node03: 6 sessions (3 stale > 24hr)
+On the server, `nomad interactive` lists the sessions and acts on them. Each
+is a dry run until `--apply`, and nothing changes until the server's
+nomad.toml has `[actions] interactive = true`:
 
-Recommendations:
-  • 5 sessions idle > 1 hour — consider auto-timeout
-  • 3 notebooks stale > 24 hours — notify users
+```bash
+nomad interactive sessions                    # who has what open, and how long idle
+nomad interactive stop PERSON PID --apply     # suspend an RStudio session, or stop a Jupyter server or kernel
+nomad interactive clear --hours 48 --apply    # every session idle that long
+nomad interactive restart jupyter --servers 12 --apply
 ```
 
-## JupyterHub Integration
+An RStudio session is suspended with Workbench's own command, so it comes
+back as it was; a Jupyter server or kernel is stopped as its person.
+[Actions: an interactive server's sessions](actions.md#an-interactive-servers-sessions)
+has the details, and how the same commands are started from the Console.
 
-NØMAÐ can integrate with JupyterHub's idle-culler:
-```toml
-[interactive.jupyter]
-hub_api_url = "http://jupyterhub:8081/hub/api"
-api_token = "..."
-idle_timeout_minutes = 60
-```
+## In the Console
 
-## Dashboard
-
-The Interactive tab in the dashboard shows live session status with:
-- Per-node session counts
-- Idle time indicators
-- Memory usage per session
-- One-click idle session alerts
+The Console's Interactive servers page shows, for staff, each server's
+sessions now, by kind and by person, how long each has been idle, and what
+needs attention (stale sessions, memory hogs, people with many idle
+sessions). Where the actions are set up, staff start the commands above from
+the Console, each shown as a dry run first.

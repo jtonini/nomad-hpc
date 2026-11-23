@@ -4,7 +4,9 @@
 
 # NØMAÐ-HPC
 
-**NØde Monitoring And Ðiagnostics** — Lightweight HPC monitoring, visualization, and predictive analytics.
+**NØde Monitoring And Ðiagnostics**: monitoring, diagnostics and plain-language
+guidance for research computing. It covers HPC clusters, interactive servers,
+lab workstations and storage.
 
 > *"Travels light, adapts to its environment, and doesn't need permanent infrastructure."*
 
@@ -13,291 +15,94 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18614517.svg)](https://doi.org/10.5281/zenodo.18614517)
 
----
-
-📖 **[Full Documentation](https://jtonini.github.io/nomad-hpc/)** — Installation guides, configuration, CLI reference, network methodology, ML framework, and more.
+**Documentation: [jtonini.github.io/nomad-hpc](https://jtonini.github.io/nomad-hpc/)**
 
 ---
 
-## Quick Start
+## What it is
+
+NØMAÐ reads what a research computing center's machines are doing: Slurm's
+jobs and queues, compute nodes and GPUs, login nodes, RStudio and JupyterHub
+servers, lab workstations and storage servers. It keeps what it reads in
+SQLite and turns it into answers for three groups of people: those who run
+jobs, the faculty who lead labs and teach courses, and the staff who run the
+machines.
+
+| Part | What it does | Where it runs |
+|---|---|---|
+| **Collectors** (`nomad collect`) | Read the machine every few minutes into that site's own database | Each cluster's head node, each interactive server, and a machine that reaches the lab workstations |
+| **The hub** (`nomad sync`) | Brings every site's new rows into one combined database, and sends alerts, reports and emails on a schedule | One machine |
+| **The Console** | The web interface: each person signs in and sees what their role allows | The hub, usually behind HTTPS |
+
+A small center can run all three on one machine.
+
+## Quick start
+
 ```bash
 pip install nomad-hpc
-nomad demo                    # Try with synthetic data
+nomad demo --no-launch                      # a demo database: jobs, nodes, GPUs, storage
+nomad status --db ~/nomad_demo.db
+nomad insights brief --db ~/nomad_demo.db
 ```
 
-For production:
-```bash
-nomad init                    # Interactive setup wizard
-nomad collect                 # Start data collection
-nomad dashboard               # Launch web interface
-```
-
----
-
-## What's New in v1.4.0
-
-### Multi-Cluster Monitoring
-Monitor multiple clusters, interactive servers, and workstation groups from a single dashboard. The `nomad sync` command merges databases from remote sites into a combined view with per-cluster tabs, partition-aware layouts, and cross-site insights.
-
-### Alert Pipeline
-End-to-end alerting from data collection through email notification. The DiskCollector detects filesystem usage above thresholds, the ThresholdChecker fires severity-graded alerts, and the AlertDispatcher persists them to the database with deduplication and cooldown. Daily email reports via system `mail` — no SMTP configuration required.
-
-### Per-Cluster Dynamics
-The Insight Engine runs diversity, niche overlap, capacity, and resilience computations independently per cluster in combined databases. Each signal is tagged with its cluster name for clear attribution.
-
-### Workstation Monitoring
-Monitor departmental workstations via SSH from a central machine. The WorkstationCollector gathers CPU load, memory, disk, logged-in users, process counts, and zombie detection. Workstation groups appear in the Workstations page with department-level grouping.
-
-### Disk Signals with Derivative Analysis
-Filesystem signals now include fill rate and projected days-until-full from derivative analysis. The Insight Engine reads from the `filesystems` table and surfaces actionable warnings before disks reach critical capacity.
-
-### Umbrella Group Filter
-Niche overlap analysis excludes groups that contain more than 80% of all users, eliminating false contention warnings from universal groups.
-
----
-
-## Features
-
-| Feature | Description | Command |
-|---------|-------------|---------|
-| **Multi-Cluster Dashboard** | Real-time monitoring across HPC clusters, interactive servers, and workstations | `nomad dashboard` |
-| **Multi-Site Sync** | Merge databases from remote sites into a combined view | `nomad sync` |
-| **Workstation Monitoring** | Track departmental machines via SSH (CPU, memory, disk, users) | Dashboard → Workstations |
-| **Storage Monitoring** | Filesystem health grouped by server with usage bars | Dashboard → Storage |
-| **Interactive Sessions** | Monitor RStudio/Jupyter sessions with memory and idle detection | Dashboard → Interactive |
-| **Alert Pipeline** | Threshold + derivative alerts with email, Slack, and webhook delivery | `nomad alerts` |
-| **Insight Engine** | Operational narratives from multi-signal, per-cluster analysis | `nomad insights brief` |
-| **System Dynamics** | Ecological and economic metrics for resource analysis | `nomad dyn` |
-| **ML Prediction** | Job failure prediction using similarity networks | `nomad predict` |
-| **Data Readiness** | Assess ML model readiness with sample size and variance analysis | `nomad readiness` |
-| **Diagnostics** | Analyze network, storage, and node-level bottlenecks | `nomad diag` |
-| **Educational Analytics** | Track computational proficiency development | `nomad edu explain <job>` |
-| **Cloud Monitoring** | AWS/Azure/GCP metrics with cost and utilization analysis | `nomad cloud status` |
-| **Community Export** | Anonymized datasets for cross-institutional research | `nomad community export` |
-| **Reference** | Built-in documentation, code navigation, and search | `nomad ref` |
-| **Developer Toolchain** | Scaffolding, validation, and contribution pipeline | `nomad dev` |
-| **Issue Reporting** | Submit bugs, features, questions from any interface | `nomad issue report` |
-
----
-
-## Dashboard Views
-
-The web dashboard includes multiple views accessible via tabs:
-
-- **Cluster Overview**: Real-time node status with health rings, per-partition layout, and live running/pending counts from queue state
-- **Network View**: 3D job similarity network with failure clustering analysis
-- **Resources**: CPU-hours, GPU-hours, and usage breakdown by group/user with cluster filtering
-- **Activity**: Job submission heatmap showing patterns by day and hour
-- **Interactive**: Active RStudio and Jupyter sessions with memory usage and idle detection
-- **Workstations**: Departmental machines grouped by site and department with CPU, memory, disk, and user counts
-- **Storage**: Filesystem health grouped by server with color-coded usage bars
-- **Cloud**: AWS, Azure, and GCP resource utilization and cost tracking
-- **Insights**: Operational narratives from multi-signal, per-cluster analysis
-- **Dynamics**: Diversity indices, niche overlap, carrying capacity, resilience scoring
-- **Readiness**: Collection health, uptime, cycles, and prediction readiness
-- **Report Issue**: Submit bugs, feature requests, and questions with auto-populated system info
-
-Toggle between light and dark themes with the Theme button.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              NØMAÐ                                          │
-├───────────────┬───────────────┬───────────────┬───────────┬────────────────┤
-│  Collectors   │   Analysis    │     Viz       │  Alerts   │  Intelligence  │
-├───────────────┼───────────────┼───────────────┼───────────┼────────────────┤
-│ disk          │ derivatives   │ dashboard     │ thresholds│ insights       │
-│ iostat        │ similarity    │ network 3D    │ predictive│ dynamics       │
-│ nfs           │ community     │ partitions    │ flapping  │ reference      │
-│ slurm         │ ML ensemble   │ workstations  │ email     │ edu scoring    │
-│ gpu           │ readiness     │ storage       │ slack     │                │
-│ workstation   │ diagnostics   │ interactive   │ webhooks  │                │
-│ storage       │               │ cloud         │           │                │
-│ cloud         │               │ insights      │           │                │
-│ groups        │               │ dynamics      │           │                │
-│ interactive   │               │ readiness     │           │                │
-└───────────────┴───────────────┴───────────────┴───────────┴────────────────┘
-                                │
-                      ┌─────────┴─────────┐
-                      │  SQLite Database  │
-                      │  (per-site + combined via sync)  │
-                      └───────────────────┘
-```
-
----
-
-## Multi-Site Deployment
-
-NØMAÐ supports monitoring multiple sites from a single dashboard:
+On a real site:
 
 ```bash
-# On each site
-nomad init                    # Configure for local environment
-nomad collect                 # Start data collection
-
-# On a central machine
-nomad sync                    # Pull and merge all site databases
-nomad dashboard --db combined.db  # Unified view
+nomad init                                  # the setup wizard writes nomad.toml
+nomad syscheck                              # what this machine has, and what is missing
+nomad collect --once                        # one round of the collectors
+# then from cron, every 5 minutes:
+#   */5 * * * * /path/to/nomad collect --once
 ```
 
-The `nomad sync` command pulls databases via SCP, merges them with `source_site` tagging, and copies partition metadata for per-cluster dashboard filtering. Set up a cron for automatic syncing:
+On the hub, list the sites under `[hub]` in its `nomad.toml` and run
+`nomad sync` from cron or a systemd timer. See
+[Installation](https://jtonini.github.io/nomad-hpc/installation/).
 
-```
-*/10 * * * * /path/to/nomad sync 2>/dev/null
-```
+## What it does
 
----
+| For | What | Docs |
+|---|---|---|
+| People who run jobs | What a job should ask for, and submitting it (`nomad size`, `nomad submit`, or the Console) | [Sizing and submitting](https://jtonini.github.io/nomad-hpc/submit/) |
+| | Their own jobs explained, with advice (`nomad edu me`, `nomad edu explain JOB`) | [Educational analytics](https://jtonini.github.io/nomad-hpc/edu/) |
+| | Practice runs, files from the browser, help requests, a weekly email about their own use | [Practice runs](https://jtonini.github.io/nomad-hpc/demos/), [My files](https://jtonini.github.io/nomad-hpc/files/), [Ask](https://jtonini.github.io/nomad-hpc/help-requests/), [Notices](https://jtonini.github.io/nomad-hpc/notices/) |
+| Faculty | Their lab's members, work, workstations and storage; course views | [Configuration](https://jtonini.github.io/nomad-hpc/config/#console-access) |
+| | Term reports, condo reports, the lab membership check, account requests | [Lab reports](https://jtonini.github.io/nomad-hpc/lab-reports/), [Condo reports](https://jtonini.github.io/nomad-hpc/condo-reports/), [Lab check](https://jtonini.github.io/nomad-hpc/lab-check/), [Accounts](https://jtonini.github.io/nomad-hpc/lab-accounts/) |
+| Staff | Alerts, with stale-site detection and declared maintenance | [Alerts](https://jtonini.github.io/nomad-hpc/alerts/) |
+| | Node health: temperatures, power, CPU clocks, GPUs (DCGM), interactive sessions | [Collectors](https://jtonini.github.io/nomad-hpc/collectors/), [GPU](https://jtonini.github.io/nomad-hpc/gpu/) |
+| | Actions from the Console: drain or resume a node, manage RStudio and Jupyter sessions | [Actions](https://jtonini.github.io/nomad-hpc/actions/) |
+| | Storage use and cold data, license end dates, the policy watch | [Storage](https://jtonini.github.io/nomad-hpc/storage/), [Licenses](https://jtonini.github.io/nomad-hpc/licenses/), [Policy watch](https://jtonini.github.io/nomad-hpc/policy_watch/) |
+| | The usage report, impact before and after, Prometheus and Grafana | [Usage report](https://jtonini.github.io/nomad-hpc/usage-report/), [Impact](https://jtonini.github.io/nomad-hpc/impact/), [Metrics](https://jtonini.github.io/nomad-hpc/metrics/) |
+| Analysis | Insight Engine, system dynamics, failure prediction (TESSERA), proficiency scoring | [Insights](https://jtonini.github.io/nomad-hpc/insights/), [Dynamics](https://jtonini.github.io/nomad-hpc/dynamics/), [ML](https://jtonini.github.io/nomad-hpc/ml/) |
 
-## CLI Reference
-
-### Core Commands
-```bash
-nomad init                    # Interactive setup wizard
-nomad collect                 # Start collectors
-nomad collect --once          # Single collection cycle
-nomad dashboard               # Web interface
-nomad dashboard --db file.db  # Use specific database
-nomad sync                    # Merge remote databases
-nomad demo                    # Demo mode with synthetic data
-nomad status                  # System status
-nomad syscheck                # Verify environment
-```
-
-### Insight Engine
-```bash
-nomad insights brief          # Executive summary
-nomad insights detail         # Comprehensive report
-nomad insights json           # Machine-readable output
-nomad insights slack          # Slack-formatted report
-```
-
-### System Dynamics
-```bash
-nomad dyn summary             # Full dynamics narrative
-nomad dyn diversity           # Workload diversity indices
-nomad dyn diversity --by partition  # By partition
-nomad dyn niche               # Resource overlap between groups
-nomad dyn capacity            # Carrying capacity, binding constraint
-nomad dyn resilience          # Recovery time after disturbances
-nomad dyn externality         # Inter-group impact scoring
-```
-
-### Data Readiness & Diagnostics
-```bash
-nomad readiness               # Check ML training readiness
-nomad readiness -v            # Verbose with feature details
-nomad diag network            # Network performance analysis
-nomad diag storage            # Storage health and I/O patterns
-nomad diag node               # Node-level resource bottlenecks
-```
-
-### Educational Analytics
-```bash
-nomad edu explain <job_id>    # Job analysis with recommendations
-nomad edu trajectory <user>   # User proficiency over time
-nomad edu report <group>      # Course/group report
-```
-
-### Analysis & Prediction
-```bash
-nomad disk /path              # Filesystem trends
-nomad jobs --user <user>      # Job history
-nomad similarity              # Network analysis
-nomad train                   # Train ML models
-nomad predict                 # Run predictions
-```
-
-### Alerts & Community
-```bash
-nomad alerts                  # View alerts
-nomad alerts --unresolved     # Unresolved only
-nomad community export        # Export anonymized data
-nomad community preview       # Preview export
-```
-
-### Reference
-```bash
-nomad ref                     # Browse all topics
-nomad ref dyn diversity       # Look up any topic
-nomad ref search "regime"     # Search across documentation
-```
-
-### Issue Reporting
-```bash
-nomad issue report            # Interactive bug/feature/question form
-nomad issue report -c bug     # Pre-select category
-nomad issue search disk       # Search existing issues
-nomad issue info              # Preview system info
-```
-
-### Developer Toolchain
-```bash
-nomad dev guide               # Interactive contribution wizard
-nomad dev new collector zfs   # Scaffold a new module
-nomad dev check               # Validate codebase health
-nomad dev check --fix         # Auto-fix registration issues
-nomad dev test changed        # Test only modified files
-nomad dev status              # Current branch and readiness
-nomad dev submit              # Full contribution pipeline
-nomad dev bump patch          # Version management
-nomad dev deps collector disk # Module dependency graph
-```
-
----
+Every command is listed in the
+[CLI reference](https://jtonini.github.io/nomad-hpc/cli/), and each release's
+changes are in the [Changelog](https://jtonini.github.io/nomad-hpc/changelog/).
 
 ## Installation
 
-### From PyPI
 ```bash
-pip install nomad-hpc
+pip install nomad-hpc                       # Python 3.10 or later
+pip install "nomad-hpc[report]"             # with PDF condo reports
 ```
 
-### From Source
+From source:
+
 ```bash
 git clone https://github.com/jtonini/nomad-hpc
-cd nomad-hpc && pip install -e .
+cd nomad-hpc && pip install -e ".[dev]"
 ```
 
-### Requirements
-- Python 3.10+
-- SQLite 3.35+
-- Optional: sysstat (`iostat`, `mpstat`), SLURM, nvidia-smi, nfsiostat
-
-### System Check
-```bash
-nomad syscheck
-```
-
----
-
-## Documentation
-
-📖 **[jtonini.github.io/nomad-hpc](https://jtonini.github.io/nomad-hpc/)**
-
-- [Installation & Configuration](https://jtonini.github.io/nomad-hpc/installation/)
-- [Dashboard Guide](https://jtonini.github.io/nomad-hpc/dashboard/)
-- [CLI Reference](https://jtonini.github.io/nomad-hpc/cli/)
-- [Configuration Options](https://jtonini.github.io/nomad-hpc/config/)
-- [Network Methodology](https://jtonini.github.io/nomad-hpc/network/)
-- [ML Framework](https://jtonini.github.io/nomad-hpc/ml/)
-- [System Dynamics](https://jtonini.github.io/nomad-hpc/dynamics/)
-- [Educational Analytics](https://jtonini.github.io/nomad-hpc/edu/)
-- [Cloud Monitoring](https://jtonini.github.io/nomad-hpc/cloud/)
-- [Reference System](https://jtonini.github.io/nomad-hpc/reference/)
-- [Issue Reporting](https://jtonini.github.io/nomad-hpc/issue/)
-
----
+Requirements: Python 3.10+, SQLite 3.35+. Each collector uses the standard
+tool for what it reads (`sacct`, `squeue` and `scontrol` for Slurm, `iostat`
+and `mpstat` from sysstat, `nvidia-smi` and DCGM for GPUs, `nfsiostat`), and
+a collector whose tool is missing says so. `nomad syscheck` and
+`nomad collectors` show what this machine has.
 
 ## License
 
-Dual-licensed:
-- **AGPL v3** — Free for academic, educational, and open-source use
-- **Commercial License** — Available for proprietary deployments
-
----
+GNU Affero General Public License v3.0 or later
+([AGPL-3.0-or-later](LICENSE)).
 
 ## Citation
 
@@ -321,13 +126,11 @@ Dual-licensed:
 }
 ```
 
----
-
 ## Contributing
 
-See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines.
-
----
+See [CONTRIBUTING.md](docs/CONTRIBUTING.md), and
+[Extending NØMAÐ](https://jtonini.github.io/nomad-hpc/extending/) for adding a
+collector.
 
 ## Contact
 
