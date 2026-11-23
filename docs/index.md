@@ -1,7 +1,7 @@
 <picture>
-  <source srcset="assets/nomad_hero.webp" type="image/webp">
-  <img src="assets/nomad_hero.jpg"
-       alt="NØMAÐ — NØde Monitoring And Ðiagnostics"
+  <source srcset="assets/nomad_card.webp" type="image/webp">
+  <img src="assets/nomad_card.jpg"
+       alt="NØMAÐ — NØde Monitoring And Ðiagnostics. Open-source monitoring and diagnostics for HPC clusters."
        style="width: 100%; border-radius: 6px; margin-bottom: 1.5rem;">
 </picture>
 
