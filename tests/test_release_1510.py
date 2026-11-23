@@ -106,14 +106,14 @@ def test_jobs_that_stopped_within_a_minute(tmp_path, insights):
     got = {m["user"]: m for m in due(db)["mail"]}
     (e,) = [e for e in got["kim"]["entries"] if e.group == "jobs:quick"]
     assert e.title == "Some of your jobs stopped within a minute"
-    assert e.lines == ["On spydur, 4 of your jobs this week stopped with an error within a minute of starting "
-                       "(job IDs 101, 102, 103 and 104)."]
-    assert "slurm-JOBID.out" in " ".join(e.advice) and "module" in e.advice[0]
+    assert e.lines == ["On spydur, 4 of your jobs this week stopped with an error within a minute of starting."]
+    assert e.jobs == "101, 102, 103 and 104"                                  # 1.62.0: a line of its own
+    assert "slurm-JOBID.out" in " ".join(e.todo) and "module" in e.advice[0]
     assert not [e for e in got.get("pat", {"entries": []})["entries"] if e.group == "jobs:quick"]   # two: too few
     off = {"notices": {**CONFIG["notices"], "jobs": {"quick_min_jobs": 0}}}
     assert not [e for m in due(db, config=off)["mail"] for e in m["entries"] if e.group == "jobs:quick"]
     text = N.text_of(got["kim"], N.settings(CONFIG))
-    assert "* Some of your jobs stopped within a minute" in text
+    assert ". Some of your jobs stopped within a minute\n" in text and "Jobs: 101, 102, 103 and 104" in text
     assert not any(c in text for c in ("n't", "'re", "'ll", "'ve", "'d "))
 
 
@@ -125,7 +125,7 @@ def test_people_new_to_a_cluster(tmp_path, insights):
     assert e.lines == ["You started running jobs on arachne recently, and 4 of your 5 jobs there so far have not "
                        "completed."]
     assert e.advice[0] == "That is common when starting out on a cluster, and it gets better quickly."
-    assert e.advice[1].endswith("reply to this email, or write to the address below.")
+    assert e.todo[0].endswith("reply to this email, or write to the address below.")
     for who in ("olive", "sam", "kim"):                                  # a year on spydur; most completed
         assert not [x for x in got.get(who, {"entries": []})["entries"] if x.group == "jobs:new"], who
     # told once a cluster
@@ -134,7 +134,7 @@ def test_people_new_to_a_cluster(tmp_path, insights):
                                           {"submit_time"}) if x.group == "jobs:new"]
     nocontact = N.settings({"notices": {k: v for k, v in CONFIG["notices"].items() if k != "contact"}})
     (e2,) = N._new_entries(sqlite3.connect(db), "ann", nocontact, NOW, {}, "source_site", {"submit_time"})
-    assert e2.advice[1].endswith("reply to this email.")
+    assert e2.todo[0].endswith("reply to this email.")
 
 
 def test_jobs_that_ran_out_of_time_or_memory(tmp_path, insights):
@@ -143,13 +143,12 @@ def test_jobs_that_ran_out_of_time_or_memory(tmp_path, insights):
     short = [e for e in got["lee"]["entries"] if e.group.startswith("jobs:short")]
     assert [e.title for e in short] == ["Some of your jobs ran out of time", "Some of your jobs ran out of memory"]
     t, m = short
-    assert t.lines[0] == ("On spydur (basic), 3 of your last 12 jobs (job IDs 601, 600 and 1 more) reached their time limit "
-                          "or came close to it (they typically asked for 12 h and ran about 12 h). Ask for this "
-                          "instead:")
-    assert "  #SBATCH --time=18:00:00" in t.lines
+    assert t.lines[0] == ("On spydur (basic), 3 of your last 12 jobs reached their time limit "
+                          "or came close to it (they typically asked for 12 h and ran about 12 h).")
+    assert t.jobs == "601, 600 and 1 more" and t.change == ["#SBATCH --time=18:00:00"]      # 1.62.0: apart
     assert m.lines[0].endswith("ran out of memory or came close to it (they typically asked for 8 GB and used about "
-                               "7.8 GB). Ask for this instead:")
-    assert "loses the work" in t.advice[0] and t.advice[1].endswith("https://nomad.example.edu/submit")
+                               "7.8 GB).")
+    assert "loses the work" in t.advice[0] and t.todo[0].endswith("https://nomad.example.edu/submit")
     # a GPU "raise", and one of a single job (short_min_jobs = 2): not told
     assert len(short) == 2
     # told again only after repeat_days

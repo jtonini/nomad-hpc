@@ -262,8 +262,9 @@ def test_a_jobs_note_names_its_jobs():
     class Issue:
         affected_jobs = 12
         jobs = [{"job_id": 4500 + k} for k in range(10)]
-    assert N._ids(Issue()) == " (job IDs 4500, 4501, 4502, 4503, 4504, 4505, 4506, 4507 and 4 more)"
+    # 1.62.0: the words alone (the email puts them on a "Jobs:" line); arrays: test_release_1620
+    assert N._ids(Issue()) == "4500, 4501, 4502, 4503, 4504, 4505, 4506, 4507 and 4 more"
     Issue.jobs, Issue.affected_jobs = [{"job_id": "77"}], 1
-    assert N._ids(Issue()) == " (job ID 77)"
+    assert N._ids(Issue()) == "77"
     Issue.jobs = []
     assert N._ids(Issue()) == ""

@@ -73,6 +73,7 @@ def db_status(ctx, tables, sites):
     if not found:
         click.echo("No nomad database here.")
         return
+    grew = False
     try:
         for path, role in found:
             try:
@@ -81,6 +82,7 @@ def db_status(ctx, tables, sites):
                 click.echo(f"{path} ({role}): not read ({e})")
                 continue
             g = H.growth(hist, str(path)) if hist else None
+            grew = grew or g is not None
             line = (f"{path} ({role}): {H.size(r['bytes'])}"
                     + (f" + {H.size(r['wal_bytes'])} write-ahead log" if r["wal_bytes"] > 1e6 else ""))
             if g is not None:
@@ -101,6 +103,9 @@ def db_status(ctx, tables, sites):
             hist.close()
     if not hist:
         click.echo("(Growth needs the databases collector's readings: it runs with nomad collect.)")
+    elif not grew:
+        click.echo("(No growth yet: the databases collector reads every few hours, and growth shows "
+                   "once its readings span a day.)")
 
 
 def _tables(path, r, hist):

@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.62.0 (November 2026)
+
+- **The weekly email, laid out**: formatted (HTML) with a plain copy;
+  numbered notes, each with what NØMAÐ saw, the jobs, what to ask for
+  instead (the `#SBATCH` line in a box, the value in words), what to do and
+  why; jobs that stopped within a minute or ran short first, asking for too
+  much last; a job array named once with its tasks counted ("array 13212
+  (15 tasks)"); what jobs used said as most jobs' use and the longest, so
+  the value to ask for makes sense. `nomad notices mail --html FOLDER`
+  writes each one's formatted copy to look at.
+- **Asking for far more time is told only when it made the person wait**:
+  their jobs' waits against other people's jobs of the same size on the
+  same partition, in the same days, that asked for about the time they ran
+  (`[notices.jobs] time_if_waited`, `waited_minutes` 30, `waited_times` 2,
+  `compare_min_jobs` 10). On a quiet cluster it isn't told.
+- **nomad's own databases are read without reading them whole**: 1.61.0
+  asked each table for its lowest and highest row number in one query,
+  which SQLite answers by reading the table (14 GB on the hub, four times a
+  day); now two lookups. Sizes over 1,000 GB say TB. `nomad db status`
+  says when there are readings but no growth yet.
+
 ## v1.61.0 (November 2026)
 
 - **nomad watches its own databases**: the `databases` collector (on by

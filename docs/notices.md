@@ -16,6 +16,20 @@ new there, with what happened, the better way, and a link to My activity.
   severity `high` or `critical` by the same rules as `nomad edu me`, with
   the value to ask for instead (`#SBATCH --mem=8G`). Only for people who
   finished jobs in the last week.
+- **Asking for far more time than the jobs ran** (1.62.0) is told only when
+  it cost the person waiting. A long time request matters when the cluster
+  is busy: the scheduler can't fit the job into gaps a shorter one would
+  fit. On a quiet cluster every job starts at once, whatever it asks for,
+  and an email about it would only be noise. So nomad compares how long
+  the person's jobs waited to start (for the queue: an array by its first
+  task) with other people's jobs on the same partition, sent in the same
+  days (a day either side), of the same size (half to twice the cores; GPU
+  jobs with GPU jobs) that asked for about the time they ran (at most twice
+  it, or an hour more). The note goes when theirs waited at least
+  `waited_minutes` (30) longer and `waited_times` (2) as long, with at
+  least `compare_min_jobs` (10) jobs to go by, and gives both waits. Without
+  enough jobs like theirs nomad can't tell, and it isn't told. My activity
+  shows the advice either way. `time_if_waited = false` tells it as before.
 - **Jobs that ran short** (1.51.0): jobs that reached their time limit or
   ran out of memory, or came close (at least `short_min_jobs`, 2), with the
   value to ask for instead from the person's own jobs, and that the work
@@ -41,42 +55,56 @@ over a person's partitions, each with its `#SBATCH` line; why it matters
 and the better way are said once a note (1.39.1). Sizes and times are in
 words ("32 GB", "1 h 38 min"), and the email has no contractions.
 
+**How it is laid out (1.62.0).** The email goes formatted (HTML), with a
+plain copy for mail programs that show only text. Its notes are numbered:
+login nodes first, then jobs that stopped within a minute, jobs that ran
+short and getting started, and asking for too much last. Each note has a
+heading, then what NØMAÐ saw, the jobs it is about, what to ask for instead
+(the `#SBATCH` line in a box of its own, and the value in words: "9 days
+15 h: enough for the longest of these jobs, with some margin"), what to do,
+and why. What they used is said as most jobs' use and, where it differs a
+lot, the longest or the most, so the value to ask for makes sense. The
+formatted copy sets no colours for text or background, so a mail program's
+dark mode reads it as well as its light one.
+
 ```
 Subject: Research computing: 2 notes on your recent work
 
 Hello,
 
 NØMAÐ, the monitoring that Academic Research Computing runs on the clusters,
-noticed something in your recent work that could run better. Nothing is wrong
-and nothing has been done about it; this is only to help.
+noticed 2 things in your recent work that could go better. Nothing is wrong
+and nothing has been changed: this is only to help.
 
-On the login nodes
-------------------
-* A long computation on the login node (3 times)
-  - python3 on spydur, Tue 10 Nov 09:29, for 40 min (1.5 cores)
-    python3 fit.py --part 2
-  - ...
-  One program kept the processor busy for a long time on the login node, ...
-  Run it as a job: in the Console, Submit a job; or start a session on a compute node
-    srun --pty -c 4 --mem=16G --time=4:00:00 bash
-  and run the same command there.
+1. Some of your jobs stopped within a minute
 
-Your jobs
----------
-* Your jobs ask for more time than they use
-  - On spydur (cpunodes), 20 of your last 22 jobs (job IDs 4521, 4519, 4502, 4498, 4490, 4487, 4480, 4477 and 12 more) asked for more time than they used (typically 1 day; they used about 1 h 38 min). Ask for this instead:
-      #SBATCH --time=04:00:00
-  - On spydur (gpunodes), ...
-  Jobs that ask for less time start sooner: the scheduler can fit them into gaps ...
+On vadur, 186 of your jobs this week stopped with an error within a minute of starting.
+Jobs: array 13213 (180 tasks) and array 12269 (6 tasks)
 
-The details, and how to do it another way: https://nomad.example.edu/me
+What to do: Look at the first lines of the output file of one of these jobs (slurm-JOBID.out, ...): they usually say what was missing.
+
+Why: A job that stops this soon usually could not find or start something: ...
+
+2. Your jobs ask for more time than they use
+
+On vadur (cpu), 15 of your last 15 jobs asked for more time than they ran: they typically asked for 365 days; most ran about 2 h 10 min, the longest 6 days 10 h.
+They waited about 3 h 20 min to start (the median). Jobs of the same size on the same partition, sent in the same days, that asked for about the time they ran waited about 4 min (the median of 37 jobs).
+Jobs: array 13212 (15 tasks)
+Ask for this instead:
+    #SBATCH --time=9-15:00:00
+That is 9 days 15 h: enough for the longest of these jobs, with some margin.
+
+Why: Jobs that ask for less time start sooner: ...
+
+Your recent work in detail, and other ways to do it: https://nomad.example.edu/me
 
 These emails come at most once every 7 days, and only with something new. To
 stop them, turn off "Email me about my own use" at https://nomad.example.edu/me.
 ```
 
 Each jobs note names the jobs it is about, newest first (eight, then "and N
-more"; 1.49.0), so a person can look at each one.
+more"; 1.49.0), so a person can look at each one; a job array once, with
+its tasks counted (1.62.0).
 
 ## Who gets one
 
@@ -115,6 +143,7 @@ nomad notices                          # how it is set, and what went lately
 nomad notices mail                     # who is due now, and why others are not (nothing is sent)
 nomad notices mail --counts            # the same as counts only, no names (to show someone)
 nomad notices mail --user NETID --text # one person's email, as it would go
+nomad notices mail --html FOLDER       # each email's formatted copy, FOLDER/NETID.html (1.62.0)
 nomad notices mail --send              # send them (while review_to is set, to review_to)
 nomad notices set NETID off --apply    # someone asked not to be emailed
 nomad notices timer --apply            # every Monday at 09:10, from systemd (as root)
@@ -147,6 +176,10 @@ short_min_jobs = 2                   # jobs that ran out of time or memory: at l
 quick_seconds = 60                   # a job that stopped with an error this soon (1.51.0)
 quick_min_jobs = 3                   # ... at least this many on a cluster in a week (0: never)
 new_days = 30                        # first job on a cluster this recently: getting started (0: never)
+time_if_waited = true                # asking for too much time: told only when it made them wait (1.62.0)
+waited_minutes = 30                  # ... at least this much longer than jobs like theirs
+waited_times = 2                     # ... and this many times as long
+compare_min_jobs = 10                # ... with at least this many jobs like theirs to go by
 
 [notices.login_node]                 # what counts on a login node (collectors.md)
 ```

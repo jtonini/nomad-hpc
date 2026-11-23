@@ -244,7 +244,12 @@ def measure(path: Path) -> dict:
         tables = []
         for n in names:
             try:
-                hi, lo = c.execute(f"SELECT MAX(rowid), MIN(rowid) FROM {_q(n)}").fetchone()
+                # Two subqueries, each a jump to one end of the table. As one
+                # SELECT MAX(rowid), MIN(rowid) SQLite reads the whole table
+                # (its shortcut takes a lone MIN or MAX only): 1.61.0 read every
+                # database in full at each reading.
+                hi, lo = c.execute(f"SELECT (SELECT MAX(rowid) FROM {_q(n)}), "
+                                   f"(SELECT MIN(rowid) FROM {_q(n)})").fetchone()
             except sqlite3.Error:                     # WITHOUT ROWID: no row numbers
                 continue
             tables.append({"name": n, "max_rowid": hi, "min_rowid": lo})
@@ -577,5 +582,6 @@ def size(n: float | None) -> str:
     if n is None:
         return "-"
     a = abs(n)
-    s = f"{a / 1e9:.2f} GB" if a >= 1e9 else (f"{a / 1e6:.1f} MB" if a >= 1e5 else f"{a / 1e3:.0f} kB")
+    s = (f"{a / 1e12:.2f} TB" if a >= 1e12 else f"{a / 1e9:.2f} GB" if a >= 1e9
+         else f"{a / 1e6:.1f} MB" if a >= 1e5 else f"{a / 1e3:.0f} kB")
     return ("-" if n < 0 else "") + s

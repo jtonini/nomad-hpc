@@ -14,6 +14,13 @@ something new there:
   asking for far more than they used (most of at least ``min_jobs`` jobs on
   a partition, of severity ``high`` or ``critical``), with the value to ask
   for instead. Only for people who finished jobs in the last week.
+  (1.62.0) Asking for far more **time** than the jobs ran is told only
+  when it cost the person waiting: their jobs waited at least
+  ``waited_minutes`` longer to start, and ``waited_times`` as long, as
+  other people's jobs of the same size on the same partition, sent in the
+  same days, that asked for about the time they ran (at least
+  ``compare_min_jobs`` of those). On a quiet cluster, where jobs start at
+  once whatever they ask for, it isn't told; My activity still shows it.
 - (1.51.0) **jobs that ran short**: jobs that reached their time limit or
   ran out of memory (at least ``short_min_jobs`` of them), with the value
   to ask for instead, from the person's own jobs: the work since a job's
@@ -28,7 +35,11 @@ something new there:
   failed about half the time, against about three in ten after).
 
 Each email says what, where and when, and the better way, and links to My
-activity for the details. What is alike is one note: the times of one kind
+activity for the details. (1.62.0) It goes laid out (HTML) with a plain
+copy: numbered notes, each with what NØMAÐ saw, the jobs (an array once,
+with its tasks counted), what to ask for instead in a box of its own, what
+to do and why; jobs that stopped within a minute or ran short come before
+asking for too much. What is alike is one note: the times of one kind
 of login-node use (at most ``SHOWN`` of them), or one kind of asking for
 too much over a person's partitions, with why it matters and the better way
 said once (1.39.1). Never the same thing twice: a login-node entry is
@@ -68,6 +79,10 @@ Settings, in the hub's nomad.toml::
     quick_seconds = 60                   # (1.51.0) a job that stopped with an error this soon
     quick_min_jobs = 3                   # ... at least this many on a cluster in the last week (0: never)
     new_days = 30                        # (1.51.0) first job on a cluster this recently: new (0: never)
+    time_if_waited = true                # (1.62.0) asking for too much time: told only when it made them wait
+    waited_minutes = 30                  # ... at least this much longer than jobs like theirs
+    waited_times = 2                     # ... and this many times as long
+    compare_min_jobs = 10                # ... with at least this many jobs like theirs to go by
 
     [notices.login_node]                 # what counts on a login node (nomad.edu.login_node)
 
@@ -87,7 +102,7 @@ SEVERITIES = ("critical", "high", "medium")
 KEYS = {"kinds", "every_days", "link", "review_to", "greeting", "mail_domain", "send_from", "signature",
         "contact", "courses", "skip_users", "db", "jobs", "login_node"}
 JOB_KEYS = {"days", "min_jobs", "severities", "repeat_days", "short_min_jobs", "quick_seconds", "quick_min_jobs",
-            "new_days"}
+            "new_days", "time_if_waited", "waited_minutes", "waited_times", "compare_min_jobs"}
 GREETING = "Hello,"
 _NETID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _ADDRESS = re.compile(r"^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$|^[^<>\n]*<[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+>$")
@@ -136,6 +151,10 @@ class Settings:
     quick_seconds: int = 60              # 1.51.0: jobs that stopped with an error within this
     quick_min: int = 3
     new_days: int = 30                   # 1.51.0: people new to a cluster
+    time_if_waited: bool = True          # 1.62.0: "ask for less time" only when it cost them waiting
+    waited_minutes: int = 30             # ... their jobs waited at least this much longer
+    waited_times: int = 2                # ... and this many times as long
+    compare_min: int = 10                # ... than at least this many jobs like theirs
     problems: tuple = ()
 
     @property
@@ -272,6 +291,13 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
     quick_s = _int(jobs, "quick_seconds", 60, 5, 3600, problems, "[notices.jobs]")
     quick_n = _int(jobs, "quick_min_jobs", 3, 0, 1000, problems, "[notices.jobs]")
     new_days = _int(jobs, "new_days", 30, 0, 365, problems, "[notices.jobs]")
+    if_waited = jobs.get("time_if_waited", True)
+    if not isinstance(if_waited, bool):
+        problems.append(f"[notices.jobs] time_if_waited = {if_waited!r}: true or false, without quotes")
+        if_waited = True
+    waited_m = _int(jobs, "waited_minutes", 30, 0, 7 * 24 * 60, problems, "[notices.jobs]")
+    waited_x = _int(jobs, "waited_times", 2, 1, 100, problems, "[notices.jobs]")
+    compare_n = _int(jobs, "compare_min_jobs", 10, 1, 10000, problems, "[notices.jobs]")
     sev = jobs.get("severities", ["critical", "high"])
     if not isinstance(sev, list) or not sev or not all(s in SEVERITIES for s in sev):
         problems.append(f"[notices.jobs] severities: a list of {', '.join(SEVERITIES)}")
@@ -283,7 +309,8 @@ def settings(config: dict | None, report=None, report_problem: str | None = None
                     db=Path(db).expanduser() if db else None, jobs_days=jdays, jobs_min=jmin,
                     jobs_severities=tuple(s for s in SEVERITIES if s in sev), repeat_days=repeat,
                     short_min=short, quick_seconds=quick_s, quick_min=quick_n, new_days=new_days,
-                    problems=tuple(problems))
+                    time_if_waited=if_waited, waited_minutes=waited_m, waited_times=waited_x,
+                    compare_min=compare_n, problems=tuple(problems))
 
 
 def config_problems(config) -> list[str]:
@@ -473,14 +500,21 @@ def _people(conn, s: Settings, now: datetime) -> dict:
 class Entry:
     """One thing to tell (what is recorded as told), as part of a note: the
     entries of one ``group`` are one note in the email, under ``title``,
-    each in its ``lines``, then the note's ``advice`` once."""
+    each with what nomad saw (``lines``), the jobs it is about and what to
+    ask for instead; then the note's ``todo`` and ``advice`` (why) once
+    (1.62.0: the parts apart, so the email can lay them out)."""
     kind: str                         # login_node | jobs
     key: str                          # what it is, so it is told once
     title: str                        # the note's heading
-    lines: list = field(default_factory=list)       # this occurrence
+    lines: list = field(default_factory=list)       # what nomad saw, this occurrence
     group: str = ""                   # entries with the same group are one note
-    advice: list = field(default_factory=list)      # the note's why and better way, said once
+    advice: list = field(default_factory=list)      # why, said once a note
     started: str = ""                 # newest first within a note
+    jobs: str = ""                    # "array 13212 (15 tasks)": the jobs it is about
+    change: list = field(default_factory=list)      # what to ask for instead (#SBATCH lines)
+    change_note: str = ""             # that value in words
+    todo: list = field(default_factory=list)        # what to do, said once a note (commands as lines)
+    command: str = ""                 # the command that ran (login nodes)
 
 
 def _mem(mb) -> str:
@@ -541,7 +575,7 @@ def _used(stats) -> str:
     if unit == "seconds":
         return _dur(stats.median)
     if unit in ("cores", "GPUs"):
-        return _num(stats.median)
+        return _many(stats.median, unit[:-1])          # 1.62.0: "1 core", not "1"
     return f"{_num(stats.median)} {unit}".strip()
 
 
@@ -563,15 +597,16 @@ def _login_entries(db_path, username, config, s: Settings, now: datetime, told: 
                                      f"{_num(f.memory_gb)} GB" if f.memory_gb else "") if x)
         lines = [f"{what} on {f.site}, {_when(f.started)}, for {LN._span(f.minutes)}"
                  + (f" ({size})" if size else "") + (", still going at the last reading" if f.ongoing else "")]
+        command = ""
         if f.command and f.command != f.program:
             cmd = " ".join(f.command.split())
-            lines.append(cmd if len(cmd) <= 160 else cmd[:157] + "...")
+            command = cmd if len(cmd) <= 160 else cmd[:157] + "..."
         out.append(Entry("login_node", key, f.title, lines, group=f"login_node:{f.kind}:{'|'.join(f.better)}",
-                         advice=[f.why, *f.better], started=str(f.started or "")))
+                         advice=[f.why], todo=list(f.better), started=str(f.started or ""), command=command))
     return out
 
 
-def _job_entries(db_path, username, config, s: Settings, now: datetime, told: dict) -> list[Entry]:
+def _job_entries(db_path, username, config, s: Settings, now: datetime, told: dict, conn=None) -> list[Entry]:
     from nomad.edu.insights import sbatch_lines, user_insights
     try:
         ins = user_insights(db_path=str(db_path), username=username, days=s.jobs_days, config=config)
@@ -596,19 +631,140 @@ def _job_entries(db_path, username, config, s: Settings, now: datetime, told: di
                     continue
             except ValueError:
                 pass
+        waited = None
+        if i.dimension_key == "time" and s.time_if_waited:
+            # 1.62.0: asking for more time than a job runs costs its owner only
+            # when the cluster is busy enough to make it wait: told only then.
+            waited = _waited(conn, username, i, s)
+            if waited is None:
+                continue
         where = f"{i.cluster}" + (f" ({i.partition})" if i.partition else "") if i.cluster else "the clusters"
         word = _ASKED.get(i.dimension_key, i.dimension_key or "resources")
-        used = _used(i.usage_stats)
-        typical = f"typically {_asked_for(i)}" + (f"; they used about {used}" if used else "")
         # 1.45.0: size advice comes from the jobs that completed; say so when some didn't
         kind = "completed jobs" if getattr(i, "failed_jobs", 0) else "jobs"
-        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} {kind}{_ids(i)} asked for more "
-                 f"{word} than they used ({typical}). Ask for this instead:"]
-        lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
-        why = _WHY.get(i.dimension_key)
+        lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} {kind} asked for more "
+                 f"{word} than they {'ran' if i.dimension_key == 'time' else 'used'}: {_typical(i)}."]
+        if waited:
+            lines.append(f"They waited about {_dur(waited['mine'])} to start"
+                         + (" (the median)" if waited["n_mine"] > 1 else "") + ". Jobs of the same size "
+                         f"on the same partition, sent in the same days, that asked for about the time they ran "
+                         f"waited about {_dur(waited['others'])} (the median of {waited['n_others']} jobs).")
         out.append(Entry("jobs", key, f"Your jobs ask for more {word} than they use", lines,
-                         group=f"jobs:{i.dimension_key}", advice=[why] if why else []))
+                         group=f"jobs:{i.dimension_key}", advice=[_WHY[i.dimension_key]] if i.dimension_key in _WHY
+                         else [], jobs=_ids(i), **_change(sbatch_lines(i.directive, i.suggested_display),
+                                                         _suggested_words(i))))
     return out
+
+
+def _change(lines, words: str) -> dict:
+    """sbatch_lines apart: the #SBATCH lines to ask with, and its words beside
+    them ("(or --ntasks=1, if the job runs several tasks...)") with ``words``."""
+    lines = list(lines or [])
+    said = " ".join([x for x in lines if not _is_command(x)] + ([words] if words else []))
+    return {"change": [x for x in lines if _is_command(x)], "change_note": said}
+
+
+def _typical(i) -> str:
+    """'they typically asked for 365 days; most ran about 2 h 10 min, the
+    longest 6 days 10 h': what they asked for and used, in words (1.62.0:
+    the longest too, where it differs, so the value to ask for makes sense)."""
+    asked = _asked_for(i)
+    st = getattr(i, "usage_stats", None)
+    used = _used(st)
+    if not used:
+        return f"they typically asked for {asked}"
+    verb = "ran" if getattr(i, "dimension_key", "") == "time" else "used"
+    text = f"they typically asked for {asked}; most {verb} about {used}"
+    top = getattr(st, "max", 0) or 0
+    if top and top > 1.5 * (st.median or 0):
+        one = _dur(top) if str(st.unit) == "seconds" else _mem(top) if str(st.unit) == "MB" else _num(top)
+        text += f", the longest {one}" if verb == "ran" else f", at most {one}"
+    return text
+
+
+def _suggested_words(i) -> str:
+    """The value to ask for, in words, and what it covers (1.62.0)."""
+    v = getattr(i, "suggested_value", 0) or 0
+    st = getattr(i, "usage_stats", None)
+    if not v or st is None:
+        return ""
+    unit = str(st.unit or "")
+    said = _dur(v) if unit == "seconds" else _mem(v) if unit == "MB" else ""
+    if not said:
+        return ""
+    covers = ("enough for the " + ("longest" if unit == "seconds" else "largest") + " of these jobs"
+              if (st.max or 0) <= v else "enough for most of these jobs")
+    return f"That is {said}: {covers}, with some margin."
+
+
+def _waited(conn, username: str, i, s: Settings) -> dict | None:
+    """Whether asking for far more time than they ran made a person's jobs
+    wait (1.62.0): their jobs' waits for the queue (nomad.db.jobkeys.
+    queue_wait_sql: an array by its first task) against those of other
+    people's jobs on the same partition, sent in the same days (a day either
+    side), of the same size (half to twice the cores, GPUs or not alike),
+    that asked for about the time they ran (at most twice it, or an hour
+    more). {"mine", "others", "n_mine", "n_others"} (seconds, medians) when
+    theirs waited at least ``waited_minutes`` longer and ``waited_times`` as
+    long, with at least ``compare_min`` jobs to go by; else None, also when
+    nomad can't tell."""
+    import statistics
+
+    from nomad.db.jobkeys import queue_wait_sql
+    if conn is None:
+        return None
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    except sqlite3.Error:
+        return None
+    need = {"job_id", "user_name", "partition", "submit_time", "start_time", "req_time_seconds",
+            "runtime_seconds", "req_cpus"}
+    ids = [str(j.get("job_id")) for j in (getattr(i, "jobs", None) or []) if isinstance(j, dict) and j.get("job_id")]
+    if not need <= cols or not ids:
+        return None
+    wait = queue_wait_sql(cols)
+    gpus = "COALESCE(req_gpus, 0)" if "req_gpus" in cols else "0"
+    site, site_args = "", []
+    if "source_site" in cols and i.cluster:
+        site, site_args = " AND source_site IS ?", [i.cluster]
+    part, part_args = "", []
+    if i.partition:
+        part, part_args = " AND partition IS ?", [i.partition]
+    try:
+        mine = conn.execute(f"SELECT {wait}, replace(submit_time, ' ', 'T'), req_cpus, {gpus} FROM jobs "
+                            f"WHERE user_name = ? AND job_id IN ({','.join('?' * len(ids))}){site}{part}",
+                            [username, *ids, *site_args, *part_args]).fetchall()
+    except sqlite3.Error:
+        return None
+    waits = [float(w) for w, *_ in mine if w is not None and w >= 0]
+    sent = sorted(x for _, x, _, _ in mine if x)
+    cores = [c for _, _, c, _ in mine if c]
+    if not waits or not sent or not cores:
+        return None
+    try:
+        lo = (datetime.fromisoformat(sent[0][:19]) - timedelta(days=1)).isoformat()
+        hi = (datetime.fromisoformat(sent[-1][:19]) + timedelta(days=1)).isoformat()
+    except ValueError:
+        return None
+    c = statistics.median(cores)
+    gpu = 1 if statistics.median([g or 0 for *_, g in mine]) > 0 else 0
+    try:
+        rows = conn.execute(
+            f"SELECT {wait} FROM jobs WHERE user_name IS NOT ?{site}{part} "
+            "AND replace(submit_time, ' ', 'T') BETWEEN ? AND ? AND req_cpus BETWEEN ? AND ? "
+            f"AND (CASE WHEN {gpus} > 0 THEN 1 ELSE 0 END) = ? "
+            "AND runtime_seconds > 0 AND req_time_seconds > 0 "
+            "AND req_time_seconds <= MAX(2 * runtime_seconds, runtime_seconds + 3600)",
+            [username, *site_args, *part_args, lo, hi, c / 2, c * 2, gpu]).fetchall()
+    except sqlite3.Error:
+        return None
+    others = [float(w) for (w,) in rows if w is not None and w >= 0]
+    if len(others) < s.compare_min:
+        return None
+    m, o = statistics.median(waits), statistics.median(others)
+    if m - o < s.waited_minutes * 60 or m < s.waited_times * o:
+        return None
+    return {"mine": m, "others": o, "n_mine": len(waits), "n_others": len(others)}
 
 
 _SHORT = {"time": ("time", "reached their time limit or came close to it"),
@@ -640,22 +796,23 @@ def _short_entry(i, s: Settings, now: datetime, told: dict) -> Entry | None:
     used = _used(i.usage_stats)
     typical = f"they typically asked for {_asked_for(i)}" + (
         f" and {'ran' if word == 'time' else 'used'} about {used}" if used else "")
-    lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} jobs{_ids(i)} {what} ({typical}). "
-             "Ask for this instead:"]
-    lines += [f"  {x}" for x in sbatch_lines(i.directive, i.suggested_display)]
-    advice = [_SHORT_WHY[i.dimension_key]]
+    lines = [f"On {where}, {i.affected_jobs} of your last {i.total_applicable} jobs {what} ({typical})."]
+    todo = []
     if s.link:
-        advice.append(f"NØMAÐ's Submit page checks this against your earlier jobs before a job goes: {s.link}/submit")
+        todo.append(f"NØMAÐ's Submit page checks this against your earlier jobs before a job goes: {s.link}/submit")
     return Entry("jobs", key, f"Some of your jobs ran out of {word}", lines, group=f"jobs:short:{word}",
-                 advice=advice)
+                 advice=[_SHORT_WHY[i.dimension_key]], jobs=_ids(i), todo=todo,
+                 **_change(sbatch_lines(i.directive, i.suggested_display), ""))
 
 
 _QUICK_WHY = [
     "A job that stops this soon usually could not find or start something: a file or folder path with a typo "
     "or that is not on the cluster, a module the script does not load, a program name the cluster does not "
     "know, or a script that is not executable.",
-    "The first lines of the job's output file (slurm-JOBID.out, in the folder it was sent from, unless the "
-    "script names another) usually say which.",
+]
+_QUICK_TODO = [
+    "Look at the first lines of the output file of one of these jobs (slurm-JOBID.out, in the folder the job "
+    "was sent from, unless the script names another): they usually say what was missing.",
 ]
 
 
@@ -704,17 +861,13 @@ def _quick_entries(conn, username: str, s: Settings, now: datetime, told: dict) 
         if _recent(told.get(f"jobs:quick:{where}"), now, s.every_days):
             continue
         jobs.sort(reverse=True)
-        ids = [j[1] for j in jobs[:JOB_IDS_SHOWN]]
-        more = len(jobs) - len(ids)
-        listed = (", ".join(ids[:-1]) + (f", {ids[-1]}" if more else f" and {ids[-1]}") if len(ids) > 1 else ids[0]) \
-            + (f" and {more} more" if more else "")
         days = "this week" if s.every_days == 7 else f"in the last {s.every_days} days"
         cluster = f"On {where}, " if where else ""
         out.append(Entry("jobs", f"jobs:quick:{where}", "Some of your jobs stopped within a minute",
                          [f"{cluster}{len(jobs)} of your jobs {days} stopped with an error within "
-                          f"{_dur(s.quick_seconds) if s.quick_seconds != 60 else 'a minute'} of starting "
-                          f"(job ID{'s' if len(jobs) > 1 else ''} {listed})."],
-                         group="jobs:quick", advice=list(_QUICK_WHY), started=max(j[0] for j in jobs)))
+                          f"{_dur(s.quick_seconds) if s.quick_seconds != 60 else 'a minute'} of starting."],
+                         group="jobs:quick", advice=list(_QUICK_WHY), todo=list(_QUICK_TODO),
+                         started=max(j[0] for j in jobs), jobs=_job_words([j[1] for j in jobs], len(jobs))))
     if s.new_days:
         out += _new_entries(conn, username, s, now, told, site, cols)
     return out
@@ -747,24 +900,41 @@ def _new_entries(conn, username, s: Settings, now: datetime, told: dict, site: s
                          [f"You started running jobs{place} recently, and {ended - (done or 0)} of your "
                           f"{ended} jobs there so far have not completed."],
                          group="jobs:new",
-                         advice=["That is common when starting out on a cluster, and it gets better quickly.",
-                                 "Research Computing will gladly look at a job script with you: reply to this "
-                                 + ("email, or write to the address below." if s.contact else "email.")]))
+                         advice=["That is common when starting out on a cluster, and it gets better quickly."],
+                         todo=["Research Computing will gladly look at a job script with you: reply to this "
+                               + ("email, or write to the address below." if s.contact else "email.")]))
     return out
 
 
+_TASK = re.compile(r"^(\d+)_(\d+)$")
+
+
+def _job_words(ids, total: int = 0) -> str:
+    """'array 13212 (15 tasks)', '4521, 4519 and array 77 (3 tasks)': the
+    jobs a note is about, newest first, so a person can look at each (1.49.0);
+    a job array once, with its tasks counted (1.62.0); then "and N more"."""
+    parts: dict = {}
+    for j in ids:
+        m = _TASK.match(str(j))
+        k = ("array", m.group(1)) if m else ("job", str(j))
+        parts[k] = parts.get(k, 0) + 1
+    if not parts:
+        return ""
+    shown = list(parts.items())[:JOB_IDS_SHOWN]
+    more = max(total or 0, len(ids)) - sum(n for _, n in shown)
+    words = [f"array {k[1]} ({_many(n, 'task')})" if k[0] == "array" else k[1] for k, n in shown]
+    if len(words) == 1:
+        text = words[0]
+    else:
+        text = ", ".join(words[:-1]) + (", " if more > 0 else " and ") + words[-1]
+    return text + (f" and {more} more" if more > 0 else "")
+
+
 def _ids(issue) -> str:
-    """' (job IDs 4521, 4519 and 3 more)': the jobs a note is about, newest
-    first, so a person can look at each (1.49.0); '' when nomad has none."""
+    """The jobs an insight is about, in words (_job_words); '' when nomad has none."""
     ids = [str(j.get("job_id")) for j in (getattr(issue, "jobs", None) or [])
            if isinstance(j, dict) and j.get("job_id")]
-    if not ids:
-        return ""
-    shown = ids[:JOB_IDS_SHOWN]
-    more = max(len(ids), getattr(issue, "affected_jobs", 0) or 0) - len(shown)
-    words = ", ".join(shown[:-1]) + (f", {shown[-1]}" if more else f" and {shown[-1]}") if len(shown) > 1 \
-        else shown[0]
-    return f" (job ID{'s' if len(shown) > 1 or more else ''} {words}" + (f" and {more} more" if more > 0 else "") + ")"
+    return _job_words(ids, getattr(issue, "affected_jobs", 0) or 0) if ids else ""
 
 
 def _when(iso: str) -> str:
@@ -818,7 +988,7 @@ def plan(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
         if "login_node" in people[user] and "login_node" in s.kinds:
             entries += _login_entries(db, n, config, s, now, told)
         if "jobs" in people[user] and "jobs" in s.kinds:
-            entries += _job_entries(db, n, config, s, now, told)
+            entries += _job_entries(db, n, config, s, now, told, conn)
             entries += _quick_entries(conn, n, s, now, told)
         if not entries:
             left["nothing new"] += 1
@@ -832,12 +1002,23 @@ def plan(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
 
 # -- the email ----------------------------------------------------------------------------------
 
+_NOTE_ORDER = ("jobs:quick", "jobs:short:", "jobs:new")
+
+
+def _rank(kind: str, group: str) -> int:
+    """Login nodes first; then jobs that stopped within a minute, that ran
+    short, getting started; asking for too much last (1.62.0)."""
+    if kind == "login_node":
+        return 0
+    return next((n for n, p in enumerate(_NOTE_ORDER, 1) if group.startswith(p)), len(_NOTE_ORDER) + 1)
+
+
 def notes_of(entries) -> list[tuple[str, list]]:
-    """The email's notes: (kind, [entries]) a group each, login nodes first,
-    in the order first met; within a note, the newest first."""
+    """The email's notes: (kind, [entries]) a group each, in _rank's order,
+    then as first met; within a note, the newest first."""
     out: dict = {}
     for e in entries:
-        out.setdefault((e.kind != "login_node", e.group or e.key), []).append(e)
+        out.setdefault((_rank(e.kind, e.group or e.key), e.group or e.key), []).append(e)
     notes = []
     for (_, _), es in sorted(out.items(), key=lambda kv: kv[0][0]):
         es.sort(key=lambda e: e.started, reverse=True)
@@ -851,45 +1032,173 @@ def subject_of(m: dict) -> str:
     return (f"[review: for {m['user']}] " if m["review"] else "") + f"Research computing: {words} on your recent work"
 
 
-def text_of(m: dict, s: Settings) -> str:
-    """The email, plain text: what, where, when, and the better way."""
-    lines = []
-    if m["review"]:
-        lines += [f"[Review: this would have gone to {m['address'] or m['user']}.]", ""]
+_COMMAND = ("srun ", "sbatch ", "salloc ", "#SBATCH", "module ")
+
+
+def _is_command(x: str) -> bool:
+    return str(x).lstrip().startswith(_COMMAND)
+
+
+def _opening(m: dict, s: Settings) -> list[str]:
     who = s.signature[0] if s.signature else "Research Computing"
-    lines += [s.greeting, "",
-              f"NØMAÐ, the monitoring that {who} runs on the clusters, noticed something in your recent "
-              "work that could run better. Nothing is wrong and nothing has been done about it; this is "
-              "only to help.", ""]
-    notes = notes_of(m["entries"])
-    for kind, title in (("login_node", "On the login nodes"), ("jobs", "Your jobs")):
-        mine = [es for k, es in notes if k == kind]
-        if not mine:
-            continue
-        lines += [title, "-" * len(title)]
-        for es in mine:
-            many = kind == "login_node" and len(es) > 1
-            lines.append(f"* {es[0].title}" + (f" ({len(es)} times)" if many else ""))
-            for e in es[:SHOWN]:
-                first, *rest = e.lines or [""]
-                lines.append(f"  - {first}")
-                lines += [f"    {x}" for x in rest]
-            if len(es) > SHOWN:
-                lines.append(f"  ... and {len(es) - SHOWN} more like these"
-                             + (" on My activity." if s.link else "."))
-            # a command to type stands out from the words around it
-            lines += [f"    {x}" if x.startswith(("srun ", "sbatch ")) else f"  {x}" for x in es[0].advice]
-            lines.append("")
-    if s.link:
-        lines += [f"The details, and how to do it another way: {s.link}/me", ""]
+    n = len(notes_of(m["entries"]))
+    things = "something" if n == 1 else f"{n} things"
+    return [s.greeting,
+            f"NØMAÐ, the monitoring that {who} runs on the clusters, noticed {things} in your recent work that "
+            "could go better. Nothing is wrong and nothing has been changed: this is only to help."]
+
+
+def _closing(s: Settings) -> tuple[str | None, str]:
+    details = f"Your recent work in detail, and other ways to do it: {s.link}/me" if s.link else None
     stop = (f"These emails come at most once every {s.every_days} days, and only with something new. "
             + (f"To stop them, turn off \"Email me about my own use\" at {s.link}/me" if s.link
                else "To stop them, reply and say so") + ".")
+    return details, stop
+
+
+def text_of(m: dict, s: Settings) -> str:
+    """The email, plain text (1.62.0: numbered notes, each with what NØMAÐ
+    saw, the jobs, what to ask for instead, what to do and why; commands on
+    lines of their own)."""
+    lines = []
+    if m["review"]:
+        lines += [f"[Review: this would have gone to {m['address'] or m['user']}.]", ""]
+    greeting, opening = _opening(m, s)
+    lines += [greeting, "", opening, ""]
+    for n, (kind, es) in enumerate(notes_of(m["entries"]), 1):
+        many = kind == "login_node" and len(es) > 1
+        lines += [f"{n}. {es[0].title}" + (f" ({len(es)} times)" if many else ""), ""]
+        bullet = len(es) > 1
+        for e in es[:SHOWN]:
+            first, *rest = e.lines or [""]
+            lines.append(("- " if bullet else "") + first)
+            pad = "  " if bullet else ""
+            lines += [pad + x for x in rest]
+            if e.command:
+                lines.append("    " + e.command)
+            if e.jobs:
+                lines.append(f"{pad}Jobs: {e.jobs}")
+            if e.change:
+                lines.append(f"{pad}Ask for this instead:")
+                lines += ["    " + x for x in e.change]
+                if e.change_note:
+                    lines.append(pad + e.change_note)
+            if bullet:
+                lines.append("")
+        if len(es) > SHOWN:
+            lines += [f"... and {len(es) - SHOWN} more like these" + (" on My activity." if s.link else "."), ""]
+        elif not bullet:
+            lines.append("")
+        todo = es[0].todo
+        if todo:
+            if len(todo) == 1 and not _is_command(todo[0]):
+                lines.append(f"What to do: {todo[0]}")
+            else:
+                lines.append("What to do:")
+                lines += [("    " + x) if _is_command(x) else x for x in todo]
+            if es[0].advice:
+                lines.append("")
+        if es[0].advice:
+            lines.append("Why: " + " ".join(es[0].advice))
+        if todo or es[0].advice:
+            lines.append("")
+    details, stop = _closing(s)
+    if details:
+        lines += [details, ""]
     lines += [stop, ""]
     if s.contact:
         lines += [s.contact, ""]
     lines += list(s.signature)
     return "\n".join(lines).rstrip() + "\n"
+
+
+_KEEP_UNIT = re.compile(r"(\d) (?=(?:h|min|days?|kB|MB|GB|TB|cores?|GPUs?|tasks?|jobs?)\b)")
+_FONT = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif")
+_MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace"
+_LABEL = "margin:14px 0 4px;font-weight:600;font-size:14px"
+_CODE = (f"margin:6px 0;padding:10px 12px;border:1px solid #c9d1d9;border-radius:6px;font-family:{_MONO};"
+         "font-size:14px;line-height:1.45;white-space:pre-wrap;word-break:break-word")
+
+
+def html_of(m: dict, s: Settings) -> str:
+    """The email as a page (1.62.0), beside text_of's plain copy: the same
+    words, each note in a box with its parts under small headings, commands
+    in a box of their own. No colours of its own for text or background, so
+    a mail program's dark mode reads it as well as its light one."""
+    from html import escape
+
+    def h(x, quote: bool = True) -> str:
+        # a number keeps its unit on the same line ("6 days 10 h", not "10" / "h")
+        return _KEEP_UNIT.sub("\\1&nbsp;", escape(str(x), quote=quote))
+
+    def link(url: str) -> str:
+        return f'<a href="{escape(url, quote=True)}">{escape(url)}</a>'
+
+    def para(x: str, style: str = "") -> str:
+        if _is_command(x):
+            return f'<pre style="{_CODE}">{escape(x)}</pre>'
+        return f'<p style="margin:6px 0;{style}">{h(x)}</p>'
+
+    out = []
+    if m["review"]:
+        out.append(f'<p style="margin:0 0 16px;padding:8px 12px;border:1px dashed #8c959f;border-radius:6px;'
+                   f'font-size:13px">Review: this would have gone to {h(m["address"] or m["user"])}.</p>')
+    greeting, opening = _opening(m, s)
+    out += [f'<p style="margin:0 0 12px">{h(greeting)}</p>', f'<p style="margin:0 0 8px">{h(opening)}</p>']
+    for n, (kind, es) in enumerate(notes_of(m["entries"]), 1):
+        many = kind == "login_node" and len(es) > 1
+        title = f"{n}. {es[0].title}" + (f" ({len(es)} times)" if many else "")
+        out.append('<div style="margin:20px 0 0;padding:14px 18px 10px;border:1px solid #c9d1d9;border-radius:10px">')
+        out.append(f'<h2 style="margin:0 0 6px;font-size:17px;line-height:1.35">{h(title)}</h2>')
+        out.append(f'<p style="{_LABEL}">What NØMAÐ saw</p>')
+        items = []
+        for e in es[:SHOWN]:
+            bits = [f'<p style="margin:6px 0">{h(x)}</p>' for x in (e.lines or [])]
+            if e.command:
+                bits.append(f'<pre style="{_CODE}">{escape(e.command)}</pre>')
+            if e.jobs:
+                bits.append(f'<p style="margin:6px 0;font-size:14px">Jobs: {h(e.jobs)}</p>')
+            if e.change:
+                bits.append(f'<p style="{_LABEL}">Ask for this instead</p>')
+                bits.append(f'<pre style="{_CODE}">{escape(chr(10).join(e.change))}</pre>')
+                if e.change_note:
+                    bits.append(f'<p style="margin:6px 0;font-size:14px">{h(e.change_note)}</p>')
+            items.append("".join(bits))
+        if len(es) > 1:
+            out.append('<ul style="margin:0;padding-left:20px">'
+                       + "".join(f'<li style="margin:0 0 8px">{x}</li>' for x in items) + "</ul>")
+        else:
+            out += items
+        if len(es) > SHOWN:
+            more = f"... and {len(es) - SHOWN} more like these"
+            out.append(f'<p style="margin:6px 0">{h(more)}'
+                       + (f' on {link(s.link + "/me")}.' if s.link else ".") + "</p>")
+        if es[0].todo:
+            out.append(f'<p style="{_LABEL}">What to do</p>')
+            out += [para(x) for x in es[0].todo]
+        if es[0].advice:
+            out.append(f'<p style="{_LABEL}">Why</p>')
+            out.append(para(" ".join(es[0].advice)))
+        out.append("</div>")
+    details, stop = _closing(s)
+    if details:
+        out.append('<p style="margin:22px 0 8px">Your recent work in detail, and other ways to do it: '
+                   f'{link(s.link + "/me")}</p>')
+    stop_html = h(stop)
+    if s.link:
+        url = f"{s.link}/me"
+        stop_html = stop_html.replace(escape(url), link(url))
+    out.append(f'<p style="margin:8px 0;font-size:13px">{stop_html}</p>')
+    if s.contact:
+        out.append(f'<p style="margin:8px 0">{h(s.contact)}</p>')
+    if s.signature:
+        out.append('<p style="margin:12px 0 0">' + "<br>".join(h(x) for x in s.signature) + "</p>")
+    body = "\n".join(out)
+    return ('<!doctype html>\n<html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f"<title>{h(subject_of(m))}</title></head>\n"
+            f'<body style="margin:0;padding:0"><div style="max-width:640px;margin:0 auto;padding:20px 16px;'
+            f'font-family:{_FONT};font-size:15px;line-height:1.55">\n{body}\n</div></body></html>\n')
 
 
 def send(conn, db, config: dict | None, s: Settings, rec, now: datetime | None = None, dry: bool = False,
@@ -904,6 +1213,7 @@ def send(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
     for m in p["mail"]:
         m["subject"] = subject_of(m)
         m["text"] = text_of(m, s)
+        m["html"] = html_of(m, s)
         m["status"] = "would send" if not m["problem"] else "can't send"
     if dry or not p["mail"]:
         return p
@@ -923,6 +1233,7 @@ def send(conn, db, config: dict | None, s: Settings, rec, now: datetime | None =
         msg["To"] = ", ".join(m["to"])
         msg["Subject"] = m["subject"]
         msg.set_content(m["text"])
+        msg.add_alternative(m["html"], subtype="html")      # 1.62.0: laid out; the plain copy first
         try:
             mail.send(msg, cfg)
         except Exception as exc:            # noqa: BLE001 -- one failure doesn't stop the others

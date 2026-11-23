@@ -104,17 +104,17 @@ def test_who_gets_an_email_and_what_it_says(tmp_path, insights):
     (e,) = amy["entries"]
     assert e.kind == "login_node" and e.title == "A long computation on the login node"
     assert e.lines[0].startswith("python3 on spydur, ") and "for 1 h" in e.lines[0] and "1.5 cores" in e.lines[0]
-    assert "srun --pty" in " ".join(e.advice)
+    assert "srun --pty" in " ".join(e.todo) and e.command == "python3 fit.py"         # 1.62.0: parts apart
     # jobs: only a pattern, of the severities and size asked, of asking for more than used
     (j,) = got["dan"]["entries"]
     assert j.kind == "jobs" and j.title == "Your jobs ask for more memory than they use"
-    assert j.lines[0] == ("On spydur (basic), 7 of your last 9 jobs asked for more memory than they used "
-                          "(typically 64 GB; they used about 6.2 GB). Ask for this instead:")
-    assert "  #SBATCH --mem=8G" in j.lines
+    assert j.lines[0] == ("On spydur (basic), 7 of your last 9 jobs asked for more memory than they used: "
+                          "they typically asked for 64 GB; most used about 6.2 GB.")
+    assert j.change == ["#SBATCH --mem=8G"]                                   # 1.62.0: apart from the words
     s = N.settings(CONFIG)
     text = N.text_of(got["dan"], s)
     assert text.startswith("[Review: this would have gone to dan@example.edu.]\n\nHello,\n")
-    assert "Your jobs\n---------\n* Your jobs ask for more memory than they use" in text
+    assert "\n1. Your jobs ask for more memory than they use\n" in text and "---" not in text
     assert "https://nomad.example.edu/me" in text and "Email me about my own use" in text
     assert text.rstrip().endswith("Questions: rc@example.edu\n\nResearch Computing\nExample University")
     assert not any(c in text for c in ("n't", "'re", "'ll", "'ve", "'d "))      # no contractions
@@ -307,5 +307,5 @@ def test_with_real_jobs(tmp_path):
     assert m["user"] == "bob" and m["to"] == ["bob@example.edu"]
     (e,) = m["entries"]                     # clusterA (5 jobs, critical); clusterB has 4, under min_jobs
     assert e.title == "Your jobs ask for more cores than they use" and e.lines[0].startswith("On clusterA (compute), 5 of")
-    assert "#SBATCH --cpus-per-task=" in " ".join(e.lines)
+    assert "#SBATCH --cpus-per-task=" in " ".join(e.change)          # 1.62.0: apart from the words
     json.dumps([x.__dict__ for x in m["entries"]])

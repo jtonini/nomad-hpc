@@ -22,7 +22,9 @@ NOW = datetime.now().replace(microsecond=0)
 CONFIG = {"console": {"courses": {}, "labs": {"group_pattern": "{netid}$"}},
           "notices": {"review_to": [], "mail_domain": "example.edu", "send_from": "rc@example.edu",
                       "link": "https://nomad.example.edu", "signature": ["Research Computing", "Example University"],
-                      "contact": "Questions: rc@example.edu", "skip_users": ["svc"]}}
+                      "contact": "Questions: rc@example.edu", "skip_users": ["svc"],
+                      # 1.62.0: the time notes told whatever the waits (their own tests: test_release_1620)
+                      "jobs": {"time_if_waited": False}}}
 # n't, 're, 'll, 've, 'd, 'm, and the 's of "it's" (a possessive's is fine: "the cluster's")
 CONTRACTION = re.compile(r"\b[A-Za-z]+'(t|re|ll|ve|d|m)\b|\b(it|that|there|what|here|he|she|who)'s\b", re.I)
 
@@ -98,23 +100,26 @@ def test_what_is_alike_is_one_note(world):
     assert p["left"]["not a person's account"] == 1 and p["left"]["nothing new"] == 1
     text = m["text"]
     # login nodes: seven long computations are one note, five shown, the why and better way once
-    assert "* A long computation on the login node (7 times)" in text
-    assert text.count("  - python on spydur, ") == 6         # five of the seven, and the one together
-    assert "  ... and 2 more like these on My activity." in text
+    assert "1. A long computation on the login node (7 times)" in text               # 1.62.0: numbered
+    assert text.count("- python on spydur, ") == 5          # five of the seven
+    assert text.count("python on spydur, ") == 6            # and the one together
+    assert "\n... and 2 more like these on My activity." in text
     why = L._TEXT["cpu"][1]
     assert text.count(why) == 1 and text.count("srun --pty -c 4") == 1
     assert "\n    srun --pty -c 4 --mem=16G --time=4:00:00 bash\n" in text
     assert "    python fit.py --part 0" in text                 # the newest first
     assert text.index("--part 0") < text.index("--part 1")
-    assert "* Many programs busy at once on the login node\n" in text and "(7.7 cores)" in text
+    assert "2. Many programs busy at once on the login node\n" in text and "(7.7 cores)" in text
     # jobs: one note a kind, a line and its #SBATCH a partition
-    assert text.count("* Your jobs ask for more time than they use") == 1
-    assert ("  - On spydur (cpunodes), 20 of your last 22 jobs asked for more time than they used "
-            "(typically 1 day; they used about 1 h 38 min). Ask for this instead:\n"
-            "      #SBATCH --time=04:00:00\n") in text
-    assert "(typically 7 days; they used about 30 min)" in text and "#SBATCH --time=09:00:00" in text
-    assert "(typically 32 GB; they used about 2.1 GB)" in text
-    assert "(typically 8 cores; they used about 1)" in text and "#SBATCH --cpus-per-task=1" in text
+    assert text.count(". Your jobs ask for more time than they use") == 1
+    assert ("- On spydur (cpunodes), 20 of your last 22 jobs asked for more time than they ran: "
+            "they typically asked for 1 day; most ran about 1 h 38 min.\n"
+            "  Ask for this instead:\n"
+            "    #SBATCH --time=04:00:00\n") in text
+    assert "they typically asked for 7 days; most ran about 30 min" in text and "#SBATCH --time=09:00:00" in text
+    assert "they typically asked for 32 GB; most used about 2.1 GB" in text
+    assert "they typically asked for 8 cores; most used about 1 core." in text
+    assert "\n    #SBATCH --cpus-per-task=1\n" in text
     assert text.count("Jobs that ask for less time start sooner") == 1
     # the email's own words: no contractions anywhere, the job advice's included
     assert "don't" not in text
@@ -122,7 +127,7 @@ def test_what_is_alike_is_one_note(world):
     # five notes: two on the login nodes, three about jobs; each entry is still told once
     assert N.subject_of(m) == "Research computing: 5 notes on your recent work"
     assert len({e.key for e in m["entries"]}) == 12
-    assert text.index("On the login nodes") < text.index("Your jobs\n---------")
+    assert text.index("1. A long computation") < text.index("3. Your jobs ask for more time")
 
 
 def test_sshd_session_is_what_a_login_node_is_for():

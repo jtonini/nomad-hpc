@@ -506,6 +506,10 @@ parent_paths = ["/usr/local/sw/"]  # matched against the executable (needs root 
 # quick_seconds = 60                   # jobs that stopped with an error this soon (1.51.0)
 # quick_min_jobs = 3                   # ... at least this many on a cluster in a week (0: never)
 # new_days = 30                        # first job on a cluster this recently: getting started (0: never)
+# time_if_waited = true                # asking for too much time: told only when it made them wait (1.62.0)
+# waited_minutes = 30                  # ... at least this much longer than jobs like theirs
+# waited_times = 2                     # ... and this many times as long
+# compare_min_jobs = 10                # ... with at least this many jobs like theirs to go by
 
 # What a login node's flags say about someone, told to them (1.38.0): on the
 # Console's My activity and Home, and in `nomad edu me`, with the better way.

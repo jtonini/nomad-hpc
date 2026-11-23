@@ -7,6 +7,7 @@ from __future__ import annotations
 import getpass
 import os
 import sys
+from pathlib import Path
 
 import click
 
@@ -59,7 +60,7 @@ def notices_group(ctx):
 
     \b
     nomad notices                          how it is set, and what went lately
-    nomad notices mail [--user NETID] [--text]   what is due now (nothing is sent)
+    nomad notices mail [--user NETID] [--text] [--html FOLDER]   what is due now (nothing is sent)
     nomad notices mail --send              send it (while review_to is set, to review_to)
     nomad notices set NETID on|off [--apply]     a person's choice, for them
     nomad notices timer [--apply]          send it every week, from systemd
@@ -87,9 +88,11 @@ def notices_group(ctx):
 @click.option("--send", is_flag=True, help="Send them (otherwise only say what is due).")
 @click.option("--user", "only", metavar="NETID", help="Only this person's (the others stay due).")
 @click.option("--text", "show_text", is_flag=True, help="Without --send: print each email as it would go.")
+@click.option("--html", "html_dir", type=click.Path(file_okay=False), default=None,
+              help="Without --send: write each email's laid-out copy to FOLDER/NETID.html (read only by you).")
 @click.option("--counts", is_flag=True, help="Counts only, no names (to show someone else).")
 @click.pass_context
-def notices_mail(ctx, send, only, show_text, counts):
+def notices_mail(ctx, send, only, show_text, counts, html_dir):
     """The emails due now: each person with something new since the last one,
     at most every every_days. While review_to is set, they go there."""
     config, s, conn, combined, rec_path = _ctx(ctx)
@@ -138,6 +141,15 @@ def notices_mail(ctx, send, only, show_text, counts):
     if show_text and not send:
         for m in p["mail"]:
             click.echo(f"\n--- To: {', '.join(m['to']) or '(no address)'}\nSubject: {m['subject']}\n\n{m['text']}")
+    if html_dir and not send and p["mail"]:
+        folder = Path(html_dir).expanduser()
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for m in p["mail"]:
+            target = folder / f"{m['user']}.html"
+            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(m["html"])
+        click.echo(f"The laid-out copies: {len(p['mail'])} in {folder}.")
     if not send and p["mail"]:
         click.echo("Nothing was sent: --send sends them" + (" (to review_to)" if s.reviewing else "") + ".")
     if any(m["status"] in ("can't send", "failed") for m in p["mail"]):
