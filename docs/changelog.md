@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.63.1 (November 2026)
+
+- **Keep rules with a collector writing meanwhile**: 1.63.0 read a day's
+  rows, then wrote, and SQLite refuses such a write at once when another
+  connection (a collector) is writing ("database is locked", on a site that
+  collects every five minutes). Each day now takes the write lock first,
+  waiting for the collector, and a day still refused is tried again. A run
+  stopped part way goes on from the day it got to.
+
 ## v1.63.0 (November 2026)
 
 - **Keep rules, part 1** (`nomad.keep_rules`): full detail for 90 days

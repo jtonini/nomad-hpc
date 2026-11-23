@@ -302,3 +302,59 @@ def test_stamps(tmp_path, width, prefix):
     stamps = [r[0] for r in conn.execute("SELECT timestamp FROM mpstat_core ORDER BY timestamp")]
     assert stamps == (["2026-08-01T00:00:00", "2026-08-01T12:00:00"] if width == 13 else ["2026-08-01T00:00:00"])
     assert prefix[:10] == stamps[0][:10]
+
+
+# -- 1.63.1: with a collector writing meanwhile ----------------------------------------------------
+
+def test_a_collector_writing_meanwhile(tmp_path):
+    """1.63.0 read a day's rows, then wrote: with a collector writing at the
+    same moment SQLite refused at once ("database is locked", as on
+    jonimitchell). Each day now takes the write lock first and waits."""
+    import threading
+    import time as _time
+    db = tmp_path / "s.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE workstation_mount_state (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, "
+              "hostname TEXT, mountpoint TEXT, is_mounted INTEGER, is_responsive INTEGER)")
+    for k in range(10):
+        d = TODAY - timedelta(days=120 - k)
+        for h in range(24):
+            c.executemany("INSERT INTO workstation_mount_state (timestamp, hostname, mountpoint, is_mounted, "
+                          "is_responsive) VALUES (?, ?, '/home', 1, 1)", [(ts(d, h), f"m{x}") for x in range(10)])
+    c.commit()
+    c.close()
+    stop = threading.Event()
+
+    def collector():
+        w = sqlite3.connect(db, timeout=30)
+        while not stop.is_set():
+            w.execute("BEGIN IMMEDIATE")
+            w.execute("INSERT INTO workstation_mount_state (timestamp, hostname, mountpoint, is_mounted, "
+                      "is_responsive) VALUES (?, 'x', '/x', 1, 1)", (datetime.now().isoformat(),))
+            _time.sleep(0.03)
+            w.execute("COMMIT")
+            _time.sleep(0.005)
+        w.close()
+    t = threading.Thread(target=collector)
+    t.start()
+    try:
+        keep = sqlite3.connect(db, timeout=30)
+        (r,) = [x for x in K.run(keep, K.settings({}), "by hand", TODAY) if x["table"] == "workstation_mount_state"]
+    finally:
+        stop.set()
+        t.join()
+    assert (r["before"], r["after"]) == (10 * 24 * 10, 10 * 10)
+
+
+def test_a_day_refused_is_tried_again(tmp_path, monkeypatch):
+    conn = sqlite3.connect(tmp_path / "s.db", timeout=0.01)
+    monkeypatch.setattr(K.time, "sleep", lambda s: None)
+    other = sqlite3.connect(tmp_path / "s.db")
+    other.execute("CREATE TABLE x (a)")
+    other.commit()
+    other.execute("BEGIN IMMEDIATE")
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        K._write(conn, lambda c: c.execute("INSERT INTO x VALUES (1)"))
+    other.execute("COMMIT")
+    K._write(conn, lambda c: c.execute("INSERT INTO x VALUES (2)"))
+    assert conn.execute("SELECT a FROM x").fetchall() == [(2,)]

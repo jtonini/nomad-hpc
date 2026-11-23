@@ -175,8 +175,16 @@ def settings(raw: dict | None) -> Settings:
 
 # -- the work ----------------------------------------------------------------------------------
 
+def _schema_parts() -> list:
+    return [x.strip() for x in SCHEMA.split(";") if x.strip()]
+
+
 def ensure(conn) -> None:
-    conn.executescript(SCHEMA)
+    """The keep rules' own tables (each statement on its own: executescript
+    commits whatever was open first)."""
+    for x in _schema_parts():
+        conn.execute(x)
+    conn.commit()
 
 
 def _cols(conn, table: str) -> set:
@@ -445,6 +453,35 @@ def untrack(conn, tables) -> list:
     return out
 
 
+TRIES = 5                   # a day whose write lock others keep taking is tried this many times
+
+
+def _write(conn, work) -> None:
+    """``work(conn)`` as one write transaction, the lock taken first (1.63.1).
+    A transaction that reads, then writes, may find another connection
+    writing (a collector): SQLite then refuses at once rather than wait (it
+    would wait forever on each other), "database is locked". BEGIN IMMEDIATE
+    takes the write lock before reading, waiting up to the connection's
+    timeout; a day still refused is tried again, a little later."""
+    if conn.in_transaction:
+        conn.commit()
+    for attempt in range(TRIES):
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) and "busy" not in str(e) or attempt == TRIES - 1:
+                raise
+            time.sleep(2 * (attempt + 1))
+            continue
+        try:
+            work(conn)
+            conn.execute("COMMIT")
+            return
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+
+
 def run(conn, s: Settings, how: str, today: date | None = None, limit: int | None = None,
         only: tuple = ()) -> list[dict]:
     """Go through what todo() says is due, a day at a time (each its own
@@ -453,8 +490,9 @@ def run(conn, s: Settings, how: str, today: date | None = None, limit: int | Non
     keep --apply`` (its note says so). [{table, days, before, after, seconds,
     note}] for each table with something due."""
     today = today or date.today()
-    ensure(conn)
-    conn.commit()
+    if conn.in_transaction:
+        conn.commit()
+    _write(conn, lambda c: [c.execute(x) for x in _schema_parts()])
     out = []
     for td in todo(conn, s, today):
         if not td.present or not td.levels or (only and td.table not in only):
@@ -468,26 +506,28 @@ def run(conn, s: Settings, how: str, today: date | None = None, limit: int | Non
         days = 0
         if td.rule.kind == DAILY_COUNTS:
             _first_runs(conn, td.rule)
+            conn.commit()
         for level, start, end in td.levels:
             d = start
             while d < end:
-                with conn:
-                    _one_day(conn, td.rule, cols, level, d)
-                    _set_mark(conn, td.table, level, d + timedelta(days=1))
+                def day(c, rule=td.rule, cols=cols, level=level, d=d):
+                    _one_day(c, rule, cols, level, d)
+                    _set_mark(c, rule.table, level, d + timedelta(days=1))
+                _write(conn, day)
                 days += 1
                 d += timedelta(days=1)
         after = sum(_rows_between(conn, td.rule, a, b) for _, a, b in td.levels)
         took = time.time() - t0
-        with conn:
-            conn.execute(f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds) "
-                         "VALUES (?,?,?,?,?,?,?)", (datetime.now().isoformat(timespec="seconds"), how, td.table,
-                                                     days, td.rows, after, round(took, 1)))
+        _write(conn, lambda c, td=td, days=days, after=after, took=took: c.execute(
+            f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds) VALUES (?,?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), how, td.table, days, td.rows, after, round(took, 1))))
         out.append({"table": td.table, "days": days, "before": td.rows, "after": after, "seconds": took,
                     "note": ""})
     if how == "by hand" and not any(not d["note"] for d in out):
-        with conn:                          # gone through by hand, nothing due: the collector may go on daily
-            conn.execute(f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds) "
-                         "VALUES (?, ?, '-', 0, 0, 0, 0)", (datetime.now().isoformat(timespec="seconds"), how))
+        # gone through by hand, nothing due: the collector may go on daily
+        _write(conn, lambda c: c.execute(
+            f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds) "
+            "VALUES (?, ?, '-', 0, 0, 0, 0)", (datetime.now().isoformat(timespec="seconds"), how)))
     return out
 
 
