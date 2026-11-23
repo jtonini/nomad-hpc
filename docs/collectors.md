@@ -844,6 +844,13 @@ anyone.
 The Console shows it beside what each running job asked for (staff, every
 job; a person, their own).
 
+## nomad's own databases (databases, 1.61.0)
+
+Each of nomad's databases every 6 hours: size, free space inside and on its
+disk, rows each table writes a day; an alert when one grows unusually in a
+day; a weekly incremental vacuum where a database is set for it. See
+[nomad's own databases](databases.md).
+
 ## Workstation mounts
 
 Each `workstation` run also checks every mount on each machine (NFS, and

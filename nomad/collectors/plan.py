@@ -97,6 +97,9 @@ SPECS: tuple[Spec, ...] = (
     Spec("power", "power", "PowerCollector", False,
          "a host whose root runs the power helper (scripts/power_root_probe.py)", (), (),
          ("power_hosts", "power_sensors", "power_events")),
+    # nomad's own databases (1.61.0): size, growth, free space inside, old copies (nomad.db_health).
+    Spec("databases", "databases", "DatabasesCollector", True, "every host nomad collects on", (), (),
+         ("db_files", "db_tables", "db_vacuums")),
     Spec("gpu", "gpu", "GPUCollector", True, "hosts with NVIDIA GPUs, or a head node "
          "reaching GPU nodes over SSH", ("nvidia-smi|ssh",), (), ("gpu_stats", "gpu_health")),
     Spec("nfs", "nfs", "NFSCollector", True, "hosts that mount NFS (client side)",
@@ -219,6 +222,11 @@ def plan(config: dict) -> list[Planned]:
             listed = ws.get("workstations") or config.get("workstations") or []
             cfg.setdefault("workstation_hosts", [w.get("hostname") for w in listed
                                                  if isinstance(w, dict) and w.get("hostname")])
+        if spec.name == "databases":
+            # where the site's and the hub's databases are: what nomad.toml says of them
+            for key in ("general", "database", "hub"):
+                if isinstance(config.get(key), dict):
+                    cfg.setdefault(key, config[key])
         if spec.name == "license_tries":
             # machines: its own list, else the workstation collector's
             ws = (config.get("collectors", {}) or {}).get("workstation", {}) or {}

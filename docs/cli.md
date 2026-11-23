@@ -26,6 +26,7 @@
 | `nomad sync status` | On the hub: how each site's last syncs went (reads only) |
 | `nomad sync timer` | On the hub: set its sync timer to `[hub] sync_interval_minutes` (`--apply`, as root) ([Setup](setup-wizard.md)) |
 | `nomad gate jump-key` | On a host the hub reaches a cluster through: let the hub's gate key forward to that cluster's ssh, and nothing else ([Submit](submit.md)) |
+| `nomad db status [--tables] [--sites]` / `nomad db tidy [--apply]` / `nomad db vacuum [--full] [--apply]` | nomad's own databases: size and growth, old copies removed only when the live database holds them, free space given back ([nomad's own databases](databases.md)) |
 | `nomad files status` / `nomad files open MODE [LAB...]` | On the hub: who the Console's My files is open to, and setting it (`open labs 'kim$' --active-days 365 --apply`: staff and those labs' people seen at work lately) ([My files](files.md#open-to-some-labs-first-1600)) |
 
 ## Educational Analytics

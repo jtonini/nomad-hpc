@@ -11884,6 +11884,9 @@ cli.add_command(gate_group)
 # Who the Console's My files is open to (1.60.0).
 from nomad.submit.files_cli import files_group  # noqa: E402
 cli.add_command(files_group)
+# nomad's own databases (1.61.0): status, tidy, vacuum.
+from nomad.db_cli import db_group  # noqa: E402
+cli.add_command(db_group)
 # What the policy watch found on login and compute nodes (1.19).
 from nomad.watch.cli import watch_group  # noqa: E402
 cli.add_command(watch_group)

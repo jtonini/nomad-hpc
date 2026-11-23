@@ -224,6 +224,23 @@ check_services = ["slurmd", "munge"]
 #                                # Slurm's FreeMem counts the file cache as used
 
 # ============================================
+# NOMAD'S OWN DATABASES
+# ============================================
+
+# nomad's own databases (1.61.0, docs/databases.md): on by default. Every
+# every_hours, each one's size, free space inside and on its disk, and the rows
+# each table writes a day; an alert when one grows unusually in a day; a weekly
+# incremental vacuum where a database is set for it (nomad db vacuum --full).
+# [collectors.databases]
+# enabled = true
+# every_hours = 6
+# stray_days = 14
+# alert_growth_mb = 1024
+# growth_factor = 4
+# incremental_vacuum = true
+# keep_days = 400
+
+# ============================================
 # LICENSE COLLECTOR
 # ============================================
 

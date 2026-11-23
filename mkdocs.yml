@@ -62,6 +62,7 @@ nav:
     - Ask (Help Requests): help-requests.md
     - My files (from the browser): files.md
     - Licenses (when each ends): licenses.md
+    - nomad's own databases: databases.md
     - Weekly Notices: notices.md
     - Practice Runs: demos.md
     - Storage Use: storage.md

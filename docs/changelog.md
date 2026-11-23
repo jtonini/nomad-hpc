@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.61.0 (November 2026)
+
+- **nomad watches its own databases**: the `databases` collector (on by
+  default) reads each one every 6 hours: its size, the free space inside it
+  and on its disk, and the rows each table writes a day; the readings go to
+  the hub, and the Console's Infrastructure page shows every site's (Console
+  fix 143). A database that grows more in a day than 1 GB and 4 times its
+  usual day raises an alert (`database_growth`).
+- `nomad db status [--tables] [--sites]`; `nomad db tidy [--apply]` removes
+  old copies (only when the live database holds everything nomad keeps that
+  they hold) and empty databases; `nomad db vacuum` gives the free space back
+  (`--full` once sets a database for incremental vacuuming, which the
+  collector then does weekly; the hub copies that site's database whole once).
+
 ## v1.60.0 (November 2026)
 
 - **My files open to some labs first**: `[console.files] open = "labs"` with
