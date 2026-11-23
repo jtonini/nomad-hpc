@@ -494,9 +494,24 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
     if job_state in ("OUT_OF_MEMORY", "OOM"):
         req_mem_mb_oom = job.get("req_mem_mb", 0) or 0
         req_mem_gb_oom = req_mem_mb_oom / 1024 if req_mem_mb_oom else 0
-        peak_mem_gb_oom = ((reading_gb if not implausible else 0)
-                           or req_mem_gb_oom)
-        suggested_mb_oom = round_memory_up(peak_mem_gb_oom * 1024 * 1.5)
+        # The job needed more than it asked for. A peak read below the request
+        # only means the readings missed the spike that stopped it, so the
+        # need is at least the request: never advise asking for less.
+        peak_gb_oom = reading_gb if not implausible else 0
+        needed_gb_oom = max(peak_gb_oom, req_mem_gb_oom)
+        suggestion_oom = None
+        if needed_gb_oom > 0:
+            suggestion_oom = Suggestion(
+                directive="mem",
+                suggested_value=round_memory_up(needed_gb_oom * 1024 * 1.5),
+                current_value=req_mem_mb_oom,
+                actual_usage=needed_gb_oom * 1024,
+                unit="MB",
+                rationale=(f"ran out of the {format_memory(req_mem_mb_oom)} it asked for: "
+                           f"half as much again, rounded up"
+                           if req_mem_mb_oom and needed_gb_oom == req_mem_gb_oom else
+                           "ran out of memory: half as much again as its peak, rounded up"),
+            )
         return DimensionScore(
             name="Memory Efficiency",
             score=15,
@@ -504,14 +519,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
             detail=(f"Job failed with OUT_OF_MEMORY. Requested "
                     f"{req_mem_gb_oom:.0f}GB was insufficient. "
                     f"Your job needed more memory than allocated."),
-            suggestion=Suggestion(
-                directive="mem",
-                suggested_value=suggested_mb_oom,
-                current_value=req_mem_mb_oom,
-                actual_usage=peak_mem_gb_oom * 1024,
-                unit="MB",
-                rationale="job hit OOM; increase request by 50%",
-            ),
+            suggestion=suggestion_oom,
         )
 
     if implausible:
