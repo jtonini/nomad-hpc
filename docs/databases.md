@@ -85,9 +85,12 @@ nomad db vacuum --full --apply    once: set for incremental vacuuming, vacuumed 
 nomad db vacuum --apply           from then on, by hand (the collector does it weekly)
 ```
 
-A whole vacuum needs about the database's size free on its disk and holds the
-database while it runs (minutes for gigabytes: a collection or a hub's sync
-then waits or tries again). It may also give rows new numbers, which the
+A whole vacuum needs about twice the database's size free on its disk: SQLite
+writes a copy of the database and a journal of the pages it replaces, both
+beside the database (1.63.2: left to itself SQLite puts the copy in `/var/tmp`
+or `/tmp`, often a small partition, and stops with "database or disk is full").
+It holds the database while it runs (minutes for gigabytes: a collection or a
+hub's sync then waits or tries again). It may also give rows new numbers, which the
 hub's incremental sync goes by, so it takes the site's change log out: the hub
 copies that site's database whole at its next sync, then goes on as before.
 

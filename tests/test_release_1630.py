@@ -308,8 +308,9 @@ def test_stamps(tmp_path, width, prefix):
 
 def test_a_collector_writing_meanwhile(tmp_path):
     """1.63.0 read a day's rows, then wrote: with a collector writing at the
-    same moment SQLite refused at once ("database is locked", as on
-    jonimitchell). Each day now takes the write lock first and waits."""
+    same moment SQLite refused at once ("database is locked", as on a site
+    collecting every five minutes). Each day now takes the write lock first
+    and waits."""
     import threading
     import time as _time
     db = tmp_path / "s.db"

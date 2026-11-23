@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.63.2 (November 2026)
+
+- **A whole vacuum puts SQLite's temporary copy beside the database.** Left
+  to itself SQLite writes it in `/var/tmp` or `/tmp`, often a small
+  partition, and a database of a few gigabytes stopped with "database or
+  disk is full" though its own disk had room. `nomad db vacuum --full` and
+  `nomad db keep` now check for about twice the database's size free beside
+  it, and say in plain words why a vacuum wasn't done (nothing changed by it;
+  the keep rules' roll-up is kept).
+- A job that ran out of memory is never told to ask for less: its advice
+  starts from what it asked for (or its peak, when higher), half as much
+  again, rounded up (52G gives 96G).
+
 ## v1.63.1 (November 2026)
 
 - **Keep rules with a collector writing meanwhile**: 1.63.0 read a day's

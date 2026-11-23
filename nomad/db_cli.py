@@ -216,8 +216,9 @@ def db_vacuum(ctx, file, full, apply):
     """The free space inside a database given back (FILE, else the site's).
     Set for incremental vacuuming, it moves pages, never rows, and the
     databases collector does it once a week by itself. --full does it once:
-    the database set for that and vacuumed whole (needs its size free on the
-    disk, holds the database for the while; the hub then copies this site's
+    the database set for that and vacuumed whole (needs about twice its size
+    free beside it, for SQLite's copy and journal, which it writes there;
+    holds the database for the while; the hub then copies this site's
     database whole at its next sync, since a whole vacuum may renumber rows)."""
     config, _ = _ctx(ctx)
     p = Path(file).expanduser().resolve() if file else _site_db(ctx, config).resolve()
@@ -229,8 +230,9 @@ def db_vacuum(ctx, file, full, apply):
     if not full and r["auto_vacuum"] != "incremental":
         click.echo("Not set for incremental vacuuming: --full sets it, once (see nomad db vacuum --help).")
         return
-    if full and r["disk_free"] < r["bytes"] * 1.2:
-        raise click.ClickException(f"a whole vacuum needs about {H.size(r['bytes'] * 1.2)} free on the disk")
+    if full and r["disk_free"] < H.room_needed(r["bytes"]):
+        raise click.ClickException(f"a whole vacuum needs about {H.size(H.room_needed(r['bytes']))} free beside "
+                                   f"the database ({H.size(r['disk_free'])} free)")
     if not apply:
         click.echo(f"Would give back about {H.size(r['free_bytes'])}"
                    + (" (a whole vacuum, then incremental from there; the hub copies it whole once)" if full else "")
@@ -238,7 +240,10 @@ def db_vacuum(ctx, file, full, apply):
         return
     t0 = time.time()
     if full:
-        before, after, had_log = H.full(p)
+        try:
+            before, after, had_log = H.full(p)
+        except H.VacuumError as e:
+            raise click.ClickException(f"not vacuumed, nothing changed: {e}")
     else:
         (before, after), had_log = H.incremental(p), False
     took = time.time() - t0
@@ -342,12 +347,17 @@ def db_keep(ctx, apply, no_vacuum):
     if r["auto_vacuum"] == "incremental":
         before, after = H.incremental(site)
         kind, had_log = "incremental", False
-    elif r["disk_free"] >= r["bytes"] * 1.2:
-        before, after, had_log = H.full(site)
+    elif r["disk_free"] >= H.room_needed(r["bytes"]):
+        try:
+            before, after, had_log = H.full(site)
+        except H.VacuumError as e:
+            click.echo(f"Not vacuumed, nothing changed by it: {e}. The readings are rolled up all the same; the "
+                       "space they freed stays inside the database, for its new readings.")
+            return
         kind = "full"
     else:
-        click.echo(f"Not vacuumed: a whole vacuum needs about {H.size(r['bytes'] * 1.2)} free on the disk "
-                   f"({H.size(r['disk_free'])} free).")
+        click.echo(f"Not vacuumed: a whole vacuum needs about {H.size(H.room_needed(r['bytes']))} free beside the "
+                   f"database ({H.size(r['disk_free'])} free). The readings are rolled up all the same.")
         return
     took = time.time() - t0
     try:

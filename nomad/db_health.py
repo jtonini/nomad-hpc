@@ -545,23 +545,64 @@ def incremental(path: Path, conn_timeout: float = 60) -> tuple[int, int]:
     return before, Path(path).stat().st_size
 
 
+class VacuumError(RuntimeError):
+    """A whole vacuum that couldn't be done, said in plain words."""
+
+
+# A whole vacuum writes a copy of the database's live pages (SQLite's
+# temporary file) and a journal of the pages it replaces: room for both.
+VACUUM_ROOM = 2.2
+
+_VACUUM = (
+    "import sqlite3, sys\n"
+    "c = sqlite3.connect(sys.argv[1], timeout=float(sys.argv[2]), isolation_level=None)\n"
+    "c.execute('PRAGMA auto_vacuum = INCREMENTAL')\n"
+    "c.execute('VACUUM')\n"
+    "c.close()\n"
+)
+
+
+def room_needed(nbytes: int) -> int:
+    return int(nbytes * VACUUM_ROOM)
+
+
 def full(path: Path, conn_timeout: float = 300) -> tuple[int, int, bool]:
     """Once: set for incremental vacuuming and vacuum whole. A whole vacuum
     may give rows new numbers, which the hub's incremental sync goes by: the
     site's change log is taken out (its notes from hubs kept), so the hub
-    copies this database whole at its next sync. (before, after, log taken out)."""
+    copies this database whole at its next sync. (before, after, log taken out).
+
+    1.63.2: the vacuum runs in a Python of its own, told to put SQLite's
+    temporary copy beside the database (SQLITE_TMPDIR, which SQLite reads
+    when it starts): left to itself SQLite takes /var/tmp or /tmp, often a
+    small partition, and stops with "database or disk is full" though the
+    database's own disk has room. VacuumError says why it wasn't done."""
+    import subprocess
+    import sys
+
     from nomad.db import delta_site
-    before = Path(path).stat().st_size
+    path = Path(path)
+    before = path.stat().st_size
+    env = dict(os.environ, SQLITE_TMPDIR=str(path.parent.resolve()))
+    r = subprocess.run([sys.executable, "-I", "-c", _VACUUM, str(path), str(conn_timeout)],
+                       env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        last = [x for x in (r.stderr or "").strip().splitlines() if x.strip()]
+        why = last[-1].split(":", 1)[-1].strip() if last else f"it ended with {r.returncode}"
+        if "full" in why:
+            why += (f" (the copy and the journal it writes beside the database need about "
+                    f"{size(room_needed(before))}; free there: {size(shutil.disk_usage(path.parent).free)})")
+        elif "locked" in why or "busy" in why:
+            why += " (something kept writing to it for the whole wait: try again at a quieter moment)"
+        raise VacuumError(why)
     c = sqlite3.connect(str(path), timeout=conn_timeout, isolation_level=None)
     try:
-        c.execute("PRAGMA auto_vacuum = INCREMENTAL")
-        c.execute("VACUUM")
         had_log = c.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (delta_site.LOG,)).fetchone() is not None
         if had_log:
             delta_site.remove(c, notes=False)
     finally:
         c.close()
-    return before, Path(path).stat().st_size, had_log
+    return before, path.stat().st_size, had_log
 
 
 def vacuum_record(conn, path, kind: str, before: int, after: int, seconds: float, when: datetime) -> None:
