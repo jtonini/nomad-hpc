@@ -396,7 +396,7 @@ The lab check, ready to go to PIs in the middle of a term.
 
 ## v1.49.0 (November 2026)
 
-Alerts that say what is real, and are mailed when it matters. spydur, one
+Alerts that say what is real, and are mailed when it matters. hpc1, one
 week of November: about 100 alert emails, 24 of them CPU clock dips of 15 to
 90 minutes on nodes running every core.
 
@@ -405,8 +405,8 @@ week of November: about 100 alert emails, 24 of them CPU clock dips of 15 to
   busy hosts alike, else its CPU's rated clock (or 60% of its top clock),
   below `busy_min_fraction` (0.4) in `[alerts.clock]`. With every core at
   work a CPU runs far below its top clock, and lower on heavy vector code:
-  spydur's Xeon 6230Rs, 3,970 MHz idle, about 2,700 busy, dips to 1,420, none
-  of it a brake. A brake (arachne's 400 of 3,700 MHz) is still found at any
+  hpc1's Xeon 6230Rs, 3,970 MHz idle, about 2,700 busy, dips to 1,420, none
+  of it a brake. A brake (hpc2's 400 of 3,700 MHz) is still found at any
   load; the message says "under load (0.95 per CPU)".
 - **What may pass on its own waits** (`[alerts.wait]`, minutes by source or
   source.kind; defaults: CPU clock 60, heavy use of a login node 30; critical
@@ -510,7 +510,7 @@ The term reports, as the first run of Fall 2026 so far read on a real hub:
   by default; table `node_memory`): the collector's login to each node, every
   half hour, also reads `/proc/meminfo`. Slurm's `FreeMem` is MemFree, which
   counts the file cache as used, so a node left idle after a long job read as
-  nearly full: spdr01 showed 82% in use with nothing allocated and a load of
+  nearly full: n001 showed 82% in use with nothing allocated and a load of
   0.2. Total less MemAvailable is what programs hold; the cache is kept
   apart. A node's timeline draws "Memory in use by programs" from it, in
   place of the cache-counted line, where it is read. The Console's Nodes page
@@ -558,7 +558,7 @@ wherever an overall is explained).
   (0.5) of the cores it asked for unused. These are the jobs the
   Recommendations judge for cores, judged the same way, matched to
   job_summary as they match it. Time unused (`waste`) stays available: at the
-  University of Richmond half the completed jobs used under 1% of the time
+  first site it was trained for, half the completed jobs used under 1% of the time
   they asked, and 89% counted as wasted even at 0.9, so its AUCs said little.
   Each of idle and waste carries its spread (what share of the cores or the
   time the jobs used), counts only.
@@ -719,7 +719,7 @@ wherever an overall is explained).
 
 - **The gate through another host** (`gate_jump` in a site's
   `[[hub.sites]]`; `nomad gate jump-key`). A cluster the hub reaches only
-  through another host (vadur, through jonimitchell) can have the Console's
+  through another host (hpc3, through labhead1) can have the Console's
   Submit page and live jobs too: the gate's own key, with the same strict
   settings, opens a forwarded connection to the cluster's ssh on that host
   (`ssh -W`), and its line there allows nothing else (no terminal, no
@@ -852,7 +852,7 @@ wherever an overall is explained).
 ## v1.35.4 (November 2026)
 
 - **The lab check's email reads as a letter** to the lab's PI: "Dear Dr.
-  Parish," (the name from `names` in `[console.labs.check]`, else the
+  Smith," (the name from `names` in `[console.labs.check]`, else the
   account's full name; "Dear colleague," without one), who asks and why,
   what about (a line for the members, one for condo users outside the
   group), where to answer and until when ("Monday, December 14, 2026"),
@@ -860,7 +860,7 @@ wherever an overall is explained).
   twice where once will do. It ends with the Console's `[console.branding]`
   lines (e.g. Academic Research Computing, Office of the Provost, the
   university), as the sign-in page and the condo reports do.
-- Subject: "Please confirm the members of the Parish Lab (cparish$)";
+- Subject: "Please confirm the members of the Smith Lab (smith$)";
   reminders start "Reminder:".
 - New settings in `[console.labs.check]`: `salutation` ("Dr. {last}"),
   `names`, `signature`, `contact`, `date_format`.
@@ -871,7 +871,7 @@ wherever an overall is explained).
 
 ## v1.35.3 (November 2026)
 
-- `columbus-water` keeps its first run on spydur (9 November, job 89551:
+- `columbus-water` keeps its first run on hpc1 (9 November, job 89551:
   condos, 1 CPU, 1 s, 121 MB) and what it wrote: the SCF energy
   -76.0253553484, the CI energy -76.2305400880 and the dipole moment
   1.98007125 D, exactly as COLUMBUS's own example has them.
@@ -945,7 +945,7 @@ A practice run is known for what it is (with Console fix 92):
   busy, peak memory) and, in its `recorded/` folder, what it wrote.
   `nomad demos show`, `look` (and `look NAME --recorded`), each copy's
   README and the Console show it. cp2k-water, gromacs-water, amber-peptide
-  (numbers only), r-bootstrap and rfdiffusion-backbone carry their spydur
+  (numbers only), r-bootstrap and rfdiffusion-backbone carry their hpc1
   runs of 9 November. A built kit with none takes nomad's; `nomad demos
   build` carries it along.
 
@@ -959,11 +959,11 @@ A practice run is known for what it is (with Console fix 92):
 
 ## v1.34.1 (November 2026)
 
-From the practice runs' first runs on spydur (9 Nov):
+From the practice runs' first runs on hpc1 (9 Nov):
 
 - `[submit.demos] partition` and `gpu_partition` (a name, or `{ site =
   partition }`): where practice runs are sent, so they don't wait behind
-  long research jobs (spydur: the condo guest queue).
+  long research jobs (hpc1: the condo guest queue).
 - amber-peptide: a box pmemd.cuda accepts (16 A of water around the
   peptide; the GPU code refused a smaller one), and 100 ps.
 - gromacs-water: 2 ns, about a minute and a half on an A40 (100 ps took 7 s).
@@ -980,7 +980,7 @@ From the practice runs' first runs on spydur (9 Nov):
   and runs, what it writes, and where its time, memory and cores are read.
   Their results mean nothing for research, and their size says nothing about
   what a real calculation needs: every kit and every copy says so.
-- Kits that come with nomad, fitted to UR's job-script templates: Gaussian,
+- Kits that come with nomad, fitted to one site's job-script templates: Gaussian,
   Q-Chem and ORCA (benzene), Molcas and CP2K (water), NAMD on CPUs and on a
   GPU (a box of water, made by scripts/demos/make_namd_water.py and checked
   with OpenMM), R (a bootstrap), Python (pi from random points), RFdiffusion
@@ -997,15 +997,15 @@ From the practice runs' first runs on spydur (9 Nov):
 
 ### Fixes
 - **Lab membership check:** a condo two labs share made each lab's PI one
-  of the other's too (yangnolin: knolin answered for myang$, and myang for
-  knolin$). A condo's owners now answer only for a group with no PI of its
+  of the other's too (leepatel: patel answered for lee$, and lee for
+  patel$). A condo's owners now answer only for a group with no PI of its
   own (`members = "group:chemlab$"`).
 
 ### New
 - `[console.labs.check] not_sites`: sites whose groups the check leaves out,
   members, condos, jobs and to-do alike. On a teaching server an
   instructor's group holds their course's students, which a PI is not the
-  one to answer for (UR: `not_sites = ["spiderweb"]`).
+  one to answer for (say, `not_sites = ["interactive1"]`).
 - Each person's last job on any cluster, beside the question, most recent
   first, on My lab and in `nomad lab check show`. Members with no job in a
   year who were in the group before that can be marked as having left at
@@ -1057,7 +1057,7 @@ From the practice runs' first runs on spydur (9 Nov):
 ### Fixes
 - `job_live`: each step of a job counted once. Asked for an array's own id,
   sstat also answers for its other running tasks, so a task asked for by
-  its own id as well came back twice: on vadur, 12266_48 and 12266_81 read
+  its own id as well came back twice: on hpc3, 12266_48 and 12266_81 read
   10.7 and 10.5 cores busy of the 6 asked, twice their 5.3.
 - `job_live`: when nothing runs, its table is emptied (a collector that
   collects nothing isn't stored, so rows of jobs that had ended stayed), and
@@ -1078,7 +1078,7 @@ From the practice runs' first runs on spydur (9 Nov):
   from `sstat`, run as Slurm's account through sudo (`sstat_as`, by default
   `[actions] slurm_as`). One row per running job (`job_live`), gone when the
   job ends; synced to the hub like any table. For the Console's running jobs.
-  On spydur, bchen's 87790 asked for 350 GB and held 31 GB (`sstat`), while
+  On hpc1, one person's job 87790 asked for 350 GB and held 31 GB (`sstat`), while
   Slurm's free memory for its node (the file cache counted as used) said
   726 GB in use.
 
@@ -1096,8 +1096,8 @@ From the practice runs' first runs on spydur (9 Nov):
 
 ### Fixes
 - `nomad node drain|resume`: the check of the nomad running here no longer
-  refuses what lies below a folder only its owner can pass through: arachne's
-  `~/.local` (700) over `~/.local/lib` (775, its group zeus's primary group
+  refuses what lies below a folder only its owner can pass through: hpc2's
+  `~/.local` (700) over `~/.local/lib` (775, its group the account's primary group
   with others in it), as pip leaves it under umask 002. Such a folder must
   itself be safe; files below it must still be root's or the account's.
 - When sudo wants a password for the change (`sudo -n -l` can't tell
@@ -1192,9 +1192,9 @@ From the practice runs' first runs on spydur (9 Nov):
 
 ### Features
 - **A condo two labs share** (or whose lab is in two groups): report.toml's
-  `members` names several groups, `members = "group:myang$,knolin$"`, anyone
+  `members` names several groups, `members = "group:lee$,patel$"`, anyone
   in any of them its lab's. `nomad partitions --condos` proposes
-  `AllowGroups=myang$,knolin$` (Slurm admits anyone in either), the condo
+  `AllowGroups=lee$,patel$` (Slurm admits anyone in either), the condo
   reports count both groups' members as the lab's, and the condo is on each
   group's My lab page. A group named twice, or an empty name, is refused.
   Before, a second group could only be added in the directory, which also
@@ -1228,7 +1228,7 @@ From the practice runs' first runs on spydur (9 Nov):
 
 ### Features
 - **How fast each CPU really runs when busy** (the `clock` collector,
-  `[alerts.clock]`, `nomad clock`). arachne's node01-03 lost a power
+  `[alerts.clock]`, `nomad clock`). hpc2's node01-03 lost a power
   supply's input on 4 October 2026 and their boards braked the CPUs to about
   400 MHz instead of 3,700: no failure, healthy in Slurm, every job ten times
   slower for a month. Each host runs a short busy loop and reads its CPU's
@@ -1236,7 +1236,7 @@ From the practice runs' first runs on spydur (9 Nov):
   there is no counter); a reading below half of what it should give (its
   usual clock, hosts with the same CPU, the CPU's top clock), twice in a row,
   is alerted: critical when its power readings show a supply problem too.
-  On arachne, 5 Nov: node02 396 MHz, node51 3,730.
+  On hpc2, 5 Nov: node02 396 MHz, node51 3,730.
 - **Where a job starts soonest** leaves out partitions whose nodes are all
   throttled, says which nodes run slow in the others, and never picks one
   with slow nodes while another has none.
@@ -1258,7 +1258,7 @@ From the practice runs' first runs on spydur (9 Nov):
   shown in full, saved as a new file beside the input as them. The versions
   are the modules the cluster really has: the new `modules` collector reads
   `module -t avail` once a day (after `module use` for folders a login
-  doesn't add: spydur's `/usr/local/sw/modulefiles`), copies kept aside
+  doesn't add: hpc1's `/usr/local/sw/modulefiles`), copies kept aside
   (`.bak`) left out; chosen first, the template's default, else the
   cluster's, else the highest. A version that runs otherwise (g09, g16)
   gets its own run line. A script with a scratch folder stops at once
@@ -1268,8 +1268,8 @@ From the practice runs' first runs on spydur (9 Nov):
   and what is wrong in a template; `--make P --input PATH` writes one.
 
 ### Fixes
-- **A fan header with no fan isn't a stopped fan.** vadur's CPU nodes have
-  four fan headers at 0 RPM on every board, and 1.25.8 alerted them (mingus
+- **A fan header with no fan isn't a stopped fan.** hpc3's CPU nodes have
+  four fan headers at 0 RPM on every board, and 1.25.8 alerted them (the hub
   had them in `[alerts.power] ignore`). A fan nomad has never seen turning
   is now said in the host's notes, not alerted; one that turned and stops
   still is, also after a read with no reading and across the upgrade
@@ -1282,26 +1282,26 @@ From the practice runs' first runs on spydur (9 Nov):
 - **Power supplies, voltages and fans** (the `power` collector,
   `[alerts.power]`, `nomad power`): what each server's board controller
   knows, through `ipmitool`: each supply's state and power, the voltages, the
-  fans, the board's event log. vadur's gpu09 ran on one supply from February
+  fans, the board's event log. hpc3's gpu09 ran on one supply from February
   to November with nothing saying so. Root reads the boards (a small
   read-only helper, `scripts/power_root_probe.py`, by root's cron: on a head
   node, itself and every Slurm node over root's ssh); nomad reads its file.
   Alerts for a supply with no input power, failed or failing, redundancy
   lost, one supply carrying the node, a voltage past its thresholds, a fan
   stopped, and new problem entries in a board's log; a threshold of 0 isn't
-  one (vadur's CPU nodes log "0 W below 0 W" at every start). Sites whose
+  one (hpc3's CPU nodes log "0 W below 0 W" at every start). Sites whose
   alerts the hub sends (`alerts = "hub"`) get them from the hub.
 
 ## v1.25.7 (November 2026)
 
 ### Fixes
 - **A CPU's cores are one temperature: their hottest.** Intel's coretemp
-  gives each core its own reading (26 a socket on spydur's Xeons: 1,674
+  gives each core its own reading (26 a socket on hpc1's Xeons: 1,674
   rows a round, and their hours kept for good). Now one row a chip, `cores`
   ("Cores (hottest)"); migration 29 takes out the per-core rows already
   kept. The package's own reading is still the alert's.
 - **An alert with nowhere to go isn't counted as sent.** Raised with no
-  alert backend (mingus's `[alerts.email]` was off), it counted as raised,
+  alert backend (the hub's `[alerts.email]` was off), it counted as raised,
   so once email was set up it waited for its daily reminder. Now it is
   tried again as a failed send is: 15 minutes later, then 30, an hour...
 - **`nomad temps --check --send` always sends** (a test, never counted as
@@ -1333,8 +1333,8 @@ From the practice runs' first runs on spydur (9 Nov):
   table, where nobody puts them, so the defaults always applied.
 - **"Your lab's condo" only for its owners and the members report.toml
   names.** Without `members`, nomad took the owners' lab groups, as the
-  condo reports do; spydur's myang$ holds some 170 people (staff, other
-  PIs, a demo account), and all of them saw yang1, yang2 and yangnolin as
+  condo reports do; hpc1's lee$ holds some 170 people (staff, other
+  PIs, a demo account), and all of them saw lee1, lee2 and leepatel as
   their own, with no guest limit, for "Fastest start" to take. Now a condo
   without `members` is its owners' own, a guest's for everyone else.
   `nomad partitions --site S --sorted` lists the condos without `members`.
@@ -1342,7 +1342,7 @@ From the practice runs' first runs on spydur (9 Nov):
 ## v1.25.5 (November 2026)
 
 ### Fixes
-- **Where a job starts soonest showed no estimate on spydur**: its sbatch
+- **Where a job starts soonest showed no estimate on hpc1**: its sbatch
   (Slurm 25.11) says a word between the start time and "using" ("to start
   at 2026-11-03T09:49:39 a using 1 processors ..."), which nomad didn't
   expect, so every partition's row came back as an error with Slurm's line
@@ -1458,7 +1458,7 @@ From the practice runs' first runs on spydur (9 Nov):
   text) goes to sbatch itself, never as a file of nomad's that someone could
   change before sbatch reads it (`/dev/stdin` before the job's arguments when
   it has some). So the Console sends from accounts set up as they are on
-  spydur, where `~/.local` is writable by everyone's group: 1.25.1 refused
+  hpc1, where `~/.local` is writable by everyone's group: 1.25.1 refused
   them. nomad still keeps its record of what it sent (private, in
   `~/.local/share/nomad/staged/`) and notes which record each job came from
   by its cluster and number (`staged/jobs/CLUSTER.JOBID`, with the job's
@@ -1476,7 +1476,7 @@ From the practice runs' first runs on spydur (9 Nov):
   before any runs, and run by their full paths; nothing runs when one could
   have been put there by someone else (it, a folder above it or a link on the
   way to it is another account's -- not root's, the person's, nomad's
-  installer's or Slurm's -- or others may write it). `nomad size` takes the gate's `--via console` too, and the gate's
+  the installing account's or Slurm's -- or others may write it). `nomad size` takes the gate's `--via console` too, and the gate's
   own steps go through `nomad-gate exec`. By hand, as before.
 
 ## v1.25.1 (November 2026)
@@ -1489,7 +1489,7 @@ From the practice runs' first runs on spydur (9 Nov):
   that text, never the path: the local-scratch script, else a private copy in
   `~/.local/share/nomad/staged/` that knows the person's own script (so the
   job is sent again from theirs). A folder others can change no longer stops
-  a job being sent from the Console (on spydur every `/scratch/USER` is
+  a job being sent from the Console (on hpc1 every `/scratch/USER` is
   writable by everyone's group): the gate says so instead (`show`'s
   `warning`), with the `chmod` that closes it. The script is read once and
   that text is what is sized, staged and sent; nomad's own folder for its
@@ -1535,7 +1535,7 @@ From the practice runs' first runs on spydur (9 Nov):
   copy in and back, the checks, Slurm's commands, the node's `python3` and
   `rsync`) without the job's `LD_LIBRARY_PATH` and `LD_PRELOAD`: a cluster's
   login environment can point those at libraries that break system tools (on
-  spydur, `ssh` fails with `undefined symbol: EVP_KDF_ctrl`). The person's
+  hpc1, `ssh` fails with `undefined symbol: EVP_KDF_ctrl`). The person's
   script gets them back exactly as they were, and so does a job it sends
   through nomad's `sbatch` stand-in.
 
@@ -1589,8 +1589,8 @@ From the practice runs' first runs on spydur (9 Nov):
   - **`watch_auth` (on by default):** failed `sudo`/`su` in the last
     `auth_window_hours` (24), counted per account, read straight from the auth
     log (`/var/log/secure` or `auth_log`) **wherever the collector's account may
-    read it** — e.g. where it's group-readable (`installer` is in `securegrp` on
-    spydur). A no-op, with no error, where the log is root-only. The actor is
+    read it** — e.g. where it's group-readable (the collector's account is in `securegrp` on
+    one cluster). A no-op, with no error, where the log is root-only. The actor is
     taken from the log's structured fields, matched on the line's head before any
     `COMMAND=` so a command string can't inject a fake account, and `su` to root
     is counted against whoever ran it.
@@ -1666,10 +1666,174 @@ From the practice runs' first runs on spydur (9 Nov):
   hub that raises a site's node alerts on its behalf (`alerts = "hub"`, 1.17.3)
   stores them in its own rows (`source_site` = the hub) while naming the site
   in `details.site`; the Insight engine attributed them by `source_site`, so
-  the hub's Signals (e.g. mingus) showed another site's "node down" and that
-  site's own Signals (e.g. vadur) hid it. The alert signal now reads unscoped
+  the hub's Signals showed another site's "node down" and that
+  site's own Signals hid it. The alert signal now reads unscoped
   and places each alert by `details.site`, falling back to `source_site`. No
   database change; the Console picks it up once nomad is upgraded on the hub.
+
+## v1.4.0 to v1.20.0 (April to October 2026)
+
+These releases' summaries were written afterwards from their commits, a
+minor version at a time. Each release's own notes are with its GitHub release.
+
+### v1.20.0 (October 2026)
+- The policy watch, for the harms named for AI agents, keyed on what happens
+  rather than the tool: a process reaching root from a regular account
+  (`escalation`, critical); a network service on a compute node; AI-agent
+  programs listed but not alerted (using one is not misuse); and a root
+  helper (`scripts/watch_root_probe.py`) for failed `sudo` and new setuid
+  files.
+
+### v1.19.0 to v1.19.1 (October 2026)
+- **The policy watch** (`nomad watch`): tunnels, miners, relays and exposed
+  services on login and compute nodes, the most serious first.
+- ssh forwards to servers the site lists in `trusted_hosts` are verified and
+  shown as information, not alerts.
+
+### v1.18.0 to v1.18.2 (October 2026)
+- **`nomad size` and `nomad submit`**: what a job should ask for (cores,
+  memory, time, GPUs, partition), each value with where it comes from, and
+  submitting it with nomad's values or the person's own.
+- `scripts/install_nomad_for_users.sh`: one install for everyone on a cluster,
+  each release in its own folder, switched in one step.
+- Each job's Slurm output in a folder of its own.
+
+### v1.17.0 to v1.17.10 (October 2026)
+- **The hub syncs only what changed**, in place: each site logs the rows its
+  collectors add, change and delete, and a sync applies just those. A run
+  writes megabytes instead of copying every site whole. `nomad sync status`.
+- Partition settings and their changes (`nomad partitions`), why jobs wait,
+  and idle condos while jobs waited elsewhere.
+- Node alerts sent by the hub for a site that can't send its own
+  (`alerts = "hub"`); runaway jobs.
+- `nomad demo --console`: a demo with a cast to sign in as; `nomad console role`.
+- Labs: research assistants, what needs a PI's attention, who holds the lab's
+  data and where, a lab's condo nodes, and groups that are never labs.
+  A course this term is a class, not a lab.
+- `nomad machine note`: what each machine is, shown beside its name.
+- Storage measured as each owner where sudo allows it.
+
+### v1.16.0 to v1.16.1 (October 2026)
+- **Storage use** (`nomad storage`): who holds each storage server's space,
+  and on what; `--over`, `--list`, `--binary`.
+
+### v1.15.0 to v1.15.5 (October 2026)
+- **Monthly condo reports** (`nomad usage-report condos`): each owner's
+  report, headed with the institution's logo and name, and a summary;
+  `condos init`, `set`, `status` and `timer`, and the setup wizard asks how
+  reports go out.
+
+### v1.14.0 to v1.14.8 (October 2026)
+- Compute nodes' local disks, read from the head node, and who holds the data
+  on them.
+- Alerts for workstations' own disks; the hub says when a site stops
+  collecting (`nomad collection-check`).
+- `nomad facts busy`: when each machine is busiest.
+- Workstations by lab; a lab's members by NetID.
+- Fixes: memory requests as sacct records them, per node; GPU jobs from before
+  Slurm recorded GPUs; readiness and a person's own page no longer read whole
+  tables.
+
+### v1.13.0 to v1.13.3 (October 2026)
+- **Impact** (`nomad impact`): jobs before and after NØMAÐ's launch, the CPU
+  use of every task, and advice shown and taken.
+- Advice names the flag a job used.
+- Workstation sessions: memory, computing, and long runs found inside them.
+- Stored measurements are kept, and lost ones brought back.
+
+### v1.12.0 to v1.12.6 (October 2026)
+- **Courses** (`nomad course`): a course's students this term, for its
+  instructors and the usage report; who teaches it, from who joined the group
+  and who was active, and what instructors say they teach.
+- **The hub as a service account**: settings in `/etc/nomad`, and the hub's
+  own site read without ssh.
+
+### v1.11.0 to v1.11.1 (October 2026)
+- Interactive servers keep daily and hourly totals for courses and the usage
+  report, with a backfill from the older snapshots.
+
+### v1.10.0 to v1.10.1 (October 2026)
+- **`nomad facts`**: sites, a person and a lab, as data the Console and the
+  command line share.
+- A site's sync snapshot goes where there is room and is always removed; an
+  alert when a site stops syncing.
+
+### v1.9.0 to v1.9.1 (October 2026)
+- **Actions** (`nomad actions`, `nomad agent`): the catalog of commands the
+  Console can start, run on a site through a key held to that one command.
+- The name's expansion spelled with Ð: NØde Monitoring And Ðiagnostics.
+
+### v1.8.0 to v1.8.2 (October 2026)
+- **`nomad usage-report`**: the administrators' report for a period: use,
+  people, waits, GPUs, storage and capacity, in Markdown and JSON.
+
+### v1.7.5 to v1.7.44 (September to October 2026)
+- **The Console's way in**: `nomad console launch` opens it through an SSH
+  tunnel; on a cluster, `nomad console` prints the line for your own
+  computer; `--key-setup` for a key with no password.
+- Who may see what in the Console, set in nomad.toml: roles, labs and their
+  leads (`nomad lab lead`), a lab's own workstations and storage.
+- `nomad config check`: a nomad.toml that can't be read is said so, by file
+  and line.
+- `nomad import sacct`: jobs from before nomad; monthly usage totals from
+  sreport (`slurm_usage`).
+- Site settings in `[mail]` and `[support]`, with one mail sender.
+- Heavy use of login nodes, measured under cron (`per_user`).
+- Fixes: scores and advice only from what was measured, and fitting the jobs
+  they are about; the alert cooldown holds across cron runs; disk alerts warn
+  in time, once per problem; every collector says when it collects nothing;
+  `nfsiostat` found in `/usr/sbin`; jobs that leave the queue get their real
+  outcome; a job number Slurm gives out again is a new job; jobs recorded
+  from every partition; a lab's members are the people its group lists now.
+
+### v1.7.0 to v1.7.4 (September 2026)
+- The educational analytics' verdicts: queue-aware promotion from a
+  workstation to a cluster, chronic memory pressure, GPU scoring from DCGM's
+  real utilization, issues scoped to each cluster and partition, and honest
+  job counts on every page.
+- The energy module (`nomad energy`): consumption, waste, carbon, forecasts
+  and before/after comparisons.
+- The interactive collector registers, so it collects on a real deployment.
+- License: the full AGPL-3.0 text (the abbreviated text and its commercial
+  clause are gone).
+- Sync: the combined database is indexed before it is published; one sync at
+  a time; a site's copy is never taken from a live database after a failed
+  backup, a corrupt cached copy is removed, and every attempted site is
+  recorded in `sync_sites`.
+- A start time in the future (Slurm's estimate for a waiting job) is never
+  recorded as one.
+
+### v1.6.0 to v1.6.5 (May 2026)
+- A restructured recommendation system.
+- `per_user`: CPU and memory per user on shared hosts, with alerting that
+  allows for listed programs.
+- Workstation sessions scored; node-state alerts set per site.
+- `nomad test-alerts` tests delivery end to end; `nomad collect` starts the
+  alert dispatcher; `nomad.toml.example` is valid TOML and matches what is read.
+
+### v1.5.0 to v1.5.7 (April to May 2026)
+- GPU monitoring with DCGM: real utilization, workload classes and hardware
+  health; `nomad diag gpu` and `nomad insights gpu`; GPUs read over ssh from
+  a head node.
+- `[hub]` in nomad.toml (`sync.toml` deprecated), and a hub branch in the
+  setup wizard; remote snapshots taken with SQLite's `.backup`.
+- `nomad edu me`.
+- The dashboard's Education and Reference panels, workstation rows with
+  per-user detail and mounts, and the Dynamics page by cluster.
+- Fixes: `job_metrics` no longer misses long jobs, and aggregates job steps;
+  DCGM field IDs for newer cards.
+
+### v1.4.0 (April 2026)
+- **Multi-site**: `nomad sync` merges each site's database into a combined
+  one, and the dashboard shows each cluster on its own.
+- Workstations collected over ssh.
+- The alert pipeline from collection to email.
+- Dynamics computed per cluster; umbrella groups left out of niche overlap.
+- The brand spelled NØMAÐ.
+
+### v1.3.2 (April 2026)
+- The developer toolchain (`nomad dev`).
+- Network analytics and dynamics in the Insight Engine.
 
 ## v1.3.1 (April 2026)
 
