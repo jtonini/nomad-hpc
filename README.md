@@ -15,7 +15,7 @@ lab workstations and storage.
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18614517.svg)](https://doi.org/10.5281/zenodo.18614517)
 
-**Documentation: [jtonini.github.io/nomad-hpc](https://jtonini.github.io/nomad-hpc/)**
+**Website: [nomad-hpc.com](https://nomad-hpc.com)** · **Documentation: [jtonini.github.io/nomad-hpc](https://jtonini.github.io/nomad-hpc/)**
 
 ---
 

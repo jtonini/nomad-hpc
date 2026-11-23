@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use NØMAÐ, please cite the article below, and the software itself if you need a specific version."
+title: "NØMAÐ: Lightweight HPC Monitoring with Machine Learning-Based Failure Prediction"
+type: software
+authors:
+  - family-names: Tonini
+    given-names: João Filipe Riva
+    orcid: "https://orcid.org/0000-0002-4730-3805"
+repository-code: "https://github.com/jtonini/nomad-hpc"
+url: "https://nomad-hpc.com"
+license: AGPL-3.0-or-later
+doi: 10.5281/zenodo.18614517
+keywords:
+  - hpc
+  - slurm
+  - monitoring
+  - research computing
+preferred-citation:
+  type: article
+  title: "NØMAÐ: Lightweight HPC Monitoring with Machine Learning-Based Failure Prediction"
+  authors:
+    - family-names: Tonini
+      given-names: João Filipe Riva
+      orcid: "https://orcid.org/0000-0002-4730-3805"
+  journal: "Journal of Open Research Software"
+  volume: 14
+  start: 17
+  year: 2026
+  doi: 10.5334/jors.686
