@@ -69,7 +69,7 @@ def _gb(n) -> str:
 @click.group("check")
 def check_group():
     """Each term, a lab's PI says who is still in it, on My lab in the
-    Console; what their answers call for is ARC's to-do. nomad changes no
+    Console; what their answers call for is research computing's to-do. nomad changes no
     group or account itself.
 
     \b
@@ -416,7 +416,7 @@ def check_submit(ctx, lab, by):
               help="Also what was done in the last this many days.")
 @click.pass_context
 def check_todo(ctx, as_json, done_days):
-    """What the PIs' answers leave ARC to do, a cluster at a time: who to
+    """What the PIs' answers leave research computing to do, a cluster at a time: who to
     take out of a group or put in one, what to do with a leaver's data
     (and where it is), and labs that didn't answer. A group change is done
     once nomad's groups reading shows it; mark the rest with `done`."""

@@ -41,9 +41,9 @@ def _sites(s: A.Settings, conn) -> list:
 @click.group("accounts")
 def accounts_group():
     """A lab's PI asks for accounts for their students, on My lab in the
-    Console: nomad says who each one is, from the campus directory, and ARC
-    is emailed. ARC makes the accounts as it does now, and closes each one
-    here (the PI is emailed). nomad makes no account itself.
+    Console: nomad says who each one is, from the campus directory, and
+    research computing is emailed. It makes the accounts as it does now, and
+    closes each one here (the PI is emailed). nomad makes no account itself.
 
     Each request has a number, as in a ticket system: ARC-0012 ([console.tickets] prefix).
 
@@ -199,7 +199,7 @@ def accounts_show(ctx, request, as_json):
 @click.option("--by", help="Who made it (default: who runs this).")
 @click.pass_context
 def accounts_close(ctx, request, netid, site, state, note, no_email, by):
-    """ARC made the account, or not (and why): the request keeps who
+    """Research computing made the account, or not (and why): the request keeps who
     closed it and when, and the PI is emailed (review_to while set).
     REQUEST: its number, ARC-0012 (or 12)."""
     config, report, cs, conn, rec_path = _ctx(ctx)
