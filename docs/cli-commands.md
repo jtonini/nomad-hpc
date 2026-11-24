@@ -276,7 +276,7 @@ The hub acting on a cluster as a person (the Console's Submit page). See [submit
 | `nomad gate install-key` | Let the hub's gate key run `nomad-gate serve` here, and nothing else. |
 | `nomad gate jump-key` | Let the hub's gate key through this host to a cluster's ssh, and nothing else (1.40.0): for a site whose [[hub.sites]] has gate_jump = "THIS-ACCOUNT@THIS-HOST". |
 | `nomad gate key` | The hub's gate key (made the first time) and how to let it in on a cluster. |
-| `nomad gate test` | Is the gate there, and may it act as --user? Asks it its version (as itself, then as the person) and the person's jobs now (not on a machine with the gate alone: it runs no jobs); where moving files is on, sends half a file and removes it. Changes nothing. |
+| `nomad gate test` | Is the gate there, and may it act as --user? Asks it its version (as itself, then as the person) and the person's jobs now (not on a machine with the gate alone: it runs no Slurm jobs); where moving files is on, sends half a file and removes it. Changes nothing, but with --run on a lab machine: a test job of nomad's started and stopped there (its record kept, as any job's, in the person's ~/.local/share/nomad/runs). |
 
 ## impact
 

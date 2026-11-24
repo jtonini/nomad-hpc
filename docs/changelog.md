@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.67.0 (November 2026)
+
+- **Jobs on lab machines.** A job script can be sent from the Console's
+  Submit page to a lab's workstation with no scheduler, as the person, and
+  started there at once by the machine's `nomad-gate` (`[console.machine_runs]`,
+  off by default; docs/lab-machine-jobs.md). No queue: a job starts now or the
+  page says why. nomad's jobs on a machine together hold at most a share of its
+  cores and memory (half by default); each runs on cores of its own at the
+  lowest priority, is stopped past its time or its memory, and writes its
+  output beside its script. A job may ask for GPUs: each is given whole, to one
+  job at a time, never one something else computes on now, and the job sees
+  only its own. The page lists the person's jobs there, with the end of each
+  one's output, and stops one.
+- **A machine has its say**: its gate starts jobs only with `nomad-gate serve
+  --runs` (`nomad-gate install-key --runs`), and never where Slurm is.
+  `nomad gate test --run` starts nomad's own small test job on a machine,
+  sees it running from another connection, and stops it.
+
 ## v1.66.0 (November 2026)
 
 - **No site's names in nomad.** Help texts, examples, defaults, code

@@ -293,11 +293,12 @@ def ensure_key(path: Path | None = None) -> tuple[Path, str]:
 _PLAIN_PATH = re.compile(r"/[A-Za-z0-9/._-]{1,1000}")
 
 
-def forced_command(gate_path: str, owners: set | None = None, edit: bool = False) -> str:
+def forced_command(gate_path: str, owners: set | None = None, edit: bool = False, runs: bool = False) -> str:
     """What sshd runs for the gate's key (through this account's login
     shell, so the path holds only letters, digits and / . _ -). ``owners``:
     the path must be safe to run from for them (gate.unsafe). ``edit``
-    (1.25.3): the gate may save people's scripts (serve --edit)."""
+    (1.25.3): the gate may save people's scripts (serve --edit). ``runs``
+    (1.67.0): it may start jobs as people, on a lab machine (serve --runs)."""
     if not _PLAIN_PATH.fullmatch(gate_path) or os.path.basename(gate_path) != gate.GATE \
             or "/../" in gate_path + "/":
         raise ValueError(f"--gate: the full path of {gate.GATE} on this cluster, in letters, digits and / . _ - "
@@ -307,7 +308,7 @@ def forced_command(gate_path: str, owners: set | None = None, edit: bool = False
         if why:
             raise ValueError(f"--gate {gate_path}: not safe to run from ({why}); install_nomad_for_users.sh "
                              "1.25.0 or later puts it there")
-    return f"{gate_path} serve --edit" if edit else f"{gate_path} serve"
+    return f"{gate_path} serve" + (" --edit" if edit else "") + (" --runs" if runs else "")
 
 
 def jump_line(pubkey: str, to: list, origins: str | None) -> str:
@@ -343,11 +344,12 @@ def install_jump_key(pubkey: str, *, to: list, origins: str | None, apply: bool 
 
 
 def install_key(pubkey: str, *, origins: str | None, gate_path: str, apply: bool = False,
-                path: Path | None = None, edit: bool = False) -> tuple:
+                path: Path | None = None, edit: bool = False, runs: bool = False) -> tuple:
     """What adding the hub's gate key to authorized_keys changes (and, with
     apply, changing it): restricted to ``gate_path serve`` (``serve --edit``
-    with edit), from ``origins``."""
+    with edit, ``--runs`` with runs), from ``origins``."""
     from nomad.actions.agent import install_key as install
+    said = "serve" + (" --edit" if edit else "") + (" --runs" if runs else "")
     return install(pubkey, from_pattern=origins, apply=apply, path=path,
-                   command=forced_command(gate_path, {0, os.getuid()}, edit=edit),
-                   what=f"`{gate.GATE} serve{' --edit' if edit else ''}`", tag="nomad-gate")
+                   command=forced_command(gate_path, {0, os.getuid()}, edit=edit, runs=runs),
+                   what=f"`{gate.GATE} {said}`", tag="nomad-gate")

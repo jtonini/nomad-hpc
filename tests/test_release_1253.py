@@ -297,8 +297,8 @@ def test_saving_is_the_clusters_say_too(me, monkeypatch):
     assert [d["edit"] for d in out] == [False, True]
     seen = []
     monkeypatch.setattr(gate, "serve", lambda me, **kw: seen.append(kw) or 0)
-    assert gate.main(["serve", "--edit"], me="/g/nomad-gate") == 0 and seen == [{"edit": True}]
-    assert gate.main(["serve"], me="/g/nomad-gate") == 0 and seen[-1] == {"edit": False}
+    assert gate.main(["serve", "--edit"], me="/g/nomad-gate") == 0 and seen == [{"edit": True, "runs": False}]
+    assert gate.main(["serve"], me="/g/nomad-gate") == 0 and seen[-1] == {"edit": False, "runs": False}
     assert gate.main(["serve", "--other"], me="/g/nomad-gate") == 2
     assert remote.forced_command("/usr/local/sw/nomad/bin/nomad-gate", edit=True).endswith("serve --edit")
     assert remote.forced_command("/usr/local/sw/nomad/bin/nomad-gate").endswith("serve")

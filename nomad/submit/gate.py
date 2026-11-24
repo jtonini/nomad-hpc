@@ -52,6 +52,22 @@ list:
                                 its sha256 and the file's size and version), for the browser to
                                 save; --length 0: only what the file is (1.55.0); with serve --edit
 
+On a lab machine with no scheduler, only with `serve --runs` (1.67.0;
+nomad-gate install-key --runs there), and never where Slurm is:
+
+    machine [--share P]         its cores and memory, what nomad's jobs may hold of them together
+                                (P percent, the hub's say: 50 by default) and hold now
+    start  --script PATH --sha256 HEX --cpus N --mem M --time T [--gpus G] [--share P]
+                                that very text started now as the person, on N cores of its own
+                                (and G GPUs, whole, none something else computes on),
+                                at the lowest priority, stopped past its time or its memory;
+                                refused when nomad's jobs there would hold more than P percent
+                                (nomad.submit.machine_run); --test instead of --script: a job of
+                                nomad's own that waits, for nomad gate test
+    runs                        the person's jobs on this machine, newest first
+    run    --run ID             one of them, with the end of its output
+    stop   --run ID             one of them stopped
+
 Every value is checked here, twice (as the cluster account, then as the
 person); nothing is handed to a shell; the script sent must be the
 person's own file, with the very text they were shown (--sha256, 1.25.1):
@@ -131,12 +147,13 @@ _PARTS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(,[A-Za-z0-9][A-Za-z0-9._-]
 _KIT = re.compile(r"[a-z0-9][a-z0-9-]{1,47}")                                                     # 1.35.0
 _BYTES = re.compile(r"0|[1-9][0-9]{0,14}")                                                        # 1.55.0
 _UPID = re.compile(r"[0-9a-f]{16,32}")
+_RID = re.compile(r"r[0-9a-f]{10}")                                                               # 1.67.0
 _KIND_WORDS = {"parts": "a list of up to 12 partitions, comma between,", "vid": "a version id",
                "kit": "a practice kit's name", "bytes": "a number of bytes",
-               "upid": "an upload's id (16 to 32 of 0-9 a-f)"}
+               "upid": "an upload's id (16 to 32 of 0-9 a-f)", "rid": "a job's id on a machine"}
 _CHECK = {"job": _JOB, "int": _INT, "mem": _MEM, "time": _TIME, "partition": _PARTITION,
           "path": _PATH, "sha": _SHA, "vid": _VID, "parts": _PARTS, "kit": _KIT, "bytes": _BYTES,
-          "upid": _UPID}
+          "upid": _UPID, "rid": _RID}
 
 _CHOICES = {"--cpus": "int", "--mem": "mem", "--time": "time", "--gpus": "int",
             "--partition": "partition", "--keep": "flag", "--localscratch": "flag",
@@ -180,6 +197,14 @@ OPS = {
     "get": {"--path": "path", "--offset": "bytes", "--length": "bytes"},
     # A folder's files and folders under it, for copying it to another machine (1.58.0).
     "tree": {"--dir": "path", "--most": "int"},
+    # Jobs on a lab machine with no scheduler (1.67.0; serve --runs): what it has, a job started now
+    # as the person, their jobs there, one with the end of its output, one stopped.
+    "machine": {"--share": "int"},
+    "start": {"--script": "path", "--sha256": "sha", "--cpus": "int", "--mem": "mem", "--time": "time",
+              "--gpus": "int", "--share": "int", "--test": "flag"},
+    "runs": {},
+    "run": {"--run": "rid"},
+    "stop": {"--run": "rid"},
 }
 REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], "job": ["--job"],
             "cancel": ["--job"], "ls": ["--dir"], "show": ["--script"],
@@ -187,7 +212,7 @@ REQUIRED = {"submit": ["--script", "--sha256"], "again": ["--job", "--sha256"], 
             "starts": ["--sha256", "--partitions"], "read": ["--path"], "practice": ["--kit", "--dir"],
             "mkdir": ["--dir"], "put": ["--path", "--upload", "--offset", "--total", "--piece-sha256"],
             "put-status": ["--path", "--upload"], "put-cancel": ["--path", "--upload"], "get": ["--path"],
-            "tree": ["--dir"]}
+            "tree": ["--dir"], "start": ["--cpus", "--mem", "--time"], "run": ["--run"], "stop": ["--run"]}
 # The requests that carry a body on standard input (at most MAX_SCRIPT bytes).
 WITH_BODY = {"save"}
 # ... and the one whose body is bytes, not text (at most MAX_PIECE; 1.55.0).
@@ -252,6 +277,12 @@ def parse(words: list) -> tuple:
         raise Refused(f"{op} needs --script or --job (one of them)")
     if op == "save" and ("--sha256" in got) == ("--new" in got):
         raise Refused("save needs --sha256 (the text it replaces) or --new (one of them)")
+    if op == "start" and "--test" in got and ("--script" in got or "--sha256" in got):
+        raise Refused("start --test takes no script")
+    if op == "start" and "--test" not in got and not ("--script" in got and "--sha256" in got):
+        raise Refused("start needs --script and --sha256, or --test (one of them)")
+    if "--share" in got and not 10 <= int(got["--share"]) <= 90:
+        raise Refused("--share: 10 to 90 (percent)")
     if "--localscratch" in got and "--no-localscratch" in got:
         raise Refused("--localscratch or --no-localscratch, not both")
     if "--cpus" in got and not 1 <= int(got["--cpus"]) <= 4096:
@@ -683,6 +714,8 @@ def _read_body(stream) -> str:
 EDITS = {"save", "read", "versions", "recall", "practice", "mkdir",    # practice, mkdir: they write (1.35.0)
          "put", "put-status", "put-cancel", "get",                      # files from and to the browser (1.55.0)
          "tree"}                                                        # copying a folder elsewhere (1.58.0)
+# Jobs on a lab machine (1.67.0): served only with `serve --runs`, the machine's own say.
+RUNS = {"machine", "start", "runs", "run", "stop"}
 
 
 def _quiet(op: str, got: dict, doc: dict | None = None) -> bool:
@@ -707,7 +740,8 @@ def _as_text(r):
     return r
 
 
-def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False) -> int:
+def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edit: bool = False,
+          runs: bool = False) -> int:
     env = os.environ if env is None else env
     if stdin is None:
         stdin = sys.stdin.buffer
@@ -736,6 +770,11 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
         return refuse("editing files from the Console isn't turned on on this cluster (its nomad account's "
                       "authorized_keys line for the hub's key runs nomad-gate serve, not nomad-gate serve "
                       "--edit: nomad gate install-key --edit)")
+    if op in RUNS and not runs:
+        _log(f"user={who} {asked}: refused: jobs aren't started here")
+        return refuse("starting jobs from the Console isn't turned on on this machine (its nomad account's "
+                      "authorized_keys line for the hub's key doesn't say nomad-gate serve --runs: "
+                      "nomad-gate install-key --runs)")
     body = None
     if op in WITH_BODY or op in WITH_BYTES:
         try:
@@ -776,7 +815,7 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
             _log(f"refused (unsafe install): {why}")
             return refuse(f"the gate won't serve as it is installed: {why}", 3)
         if pw is None:
-            return answer({**_version(), "edit": bool(edit)})
+            return answer({**_version(), "edit": bool(edit), "runs": bool(runs)})
         # May this account act as them? sudo says so by its exit status alone.
         try:
             pre = run_([sudo, "-n", "-l", "-u", pw.pw_name, me, "run"], stdin=subprocess.DEVNULL,
@@ -828,6 +867,8 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
         return refuse(why, 4)
     job = doc.get("job")
     done = f" -> job {job}" if op in ("submit", "again") and isinstance(job, str) and _JOB.fullmatch(job) else ""
+    if op == "start" and doc.get("ok"):
+        done = f" -> job {doc.get('run')} on cores {','.join(str(c) for c in doc.get('cores') or [])}"
     if op == "save" and doc.get("ok"):
         old = got.get("--sha256", "new")[:12]
         done = f" -> {old} => {str(doc.get('sha256'))[:12]}" + (f", kept {doc['kept']}" if doc.get("kept") else "")
@@ -837,6 +878,7 @@ def serve(me: str, env=None, run_=None, slot_=None, check_=None, stdin=None, edi
         _log(f"user={pw.pw_name} {asked}: {'ok' if doc.get('ok') else 'not done'}{done}")
     if op == "version":
         doc["edit"] = bool(edit)                    # the cluster's say on saving (1.25.3)
+        doc["runs"] = bool(runs)                    # the machine's say on starting jobs (1.67.0)
     return answer(doc, r.returncode)
 
 
@@ -1147,6 +1189,8 @@ def run(words: list, me: str, run_=None) -> int:
             return answer({"ok": True, "jobs": rows})
         if op == "job":
             return answer(dict(ok=True, **job_details(got["--job"], run_=run_, me=me)))
+        if op in RUNS:
+            return answer({"ok": True, **_machine_op(op, got)})
         if op == "cancel":
             code, said = in_login(_home(), _slurm(me, ["scancel", got["--job"]]), 60, run_=run_)
             return answer({"ok": code == 0, "job": got["--job"], "exit": code, "said": said.strip()[-2000:]},
@@ -1154,6 +1198,25 @@ def run(words: list, me: str, run_=None) -> int:
     except Refused as e:
         return refuse(str(e), **e.said)
     return refuse(f"{op}: not done")
+
+
+def _machine_op(op: str, got: dict) -> dict:
+    """Jobs on a lab machine (1.67.0), as the person: nomad.submit.machine_run."""
+    from nomad.submit import machine_run as M
+    try:
+        if op == "machine":
+            return {k: v for k, v in M.facts(got.get("--share")).items() if not k.startswith("_")}
+        if op == "start":
+            return M.start(got.get("--script"), got.get("--sha256"), int(got["--cpus"]), got["--mem"],
+                           got["--time"], share=got.get("--share"), test="--test" in got,
+                           gpus=int(got.get("--gpus", 0)))
+        if op == "runs":
+            return {"machine": M.machine(), "runs": M.runs()}
+        if op == "run":
+            return M.one(got["--run"])
+        return M.stop(got["--run"])
+    except M.RunError as e:
+        raise Refused(str(e)) from None
 
 
 # What Slurm says of one job (scontrol, while it knows it), and its accounting record
@@ -2231,7 +2294,7 @@ def get_piece(path: str, offset: int = 0, length: int = GET_PIECE) -> dict:
 USAGE = """usage: nomad-gate serve            (run by sshd for the hub's key)
        nomad-gate run OP [OPTIONS]  (as yourself: what the hub would get)
        nomad-gate version | check   (check: whether it would serve as installed)
-       nomad-gate install-key KEY --from ADDRESS [--edit] [--apply]
+       nomad-gate install-key KEY --from ADDRESS [--edit] [--runs] [--apply]
                                     (as this account: the hub's gate key let in for this gate
                                      alone, as nomad gate install-key does; 1.58.0)
        nomad-gate exec NAME ARGS    (squeue, scancel, scontrol, sacct: as your PATH finds it,
@@ -2243,8 +2306,8 @@ def main(argv: list | None = None, me: str | None = None) -> int:
     """``me``: the gate's own path (bin/nomad-gate, as its launcher gives it)."""
     argv = sys.argv[1:] if argv is None else list(argv)
     me = os.path.abspath(me or sys.argv[0])
-    if argv[:1] == ["serve"] and argv[1:] in ([], ["--edit"]):
-        return serve(me, edit=argv[1:] == ["--edit"])
+    if argv[:1] == ["serve"] and argv[1:] in ([], ["--edit"], ["--runs"], ["--edit", "--runs"]):
+        return serve(me, edit="--edit" in argv[1:], runs="--runs" in argv[1:])
     if argv[:1] == ["run"]:
         return run(argv[1:], me)
     if argv[:1] == ["exec"]:
@@ -2271,11 +2334,14 @@ def install_key_main(argv: list, me: str) -> int:
     p.add_argument("--from", dest="origins", required=True,
                    help="the hub's address as this machine sees it (sshd's from=)")
     p.add_argument("--edit", action="store_true", help="serve --edit: files moved and saved as people (My files)")
+    p.add_argument("--runs", action="store_true", help="serve --runs: jobs started here as people, on a lab "
+                   "machine with no scheduler (1.67.0)")
     p.add_argument("--apply", action="store_true", help="write it (otherwise show what would change)")
     a = p.parse_args(argv)
     from nomad.submit import remote
     try:
-        _status, lines = remote.install_key(a.pubkey, origins=a.origins, gate_path=me, apply=a.apply, edit=a.edit)
+        _status, lines = remote.install_key(a.pubkey, origins=a.origins, gate_path=me, apply=a.apply, edit=a.edit,
+                                            runs=a.runs)
     except (ValueError, OSError) as e:
         sys.stderr.write(f"nomad-gate install-key: {e}\n")
         return 1

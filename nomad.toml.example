@@ -778,6 +778,15 @@ institution = "Your Institution"     # shown in reports and system information
 # folders = ["~", "/scratch/{user}"]
 # login = "cluster.example.edu"   # the host for rsync (default: its [[hub.sites]] host)
 
+# Jobs on lab machines (1.67.0, docs/lab-machine-jobs.md): a job script sent
+# from Submit to a lab machine of [[console.files.machines]] and started there
+# at once, as the person, through its nomad-gate -- only where its key line
+# runs `nomad-gate serve --runs`. No queue: started now, or refused.
+# [console.machine_runs]
+# open = "off"             # "off", "staff", or "labs" (each lab's members on their lab's machines)
+# share = 50               # percent of a machine's cores and memory nomad's jobs hold together
+# most_hours = 72          # the longest time a job may ask for
+
 # ─── Issue reporting ─────────────────────────────────────────────
 # Bug reports and feature requests to the NØMAÐ project on GitHub
 # (`nomad issue`, and the Console's Report Issue page for administrators).

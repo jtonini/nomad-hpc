@@ -11,6 +11,8 @@ nomad submit --mem 12G job.sh     your own value for memory (and --cpus, --time,
 nomad submit --keep job.sh        the script's own values: nomad only checks and tags
 ```
 
+A lab's own workstations, with no scheduler, take jobs from the Console's Submit page too (1.67.0): see [Jobs on Lab Machines](lab-machine-jobs.md).
+
 Options for `nomad submit` go before the script, as with sbatch; what follows the script is its arguments (nomad warns, and won't submit without asking, when one of its own options comes after the script). `--dry-run` shows the command without running it, and `--yes` submits without asking.
 
 ## What it shows

@@ -147,14 +147,21 @@ def _site(ctx, name):
 @click.option("--machines", "all_machines", is_flag=True,
               help="Each of [[console.files.machines]] (lab machines with the gate alone), one after another.")
 @click.option("--user", help="Someone the gate should act as (you, say): asks as them too.")
+@click.option("--run", "try_run", is_flag=True,
+              help="With --user, on a lab machine whose gate starts jobs (serve --runs): start nomad's own "
+                   "small test job there as them, see it running, and stop it (1.67.0).")
 @click.pass_context
-def test_cmd(ctx, site_name, all_machines, user):
+def test_cmd(ctx, site_name, all_machines, user, try_run=False):
     """Is the gate there, and may it act as --user? Asks it its version
     (as itself, then as the person) and the person's jobs now (not on a
-    machine with the gate alone: it runs no jobs); where moving files is on,
-    sends half a file and removes it. Changes nothing."""
+    machine with the gate alone: it runs no Slurm jobs); where moving files
+    is on, sends half a file and removes it. Changes nothing, but with --run
+    on a lab machine: a test job of nomad's started and stopped there (its
+    record kept, as any job's, in the person's ~/.local/share/nomad/runs)."""
     if bool(site_name) == bool(all_machines):
         raise click.UsageError("--site NAME, or --machines")
+    if try_run and not user:
+        raise click.UsageError("--run goes with --user")
     if all_machines:
         machines = _machines(ctx)
         if not machines:
@@ -162,7 +169,7 @@ def test_cmd(ctx, site_name, all_machines, user):
         bad = []
         for m in machines:
             try:
-                ctx.invoke(test_cmd, site_name=m["name"], all_machines=False, user=user)
+                ctx.invoke(test_cmd, site_name=m["name"], all_machines=False, user=user, try_run=try_run)
             except SystemExit as e:
                 if e.code:
                     bad.append(m["name"])
@@ -196,6 +203,9 @@ def test_cmd(ctx, site_name, all_machines, user):
                 hub_says = "on (a machine of [[console.files.machines]])"
             click.echo(f"       saving scripts and moving files from the Console: the cluster {here}; "
                        f"the hub {hub_says}")
+        if s.get("machine"):
+            click.echo("       starting jobs here from the Console: " + (
+                "on" if a.get("runs") else "off (nomad-gate install-key --runs turns it on)"))
     if user and a.get("ok"):
         b = say(f"it acts as {user}", remote.call(s, "version", user, hub=hub))
         if b.get("ok") and b.get("account") != user:
@@ -215,8 +225,50 @@ def test_cmd(ctx, site_name, all_machines, user):
                 say("listing a folder for copying it (their home, the first few)", t if t.get("ok") or
                     "not something the gate does" not in str(t.get("error") or "") else
                     {"ok": False, "error": "the gate is older than 1.58.0"})
+        if b.get("ok") and try_run and s.get("machine"):
+            if not a.get("runs"):
+                say("a test job as them", {"ok": False, "error": "this machine's gate doesn't start jobs "
+                                                                 "(nomad-gate install-key --runs)"})
+            else:
+                from nomad.actions.remote import _config
+                from nomad.submit import machine_runs as R
+                share = R.settings(_config(ctx.obj.get("config_target") if ctx.obj else None)).share
+                say("a test job as them (started, seen running from a new connection, stopped)",
+                    run_check(remote, s, hub, user, share))
     if not ok:
         sys.exit(1)
+
+
+def run_check(remote, s, hub, user, share: int, pause: float = 2.0) -> dict:
+    """Jobs on a lab machine (1.67.0), as ``user``: what the machine has,
+    nomad's own test job started on one core (no script of theirs), seen
+    running from another connection a moment later (so the job outlives the
+    connection that started it), and stopped."""
+    import time as _time
+    m = remote.call(s, "machine", user, hub=hub, share=share)
+    if not m.get("ok"):
+        return {"ok": False, "error": f"what the machine has: {m.get('error')}"}
+    click.echo(f"       {m.get('cpus')} cores, {m.get('mem', 0) / 1024 ** 3:.0f} GB; nomad's jobs may hold "
+               f"{m.get('may_cpus')} cores ({m.get('share')}%), hold {m.get('held_cpus')} now")
+    st = remote.call(s, "start", user, hub=hub, test=True, cpus=1, mem="64M", time="5:00", share=share)
+    if not st.get("ok"):
+        return {"ok": False, "error": f"starting it: {st.get('error')}"}
+    run = st.get("run")
+    _time.sleep(pause)
+    seen = remote.call(s, "runs", user, hub=hub)
+    mine = next((r for r in seen.get("runs") or [] if r.get("run") == run), None) if seen.get("ok") else None
+    gone = remote.call(s, "stop", user, hub=hub, run=run)
+    if not seen.get("ok"):
+        return {"ok": False, "error": f"listing their jobs: {seen.get('error')}"}
+    if not mine or mine.get("state") != "running":
+        why = (mine or {}).get("why_words") or "not listed"
+        return {"ok": False, "error": f"job {run} wasn't running a moment later ({why}): the machine may end "
+                                      "what a connection started once it closes (logind's KillUserProcesses)"}
+    if not gone.get("ok"):
+        return {"ok": False, "error": f"stopping it: {gone.get('error')}"}
+    click.echo(f"       job {run} on core {','.join(str(c) for c in st.get('cores') or [])}: running, then "
+               + ("stopped" if gone.get("state") == "ended" else "stopping"))
+    return {"ok": True}
 
 
 def _at_least(version, want: tuple) -> bool:
