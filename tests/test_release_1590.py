@@ -177,7 +177,7 @@ def _hub(rows):
     conn.execute(f"ALTER TABLE {T.HOSTS} ADD COLUMN source_site TEXT")
     for m, inst, res, why, since in rows:
         conn.execute(f"INSERT INTO {T.TABLE} (machine, program, install, version, result, reason, seconds, tried_at, "
-                     "since, source_site) VALUES (?, 'Q-Chem', ?, ?, ?, ?, 1, ?, ?, 'jonimitchell')",
+                     "since, source_site) VALUES (?, 'Q-Chem', ?, ?, ?, ?, 1, ?, ?, 'labhead1')",
                      (m, inst, T.version_of(inst), res, why, since, since))
     return conn
 
@@ -201,7 +201,7 @@ def test_told_once_each_change(tmp_path):
     sent = []
     out = L.remind(conn, s, rec, datetime(2026, 11, 21, 8, 20), dry=False, sender=lambda m, c: sent.append(m))
     assert out["status"] == "sent" and out["subject"] == "NOMAD: Q-Chem doesn't run on some machines"
-    assert "Q-Chem 6.4 (jonimitchell) doesn't run on 1 machine: erica. Why: this machine isn't in the license." \
+    assert "Q-Chem 6.4 (labhead1) doesn't run on 1 machine: erica. Why: this machine isn't in the license." \
         in out["text"] and "kevin" not in out["text"]
     assert L.remind(conn, s, rec, datetime(2026, 11, 21, 20), dry=False, sender=lambda m, c: sent.append(m))["status"] \
         == "nothing due"
@@ -215,15 +215,15 @@ def test_told_once_each_change(tmp_path):
 
 
 def test_with_a_license_ending_one_email(tmp_path):
-    notes = [L.Note({"site": "spydur", "name": "Gurobi", "ends": "2026-12-01", "never": False, "detail": "",
+    notes = [L.Note({"site": "hpc1", "name": "Gurobi", "ends": "2026-12-01", "never": False, "detail": "",
                      "kind": "gurobi", "problem": None, "problem_since": None, "about": "", "read_at": None},
                     "ends", "ends:2026-12-01", ("14",), 11)]
-    tries = [{"row": {"site": "jonimitchell", "machine": "erica", "program": "Q-Chem", "install": "/q64",
+    tries = [{"row": {"site": "labhead1", "machine": "erica", "program": "Q-Chem", "install": "/q64",
                       "version": "6.4", "result": "license", "reason": "this machine isn't in the license"},
               "why": "notrun", "what": "license:x"}]
     subject, text = L.letter(notes, L.settings({}), datetime(2026, 11, 20).date(), tries)
-    assert subject == "NOMAD: Gurobi (spydur) ends in 11 days; Q-Chem doesn't run on some machines"
-    assert text.index("Gurobi (spydur)") < text.index("Licensed programs on the machines")
+    assert subject == "NOMAD: Gurobi (hpc1) ends in 11 days; Q-Chem doesn't run on some machines"
+    assert text.index("Gurobi (hpc1)") < text.index("Licensed programs on the machines")
 
 
 def test_the_commands(lab, tmp_path):

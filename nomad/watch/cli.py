@@ -113,7 +113,7 @@ def watch_group():
               help="Findings seen in the last DAYS days.")
 @click.option("--all", "everything", is_flag=True, help="Also what is only listed (info): listeners on "
               "ephemeral ports on compute nodes. Verified forwards are always shown.")
-@click.option("--mask", is_flag=True, help="Stand-ins for people and hosts (for sharing outside ARC).")
+@click.option("--mask", is_flag=True, help="Stand-ins for people and hosts (for sharing outside research computing).")
 @click.option("--json", "as_json", is_flag=True, help="Print JSON.")
 @click.option("--db", type=click.Path(exists=True, dir_okay=False), help="Database (default: the site's).")
 @click.pass_context

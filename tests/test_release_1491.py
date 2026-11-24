@@ -40,7 +40,7 @@ def world(tmp_path):
             collected_at TEXT, has_account INTEGER, account_missing_since TEXT, first_seen TEXT, source_site TEXT);
         CREATE TABLE jobs (job_id TEXT, user_name TEXT, partition TEXT, submit_time TEXT, source_site TEXT);""")
     conn.executemany("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
-                     "source_site) VALUES (?, ?, 1, 'spydur', ?, 1, 'spydur')",
+                     "source_site) VALUES (?, ?, 1, 'hpc1', ?, 1, 'hpc1')",
                      [(u, g, "2099-01-01T00:00:00") for u, g in
                       (("kim", "kim$"), ("ann", "kim$"), ("pat", "pat$"), ("olive", "pat$"), ("lee", "pat$"))])
     conn.commit()
@@ -122,7 +122,7 @@ def test_a_lab_new_to_the_check_mid_term(world, clock):
     run(conn, rec, live, clock, OPENS)
     run(conn, rec, live, clock, day(11, 16))
     conn.executemany("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
-                     "source_site) VALUES (?, 'sam$', 1, 'spydur', '2099-01-01T00:00:00', 1, 'spydur')",
+                     "source_site) VALUES (?, 'sam$', 1, 'hpc1', '2099-01-01T00:00:00', 1, 'hpc1')",
                      [("sam",), ("quinn",)])
     conn.commit()
     assert run(conn, rec, live, clock, day(11, 20)) == [("sam$", "open", "sent")]

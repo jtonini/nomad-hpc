@@ -20,17 +20,17 @@ PUB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBqLm5Kcl1V0Hn5dGx0rP6yE8Wq8l9Q5Yk2n5
 def _site(tmp_path, **kw):
     key = tmp_path / "id_gate"
     key.write_text("x")
-    return {"name": "vadur", "host": "vadur", "ssh_user": "nomad", "submit": "gate", "gate_key": str(key), **kw}
+    return {"name": "hpc3", "host": "hpc3", "ssh_user": "nomad", "submit": "gate", "gate_key": str(key), **kw}
 
 
 # -- the gate through a jump host -----------------------------------------------------------------
 
 def test_a_gate_reached_through_another_host(tmp_path):
-    s = _site(tmp_path, gate_jump="zeus@jonimitchell")
+    s = _site(tmp_path, gate_jump="monitor@labhead1")
     cfg = remote.settings(s)
-    assert cfg["jump"] == {"user": "zeus", "host": "jonimitchell", "port": None}
+    assert cfg["jump"] == {"user": "monitor", "host": "labhead1", "port": None}
     argv = remote.ssh_argv(cfg, ["jobs", "--user", "jdoe"])
-    assert argv[-4:-1] == ["nomad", "--", "vadur"]               # the cluster itself, as before
+    assert argv[-4:-1] == ["nomad", "--", "hpc3"]               # the cluster itself, as before
     proxy = [a for a in argv if a.startswith("ProxyCommand=")]
     assert len(proxy) == 1 and argv[argv.index(proxy[0]) - 1] == "-o"
     inner = shlex.split(proxy[0][len("ProxyCommand="):])
@@ -38,63 +38,63 @@ def test_a_gate_reached_through_another_host(tmp_path):
     for o in ("IdentitiesOnly=yes", "IdentityAgent=none", "BatchMode=yes", "StrictHostKeyChecking=yes",
               "ControlPath=none", "ForwardAgent=no", "PasswordAuthentication=no"):
         assert o in inner
-    assert inner[-5:] == ["zeus", "-W", "%h:%p", "--", "jonimitchell"] and "-l" in inner
+    assert inner[-5:] == ["monitor", "-W", "%h:%p", "--", "labhead1"] and "-l" in inner
     assert shlex.split(argv[-1]) == [gate.GATE, "jobs", "--user", "jdoe"]
     # a port, and a key whose path has a % (ssh's own tokens in ProxyCommand)
     odd = tmp_path / "k%h"
     odd.write_text("x")
-    cfg = remote.settings({**s, "gate_jump": "zeus@10.0.0.5:2222", "gate_key": str(odd)})
+    cfg = remote.settings({**s, "gate_jump": "monitor@10.0.0.5:2222", "gate_key": str(odd)})
     inner = shlex.split(remote.proxy_command(cfg))
     assert inner[inner.index("-p") + 1] == "2222" and inner[inner.index("-i") + 1].endswith("k%%h")
     # none: as before, no proxy at all; nothing of the account's ssh settings either way
     plain = remote.ssh_argv(remote.settings(_site(tmp_path)), ["version"])
     assert not any(a.startswith("ProxyCommand") for a in plain) and "jump" not in remote.settings(_site(tmp_path))
-    for bad in ("jonimitchell", "zeus@", "Zeus Smith@x", "zeus@-oProxyCommand=x", "zeus@h:0", "zeus@h:99999", 5):
+    for bad in ("labhead1", "monitor@", "Zeus Smith@x", "monitor@-oProxyCommand=x", "monitor@h:0", "monitor@h:99999", 5):
         with pytest.raises(remote.GateError, match="gate_jump"):
             remote.settings({**s, "gate_jump": bad})
 
 
 def test_the_jump_hosts_key_line(tmp_path):
-    line = remote.jump_line(PUB, ["vadur:22"], "141.166.186.112")
+    line = remote.jump_line(PUB, ["hpc3:22"], "172.40.186.112")
     opts, kind, blob, comment = line.split(" ", 3)
-    assert opts.split(",") == ["restrict", "port-forwarding", 'permitopen="vadur:22"', 'command="/bin/false"',
-                               'from="141.166.186.112"']
+    assert opts.split(",") == ["restrict", "port-forwarding", 'permitopen="hpc3:22"', 'command="/bin/false"',
+                               'from="172.40.186.112"']
     assert (kind, comment) == ("ssh-ed25519", "nomad-gate@hub")
-    two = remote.jump_line(PUB, ["vadur:22", "10.1.2.3:2222"], None)
-    assert 'permitopen="vadur:22",permitopen="10.1.2.3:2222"' in two and "from=" not in two
-    for bad in ([], ["vadur"], ["vadur:0"], ["-x:22"], ['vadur:22",x']):
+    two = remote.jump_line(PUB, ["hpc3:22", "10.1.2.3:2222"], None)
+    assert 'permitopen="hpc3:22",permitopen="10.1.2.3:2222"' in two and "from=" not in two
+    for bad in ([], ["hpc3"], ["hpc3:0"], ["-x:22"], ['hpc3:22",x']):
         with pytest.raises(ValueError):
             remote.jump_line(PUB, bad, None)
     with pytest.raises(ValueError):
-        remote.jump_line(PUB, ["vadur:22"], 'x" ,command="sh')
+        remote.jump_line(PUB, ["hpc3:22"], 'x" ,command="sh')
     # written once, then present; a line with the same key and other options is replaced
     ak = tmp_path / ".ssh" / "authorized_keys"
     ak.parent.mkdir()
     ak.write_text("ssh-rsa AAAAother someone\n" + PUB + "\n")
-    status, msg = remote.install_jump_key(PUB, to=["vadur:22"], origins="141.166.186.112", path=ak)
+    status, msg = remote.install_jump_key(PUB, to=["hpc3:22"], origins="172.40.186.112", path=ak)
     assert status == "would-change" and ak.read_text().count(PUB.split()[1]) == 1 and "restrict" not in ak.read_text()
-    status, _ = remote.install_jump_key(PUB, to=["vadur:22"], origins="141.166.186.112", path=ak, apply=True)
+    status, _ = remote.install_jump_key(PUB, to=["hpc3:22"], origins="172.40.186.112", path=ak, apply=True)
     assert status == "changed"
     got = ak.read_text().splitlines()
     assert got[0] == "ssh-rsa AAAAother someone" and got[1] == line and len(got) == 2
-    assert remote.install_jump_key(PUB, to=["vadur:22"], origins="141.166.186.112", path=ak)[0] == "present"
+    assert remote.install_jump_key(PUB, to=["hpc3:22"], origins="172.40.186.112", path=ak)[0] == "present"
 
 
 def test_nomad_gate_jump_key(tmp_path, monkeypatch):
     from nomad.cli import cli
     monkeypatch.setenv("HOME", str(tmp_path))
-    r = CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "vadur:22", "--from", "141.166.186.112"])
+    r = CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "hpc3:22", "--from", "172.40.186.112"])
     assert r.exit_code == 0, r.output
-    assert 'permitopen="vadur:22"' in r.output and "Nothing written (dry run)" in r.output
+    assert 'permitopen="hpc3:22"' in r.output and "Nothing written (dry run)" in r.output
     assert not (tmp_path / ".ssh" / "authorized_keys").exists()
-    r = CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "vadur:22", "--from", "141.166.186.112", "--apply"])
+    r = CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "hpc3:22", "--from", "172.40.186.112", "--apply"])
     assert r.exit_code == 0 and "Written." in r.output
-    assert CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "vadur:22"]).exit_code != 0     # no --from
-    assert CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "vadur", "--from-anywhere"]).exit_code != 0
+    assert CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "hpc3:22"]).exit_code != 0     # no --from
+    assert CliRunner().invoke(cli, ["gate", "jump-key", PUB, "--to", "hpc3", "--from-anywhere"]).exit_code != 0
 
 
 def test_a_gate_through_a_jump_is_asked_as_any_other(tmp_path):
-    s = _site(tmp_path, gate_jump="zeus@jonimitchell")
+    s = _site(tmp_path, gate_jump="monitor@labhead1")
     seen = {}
 
     def run_(argv, **kw):
@@ -105,13 +105,13 @@ def test_a_gate_through_a_jump_is_asked_as_any_other(tmp_path):
     assert "SHELL" not in seen["env"]                # so ssh runs the ProxyCommand with /bin/sh
 
     def unknown(argv, **kw):
-        return subprocess.CompletedProcess(argv, 255, "", "No ED25519 host key is known for vadur and you have "
+        return subprocess.CompletedProcess(argv, 255, "", "No ED25519 host key is known for hpc3 and you have "
                                            "requested strict checking.\nHost key verification failed.\n"
                                            "Connection closed by UNKNOWN port 65535\n")
     doc = remote.call(s, "jobs", "jdoe", run_=unknown)
     assert not doc["ok"] and doc["where"] == "ssh"
-    assert "through zeus@jonimitchell: No ED25519 host key is known for vadur" in doc["error"]
-    assert "jonimitchell's and vadur's" in doc["error"]
+    assert "through monitor@labhead1: No ED25519 host key is known for hpc3" in doc["error"]
+    assert "labhead1's and hpc3's" in doc["error"]
 
 
 # -- the hub's sync timer ---------------------------------------------------------------------------

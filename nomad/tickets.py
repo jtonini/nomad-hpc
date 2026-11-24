@@ -4,19 +4,20 @@
 
 Everything a PI asks Research Computing for through nomad, and every case
 Research Computing opens with someone (data unchanged for a year, say), gets
-one number from one sequence, shown as ``ARC-0012``: on the PI's card, in
+one number from one sequence, shown as ``REQ-0012``: on the PI's card, in
 each email's subject, on the Admin page, in the log and in the reports. A
 reply to an email keeps its subject, so the number comes back with it.
 
 The sequence is kept in lab_check.db (beside combined.db, the nomad
 account's), in ``tickets``: the number, what kind of thing it is, and when it
 was taken. Account requests made before 1.44.0 keep their number: request
-#12 is ARC-0012.
+#12 is REQ-0012. (Before 1.66.0 the prefix was "ARC" unless set: a site
+that had its numbers as ARC-0012 sets ``prefix = "ARC"`` to keep them.)
 
 Settings, in the hub's nomad.toml::
 
     [console.tickets]
-    prefix = "ARC"        # letters and digits, at most 10: ARC-0012
+    prefix = "REQ"        # letters and digits, at most 10: REQ-0012 (1.66.0; it was "ARC")
     digits = 4            # the number's width, with leading zeros (3 to 8); a larger number just grows
 """
 from __future__ import annotations
@@ -35,7 +36,7 @@ _PREFIX = re.compile(r"[A-Za-z][A-Za-z0-9]{0,9}")
 
 @dataclass(frozen=True)
 class Settings:
-    prefix: str = "ARC"
+    prefix: str = "REQ"
     digits: int = 4
     problems: tuple = field(default_factory=tuple)
 
@@ -44,10 +45,10 @@ def settings(config: dict | None) -> Settings:
     console = (config or {}).get("console") or {}
     raw = console.get("tickets") if isinstance(console.get("tickets"), dict) else {}
     problems = []
-    prefix = raw.get("prefix", "ARC")
+    prefix = raw.get("prefix", "REQ")
     if not (isinstance(prefix, str) and _PREFIX.fullmatch(prefix)):
         problems.append("[console.tickets] prefix should be letters and digits, at most 10, starting with a letter")
-        prefix = "ARC"
+        prefix = "REQ"
     digits = raw.get("digits", 4)
     if isinstance(digits, bool) or not isinstance(digits, int) or not 3 <= digits <= 8:
         problems.append("[console.tickets] digits should be a whole number from 3 to 8")
@@ -56,13 +57,13 @@ def settings(config: dict | None) -> Settings:
 
 
 def ref(number, s: Settings | None = None) -> str:
-    """ARC-0012."""
+    """REQ-0012."""
     s = s or Settings()
     return f"{s.prefix}-{int(number):0{s.digits}d}"
 
 
 def number_of(text, s: Settings | None = None) -> int | None:
-    """The number in ARC-0012, arc-12, #12 or 12; None if it isn't one
+    """The number in REQ-0012, req-12, #12 or 12; None if it isn't one
     (another prefix included: it is another place's number)."""
     s = s or Settings()
     t = str(text if text is not None else "").strip()

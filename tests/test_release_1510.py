@@ -32,29 +32,29 @@ def world(tmp_path):
         c.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   (jid, site, user, state, ran, code, sig, sub.isoformat(sep=" "), end.isoformat()))
     # kim: an old hand, four jobs stopped within seconds this week, one killed for memory (not one of them)
-    job("100", "spydur", "kim", "COMPLETED", 3600, 300, code=0)
+    job("100", "hpc1", "kim", "COMPLETED", 3600, 300, code=0)
     for n in range(4):
-        job(f"10{n + 1}", "spydur", "kim", "FAILED", 8, 1 + n * 0.1)
-    job("110", "spydur", "kim", "FAILED", 20, 1, code=137)
-    job("111", "spydur", "kim", "FAILED", 30, 20)                       # three weeks ago: not this week's
+        job(f"10{n + 1}", "hpc1", "kim", "FAILED", 8, 1 + n * 0.1)
+    job("110", "hpc1", "kim", "FAILED", 20, 1, code=137)
+    job("111", "hpc1", "kim", "FAILED", 30, 20)                       # three weeks ago: not this week's
     # pat: two quick ones only
-    job("200", "spydur", "pat", "COMPLETED", 3600, 300, code=0)
-    job("201", "spydur", "pat", "FAILED", 5, 1)
-    job("202", "spydur", "pat", "FAILED", 5, 2)
-    # ann: new on arachne (first job ten days ago), four of five not completed; long-running, so not quick
+    job("200", "hpc1", "pat", "COMPLETED", 3600, 300, code=0)
+    job("201", "hpc1", "pat", "FAILED", 5, 1)
+    job("202", "hpc1", "pat", "FAILED", 5, 2)
+    # ann: new on hpc2 (first job ten days ago), four of five not completed; long-running, so not quick
     for n, st in enumerate(("FAILED", "FAILED", "TIMEOUT", "OUT_OF_MEMORY", "COMPLETED")):
-        job(f"30{n}", "arachne", "ann", st, 900, 2 + n, code=0 if st == "COMPLETED" else 1)
-    job("309", "arachne", "ann", "CANCELLED", 10, 1)
-    # olive: failing, but on spydur for a year
-    job("400", "spydur", "olive", "COMPLETED", 3600, 360, code=0)
+        job(f"30{n}", "hpc2", "ann", st, 900, 2 + n, code=0 if st == "COMPLETED" else 1)
+    job("309", "hpc2", "ann", "CANCELLED", 10, 1)
+    # olive: failing, but on hpc1 for a year
+    job("400", "hpc1", "olive", "COMPLETED", 3600, 360, code=0)
     for n in range(3):
-        job(f"40{n + 1}", "spydur", "olive", "FAILED", 900, 1 + n)
+        job(f"40{n + 1}", "hpc1", "olive", "FAILED", 900, 1 + n)
     # sam: new, and most completed
     for n, st in enumerate(("COMPLETED", "COMPLETED", "FAILED")):
-        job(f"50{n}", "spydur", "sam", st, 900, 2 + n, code=0 if st == "COMPLETED" else 1)
+        job(f"50{n}", "hpc1", "sam", st, 900, 2 + n, code=0 if st == "COMPLETED" else 1)
     # lee: jobs this week (what ran short comes from his insights)
-    job("600", "spydur", "lee", "COMPLETED", 3600, 400, code=0)
-    job("601", "spydur", "lee", "TIMEOUT", 43200, 1, code=0)
+    job("600", "hpc1", "lee", "COMPLETED", 3600, 400, code=0)
+    job("601", "hpc1", "lee", "TIMEOUT", 43200, 1, code=0)
     c.commit()
     c.close()
     return db
@@ -64,7 +64,7 @@ def short_issue(key, directive, suggested, current, stats, **kw):
     base = {"dimension": key, "dimension_key": key, "affected_jobs": 3, "total_applicable": 12, "avg_score": 40.0,
             "severity": "medium", "trajectory": "stable", "directive": directive, "suggested_value": 1,
             "suggested_display": suggested, "current_display": "x", "direction": "raise",
-            "current_value_typical": current, "cluster": "spydur", "partition": "basic", "usage_stats": stats}
+            "current_value_typical": current, "cluster": "hpc1", "partition": "basic", "usage_stats": stats}
     base.update(kw)
     return Issue(**base)
 
@@ -106,7 +106,7 @@ def test_jobs_that_stopped_within_a_minute(tmp_path, insights):
     got = {m["user"]: m for m in due(db)["mail"]}
     (e,) = [e for e in got["kim"]["entries"] if e.group == "jobs:quick"]
     assert e.title == "Some of your jobs stopped within a minute"
-    assert e.lines == ["On spydur, 4 of your jobs this week stopped with an error within a minute of starting."]
+    assert e.lines == ["On hpc1, 4 of your jobs this week stopped with an error within a minute of starting."]
     assert e.jobs == "101, 102, 103 and 104"                                  # 1.62.0: a line of its own
     assert "slurm-JOBID.out" in " ".join(e.todo) and "module" in e.advice[0]
     assert not [e for e in got.get("pat", {"entries": []})["entries"] if e.group == "jobs:quick"]   # two: too few
@@ -121,16 +121,16 @@ def test_people_new_to_a_cluster(tmp_path, insights):
     db = world(tmp_path)
     got = {m["user"]: m for m in due(db)["mail"]}
     (e,) = [e for e in got["ann"]["entries"] if e.group == "jobs:new"]
-    assert e.title == "Getting started on arachne"
-    assert e.lines == ["You started running jobs on arachne recently, and 4 of your 5 jobs there so far have not "
+    assert e.title == "Getting started on hpc2"
+    assert e.lines == ["You started running jobs on hpc2 recently, and 4 of your 5 jobs there so far have not "
                        "completed."]
     assert e.advice[0] == "That is common when starting out on a cluster, and it gets better quickly."
     assert e.todo[0].endswith("reply to this email, or write to the address below.")
-    for who in ("olive", "sam", "kim"):                                  # a year on spydur; most completed
+    for who in ("olive", "sam", "kim"):                                  # a year on hpc1; most completed
         assert not [x for x in got.get(who, {"entries": []})["entries"] if x.group == "jobs:new"], who
     # told once a cluster
     assert not [x for x in N._new_entries(sqlite3.connect(db), "ann", N.settings(CONFIG), NOW,
-                                          {"jobs:new:arachne": NOW.isoformat()}, "source_site",
+                                          {"jobs:new:hpc2": NOW.isoformat()}, "source_site",
                                           {"submit_time"}) if x.group == "jobs:new"]
     nocontact = N.settings({"notices": {k: v for k, v in CONFIG["notices"].items() if k != "contact"}})
     (e2,) = N._new_entries(sqlite3.connect(db), "ann", nocontact, NOW, {}, "source_site", {"submit_time"})
@@ -143,7 +143,7 @@ def test_jobs_that_ran_out_of_time_or_memory(tmp_path, insights):
     short = [e for e in got["lee"]["entries"] if e.group.startswith("jobs:short")]
     assert [e.title for e in short] == ["Some of your jobs ran out of time", "Some of your jobs ran out of memory"]
     t, m = short
-    assert t.lines[0] == ("On spydur (basic), 3 of your last 12 jobs reached their time limit "
+    assert t.lines[0] == ("On hpc1 (basic), 3 of your last 12 jobs reached their time limit "
                           "or came close to it (they typically asked for 12 h and ran about 12 h).")
     assert t.jobs == "601, 600 and 1 more" and t.change == ["#SBATCH --time=18:00:00"]      # 1.62.0: apart
     assert m.lines[0].endswith("ran out of memory or came close to it (they typically asked for 8 GB and used about "

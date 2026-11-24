@@ -27,7 +27,7 @@ import click
 import toml
 
 from nomad.analysis.derivatives import (
-    analyze_disk_trend,
+    analyze_disk_fit,
 )
 from nomad.issue.cli_commands import issue as issue_group
 
@@ -577,12 +577,12 @@ def templates_cmd(ctx, site, on_hub, program, input_path, module, choices, check
     """The job script templates a site offers (1.26.0): [[submit.templates]].
 
     \b
-    nomad templates --site spydur --hub          each program, its versions there, the one chosen first,
+    nomad templates --site hpc1 --hub          each program, its versions there, the one chosen first,
                                                  its options (1.29.0) and their choices
-    nomad templates --site spydur --hub --make Gaussian --input /home/me/water.gjf
+    nomad templates --site hpc1 --hub --make Gaussian --input /home/me/water.gjf
                                                  the script it would write (nothing is saved)
-    nomad templates --site spydur --hub --make CP2K --input /home/me/h2o.inp --choose parallel=2
-    nomad templates --site spydur --hub --check  every script each template can make, made (for its staff)
+    nomad templates --site hpc1 --hub --make CP2K --input /home/me/h2o.inp --choose parallel=2
+    nomad templates --site hpc1 --hub --check  every script each template can make, made (for its staff)
 
     The versions are the cluster's own modules ([collectors.modules] there)."""
     from nomad.collectors.modules import available
@@ -671,7 +671,7 @@ def clock_cmd(ctx, hosts, history, on_hub, site, check, send, db):
     nomad clock                        each host: its clock busy, what it should give, throttled since
     nomad clock --host node02 --history 10
     nomad clock --check --send         what would be alerted now, sent as a test
-    nomad clock --hub --site arachne   a site's, on the hub
+    nomad clock --hub --site hpc2   a site's, on the hub
 
     The clock collector reads each host's CPU cycle counter over a short busy
     loop ([collectors.clock])."""
@@ -791,7 +791,7 @@ def power_cmd(ctx, hosts, all_sensors, events, on_hub, site, check, send, db):
     nomad power                       each host: what is wrong, its supplies, its log
     nomad power --host gpu09 --all    every sensor of one host
     nomad power --check --send        what would be alerted now, sent as a test
-    nomad power --hub --site vadur    a site's, on the hub
+    nomad power --hub --site hpc3    a site's, on the hub
 
     The power collector reads them from the root helper's file
     (scripts/power_root_probe.py, run by root's cron)."""
@@ -1758,9 +1758,11 @@ def storage_status_cmd(ctx, db):
 @click.option('--db', type=click.Path(), help='Database path override')
 @click.pass_context
 def analyze(ctx: click.Context, path: str, hours: int, limit_gb: float, db: str) -> None:
-    """Analyze filesystem trends using derivatives.
-    
-    Shows current trend, rate of change, and projections.
+    """A filesystem's trend: how fast it fills, and when it will be full.
+
+    From the disk collector's readings of PATH over the last HOURS: a curve
+    fitted to every reading (1.66.0), its rate now and, where it bends, its
+    acceleration, and the size in a day and a week.
     """
     config = ctx.obj['config']
 
@@ -1772,23 +1774,30 @@ def analyze(ctx: click.Context, path: str, hours: int, limit_gb: float, db: str)
     if not db_path.exists():
         raise click.ClickException(f"Database not found: {db_path}")
 
-    # Get historical data
+    # Get historical data: the disk collector's readings (1.66.0: it read a
+    # table the NAS collector writes, without a path, and failed)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(filesystems)")}
+    if not {"path", "timestamp", "used_bytes", "total_bytes"} <= cols:
+        raise click.ClickException(f"{db_path}: no disk readings (the disk collector writes them)")
+    pct = "used_percent" if "used_percent" in cols else "100.0 * used_bytes / NULLIF(total_bytes, 0)"
+    since = (datetime.now() - timedelta(hours=hours)).isoformat()
     rows = conn.execute(
-        """
-        SELECT timestamp, used_bytes, used_percent, total_bytes
-        FROM storage_state
+        f"""
+        SELECT timestamp, used_bytes, {pct} AS used_percent, total_bytes
+        FROM filesystems
         WHERE path = ?
-          AND timestamp > datetime('now', ?)
+          AND timestamp > ?
         ORDER BY timestamp ASC
         """,
-        (path, f'-{hours} hours')
+        (path, since)
     ).fetchall()
 
     if not rows:
-        raise click.ClickException(f"No data found for {path}")
+        known = [r[0] for r in conn.execute("SELECT DISTINCT path FROM filesystems ORDER BY path LIMIT 12")]
+        raise click.ClickException(f"No readings of {path} in the last {hours} hours"
+                                   + (f" (read: {', '.join(known)})" if known else ""))
 
     # Convert to history format
     history = [dict(row) for row in rows]
@@ -1801,7 +1810,7 @@ def analyze(ctx: click.Context, path: str, hours: int, limit_gb: float, db: str)
         limit_bytes = history[-1]['total_bytes']
 
     # Analyze
-    analysis = analyze_disk_trend(history, limit_bytes=limit_bytes)
+    analysis = analyze_disk_fit(history, limit_bytes=limit_bytes)   # 1.66.0: over every reading
 
     # Display results
     click.echo()
@@ -2680,7 +2689,7 @@ def dashboard(ctx, host, port, db):
     - PCA View: Jobs positioned by principal components (patterns emerge from data)
     
     Remote access via SSH tunnel:
-        ssh -L 8050:localhost:8050 badenpowell
+        ssh -L 8050:localhost:8050 gpuws1
         Then open http://localhost:8050 in your browser
     
     Examples:
@@ -3550,7 +3559,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                     "nodes": nodes,
                     "gpu_nodes": part_gpu,
                 }
-            # Ask for node_ssh_user (e.g., zeus on headnode but root on nodes)
+            # Ask for node_ssh_user (e.g., monitor on the head node but root on nodes)
             click.echo()
             click.echo(
                 "  Some clusters require SSHing into compute nodes")
@@ -3573,9 +3582,9 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
                 "  For workstation groups, you organize machines by")
             click.echo(
                 "  department or lab. Each group becomes a section")
-            click.echo("  in the dashboard.")
+            click.echo("  in the Console.")
             click.echo()
-            # Ask for workstation SSH user (zeus may SSH as root, etc.)
+            # Ask for workstation SSH user (monitor may ssh as root, etc.)
             import getpass
             current_user = getpass.getuser()
             click.echo(
@@ -4104,7 +4113,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             click.echo(
                 "    Use 'nomad sync' on a central host to merge")
             click.echo(
-                "    all databases into a unified dashboard.")
+                "    all databases into one, for the Console.")
             click.echo()
             click.echo(
                 "    Best when: machines have different roles")
@@ -4622,7 +4631,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             "  attention (disk filling up, nodes going down,"
             " etc.).")
         click.echo(
-            "  You can also view all alerts in the dashboard.")
+            "  The Console shows every alert too.")
         click.echo()
         admin_email = click.prompt(
             "  Your email address (press Enter to skip)",
@@ -4640,12 +4649,13 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             "  ━━ Step 4: Dashboard ━━", fg="cyan", bold=True))
         click.echo()
         click.echo(
-            "  The NØMAÐ dashboard is a web page you open in"
-            " your")
+            "  People see NØMAÐ in the Console, which runs on the hub")
         click.echo(
-            "  browser to view cluster status, node health, and")
+            "  (the machine that gathers every site's data). Here,")
         click.echo(
-            "  alerts. It runs on a port you choose.")
+            "  `nomad dashboard` shows this machine's own data on a")
+        click.echo(
+            "  page of its own, on a port you choose.")
         click.echo()
         dash_port = click.prompt(
             "  Dashboard port", type=int, default=8050)
@@ -4974,7 +4984,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     click.echo(
         "  sites and merges them into a single combined database for")
     click.echo(
-        "  cross-site dashboards and analytics.")
+        "  the Console and the reports across sites.")
     click.echo()
 
     is_hub = click.confirm(
@@ -4996,7 +5006,7 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
             click.echo(click.style(
                 f"  Site {site_idx}", fg="cyan"))
             site_name = click.prompt(
-                "    Name (e.g., arachne)", type=str).strip()
+                "    Name (e.g., hpc2)", type=str).strip()
             site_host = click.prompt(
                 "    Hostname or SSH alias",
                 default=site_name, type=str).strip()
@@ -5256,7 +5266,8 @@ def init(ctx, system, force, quick, no_systemd, no_prolog, dry_run, show):
     click.echo("         nomad collect")
     click.echo()
     click.echo(
-        "    4. Open the dashboard in your browser:")
+        "    4. See it: the Console, on the hub (docs: Console); here,")
+    click.echo("       this machine's own data on a page of its own:")
     click.echo("         nomad dashboard")
     click.echo()
     import re as _re
@@ -5635,13 +5646,13 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
       [[hub.sites]]
       name = "cluster-a"
       host = "headnode-a"
-      ssh_user = "jtonini"
+      ssh_user = "rcadmin"
       db_path = "~/.local/share/nomad/nomad.db"
 
       [[hub.sites]]
       name = "workstations"
-      host = "jonimitchell"
-      ssh_user = "zeus"
+      host = "labhead1"
+      ssh_user = "monitor"
       db_path = "~/.local/share/nomad/nomad.db"
 
       [[hub.sites]]
@@ -5655,7 +5666,7 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
       [[sites]]
       name = "cluster-a"
       host = "headnode-a"
-      user = "jtonini"
+      user = "rcadmin"
       db_path = "~/.local/share/nomad/nomad.db"
 
     \b
@@ -5695,7 +5706,7 @@ def sync(ctx, config_file, output, dry_run, full, remove_logs):
         click.echo('    [[hub.sites]]')
         click.echo('    name = "cluster-a"')
         click.echo('    host = "headnode-a"')
-        click.echo('    ssh_user = "jtonini"')
+        click.echo('    ssh_user = "rcadmin"')
         click.echo('    db_path = "~/.local/share/nomad/nomad.db"')
         click.echo()
         click.echo("  Or run `nomad init` to set this up interactively.")
@@ -6979,8 +6990,8 @@ def console_launch(destination, via, local_port, remote_port, no_browser, print_
     DESTINATION is [USER@]HOST of the machine that serves the Console:
 
     \b
-        nomad console launch NETID@mingus.richmond.edu
-        nomad console launch NETID@mingus.richmond.edu --via NETID@WORKSTATION
+        nomad console launch NETID@hub.example.edu
+        nomad console launch NETID@hub.example.edu --via NETID@WORKSTATION
 
     ssh asks for your password itself; nomad never sees it. The tunnel stays
     open until you press Ctrl-C. The machine names of the last launch that
@@ -7703,7 +7714,7 @@ def _usage_period(since, until):
 def _usage_site(ctx, db_path, cluster):
     """The site to report on, and the name report.toml knows it by: --cluster;
     else the hub database's one site; else, in a site's own database, the
-    cluster its node samples name, the database's file name (spydur.db), or
+    cluster its node samples name, the database's file name (hpc1.db), or
     the cluster name in nomad.toml."""
     from nomad.usage import sources
     site, name = cluster, cluster
@@ -7774,9 +7785,9 @@ def usage_report(ctx, since, until, cluster, db, report_config, sacct, user_map,
     """The administrators' report: use, people, waits, GPUs, storage, capacity.
 
     \b
-    nomad usage-report --from 2025-10-01 --to 2026-10-07 --cluster spydur
-    nomad usage-report init --cluster spydur      draft ~/.config/nomad/report.toml
-    nomad usage-report people --cluster spydur    the period's usernames, for a user map
+    nomad usage-report --from 2025-10-01 --to 2026-10-07 --cluster hpc1
+    nomad usage-report init --cluster hpc1      draft ~/.config/nomad/report.toml
+    nomad usage-report people --cluster hpc1    the period's usernames, for a user map
 
     Aggregates only: people are counted, never named, and a report that would
     contain a username, group, job name or condo partition is not written.
@@ -11068,7 +11079,7 @@ def insights_gpu(ctx, node, hours, db_path):
  
       nomad insights gpu --hours 12
  
-      nomad insights gpu --node spdr16
+      nomad insights gpu --node nd16
     """
     import sqlite3
     from datetime import datetime, timedelta
@@ -11894,7 +11905,7 @@ cli.add_command(watch_group)
 # Each term, a lab's PI says who is still in it (1.33).
 from nomad.lab_check_cli import check_group as lab_check_group  # noqa: E402
 lab.add_command(lab_check_group)
-# A lab's PI asks ARC for accounts (1.42).
+# A lab's PI asks research computing for accounts (1.42).
 from nomad.lab_accounts_cli import accounts_group as lab_accounts_group  # noqa: E402
 lab.add_command(lab_accounts_group)
 from nomad.storage.cold_cli import cold_group  # noqa: E402

@@ -7,7 +7,7 @@ People ask the computing center for help from the Console's **Ask** page
 has
 
 - a number from the one sequence the account requests use
-  (`[console.tickets]`: `ARC-0042`), in every email's subject;
+  (`[console.tickets]`: `REQ-0042`), in every email's subject;
 - what it is about (one of their jobs, their storage, software, an account,
   something else), a subject and their message;
 - what they chose to attach, after reading each part in full: the job as
@@ -33,11 +33,11 @@ Nothing about one institution is written into nomad or the Console:
 
 ```toml
 [support]
-team = "ARC"                       # "Ask ARC", "ARC answered" (default "Research Computing")
+team = "RC"                        # "Ask RC", "RC answered" (default "Research Computing")
 email = "hpc@example.edu"          # where requests go, unless [console.help] notify says
 
 [console.tickets]
-prefix = "ARC"                     # ARC-0042
+prefix = "REQ"                     # REQ-0042 (the default)
 
 [console.help]
 notify = ["hpc@example.edu"]

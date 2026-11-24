@@ -58,21 +58,21 @@ def db(tmp_path):
     path = str(tmp_path / "combined.db")
     c = _make_db(path)
     # The same job ID at two sites, measured very differently.
-    _job(c, "100", "alice", "spydur", _ago(2), cpu=90)
-    _job(c, "100", "bob", "arachne", _ago(2), cpu=10)
+    _job(c, "100", "alice", "hpc1", _ago(2), cpu=90)
+    _job(c, "100", "bob", "hpc2", _ago(2), cpu=10)
     # alice: more measured jobs across the window, and one never measured.
-    _job(c, "101", "alice", "spydur", _ago(40), cpu=30)
-    _job(c, "102", "alice", "spydur", _ago(39), cpu=30)
-    _job(c, "103", "alice", "spydur", _ago(3), cpu=90)
-    _job(c, "104", "alice", "spydur", _ago(1))                      # no summary
+    _job(c, "101", "alice", "hpc1", _ago(40), cpu=30)
+    _job(c, "102", "alice", "hpc1", _ago(39), cpu=30)
+    _job(c, "103", "alice", "hpc1", _ago(3), cpu=90)
+    _job(c, "104", "alice", "hpc1", _ago(1))                      # no summary
     # A GPU job whose GPU use nobody measured.
-    _job(c, "200", "bob", "arachne", _ago(5), cpu=80, gpus=1, used_gpu=None)
+    _job(c, "200", "bob", "hpc2", _ago(5), cpu=80, gpus=1, used_gpu=None)
     # Outside the window, and not finished.
-    _job(c, "300", "alice", "spydur", _ago(200), cpu=10)
-    _job(c, "301", "alice", "spydur", _ago(1), cpu=10, state="RUNNING")
-    for g, u in [("lab$", "alice"), ("lab$", "bob"), ("lab$", "carol"),
+    _job(c, "300", "alice", "hpc1", _ago(200), cpu=10)
+    _job(c, "301", "alice", "hpc1", _ago(1), cpu=10, state="RUNNING")
+    for g, u in [("lab$", "alice"), ("lab$", "bob"), ("lab$", "robin"),
                  ("people", "alice"), ("people", "bob"), ("empty$", "dave")]:
-        c.execute("INSERT INTO group_membership VALUES (?,?,?)", (g, u, "spydur"))
+        c.execute("INSERT INTO group_membership VALUES (?,?,?)", (g, u, "hpc1"))
     c.commit()
     c.close()
     popmod._CACHE.clear()
@@ -87,9 +87,9 @@ def test_jobs_meet_their_own_measurements(db):
     assert "source_site" in summary_join(c)
     c.close()
     pop = popmod.population(db)
-    # bob's job 100 ran at 10% CPU on arachne (score 11) and job 200 at 80%
+    # bob's job 100 ran at 10% CPU on hpc2 (score 11) and job 200 at 80%
     # (88). Matched by job ID alone, job 100 would also take alice's 90% from
-    # spydur, and each would count twice.
+    # hpc1, and each would count twice.
     assert pop.people["bob"].dimensions["cpu"] == pytest.approx(49.5)
     assert pop.people["bob"].scored_jobs == 2
 
@@ -115,8 +115,8 @@ def test_unmeasured_gpu_is_not_called_unused():
 
 
 def test_explain_finds_a_job_by_site_in_a_combined_database(db):
-    assert load_job(db, "100", "arachne")["user_name"] == "bob"
-    with pytest.raises(ValueError, match="arachne"):
+    assert load_job(db, "100", "hpc2")["user_name"] == "bob"
+    with pytest.raises(ValueError, match="hpc2"):
         load_job(db, "100")
 
 
@@ -128,10 +128,10 @@ def test_population_counts_every_finished_job_and_scores_measured_ones(db):
     alice = pop.people["alice"]
     assert alice.jobs == 5              # 100, 101, 102, 103, 104; not 300 or 301
     assert alice.scored_jobs == 4       # 104 was never measured
-    assert alice.sites == ["spydur"]
-    assert pop.people["bob"].sites == ["arachne"]
+    assert alice.sites == ["hpc1"]
+    assert pop.people["bob"].sites == ["hpc2"]
     assert "gpu" not in pop.people["bob"].dimensions
-    assert set(pop.sites) == {"arachne", "spydur"}
+    assert set(pop.sites) == {"hpc2", "hpc1"}
 
 
 def test_list_and_person_page_agree(db):
@@ -148,7 +148,7 @@ def test_population_is_kept_until_the_database_changes(db):
     assert popmod.population(db) is first
     time.sleep(0.01)
     c = sqlite3.connect(db)
-    _job(c, "105", "alice", "spydur", _ago(1), cpu=50)
+    _job(c, "105", "alice", "hpc1", _ago(1), cpu=50)
     c.commit()
     c.close()
     os.utime(db)
@@ -162,7 +162,7 @@ def test_population_is_kept_until_the_database_changes(db):
 def test_group_report(db):
     gr = popmod.group_report(db, "lab$")
     assert gr.members == 3 and gr.members_with_jobs == 2 and gr.members_scored == 2
-    assert gr.without_jobs == ["carol"]
+    assert gr.without_jobs == ["robin"]
     assert gr.overall.n == 2
     assert gr.people[0].overall <= gr.people[1].overall     # lowest first
     assert dict(gr.issues).get("cpu") == 1                   # bob, at ~11
@@ -191,7 +191,7 @@ def test_cli_group_report(db):
     assert out.exit_code == 0, out.output
     assert "Group Report" in out.output and "No jobs in this period: 1 member" in out.output
     data = json.loads(runner.invoke(cli, ["edu", "report", "lab$", "--db", db, "--json"]).output)
-    assert data["members_with_jobs"] == 2 and data["without_jobs"] == ["carol"]
+    assert data["members_with_jobs"] == 2 and data["without_jobs"] == ["robin"]
 
 
 # ── One person: nomad edu me and the Console's My Activity ─────────────
@@ -217,8 +217,8 @@ def test_me_scores_only_measured_jobs_and_agrees_with_the_list(db):
 def test_me_with_nothing_measured_has_no_score(db):
     from nomad.edu.insights import format_user_insights, user_insights
     c = sqlite3.connect(db)
-    _job(c, "500", "erin", "spydur", _ago(2))
-    _job(c, "501", "erin", "spydur", _ago(9))
+    _job(c, "500", "erin", "hpc1", _ago(2))
+    _job(c, "501", "erin", "hpc1", _ago(9))
     c.commit(); c.close()
     ui = user_insights(db, "erin", cluster_capacities=[])
     assert ui.finished_job_count == 2 and ui.job_count == 0
@@ -259,7 +259,7 @@ def _node_state(c, site, mem_mb):
 
 
 def test_a_peak_above_any_node_is_not_scored():
-    # arachne, job 3772: sacct's MaxRSS said 7364444636K (7 TB) on one node
+    # hpc2, job 3772: sacct's MaxRSS said 7364444636K (7 TB) on one node
     job = {"req_mem_mb": 460800, "req_cpus": 20, "state": "COMPLETED",
            "_node_memory_mb": 512 * 1024}
     d = score_job(job, {"peak_memory_gb": 7023.3, "avg_cpu_percent": 50}).dimensions["memory"]
@@ -276,13 +276,13 @@ def test_a_peak_above_any_node_is_not_scored():
 def test_everyone_and_one_person_set_aside_impossible_readings(db):
     from nomad.edu.insights import user_insights
     c = sqlite3.connect(db)
-    _node_state(c, "arachne", 512 * 1024)
-    _node_state(c, "spydur", 1024 * 1024)
+    _node_state(c, "hpc2", 512 * 1024)
+    _node_state(c, "hpc1", 1024 * 1024)
     c.execute("DELETE FROM jobs WHERE user_name = 'bob'")
-    c.execute("DELETE FROM job_summary WHERE source_site = 'arachne'")
+    c.execute("DELETE FROM job_summary WHERE source_site = 'hpc2'")
     for jid, peak in (("700", 7023.3), ("701", 4134.4), ("702", 4.0)):
-        _job(c, jid, "bob", "arachne", _ago(3), cpu=50)
-        c.execute("UPDATE job_summary SET peak_memory_gb = ? WHERE job_id = ? AND source_site = 'arachne'",
+        _job(c, jid, "bob", "hpc2", _ago(3), cpu=50)
+        c.execute("UPDATE job_summary SET peak_memory_gb = ? WHERE job_id = ? AND source_site = 'hpc2'",
                   (peak, jid))
     c.commit(); c.close()
     popmod._CACHE.clear()
@@ -297,6 +297,6 @@ def test_everyone_and_one_person_set_aside_impossible_readings(db):
 
 def test_explain_passes_the_ceiling(db):
     c = sqlite3.connect(db)
-    _node_state(c, "arachne", 512 * 1024)
+    _node_state(c, "hpc2", 512 * 1024)
     c.commit(); c.close()
-    assert load_job(db, "200", "arachne")["_node_memory_mb"] == 512 * 1024
+    assert load_job(db, "200", "hpc2")["_node_memory_mb"] == 512 * 1024

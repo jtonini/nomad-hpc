@@ -8,26 +8,26 @@ from nomad.cli import cli
 from nomad.config.access import access_from, members_lookup, visible_people
 
 UR = {"console": {
-    "roles": {"admin": ["jtonini", " Jacob "], "operator": ["ops1"]},
-    "labs": {"group_pattern": "{netid}$", "leads": {"carol": ["chemlab$", "carol$"]}},
+    "roles": {"admin": ["rcadmin", " Jacob "], "operator": ["ops1"]},
+    "labs": {"group_pattern": "{netid}$", "leads": {"robin": ["chemlab$", "robin$"]}},
 }}
 
 
 def test_roles_from_the_file():
     a = access_from(UR)
-    assert a.role("jtonini") == "admin"
+    assert a.role("rcadmin") == "admin"
     assert a.role("JACOB") == "admin"            # NetIDs compare without case or spaces
     assert a.role("ops1") == "operator"
-    assert a.role("carol") is None               # the file grants her no role: a viewer
+    assert a.role("robin") is None               # the file grants her no role: a viewer
     assert a.role(None) is None
-    assert a.named() == {"jtonini", "jacob", "ops1", "carol"}
+    assert a.named() == {"rcadmin", "jacob", "ops1", "robin"}
     assert a.problems == ()
 
 
 def test_labs_by_name_and_by_leads():
     a = access_from(UR)
-    exists = {"carol$", "chemlab$", "dana$"}.__contains__
-    assert a.lab_groups("carol", exists) == ["chemlab$", "carol$"]   # listed once
+    exists = {"robin$", "chemlab$", "dana$"}.__contains__
+    assert a.lab_groups("robin", exists) == ["chemlab$", "robin$"]   # listed once
     assert a.lab_groups("dana", exists) == ["dana$"]                  # by the pattern
     assert a.lab_groups("erin", exists) == []                         # no such group
     assert a.lab_groups("erin") == ["erin$"]                          # existence unknown
@@ -35,15 +35,15 @@ def test_labs_by_name_and_by_leads():
 
 def test_no_pattern_no_labs_from_names():
     """A site that has not said how its groups work gets no lab view."""
-    a = access_from({"console": {"labs": {"leads": {"carol": "chemlab$"}}}})
+    a = access_from({"console": {"labs": {"leads": {"robin": "chemlab$"}}}})
     assert a.group_pattern == ""
     assert a.lab_groups("dana", lambda g: True) == []
-    assert a.lab_groups("carol") == ["chemlab$"]                      # a string is a list of one
-    assert access_from({}).lab_groups("carol", lambda g: True) == []
+    assert a.lab_groups("robin") == ["chemlab$"]                      # a string is a list of one
+    assert access_from({}).lab_groups("robin", lambda g: True) == []
 
 
 @pytest.mark.parametrize("config,expect", [
-    ({"console": {"roles": {"pi": ["carol"]}}}, "a PI comes from [console.labs]"),
+    ({"console": {"roles": {"pi": ["robin"]}}}, "a PI comes from [console.labs]"),
     ({"console": {"roles": {"superuser": ["x"]}}}, "not a role"),
     ({"console": {"roles": {"admin": ["x"], "operator": ["x"]}}}, "both admin and operator"),
     ({"console": {"roles": {"admin": [5]}}}, "is not a name"),
@@ -51,7 +51,7 @@ def test_no_pattern_no_labs_from_names():
     ({"console": {"roles": "admin"}}, "[console.roles] is not a table"),
     ({"console": {"labs": {"group_pattern": "faculty"}}}, "has no {netid}"),
     ({"console": {"labs": {"group_pattern": 3}}}, "should be text"),
-    ({"console": {"labs": {"leads": ["carol"]}}}, "should be a table"),
+    ({"console": {"labs": {"leads": ["robin"]}}}, "should be a table"),
     ({"console": {"labs": {"pattern": "{netid}$"}}}, "unknown setting"),
 ])
 def test_what_is_wrong_is_said_and_left_out(config, expect):
@@ -76,9 +76,9 @@ def db(tmp_path):
     path = tmp_path / "combined.db"
     c = sqlite3.connect(path)
     c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
-    rows = [(u, "carol$", "spydur") for u in ("carol", "s1", "s2", "s3")]
-    rows += [(u, "chemlab$", "arachne") for u in ("s3", "S4")]
-    rows += [("s1", "carol$", "arachne")]                        # same person, two sites
+    rows = [(u, "robin$", "hpc1") for u in ("robin", "s1", "s2", "s3")]
+    rows += [(u, "chemlab$", "hpc2") for u in ("s3", "S4")]
+    rows += [("s1", "robin$", "hpc2")]                        # same person, two sites
     c.executemany("INSERT INTO group_membership VALUES (?, ?, ?)", rows)
     c.commit()
     c.close()
@@ -89,41 +89,41 @@ def test_whom_a_pi_sees(db):
     a = access_from(UR)
     c = sqlite3.connect(db)
     exists, members = members_lookup(c)
-    assert exists("carol$") and not exists("nobody$")
-    assert visible_people(a, "carol", members, exists) == {"carol", "s1", "s2", "s3", "s4"}
+    assert exists("robin$") and not exists("nobody$")
+    assert visible_people(a, "robin", members, exists) == {"robin", "s1", "s2", "s3", "s4"}
     assert visible_people(a, "s2", members, exists) == {"s2"}       # a student: themselves
-    assert visible_people(a, "jtonini", members, exists) is None    # admin: everyone
+    assert visible_people(a, "rcadmin", members, exists) is None    # admin: everyone
     c.close()
 
 
 def test_no_membership_table_means_no_labs(tmp_path):
     c = sqlite3.connect(tmp_path / "empty.db")
     exists, members = members_lookup(c)
-    assert not exists("carol$") and members("carol$") == set()
+    assert not exists("robin$") and members("robin$") == set()
     assert visible_people(access_from(UR), "dana", members, exists) == {"dana"}
 
 
 def test_cli_roles(tmp_path, db):
     cfg = tmp_path / "nomad.toml"
-    cfg.write_text('[console.roles]\nadmin = ["jtonini"]\npi = ["carol"]\n\n'
+    cfg.write_text('[console.roles]\nadmin = ["rcadmin"]\npi = ["robin"]\n\n'
                    '[console.labs]\ngroup_pattern = "{netid}$"\n'
-                   'leads = { carol = ["chemlab$"] }\n')
+                   'leads = { robin = ["chemlab$"] }\n')
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles"])
     assert r.exit_code == 0, r.output
-    assert "admin:     1 (jtonini)" in r.output
+    assert "admin:     1 (rcadmin)" in r.output
     assert "a PI comes from [console.labs]" in r.output
 
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(db)])
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(db)])
     assert r.exit_code == 0, r.output
     assert "(a viewer unless given a role there), and a PI: leads 2 labs" in r.output
-    assert "chemlab$: 2 members" in r.output and "carol$: 4 members" in r.output
+    assert "chemlab$: 2 members" in r.output and "robin$: 4 members" in r.output
     assert "their own work and 4 lab members" in r.output
 
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(db),
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(db),
                                  "--mask"])
     assert r.exit_code == 0, r.output
-    assert "carol" not in r.output.split("Console access")[1].replace("console.labs", "")
-    assert "jtonini" not in r.output
+    assert "robin" not in r.output.split("Console access")[1].replace("console.labs", "")
+    assert "rcadmin" not in r.output
     assert "lab #1: 2 members" in r.output
 
 
@@ -133,7 +133,7 @@ LAB = {"console": {"labs": {
     "group_pattern": "{netid}$",
     "leads": {"dana": ["physlab$"]},
     "resources": {
-        "carol$": {"workstations": ["adam", "eve", "adam"], "storage": ["sarahvaughan"]},
+        "robin$": {"workstations": ["adam", "eve", "adam"], "storage": ["nas1"]},
         "physlab$": {"workstations": "zappa", "storage": ["nas2:/export/phys"]},
     },
 }}}
@@ -143,53 +143,53 @@ def test_a_pi_gets_the_machines_of_the_labs_they_lead():
     from nomad.config.access import access_from
     a = access_from(LAB)
     assert a.problems == ()
-    assert a.resources["carol$"]["workstations"] == ("adam", "eve")     # listed once
-    # carol$ has resources listed, so it counts as existing even without group data
-    assert a.lab_resources("carol", lambda g: False) == {
-        "workstations": {"adam", "eve"}, "storage": {"sarahvaughan"}}
+    assert a.resources["robin$"]["workstations"] == ("adam", "eve")     # listed once
+    # robin$ has resources listed, so it counts as existing even without group data
+    assert a.lab_resources("robin", lambda g: False) == {
+        "workstations": {"adam", "eve"}, "storage": {"nas1"}}
     assert a.lab_resources("dana") == {"workstations": {"zappa"},
                                        "storage": {"nas2:/export/phys"}}
     assert a.lab_resources("s1", lambda g: False) == {"workstations": set(), "storage": set()}
 
 
 @pytest.mark.parametrize("resources,expect", [
-    ({"carol$": {"printers": ["p1"]}}, "unknown; the settings are name, workstations, storage"),
-    ({"carol$": ["adam"]}, "should be a table"),
-    ({"carol$": {"workstations": [3]}}, "is not a name"),
+    ({"robin$": {"printers": ["p1"]}}, "unknown; the settings are name, workstations, storage"),
+    ({"robin$": ["adam"]}, "should be a table"),
+    ({"robin$": {"workstations": [3]}}, "is not a name"),
 ])
 def test_wrong_machine_lists_are_said_and_left_out(resources, expect):
     from nomad.config.access import access_from
     a = access_from({"console": {"labs": {"resources": resources}}}, log=False)
     assert any(expect in p for p in a.problems), a.problems
-    assert not a.resources.get("carol$", {}).get("printers")
+    assert not a.resources.get("robin$", {}).get("printers")
 
 
 def test_people_outside_the_lab_are_another_user():
     from nomad.config.access import OTHER_USER, shown_name
-    assert shown_name("s1", {"carol", "s1"}) == "s1"
-    assert shown_name("S1", {"carol", "s1"}) == "S1"
-    assert shown_name("stranger", {"carol", "s1"}) == OTHER_USER
+    assert shown_name("s1", {"robin", "s1"}) == "s1"
+    assert shown_name("S1", {"robin", "s1"}) == "S1"
+    assert shown_name("stranger", {"robin", "s1"}) == OTHER_USER
     assert shown_name("stranger", None) == "stranger"      # admins see everyone
 
 
 def _lab_db(path):
     c = sqlite3.connect(path)
     c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
-    c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
+    c.execute("INSERT INTO group_membership VALUES ('s1', 'robin$', 'hpc1')")
     c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT, department TEXT, "
               "status TEXT)")
     c.executemany("INSERT INTO workstation_state VALUES (?, ?, ?, ?)", [
         ("2026-10-05T19:00:00", "adam", "chemistry", "online"),
-        ("2026-10-04T08:00:00", "eve", "carol$", "online"),
-        ("2026-10-05T19:00:00", "eve", "carol$", "offline"),
-        ("2026-10-01T08:00:00", "moved", "carol$", "online"),
+        ("2026-10-04T08:00:00", "eve", "robin$", "online"),
+        ("2026-10-05T19:00:00", "eve", "robin$", "offline"),
+        ("2026-10-01T08:00:00", "moved", "robin$", "online"),
         ("2026-10-05T19:00:00", "moved", "physics$", "online"),     # retagged since
-        ("2026-10-05T19:00:00", "dead", "carol$", "offline"),
+        ("2026-10-05T19:00:00", "dead", "robin$", "offline"),
     ])
     c.execute("CREATE TABLE workstation_mount_state (timestamp TEXT, hostname TEXT, source TEXT, "
               "is_mounted INTEGER, is_responsive INTEGER)")
     c.executemany("INSERT INTO workstation_mount_state VALUES (?, ?, ?, ?, ?)", [
-        ("2026-10-05T18:00:00", "adam", "sarahvaughan:/export/parish", 1, 1),
+        ("2026-10-05T18:00:00", "adam", "nas1:/export/ames", 1, 1),
         ("2026-10-05T17:00:00", "adam", "nas2:/export/old", 1, 1),
         ("2026-10-05T18:00:00", "adam", "nas2:/export/old", 1, 0),
     ])
@@ -203,12 +203,12 @@ def test_workstations_tagged_by_their_collector(tmp_path):
     _lab_db(tmp_path / "c.db")
     c = sqlite3.connect(tmp_path / "c.db")
     tagged = workstation_tags(c, now=datetime(2026, 10, 5, 19, 30))
-    assert tagged("carol$") == {"eve", "dead"}        # "moved" follows its latest tag
+    assert tagged("robin$") == {"eve", "dead"}        # "moved" follows its latest tag
     assert tagged("physics$") == {"moved"}
     a = access_from({"console": {"labs": {"group_pattern": "{netid}$"}}})
     exists, _ = members_lookup(c)
-    # Listed nowhere in nomad.toml: the tags alone make carol$ a lab with machines.
-    assert a.lab_resources("carol", exists, tagged)["workstations"] == {"eve", "dead"}
+    # Listed nowhere in nomad.toml: the tags alone make robin$ a lab with machines.
+    assert a.lab_resources("robin", exists, tagged)["workstations"] == {"eve", "dead"}
     # A lab known only by its tags still counts as one.
     assert a.lab_groups("physics", lambda g: False, tagged) == ["physics$"]
     c.close()
@@ -218,7 +218,7 @@ def test_no_department_column_means_no_tags(tmp_path):
     from nomad.config.access import workstation_tags
     c = sqlite3.connect(tmp_path / "old.db")
     c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT)")
-    assert workstation_tags(c)("carol$") == set()
+    assert workstation_tags(c)("robin$") == set()
 
 
 def test_cli_roles_shows_the_machines(tmp_path, monkeypatch):
@@ -227,14 +227,14 @@ def test_cli_roles_shows_the_machines(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 5, 18, 50))
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
-                   '[console.labs.resources."carol$"]\n'
+                   '[console.labs.resources."robin$"]\n'
                    'workstations = ["adam", "ghost"]\n'
-                   'storage = ["sarahvaughan", "nas2:/export/old", "nowhere:/x"]\n')
+                   'storage = ["nas1", "nas2:/export/old", "nowhere:/x"]\n')
     dbp = tmp_path / "combined.db"
     _lab_db(dbp)
     r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles"])
     assert "machines:  listed for 1 lab: 2 workstations, 3 storage" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp)])
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(dbp)])
     assert r.exit_code == 0, r.output
     out = r.output
     assert "adam: online, 2026-10-05T19:00" in out
@@ -244,10 +244,10 @@ def test_cli_roles_shows_the_machines(tmp_path, monkeypatch):
     assert "ghost: not in the data" in out
     # Storage by server: a server listed alone carries its state on its line;
     # its exports follow, indented.
-    assert "    sarahvaughan: mounted and responding, 2026-10-05T18:00" in out
+    assert "    nas1: mounted and responding, 2026-10-05T18:00" in out
     assert "    nas2:\n      /export/old: not responding at 2026-10-05T18:00; last responding " \
         "2026-10-05T17:00" in out
     assert "    nowhere:\n      /x: not in the data" in out
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(dbp),
                                  "--mask"])
     assert "adam" not in r.output and "workstation #1: online" in r.output

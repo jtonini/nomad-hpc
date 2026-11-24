@@ -42,7 +42,7 @@ entries:
       - |
         [general]
         db_path = "/var/lib/nomad/cluster.db"
-        cluster_name = "Arachne GPU Cluster"
+        cluster_name = "Hpc2 GPU Cluster"
         log_level = "info"
     tags:
       - general

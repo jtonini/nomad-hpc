@@ -1,6 +1,6 @@
 """nomad 1.49.0: alerts that say what is real and when it matters.
 
-* The CPU clock of a busy host is judged against busy readings (spydur's
+* The CPU clock of a busy host is judged against busy readings (hpc1's
   Xeon 6230Rs: 3,970 MHz idle, about 2,700 with every core at work, dips to
   1,420 on heavy vector code: 24 alerts in a week, none a brake).
 * The dispatcher waits before it mails what may pass ([alerts.settle]) and
@@ -19,7 +19,7 @@ RULE = dict(C.DEFAULTS)
 
 
 def reading(mhz, load1, model=XEON, cpus=52, max_mhz=4000, **kw):
-    return {"node": "spdr52", "model": model, "cpus": cpus, "load1": load1, "mhz": mhz, "max_mhz": max_mhz,
+    return {"node": "nd52", "model": model, "cpus": cpus, "load1": load1, "mhz": mhz, "max_mhz": max_mhz,
             "sha_mbps": None, **kw}
 
 
@@ -40,7 +40,7 @@ def test_a_busy_host_is_judged_against_busy_readings():
 
 
 def test_busy_with_no_busy_past():
-    peers = [reading(2700, 51.0, node="spdr09"), reading(2800, 50.0, node="spdr10"), reading(3970, 0.1)]
+    peers = [reading(2700, 51.0, node="nd09"), reading(2800, 50.0, node="nd10"), reading(3970, 0.1)]
     j = C.judge(reading(1500, 50.0), [], peers, RULE)
     assert not j["low"] and j["basis"] == "2 busy hosts with its CPU" and j["reference"] == 2750
     j = C.judge(reading(1500, 50.0), [], [], RULE)
@@ -51,7 +51,7 @@ def test_busy_with_no_busy_past():
     assert not j["low"] and j["basis"] == "60% of its CPU's top clock"
     assert C.judge(reading(800, 60.0, model=epyc, cpus=64, max_mhz=3764), [], [], RULE)["low"]
     # [alerts.clock] busy_min_fraction, its own
-    assert C.rules({"busy_min_fraction": 0.6}, "spdr52")["busy_min_fraction"] == 0.6
+    assert C.rules({"busy_min_fraction": 0.6}, "nd52")["busy_min_fraction"] == 0.6
     assert C.judge(reading(1500, 50.0), [], [], dict(RULE, busy_min_fraction=0.75))["low"]
 
 
@@ -117,8 +117,8 @@ def run(tmp_path, mail, cfg=None, **alert):
     d = D.AlertDispatcher({"database": {"path": "site.db"}, "general": {"data_dir": str(tmp_path)},
                            "alerts": cfg or {}})
     d.backends = [mail]
-    a = {"severity": "warning", "source": "clock", "host": "spdr52", "subject": "cpu clock",
-         "message": "spdr52: its CPU runs at 1432 MHz busy.", "details": {"episode_gap_minutes": 60}}
+    a = {"severity": "warning", "source": "clock", "host": "nd52", "subject": "cpu clock",
+         "message": "nd52: its CPU runs at 1432 MHz busy.", "details": {"episode_gap_minutes": 60}}
     a.update(alert)
     return d.dispatch(a)
 
@@ -144,7 +144,7 @@ def test_a_warning_waits_its_sources_wait(tmp_path, at):
     at["now"] = T0 + timedelta(minutes=75)
     assert isinstance(run(tmp_path, mail), D.Held)   # then reminders, as before
     (src, host, first, last, raised, wait), = episodes(tmp_path)
-    assert (src, host, raised, wait) == ("clock", "spdr52", 1, 60.0) and first == T0.isoformat()
+    assert (src, host, raised, wait) == ("clock", "nd52", 1, 60.0) and first == T0.isoformat()
 
 
 def test_what_passes_within_its_wait_is_kept_not_mailed(tmp_path, at):
@@ -161,9 +161,9 @@ def test_critical_and_sources_without_a_wait_go_at_once(tmp_path, at):
     mail = Mailbox()
     run(tmp_path, mail, severity="critical")
     run(tmp_path, mail, source="disk", subject="/scratch", message="Disk /scratch at 87%")
-    run(tmp_path, mail, source="policy_watch", subject="listening:f3", message="jonimitchell: a program")
+    run(tmp_path, mail, source="policy_watch", subject="listening:f3", message="labhead1: a program")
     assert [a["source"] for a in mail.sent] == ["clock", "disk", "policy_watch"]
-    held = run(tmp_path, mail, source="policy_watch", subject="heavy:f9", message="spydur: heavy use")
+    held = run(tmp_path, mail, source="policy_watch", subject="heavy:f9", message="hpc1: heavy use")
     assert isinstance(held, D.Held) and len(mail.sent) == 3
 
 
@@ -172,7 +172,7 @@ def test_alerts_wait_in_nomad_toml(tmp_path, at):
     run(tmp_path, mail, {"wait": {"clock": 0}})
     assert len(mail.sent) == 1
     run(tmp_path, mail, {"wait": {"policy_watch": {"heavy": 0}, "disk": 30}}, source="policy_watch",
-        subject="heavy:f9", message="spydur: heavy use")
+        subject="heavy:f9", message="hpc1: heavy use")
     assert len(mail.sent) == 2
     assert isinstance(run(tmp_path, mail, {"wait": {"disk": 30}}, source="disk", subject="/home",
                           message="Disk /home at 81%"), D.Held)
@@ -189,7 +189,7 @@ def test_the_third_time_in_seven_days_is_mailed_once(tmp_path, at):
             run(tmp_path, mail)
     assert len(mail.sent) == 1                       # the third, at its start; the fourth: not again
     msg = mail.sent[0]["message"]
-    assert msg.startswith("spdr52: its CPU runs at 1432 MHz busy. The 3rd time in 7 days (before: Sat 14 05:55, "
+    assert msg.startswith("nd52: its CPU runs at 1432 MHz busy. The 3rd time in 7 days (before: Sat 14 05:55, "
                           "30 min; Sat 14 11:55, 30 min).")
     assert mail.sent[0]["details"]["recurring"] == 3
     assert [e[4] for e in episodes(tmp_path)] == [0, 0, 1, 0]
@@ -220,16 +220,16 @@ def test_a_clock_alert_names_the_jobs_it_slows(tmp_path):
                  "source_site TEXT)")
     now = datetime(2026, 11, 14, 6, 10)
     for jid, nodes, state, start, end in (
-            ("4521", "spdr[51-52]", "RUNNING", now - timedelta(hours=2), None),
-            ("4519", "spdr52", "RUNNING", now - timedelta(hours=5), None),
-            ("4400", "spdr52", "COMPLETED", now - timedelta(days=1), now - timedelta(hours=20)),
-            ("4522", "spdr01", "RUNNING", now - timedelta(hours=1), None)):
-        conn.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, ?, 'spydur')",
+            ("4521", "nd[51-52]", "RUNNING", now - timedelta(hours=2), None),
+            ("4519", "nd52", "RUNNING", now - timedelta(hours=5), None),
+            ("4400", "nd52", "COMPLETED", now - timedelta(days=1), now - timedelta(hours=20)),
+            ("4522", "nd01", "RUNNING", now - timedelta(hours=1), None)):
+        conn.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, ?, 'hpc1')",
                      (jid, nodes, state, start.isoformat(), end.isoformat() if end else None))
-    assert C.jobs_on(conn, "spdr52", now=now) == ["4521", "4519"]
-    assert C.jobs_on(conn, "spdr52", "vadur", now=now) == []
+    assert C.jobs_on(conn, "nd52", now=now) == ["4521", "4519"]
+    assert C.jobs_on(conn, "nd52", "hpc3", now=now) == []
     host = {"problem": "its CPU runs at 400 MHz under load (0.95 per CPU), 15% of 2690 MHz", "low_since": "x"}
-    it = C.alert_item("spdr52", host, [], None, jobs=C.jobs_on(conn, "spdr52", now=now))
+    it = C.alert_item("nd52", host, [], None, jobs=C.jobs_on(conn, "nd52", now=now))
     assert "since x. Running there: 2 jobs (4521, 4519). Drain it" in it["message"]
     assert it["details"]["jobs"] == ["4521", "4519"]
     assert C.jobs_words([str(i) for i in range(10)]).endswith("(0, 1, 2, 3, 4, 5, 6, 7 and 2 more).")
@@ -238,16 +238,16 @@ def test_a_clock_alert_names_the_jobs_it_slows(tmp_path):
 
 def test_the_console_link_in_an_alert(tmp_path, at):
     mail = Mailbox()
-    run(tmp_path, mail, {"wait": {"clock": 0}, "link": "https://nomad.example.edu/"}, site="spydur")
+    run(tmp_path, mail, {"wait": {"clock": 0}, "link": "https://nomad.example.edu/"}, site="hpc1")
     assert mail.sent[0]["message"].endswith(
-        "In the Console: https://nomad.example.edu/nodes/timeline?site=spydur&node=spdr52")
+        "In the Console: https://nomad.example.edu/nodes/timeline?site=hpc1&node=nd52")
     # [notices] link on a hub; Policy watch's page; nothing without either
     d = D.AlertDispatcher({"notices": {"link": "https://nomad.example.edu"}})
     assert d.link == "https://nomad.example.edu"
     assert D.console_link(d.link, {"source": "policy_watch"}) == "https://nomad.example.edu/watch"
     assert D.console_link(d.link, {"source": "disk"}) == "https://nomad.example.edu/alerts"
-    assert D.console_link(d.link, {"source": "clock", "host": "node3", "site": "vadur/node3",
-                                   "details": {"cluster": "vadur"}}).endswith("site=vadur&node=node3")
+    assert D.console_link(d.link, {"source": "clock", "host": "node3", "site": "hpc3/node3",
+                                   "details": {"cluster": "hpc3"}}).endswith("site=hpc3&node=node3")
     assert D.AlertDispatcher({"alerts": {"link": "javascript:x"}}).link is None
 
 

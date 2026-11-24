@@ -68,13 +68,13 @@ def cold_group(ctx):
     min_tb of it on a path, on every scanned storage server, with their last
     job, labs and what the lab check said of them; and the cases Research
     Computing opens to talk with them about it (numbered like account
-    requests: ARC-0013).
+    requests: REQ-0013).
 
     \b
     nomad storage cold [list] [--server S] [--json | --csv]     the list
     nomad storage cold open PERSON SERVER:/PATH [--note "..."] a case, to contact them
-    nomad storage cold case ARC-0013 [STATE] [--note "..."]    it moves on, or a note
-    nomad storage cold show ARC-0013                           one case and its notes
+    nomad storage cold case REQ-0013 [STATE] [--note "..."]    it moves on, or a note
+    nomad storage cold show REQ-0013                           one case and its notes
     nomad storage cold letter PERSON [--as NETID] [--send]     the email to them about it (1.57.0)
     nomad storage cold digest [--send]                         the weekly email to Research Computing
     nomad storage cold timer [--apply]                         send it weekly (a systemd timer)

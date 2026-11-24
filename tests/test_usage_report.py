@@ -91,7 +91,7 @@ def make_site(path: Path) -> Path:
     J(c, "3", "bob", "short", "cn04", 10, "2025-12-31T19:00:00", "2025-12-31T20:00:00", 8,
       mem_mb=32768, root="/home", tail="q/r3")
     J(c, "4", "bob", "gpus", "g01", 4, "2026-02-10T00:00:00", "2026-02-10T00:00:00", 10, name="gmx_run", gpus=2)
-    J(c, "5", "carol", "all", "lab01", 10, "2026-02-01T00:00:00", "2026-02-01T00:00:00", 24, state="FAILED")
+    J(c, "5", "robin", "all", "lab01", 10, "2026-02-01T00:00:00", "2026-02-01T00:00:00", 24, state="FAILED")
     J(c, "6", "root", "short", "cn01", 10, "2026-01-20T00:00:00", "2026-01-20T00:00:00", 1)
     J(c, "7", "dave", "short", None, 4, "2026-02-20T00:00:00", None, 0, state="PENDING")
     J(c, "8", "erin", "short", "cn01", 10, "2025-11-30T00:00:00", "2025-12-01T00:00:00", 1)
@@ -148,7 +148,7 @@ def fact(report, fid):
 
 def test_population_and_set_aside(site, cfg):
     report, data = build(site, cfg)
-    assert fact(report, "s01.people") == 5                     # alice bob carol dave frank; not root, not erin
+    assert fact(report, "s01.people") == 5                     # alice bob robin dave frank; not root, not erin
     assert data.excluded_accounts == 1 and data.excluded_jobs == 1
     assert data.set_aside["never started"] == 1
     assert data.set_aside["start corrected"] == 1
@@ -166,7 +166,7 @@ def test_core_hours_clipped_and_whole(site, cfg):
     assert fact(report, "s01.institutional_utilization") == pytest.approx(294 / (50 * 1416))
     assert fact(report, "s01.condo_core_hours") == pytest.approx(240)
     assert fact(report, "s01.jobs_run") == 7
-    # By month submitted: January alice alone; February bob, carol, dave, frank.
+    # By month submitted: January alice alone; February bob, robin, dave, frank.
     assert fact(report, "s01.people_per_month_min") == 1 and fact(report, "s01.people_per_month_max") == 4
 
 
@@ -185,7 +185,7 @@ def test_partition_classes_from_nodes(site, cfg):
     report, _ = build(site, cfg)
     assert fact(report, "s03.people.basic") == 3          # alice, bob, dave (short = cn[01-04])
     assert fact(report, "s03.people.gpu") == 1            # bob (gpus = g01)
-    assert fact(report, "s03.people.overlay") == 2        # carol, frank (all spans every tier)
+    assert fact(report, "s03.people.overlay") == 2        # robin, frank (all spans every tier)
     assert fact(report, "s03.people.gpu_partitions_or_requests") == 1
     assert fact(report, "s03.people_overlay_only") == 2
     assert fact(report, "s03.people_several_classes") == 1   # bob: basic and GPU
@@ -214,7 +214,7 @@ def test_memory_by_partition_class(site, cfg):
     # are not the basic partition's work, but the basic nodes held them.
     c = sqlite3.connect(site)
     for i in range(6):
-        J(c, f"3{i}", "carol", "all", "cn02", 1, "2026-01-15T00:00:00", "2026-01-15T00:00:00", 1, mem_mb=1024)
+        J(c, f"3{i}", "robin", "all", "cn02", 1, "2026-01-15T00:00:00", "2026-01-15T00:00:00", 1, mem_mb=1024)
         c.execute("INSERT INTO job_summary (job_id, avg_cpu_percent, peak_memory_gb) VALUES (?,?,?)",
                   (f"3{i}", 90.0, 0.5))
     J(c, "40", "alice", "short", "cn03", 10, "2026-01-16T00:00:00", "2026-01-16T00:00:00", 2,
@@ -610,8 +610,8 @@ def test_cli_init_and_people(site, tmp_path):
     assert r.exit_code == 0 and "alice" not in r.output
     rows = list(csv.reader(csvp.open()))
     assert rows[0] == ["user", "department", "school"]
-    assert sorted(r[0] for r in rows[1:]) == ["alice", "bob", "carol", "dave", "frank", "root"] or \
-        sorted(r[0] for r in rows[1:]) == ["alice", "bob", "carol", "dave", "frank"]
+    assert sorted(r[0] for r in rows[1:]) == ["alice", "bob", "dave", "frank", "robin", "root"] or \
+        sorted(r[0] for r in rows[1:]) == ["alice", "bob", "dave", "frank", "robin"]
     assert stat.S_IMODE(os.stat(csvp).st_mode) == 0o600
 
 

@@ -21,7 +21,7 @@ LINE = ("NodeName=node02 Arch=x86_64 CoresPerSocket=16 CPUAlloc=12 CPUEfctv=64 C
         "AvailableFeatures=(null) ActiveFeatures=(null) Gres=gpu:a40:2(S:0-1) NodeAddr=node02 "
         "NodeHostName=node02 Version=23.02.7 OS=Linux 4.18.0-513.el8.x86_64 #1 SMP PREEMPT_DYNAMIC "
         "Fri Sep 29 05:21:10 EDT 2023 RealMemory=256000 AllocMem=48000 FreeMem=200000 Sockets=2 Boards=1 "
-        "State=MIXED+DRAIN ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A Partitions=basic,parish "
+        "State=MIXED+DRAIN ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A Partitions=basic,ames "
         "BootTime=2026-10-01T10:00:00 SlurmdStartTime=2026-10-01T10:01:00 LastBusyTime=2026-11-06T09:00:00 "
         "ResumeAfterTime=None CfgTRES=cpu=64,mem=250G,billing=64 AllocTRES=cpu=12,mem=48000M CapWatts=n/a "
         "CurrentWatts=0 AveWatts=0 ExtSensorsJoules=n/s ExtSensorsWatts=0 ExtSensorsTemp=n/s "
@@ -96,7 +96,7 @@ def test_parse_node():
     assert n["flags"] == ["DRAIN"] and drain.drained(n) and drain.resumable(n)
     assert n["reason"] == "disk errors = bad (jt via nomad)"
     assert n["reason_user"] == "slurm" and n["reason_time"] == "2026-11-06T10:15:02"
-    assert (n["cpus_alloc"], n["cpus_total"], n["partitions"]) == (12, 64, "basic,parish")
+    assert (n["cpus_alloc"], n["cpus_total"], n["partitions"]) == (12, 64, "basic,ames")
     assert "draining" in drain.described(n)
     m = drain.parse_node(LINE.replace("State=MIXED+DRAIN", "State=IDLE").split(" Reason=")[0])
     assert m["reason"] is None and not drain.drained(m) and not drain.resumable(m)
@@ -187,9 +187,9 @@ def test_refused_before_anything(home):
 def test_off_until_slurm_as(home):
     s = Slurm()
     r = drain.change("node02", drain.DRAIN, reason="disk", by="jt", config={}, run=s, finder=finder,
-                     config_path="/home/zeus/.config/nomad/nomad.toml", apply=True)
+                     config_path="/home/monitor/.config/nomad/nomad.toml", apply=True)
     assert r["ok"] is False and r["applied"] is False
-    assert "slurm_as is not set in /home/zeus/.config/nomad/nomad.toml" in r["problems"][0]
+    assert "slurm_as is not set in /home/monitor/.config/nomad/nomad.toml" in r["problems"][0]
     assert not any("update" in c for c in s.calls)
     r = drain.change("node02", drain.DRAIN, reason="disk", config={"actions": {"slurm_as": "-u root"}},
                      run=s, finder=finder)
@@ -332,8 +332,8 @@ def test_slurm_programs_share_one_environment(home, monkeypatch):
 
 
 def test_the_sudo_line_lets_these_two_only():
-    line = drain.sudo_line("zeus", "slurm", "/usr/bin/scontrol")
-    assert line == ("zeus ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\\=* State\\=DRAIN Reason\\=*, "
+    line = drain.sudo_line("monitor", "slurm", "/usr/bin/scontrol")
+    assert line == ("monitor ALL=(slurm) NOPASSWD: /usr/bin/scontrol update NodeName\\=* State\\=DRAIN Reason\\=*, "
                     "/usr/bin/scontrol update NodeName\\=* State\\=RESUME")
 
 
@@ -388,7 +388,7 @@ def test_install_problem(open_tmp, monkeypatch):
 
 
 def test_a_folder_only_its_owner_passes_shields_what_is_below(open_tmp, monkeypatch):
-    """1.31.1: arachne's ~/.local (700) over ~/.local/lib (775, group localuser: zeus's primary group,
+    """1.31.1: hpc2's ~/.local (700) over ~/.local/lib (775, group localuser: monitor's primary group,
     with five other members): no one else reaches it, whatever its mode."""
     import nomad
     tmp_path = open_tmp
@@ -431,7 +431,7 @@ def test_sudo_wanting_a_password_is_said(home):
 
 
 def test_sudo_insisting_on_a_terminal_is_said(home):
-    """1.31.2: vadur (RHEL 7) has Defaults requiretty; its agent has no terminal."""
+    """1.31.2: hpc3 (RHEL 7) has Defaults requiretty; its agent has no terminal."""
     TTY = "sudo: sorry, you must have a tty to run sudo\n"
 
     class NoTty(Slurm):
@@ -501,7 +501,7 @@ if a[:3] == ["show", "node", "-o"]:
         sys.exit(1)
     line = "NodeName=node02 CPUAlloc=4 CPUTot=8 OS=Linux 4.18 #1 SMP State=%s Partitions=basic" % st["state"]
     if st.get("reason"):
-        line += " Reason=%s [zeus@2026-11-06T10:15:02]" % st["reason"]
+        line += " Reason=%s [monitor@2026-11-06T10:15:02]" % st["reason"]
     print(line)
     sys.exit(0)
 if a[0] == "update":

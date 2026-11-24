@@ -67,7 +67,7 @@ def test_rules_from_alerts_temps():
     assert T.rules({}, "x") == T.DEFAULTS
     cfg = {"warning": 88, "sustain_minutes": 2, "critical": "hot",
            "peterslabworkstation": {"warning": 85, "critical": 89}}
-    r = T.rules(cfg, "peterslabworkstation.richmond.edu")           # its short name's table
+    r = T.rules(cfg, "peterslabworkstation.example.edu")           # its short name's table
     assert (r["warning"], r["critical"], r["sustain_minutes"]) == (85.0, 89.0, 2.0)
     assert T.rules(cfg, "other")["warning"] == 88.0 and T.rules(cfg, "other")["critical"] == 95.0
     assert T.rules({"enabled": False}, "x")["enabled"] is False
@@ -251,9 +251,9 @@ def test_workstations_and_slurm_s_nodes_too(tmp_path, monkeypatch):
 
     def run(argv, **kw):
         if argv[0].endswith("sinfo"):
-            return subprocess.CompletedProcess(argv, 0, "spdr01 spdr01 idle\nspdr01 spdr01 idle\n"
-                                                      "spdr02 spdr02-ib mix\nspdr03 spdr03 down*\n"
-                                                      "spdr04 spdr04 idle~\n", "")
+            return subprocess.CompletedProcess(argv, 0, "nd01 nd01 idle\nnd01 nd01 idle\n"
+                                                      "nd02 nd02-ib mix\nnd03 nd03 down*\n"
+                                                      "nd04 nd04 idle~\n", "")
         asked.append(argv[argv.index("--") + 1] if "--" in argv else "here")
         return subprocess.CompletedProcess(argv, 0, f"{T.MARK}\nT|coretemp|x|temp1|Package id 0|61000|100000\n", "")
     monkeypatch.setattr(T.subprocess, "run", run)
@@ -262,8 +262,8 @@ def test_workstations_and_slurm_s_nodes_too(tmp_path, monkeypatch):
     c = T.TempsCollector({"hosts": ["localhost"], "slurm_nodes": True, "min_seconds": 0, "alert_rules": {}},
                          tmp_path / "db")
     rows = c.collect()
-    assert sorted(asked) == ["here", "spdr01", "spdr02-ib"]                   # not down, not powered off
-    assert sorted(r["node"] for r in rows) == sorted([H, "spdr01", "spdr02"])
+    assert sorted(asked) == ["here", "nd01", "nd02-ib"]                   # not down, not powered off
+    assert sorted(r["node"] for r in rows) == sorted([H, "nd01", "nd02"])
     assert {r["crit_c"] for r in rows} == {100.0}
 
 
@@ -275,8 +275,8 @@ def test_a_host_with_no_sensors_is_said_not_failed(tmp_path):
     assert c.collect() == [] and c.note == f"no temperature sensors on {H}"      # a VM: nothing, not an error
 
 
-def test_spiderweb_two_sockets_and_an_older_driver(tmp_path):
-    # spiderweb (3 Nov): hwmon0 and hwmon1 coretemp (a socket each), hwmon2 with no name
+def test_interactive1_two_sockets_and_an_older_driver(tmp_path):
+    # interactive1 (3 Nov): hwmon0 and hwmon1 coretemp (a socket each), hwmon2 with no name
     root = tmp_path / "hwmon"
     for dev in ("coretemp.0", "coretemp.1", "acpi-power", "it87.656"):
         (root / "devices" / dev).mkdir(parents=True)
@@ -290,7 +290,7 @@ def test_spiderweb_two_sockets_and_an_older_driver(tmp_path):
     (old / "device").symlink_to(root / "devices" / "it87.656")
     (root / "devices" / "it87.656" / "name").write_text("it87\n")
     (root / "devices" / "it87.656" / "temp1_input").write_text("38000\n")
-    rows = T.parse("spiderweb", _read(root), "2026-11-03T10:30:00")
+    rows = T.parse("interactive1", _read(root), "2026-11-03T10:30:00")
     got = sorted((r["chip"], r["label"] or r["sensor"], r["temp_c"]) for r in rows)
     # (1.25.7) each socket's cores as one: their hottest
     assert got == [("coretemp@coretemp.0", "Cores (hottest)", 47.0), ("coretemp@coretemp.0", "Package id 0", 48.0),

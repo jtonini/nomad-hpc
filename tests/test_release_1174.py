@@ -204,7 +204,7 @@ cluster_name = "c"
 title = "x"
 
 [console.roles]
-admin = ["jtonini"]            # everything, settings included
+admin = ["rcadmin"]            # everything, settings included
 operator = []                  # everything, no settings
 
 [console.labs]
@@ -234,7 +234,7 @@ def test_console_role_shows_then_writes_one_change(tmp_path):
     assert text.replace('["jdoe"]', "[]") == ROLES_TOML           # nothing else moved
     assert list(tmp_path.glob("nomad.toml.bak-*"))
     acc = access_from(read_toml(toml), log=False)
-    assert acc.role("jdoe") == "operator" and acc.role("jtonini") == "admin"
+    assert acc.role("jdoe") == "operator" and acc.role("rcadmin") == "admin"
 
 
 def test_console_role_moves_and_removes(tmp_path):
@@ -254,14 +254,14 @@ def test_console_role_moves_and_removes(tmp_path):
     data = TomlEdit(toml).data
     assert role_of(data, "jdoe") == "admin" and role_of(data, "amy") == "operator"
     # viewer: named one, whatever else says; none: on no list
-    said = change("jtonini", "viewer")
-    assert said[0] == "jtonini is no longer listed as an admin" and "viewer ([console.roles] viewer)" in said[1]
+    said = change("rcadmin", "viewer")
+    assert said[0] == "rcadmin is no longer listed as an admin" and "viewer ([console.roles] viewer)" in said[1]
     text = toml.read_text()
-    assert 'admin = ["jdoe"]' in text and 'operator = ["amy"]' in text and 'viewer = ["jtonini"]' in text
+    assert 'admin = ["jdoe"]' in text and 'operator = ["amy"]' in text and 'viewer = ["rcadmin"]' in text
     assert "# everything, settings" in text
-    assert role_of(TomlEdit(toml).data, "jtonini") == "viewer"
-    assert change("jtonini", "none")[-1].endswith("the Console's own record for them decides")
-    assert role_of(TomlEdit(toml).data, "jtonini") == "none" and 'viewer = []' in toml.read_text()
+    assert role_of(TomlEdit(toml).data, "rcadmin") == "viewer"
+    assert change("rcadmin", "none")[-1].endswith("the Console's own record for them decides")
+    assert role_of(TomlEdit(toml).data, "rcadmin") == "none" and 'viewer = []' in toml.read_text()
     # already so: nothing to change
     assert set_role(TomlEdit(toml), "nobody", "none") == []
     assert set_role(TomlEdit(toml), "amy", "operator") == []
@@ -284,17 +284,17 @@ def test_console_role_adds_the_table_or_the_list(tmp_path):
     set_role(edit, "jdoe", "admin")
     assert edit.text.index("[console.roles]") < edit.text.index("[console.labs]")   # after [console]
     assert role_of(edit.data, "jdoe") == "admin"
-    toml.write_text('[console.roles]\nadmin = "jtonini"   # one\n')
+    toml.write_text('[console.roles]\nadmin = "rcadmin"   # one\n')
     edit = TomlEdit(toml)
     set_role(edit, "jdoe", "operator")
     set_role(edit, "amy", "admin")
-    assert edit.text == '[console.roles]\noperator = ["jdoe"]\nadmin = ["jtonini", "amy"]   # one\n'
+    assert edit.text == '[console.roles]\noperator = ["jdoe"]\nadmin = ["rcadmin", "amy"]   # one\n'
 
 
 @pytest.mark.parametrize("text", [
-    '[console]\nroles = { admin = ["jtonini"] }\n',
-    '[console]\nroles.admin = ["jtonini"]\n',
-    '[console.roles]\nadmin = [\n  "jtonini",\n]\n',
+    '[console]\nroles = { admin = ["rcadmin"] }\n',
+    '[console]\nroles.admin = ["rcadmin"]\n',
+    '[console.roles]\nadmin = [\n  "rcadmin",\n]\n',
 ])
 def test_console_role_never_rewrites_what_it_cant_read_line_by_line(tmp_path, text):
     r, toml = _role(tmp_path, text, "jdoe", "admin", "--apply")
@@ -303,7 +303,7 @@ def test_console_role_never_rewrites_what_it_cant_read_line_by_line(tmp_path, te
 
 
 def test_console_role_takes_netids_only(tmp_path):
-    for bad in ("a b", "-x", "jdoe@richmond.edu", ""):
+    for bad in ("a b", "-x", "jdoe@example.edu", ""):
         r, toml = _role(tmp_path, ROLES_TOML, bad, "admin", "--apply")
         assert r.exit_code != 0 and toml.read_text() == ROLES_TOML, (bad, r.output)
 
@@ -591,13 +591,13 @@ def test_console_roles_says_whose_word_decides(tmp_path):
     toml = tmp_path / "nomad.toml"
     toml.write_text(ROLES_TOML.replace("operator = []", 'operator = []\nviewer = ["vic"]'))
     out = {}
-    for who in ("vic", "jdoe", "jtonini"):
+    for who in ("vic", "jdoe", "rcadmin"):
         r = CliRunner().invoke(cli, ["-c", str(toml), "console", "roles", who, "--db", str(tmp_path / "none.db")])
         assert r.exit_code == 0, r.output
         out[who] = next(line for line in r.output.splitlines() if line.strip().startswith("role:"))
     assert "viewer (named one in the file" in out["vic"]
     assert "as the Console's own record says" in out["jdoe"] and not out["jdoe"].strip().startswith("role: viewer")
-    assert out["jtonini"].strip() == "role: admin"
+    assert out["rcadmin"].strip() == "role: admin"
 
 
 def test_a_swap_while_saving_is_refused(tmp_path, monkeypatch):

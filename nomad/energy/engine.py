@@ -8,7 +8,7 @@ summary, per-group/per-user breakdowns, and carbon view from that single
 pass. Provides unified CLI and JSON output, mirroring DynamicsEngine.
 
 Usage:
-    engine = EnergyEngine(db_path, hours=168, cluster_name="spydur",
+    engine = EnergyEngine(db_path, hours=168, cluster_name="hpc1",
                           config=cfg, mode="physical")
     print(engine.full_summary())
     print(engine.report(group_by="partition"))

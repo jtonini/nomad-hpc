@@ -55,7 +55,7 @@ def test_threads_with_srun_get_their_cpus_and_old_templates_are_as_they_were():
                     "run": "g16 < {input} > {stem}.log"})
     text = T.render(g, module="gaussian/g16c02", input_path="/home/amy/water.gjf")
     assert "OMP_NUM_THREADS" not in text and "SRUN_CPUS_PER_TASK" not in text and "# Change anything" in text
-    assert T.template(CP2K).to_dict("spydur")["options"][1]["choices"][1] == {
+    assert T.template(CP2K).to_dict("hpc1")["options"][1]["choices"][1] == {
         "label": "Goes on from its restart file", "time": "3-00:00:00"}
 
 
@@ -131,23 +131,23 @@ threads_per_task = 2
     conn.execute("INSERT INTO modules_available VALUES ('cp2k/2024.1', 0, '2026-11-05')")
     conn.commit()
     conn.close()
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db)])
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db)])
     assert r.exit_code == 0, r.output
     assert "Runs as (--choose parallel=N): 1. MPI processes, one a core; 2. MPI processes of 2 threads each" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--make", "CP2K",
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--make", "CP2K",
                                  "--input", "/home/amy/h2o.inp", "--choose", "parallel=2"])
     assert r.exit_code == 0, r.output
     assert "#SBATCH --ntasks=4" in r.output and "#SBATCH --cpus-per-task=2" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--make", "CP2K",
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--make", "CP2K",
                                  "--input", "/home/amy/h2o.inp", "--choose", "parallel"])
     assert r.exit_code != 0 and "OPTION=N" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--check"])
-    assert r.exit_code == 0 and "spydur: 2 script(s) made from 1 template(s); every one could be" in r.output
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--check"])
+    assert r.exit_code == 0 and "hpc1: 2 script(s) made from 1 template(s); every one could be" in r.output
     # one that can't be made (as render says) fails the check, and is said
     def no(*a, **k):
         raise T.TemplateError("cannot")
     monkeypatch.setattr(T, "render", no)
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--check"])
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--check"])
     assert r.exit_code == 1 and "! CP2K (cp2k/2024.1; Runs as: MPI processes of 2 threads each): cannot" in r.output
 
 
@@ -156,14 +156,14 @@ def test_a_choice_for_one_site_and_lines_that_only_read_a_variable():
                     "partition": "gpunodes", "run": "gmx mdrun -deffnm {stem} -ntomp $OMP_NUM_THREADS",
                     "sbatch": ["--constr=a100"],
                     "options": [{"name": "where", "label": "Where", "choices": [
-                        {"label": "The usual"}, {"label": "arachne's GPUs", "partition": {"arachne": "gpu"}}]}]})
-    spydur = T.render(t, module="gromacs/1", input_path="/home/amy/md.tpr", site={"name": "spydur"},
+                        {"label": "The usual"}, {"label": "hpc2's GPUs", "partition": {"hpc2": "gpu"}}]}]})
+    hpc1 = T.render(t, module="gromacs/1", input_path="/home/amy/md.tpr", site={"name": "hpc1"},
                       choose={"where": 2})
-    assert "#SBATCH --partition=gpunodes" in spydur                     # the choice names arachne only
-    arachne = T.render(t, module="gromacs/1", input_path="/home/amy/md.tpr", site={"name": "arachne"},
+    assert "#SBATCH --partition=gpunodes" in hpc1                     # the choice names hpc2 only
+    hpc2 = T.render(t, module="gromacs/1", input_path="/home/amy/md.tpr", site={"name": "hpc2"},
                        choose={"where": 2})
-    assert "#SBATCH --partition=gpu" in arachne and "#SBATCH --constraint=a100" in arachne
-    assert "export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}" in spydur                        # read in a line, not set there
+    assert "#SBATCH --partition=gpu" in hpc2 and "#SBATCH --constraint=a100" in hpc2
+    assert "export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}" in hpc1                        # read in a line, not set there
     own = T.template({"program": "X", "modules": ["x/*"], "inputs": [".x"], "cpus": 4, "omp": True,
                       "setup": ["export OMP_NUM_THREADS=2"], "run": "x {input}"})
     assert T.render(own, module="x/1", input_path="/home/amy/a.x").count("OMP_NUM_THREADS=") == 1
@@ -173,15 +173,15 @@ def test_a_choice_for_one_site_and_lines_that_only_read_a_variable():
 
 def test_a_program_may_have_a_template_a_site():
     cfg = {"submit": {"templates": [
-        {"program": "CP2K", "sites": ["spydur"], "modules": ["cp2k/*"], "inputs": [".inp"], "parallel": "mpi",
+        {"program": "CP2K", "sites": ["hpc1"], "modules": ["cp2k/*"], "inputs": [".inp"], "parallel": "mpi",
          "run": "mpirun -np {tasks} --bind-to core cp2k.psmp -i {input} -o {stem}.out"},
-        {"program": "CP2K", "sites": ["arachne"], "modules": ["cp2k/*"], "inputs": [".inp"], "parallel": "mpi",
+        {"program": "CP2K", "sites": ["hpc2"], "modules": ["cp2k/*"], "inputs": [".inp"], "parallel": "mpi",
          "run": "srun --mpi=pmix cp2k.psmp -i {input} -o {stem}.out"},
         {"program": "CP2K", "modules": ["cp2k/*"], "inputs": [".inp"], "run": "cp2k.ssmp {input}"}]}}
-    s, ps = T.templates(cfg, "spydur")
+    s, ps = T.templates(cfg, "hpc1")
     assert [t.run for t in s] == ["mpirun -np {tasks} --bind-to core cp2k.psmp -i {input} -o {stem}.out"]
-    assert ps == ["two templates for CP2K at spydur: the first is used"]           # the third is everywhere
-    a, _ = T.templates(cfg, "arachne")
+    assert ps == ["two templates for CP2K at hpc1: the first is used"]           # the third is everywhere
+    a, _ = T.templates(cfg, "hpc2")
     assert a[0].run.startswith("srun --mpi=pmix")
     both, ps = T.templates({"submit": {"templates": cfg["submit"]["templates"][:2]}})
     assert len(both) == 2 and ps == []
@@ -217,5 +217,5 @@ def test_check_all_counts_what_it_made_and_what_cant_be_read():
     cfg = {"submit": {"templates": [dict(CP2K, cpus=16, options=[]),
                                     dict(CP2K, program="Bad", cpus=16, parallel="hybrid", threads_per_task=3,
                                          options=[])]}}
-    made, failed = T.check_all(cfg, "spydur", ["cp2k/1"])
+    made, failed = T.check_all(cfg, "hpc1", ["cp2k/1"])
     assert made == 1 and len(failed) == 1 and "aren't processes of 3 threads" in failed[0]

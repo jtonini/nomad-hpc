@@ -45,15 +45,15 @@ class TestSystemInfo:
             alert_count=2,
             cluster_count=3,
             source="console",
-            institution="University of Richmond",
-            submitted_by="jtonini@richmond.edu",
+            institution="Example University",
+            submitted_by="rcadmin@example.edu",
             timestamp="2026-04-07T10:00:00",
         )
         md = info.to_markdown()
         assert "Console version" in md
         assert "slurm, gpu, disk" in md
         assert "disk_warning, gpu_temp" in md
-        assert "University of Richmond" in md
+        assert "Example University" in md
 
     def test_to_dict(self):
         info = SystemInfo(nomad_version="1.3.0", source="cli")
@@ -279,14 +279,14 @@ class TestGitHubClient:
             category="bug",
             component="alerts",
             version="1.3.0",
-            institution="University of Richmond",
+            institution="Example University",
             source="console",
         )
         assert "bug" in labels
         assert "component:alerts" in labels
         assert "v1.3.0" in labels
         assert "source:console" in labels
-        assert "inst:university-of-richmond" in labels
+        assert "inst:example-university" in labels
 
     def test_build_labels_minimal(self):
         client = GitHubClient()

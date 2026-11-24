@@ -83,7 +83,7 @@ def remote_command(root: str = HWMON) -> str:
     """One line of POSIX sh (any login shell runs it: no newlines, no !):
     a line ``T|chip|device|sensor|label|millidegrees|crit`` per sensor."""
     r = shlex.quote(root)
-    # an older kernel's driver keeps its name and readings in device/ (spiderweb's hwmon2 has no name)
+    # an older kernel's driver keeps its name and readings in device/ (interactive1's hwmon2 has no name)
     return (f'for d in {r}/hwmon*; do n=$(cat "$d/name" 2>/dev/null || cat "$d/device/name" 2>/dev/null); '
             '[ -n "$n" ] || continue; v=$(readlink -f "$d/device" 2>/dev/null); v=${v##*/}; '
             'for t in "$d"/temp*_input "$d"/device/temp*_input; do [ -r "$t" ] || continue; b=${t%_input}; '
@@ -131,7 +131,7 @@ CORES = "cores"            # the sensor kept for a chip's cores: their hottest
 
 
 def _cores_as_one(rows: list[dict]) -> list[dict]:
-    """coretemp's Core N readings, one a core (26 a socket on spydur's
+    """coretemp's Core N readings, one a core (26 a socket on hpc1's
     Xeons: 1,674 rows a round there, 1.25.6), as one a chip: its hottest
     core now (sensor ``cores``, "Cores (hottest)"). The package's own
     reading is the alert's anyway."""

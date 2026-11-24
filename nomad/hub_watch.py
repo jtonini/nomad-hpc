@@ -91,9 +91,11 @@ class Hub:
 
     @property
     def label(self) -> str:
-        """As a sentence names it: "the hub mingus", or "its hub" when it
-        left no name."""
-        return f"the hub {self.name}" if self.name else "its hub"
+        """As a sentence names it: "the hub1", "the hub" when its name
+        is just that, or "its hub" when it left no name."""
+        if not self.name:
+            return "its hub"
+        return "the hub" if str(self.name).lower() == "hub" else f"the hub {self.name}"
 
     @property
     def usual_gap(self) -> float | None:

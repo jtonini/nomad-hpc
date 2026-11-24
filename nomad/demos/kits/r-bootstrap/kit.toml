@@ -27,7 +27,7 @@ file = "bootstrap_slopes.pdf"
 what = "A histogram of the 20,000 slopes"
 
 [recorded]                      # one real run, kept with the kit
-site = "spydur"
+site = "hpc1"
 date = "2026-11-09"
 module = "R/4.4.2"
 partition = "condos"

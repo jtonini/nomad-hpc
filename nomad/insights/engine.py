@@ -10,7 +10,7 @@ and output formatters into a unified pipeline:
 
 Usage:
     engine = InsightEngine(db_path)                  # a single site's database
-    engine = InsightEngine(combined, site="spydur")  # one site of a combined one
+    engine = InsightEngine(combined, site="hpc1")  # one site of a combined one
     print(engine.brief())
     data = engine.to_dict()
 

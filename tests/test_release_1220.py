@@ -84,7 +84,7 @@ def _heavy_probe():
 
 
 def test_heavy_is_a_warning_on_a_login_host():
-    rows = findings_of(_heavy_probe(), "spydur", "login")
+    rows = findings_of(_heavy_probe(), "hpc1", "login")
     assert rows and rows[0]["kind"] == "heavy" and rows[0]["severity"] == "warning"
     assert "cores" in rows[0]["note"]
 
@@ -123,7 +123,7 @@ def test_a_burst_of_submissions_is_listed(jobs_db):
     for i in range(65):
         _add(jobs_db, i, "alice", f"j{i}", "COMPLETED", NOW - timedelta(minutes=5) + timedelta(seconds=i * 4), 100)
     jobs_db.commit()
-    out = job_findings(jobs_db, "spydur", "login", NOW, dict(JOB_DEFAULTS))
+    out = job_findings(jobs_db, "hpc1", "login", NOW, dict(JOB_DEFAULTS))
     burst = [r for r in out if r["kind"] == "job_burst"]
     assert burst and burst[0]["username"] == "alice" and burst[0]["severity"] == "info"
 
@@ -133,23 +133,23 @@ def test_an_array_is_one_submission_not_a_burst(jobs_db):
     for i in range(500):                                  # 500 tasks, one submit time
         _add(jobs_db, i, "bob", "arr", "COMPLETED", submit, 200)
     jobs_db.commit()
-    assert job_findings(jobs_db, "spydur", "login", NOW, dict(JOB_DEFAULTS)) == []
+    assert job_findings(jobs_db, "hpc1", "login", NOW, dict(JOB_DEFAULTS)) == []
 
 
 def test_fail_fast_is_a_warning(jobs_db):
     for i in range(20):
-        _add(jobs_db, i, "carol", f"f{i}", "FAILED", NOW - timedelta(minutes=30) + timedelta(seconds=i * 10), 3)
+        _add(jobs_db, i, "robin", f"f{i}", "FAILED", NOW - timedelta(minutes=30) + timedelta(seconds=i * 10), 3)
     jobs_db.commit()
-    out = job_findings(jobs_db, "spydur", "login", NOW, dict(JOB_DEFAULTS))
+    out = job_findings(jobs_db, "hpc1", "login", NOW, dict(JOB_DEFAULTS))
     ff = [r for r in out if r["kind"] == "fail_fast"]
-    assert ff and ff[0]["username"] == "carol" and ff[0]["severity"] == "warning"
+    assert ff and ff[0]["username"] == "robin" and ff[0]["severity"] == "warning"
 
 
 def test_a_node_failure_is_not_the_users_fault(jobs_db):
     for i in range(20):
         _add(jobs_db, i, "dave", f"n{i}", "NODE_FAIL", NOW - timedelta(minutes=30) + timedelta(seconds=i * 10), 2)
     jobs_db.commit()
-    assert [r for r in job_findings(jobs_db, "spydur", "login", NOW, dict(JOB_DEFAULTS))
+    assert [r for r in job_findings(jobs_db, "hpc1", "login", NOW, dict(JOB_DEFAULTS))
             if r["kind"] == "fail_fast"] == []
 
 
@@ -158,7 +158,7 @@ def test_cancel_resubmit_churn_is_a_warning(jobs_db):
         state = "CANCELLED by 1" if i < 6 else "COMPLETED"
         _add(jobs_db, i, "erin", "model", state, NOW - timedelta(minutes=40) + timedelta(minutes=i), 50)
     jobs_db.commit()
-    out = job_findings(jobs_db, "spydur", "login", NOW, dict(JOB_DEFAULTS))
+    out = job_findings(jobs_db, "hpc1", "login", NOW, dict(JOB_DEFAULTS))
     churn = [r for r in out if r["kind"] == "job_churn"]
     assert churn and churn[0]["username"] == "erin" and "cancelled" in churn[0]["note"]
 
@@ -166,7 +166,7 @@ def test_cancel_resubmit_churn_is_a_warning(jobs_db):
 def test_no_jobs_table_is_no_op():
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    assert job_findings(conn, "jonimitchell", "login", NOW, dict(JOB_DEFAULTS)) == []
+    assert job_findings(conn, "labhead1", "login", NOW, dict(JOB_DEFAULTS)) == []
 
 
 # ── config ──────────────────────────────────────────────────────────────────

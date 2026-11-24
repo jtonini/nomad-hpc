@@ -11,9 +11,9 @@ import sqlite3
 from nomad.alerts.backends import EmailBackend, readable_time
 from nomad.alerts.dispatcher import AlertDispatcher
 
-ALERT = {"severity": "warning", "source": "disk", "host": "spydur",
+ALERT = {"severity": "warning", "source": "disk", "host": "hpc1",
          "message": "Disk /scratch at 85.0% (threshold: 80%)",
-         "timestamp": "2026-09-29T17:33:41.698908", "site": "spydur"}
+         "timestamp": "2026-09-29T17:33:41.698908", "site": "hpc1"}
 
 
 def _backend():
@@ -23,7 +23,7 @@ def _backend():
 
 def test_subject_names_the_cluster_and_the_problem():
     assert _backend()._format_subject(ALERT) == \
-        "[WARNING] NØMAÐ spydur: Disk /scratch at 85.0% (threshold: 80%)"
+        "[WARNING] NØMAÐ hpc1: Disk /scratch at 85.0% (threshold: 80%)"
     long = dict(ALERT, message="x" * 300, site=None)
     s = _backend()._format_subject(long)
     assert s.startswith("[WARNING] NØMAÐ: xxx") and len(s) < 130
@@ -32,9 +32,9 @@ def test_subject_names_the_cluster_and_the_problem():
 def test_body_has_cluster_and_readable_time():
     b = _backend()
     text, page = b._format_text(ALERT), b._format_html(ALERT)
-    assert "Cluster: spydur" in text and "2026-09-29 17:33" in text
+    assert "Cluster: hpc1" in text and "2026-09-29 17:33" in text
     assert "T17:33:41" not in text
-    assert "<strong>Cluster:</strong> spydur" in page and "2026-09-29 17:33" in page
+    assert "<strong>Cluster:</strong> hpc1" in page and "2026-09-29 17:33" in page
 
 
 def test_html_is_escaped():
@@ -60,11 +60,11 @@ def test_dispatcher_stamps_the_site(tmp_path):
             sent.append(alert)
             return True
 
-    d = AlertDispatcher({"clusters": {"spydur": {"name": "spydur"}},
+    d = AlertDispatcher({"clusters": {"hpc1": {"name": "hpc1"}},
                          "database": {"path": db.name}, "general": {"data_dir": str(tmp_path)}})
     d.backends = [B()]
-    d.dispatch({"severity": "warning", "source": "disk", "host": "spdr-head", "message": "m"})
-    assert sent[0]["site"] == "spydur"
+    d.dispatch({"severity": "warning", "source": "disk", "host": "nd-head", "message": "m"})
+    assert sent[0]["site"] == "hpc1"
     c = sqlite3.connect(db)
     details = json.loads(c.execute("SELECT details FROM alerts").fetchone()[0])
-    assert details == {"host": "spdr-head", "site": "spydur"}
+    assert details == {"host": "nd-head", "site": "hpc1"}

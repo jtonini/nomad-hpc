@@ -261,13 +261,13 @@ def test_look_says_what_may_be_done(w):
 # --- stopping one --------------------------------------------------------------------
 
 def test_an_rstudio_session_is_suspended_with_workbenchs_own_command(w):
-    res = ia.stop("ann", 4101, started="2026-11-10T08:00:00", by="jtonini", config=ON, run=w.run)
+    res = ia.stop("ann", 4101, started="2026-11-10T08:00:00", by="rcadmin", config=ON, run=w.run)
     assert res["ok"] and not res["applied"] and res["runs_as"] == "root"
     assert res["command"] == ["/usr/bin/sudo", "-n", "/usr/sbin/rstudio-server", "suspend-session", "4101"]
     assert 4101 in w.procs and "comes back" in res["does"]
-    res = ia.stop("ann", 4101, started="2026-11-10T08:00:00", by="jtonini", apply=True, config=ON, run=w.run)
+    res = ia.stop("ann", 4101, started="2026-11-10T08:00:00", by="rcadmin", apply=True, config=ON, run=w.run)
     assert res["ok"] and res["applied"] and res["said"].startswith("suspended") and 4101 not in w.procs
-    assert _log(w)[-1]["what"] == "stop" and _log(w)[-1]["by"] == "jtonini" and _log(w)[-1]["ok"]
+    assert _log(w)[-1]["what"] == "stop" and _log(w)[-1]["by"] == "rcadmin" and _log(w)[-1]["ok"]
 
 
 def test_a_jupyter_server_is_stopped_as_its_person(w):
@@ -347,7 +347,7 @@ def test_clear_suspends_and_stops_the_stale_ones(w):
     assert res["hours"] == 24 and 4101 in w.procs
     res = ia.clear(hours=27, kind="jupyter", config=ON, db=w.db, run=w.run, collect=w.sessions)
     assert [x["pid"] for x in res["stale"]] == [4501]
-    res = ia.clear(by="jtonini", apply=True, config=ON, db=w.db, run=w.run, collect=w.sessions)
+    res = ia.clear(by="rcadmin", apply=True, config=ON, db=w.db, run=w.run, collect=w.sessions)
     assert res["ok"] and res["applied"] and res["said"] == "3 of 3 stale sessions cleared"
     assert {4101, 4202, 4501}.isdisjoint(w.procs)
     assert _log(w)[-1]["what"] == "clear" and len(_log(w)[-1]["sessions"]) == 3
@@ -387,7 +387,7 @@ def test_restarting_rstudio(w):
     res = ia.restart("rstudio", config=ON, run=w.run, collect=w.sessions)
     assert res["ok"] and res["sessions"] == 1 and res["command"] == [
         "/usr/bin/sudo", "-n", "/usr/bin/systemctl", "restart", "rstudio-server"]
-    res = ia.restart("rstudio", apply=True, by="jtonini", config=ON, run=w.run, collect=w.sessions)
+    res = ia.restart("rstudio", apply=True, by="rcadmin", config=ON, run=w.run, collect=w.sessions)
     assert res["ok"] and res["applied"] and res["after"] == "active"
     assert ["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "restart", "rstudio-server"] in w.ran
 
@@ -477,7 +477,7 @@ def test_the_command_line(w, monkeypatch):
     assert "stops every person's server" in r.output and "--servers 1" in r.output, r.output
     r = go("sessions")
     assert r.exit_code == 0 and "1 idle 24 hours or more" in r.output, r.output
-    r = go("clear", "--apply", "--by", "jtonini")
+    r = go("clear", "--apply", "--by", "rcadmin")
     assert r.exit_code == 0 and "1 of 1 stale sessions cleared" in r.output and 4101 not in w.procs, r.output
 
 

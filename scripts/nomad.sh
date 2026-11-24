@@ -208,7 +208,7 @@ njobs() {
         echo "Examples:"
         echo "  njobs"
         echo "  njobs -n 50"
-        echo "  njobs -u jtonini"
+        echo "  njobs -u rcadmin"
         echo "  njobs -s FAILED"
         echo "  njobs -j 12345"
         return 0

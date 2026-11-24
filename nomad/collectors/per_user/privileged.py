@@ -10,10 +10,10 @@ collector uses ordinary psutil calls that work for any uid.
 Why this exists
 ---------------
 Validation showed two privilege regimes:
-  - spydur: collector ran as `installer` (no sudo). Process metadata across
+  - hpc1: collector ran as `hpcadmin` (no sudo). Process metadata across
     all users was visible (psutil works), but /proc/<pid>/io was AccessDenied
     for processes belonging to other users (320/391 sample rows).
-  - arachne: collector ran as root. /proc/<pid>/io and /proc/<pid>/fd were
+  - hpc2: collector ran as root. /proc/<pid>/io and /proc/<pid>/fd were
     fully accessible — required for fd attribution on compute nodes.
 
 For Component 1 head/monitoring rules (CPU + memory), no privilege is

@@ -99,7 +99,7 @@ def test_the_site_adds_agent_names():
 def test_an_agent_is_info_not_alerted():
     a = {"findings": [{"uid": 1500, "user": "amy", "kind": "agent", "program": "aider", "detail": "",
                        "aka": ["aider"], "processes": 1}], "listeners": []}
-    [f] = pw.findings_of(a, "spdr05", "node")
+    [f] = pw.findings_of(a, "nd05", "node")
     assert f["kind"] == "agent" and f["severity"] == "info" and pw.LABELS["agent"] == "an AI agent"
 
 
@@ -114,7 +114,7 @@ def test_escalation_and_root_signals_become_findings():
                    "processes": 9},
                   {"kind": "setuid_new", "uid": 1500, "user": "amy", "program": "rootme", "detail": "",
                    "processes": 1}]}
-    by = {f["kind"]: f for f in pw.findings_of(a, "spdr05", "node")}
+    by = {f["kind"]: f for f in pw.findings_of(a, "nd05", "node")}
     assert by["escalation"]["severity"] == "critical"
     assert by["escalation"]["note"] == "its parent is a python3"
     assert by["auth_failures"]["severity"] == "warning" and by["auth_failures"]["detail"] == "9"
@@ -206,7 +206,7 @@ def test_watch_list_shows_an_escalation_and_folds_agents_under_all(tmp_path, mon
                 ("auth_failures", "", "7", None, "warning")):
             conn.execute("INSERT INTO policy_findings (host, role, username, uid, kind, program, detail, reach, "
                          "note, first_seen, last_seen, sweeps, severity) "
-                         "VALUES ('spdr05','node','amy',1500,?,?,?,'',?,?,?,1,?)",
+                         "VALUES ('nd05','node','amy',1500,?,?,?,'',?,?,?,1,?)",
                          (kind, prog, detail, note, now, now, sev))
         conn.commit()
     r = CliRunner().invoke(watch_group, ["list", "--db", db])

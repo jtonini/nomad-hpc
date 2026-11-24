@@ -36,9 +36,9 @@ Settings, in the hub's nomad.toml::
     folders = ["~"]          # where My files opens, as shortcuts: ~ is their home, {user} their name
     only_in_folders = false  # true: only in those folders and below
 
-    [console.files.sites.spydur]   # one cluster's own (optional)
+    [console.files.sites.hpc1]   # one cluster's own (optional)
     folders = ["~", "/scratch/{user}"]
-    login = "spydur.example.edu"   # the host people use for rsync (default: its [[hub.sites]] host)
+    login = "hpc1.example.edu"   # the host people use for rsync (default: its [[hub.sites]] host)
 
 **Open to some labs (1.60.0).** With ``open = "labs"``, besides staff, My
 files is open to the people of the labs in ``labs``: their members now (in
@@ -73,7 +73,7 @@ entry here::
     name = "ws-kim-01"             # as people know it
     host = "ws-kim-01.example.edu"
     gate_user = "nomad"            # the account its gate runs as (default: nomad)
-    # gate_jump = "zeus@jumphost"  # reached only through that host
+    # gate_jump = "monitor@jumphost"  # reached only through that host
     folders = ["~", "/scratch/{user}", "/shared"]
     # login = "..."                # the host for rsync (default: host)
 

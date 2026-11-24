@@ -65,13 +65,13 @@ def test_a_columbus_practice_run():
     assert "colinp.debug" not in k.files and len(k.files) == 25
     assert open(k.path / "control.run").read().split() == ["niter", "=", "1", "hermit", "scf", "ciudg", "ffield",
                                                           "scfprop", "ciprop"]
-    conf = {"submit": {"demos": {"partition": {"spydur": "condos"}}, "templates": [
+    conf = {"submit": {"demos": {"partition": {"hpc1": "condos"}}, "templates": [
         {"program": "Columbus", "modules": ["columbus/*"], "default": "columbus/722", "folder": "control.run",
          "run": "$COLUMBUS/runc -m {mem_mb_each} -nproc {cpus} > runls 2>&1", "outputs": ["runls"],
          "parallel": "mpi", "cpus": 4, "mem": "16G", "time": "2-00:00:00"}]}}
-    assert K.check(k, conf, "spydur") == []
-    text = K.mark(TT.make(conf, "spydur", "Columbus", module="columbus/722", input_path="/home/you/columbus-water",
-                          available=["columbus/722"], **K.job_values(k, conf, "spydur"))["text"], k)
+    assert K.check(k, conf, "hpc1") == []
+    text = K.mark(TT.make(conf, "hpc1", "Columbus", module="columbus/722", input_path="/home/you/columbus-water",
+                          available=["columbus/722"], **K.job_values(k, conf, "hpc1"))["text"], k)
     assert "#SBATCH --job-name=practice-columbus-water" in text and "#SBATCH --partition=condos" in text
     assert "cd /home/you/columbus-water" in text and "-nproc ${SLURM_NTASKS:-1}" in text
     assert "#SBATCH --mem=2G" in text and "#SBATCH --ntasks=1" in text

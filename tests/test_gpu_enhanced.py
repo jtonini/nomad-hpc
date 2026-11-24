@@ -55,7 +55,7 @@ def collector(tmp_db):
 @pytest.fixture
 def ssh_collector(tmp_db):
     return GPUCollector(
-        {'enabled': True, 'gpu_nodes': ['node51', 'node52'], 'ssh_user': 'zeus'},
+        {'enabled': True, 'gpu_nodes': ['node51', 'node52'], 'ssh_user': 'monitor'},
         tmp_db,
     )
 

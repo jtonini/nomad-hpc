@@ -33,7 +33,7 @@ def issue(key, directive, asked, used, unit, partition, suggested, **kw):
     base = {"dimension": key, "dimension_key": key, "affected_jobs": 20, "total_applicable": 22, "avg_score": 10.0,
             "severity": "critical", "trajectory": "stable", "directive": directive, "direction": "lower",
             "current_value_typical": asked, "current_display": "x", "suggested_display": suggested,
-            "cluster": "spydur", "partition": partition, "usage_stats": UsageStats(used, 0, 0, 0, 0, unit),
+            "cluster": "hpc1", "partition": partition, "usage_stats": UsageStats(used, 0, 0, 0, 0, unit),
             "rationale": "Memory you don't use is unavailable to other jobs on the node."}
     base.update(kw)
     return Issue(**base)
@@ -101,8 +101,8 @@ def test_what_is_alike_is_one_note(world):
     text = m["text"]
     # login nodes: seven long computations are one note, five shown, the why and better way once
     assert "1. A long computation on the login node (7 times)" in text               # 1.62.0: numbered
-    assert text.count("- python on spydur, ") == 5          # five of the seven
-    assert text.count("python on spydur, ") == 6            # and the one together
+    assert text.count("- python on hpc1, ") == 5          # five of the seven
+    assert text.count("python on hpc1, ") == 6            # and the one together
     assert "\n... and 2 more like these on My activity." in text
     why = L._TEXT["cpu"][1]
     assert text.count(why) == 1 and text.count("srun --pty -c 4") == 1
@@ -112,7 +112,7 @@ def test_what_is_alike_is_one_note(world):
     assert "2. Many programs busy at once on the login node\n" in text and "(7.7 cores)" in text
     # jobs: one note a kind, a line and its #SBATCH a partition
     assert text.count(". Your jobs ask for more time than they use") == 1
-    assert ("- On spydur (cpunodes), 20 of your last 22 jobs asked for more time than they ran: "
+    assert ("- On hpc1 (cpunodes), 20 of your last 22 jobs asked for more time than they ran: "
             "they typically asked for 1 day; most ran about 1 h 38 min.\n"
             "  Ask for this instead:\n"
             "    #SBATCH --time=04:00:00\n") in text

@@ -93,7 +93,7 @@ MIN_JOBS = 50
 STALE_AFTER_HOURS = 2
 # A measured value in an alert message: a decimal, or a number with its unit
 # ("86.0%", "87%", "120ms", "85°C", "in 3 days"). Digits inside names
-# ("GPU 3", "/data2", "spdr17") are not values and keep conditions apart.
+# ("GPU 3", "/data2", "nd17") are not values and keep conditions apart.
 _MEASURED = re.compile(
     r"(?<![\w/.\-])\d+(?:\.\d+)?(?=\s*(?:%|ms\b|°C|days?\b|hours?\b|h\b))"
     r"|(?<![\w/.\-])\d+\.\d+")
@@ -121,7 +121,7 @@ def _period(hours: int) -> str:
 
 # How a job ended. Slurm writes "CANCELLED by 29405" for a job its owner
 # cancelled; a cancelled job is not a failure, and counting it as one put
-# arachne "below baseline" with 2 failures in 31 jobs.
+# hpc2 "below baseline" with 2 failures in 31 jobs.
 _OUTCOME = {
     "COMPLETED": "completed",
     "FAILED": "failed", "BOOT_FAIL": "failed",
@@ -411,7 +411,7 @@ def read_disk_signals(db_path: Path, hours: int = 6, config: dict | None = None,
             """, (since,)).fetchall()
 
         # One filesystem mounted at two paths reports the same size and use;
-        # say it once. (arachne's /home and /scratch are one 145 TB volume.)
+        # say it once. (hpc2's /home and /scratch are one 145 TB volume.)
         groups: dict[tuple, list] = {}
         for r in fs_rows:
             key = ((r["source_site"] or ""), r["total_bytes"], r["used_bytes"]) \
@@ -791,8 +791,8 @@ def read_alert_signals(db_path: Path, hours: int = 24, config: dict | None = Non
     # it was stored. The hub raises a site's node alerts on its behalf (1.17.3):
     # such an alert lives in the hub's own rows (source_site = the hub) but
     # carries the site it is about in details.site. Attributing it by
-    # source_site would show vadur's "node down" under the hub (mingus), and
-    # hide it from vadur -- so the effective site is details.site when set,
+    # source_site would show hpc3's "node down" under the hub (the hub), and
+    # hide it from hpc3 -- so the effective site is details.site when set,
     # and source_site (or, on a single-site database, the lone site) otherwise.
     conn = scope.connect(db_path, None)
     try:

@@ -191,7 +191,7 @@ def test_the_cli_letter(world, tmp_path, monkeypatch):
     assert "Subject: Your data on fs1" in r.output and not sent
     r = run("kim", "--as", "arc1", "--send")
     assert r.exit_code == 0, r.output
-    assert "Sent to kim@example.edu, copy pat@example.edu, hpc@example.edu; ARC-0001, ARC-0002 contacted." in r.output
+    assert "Sent to kim@example.edu, copy pat@example.edu, hpc@example.edu; REQ-0001, REQ-0002 contacted." in r.output
     assert "written to before" in run("kim", "--as", "arc1").output
     assert run("zed").exit_code != 0
 

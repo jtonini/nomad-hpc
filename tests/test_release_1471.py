@@ -33,7 +33,7 @@ def with_memory(*lines, meminfo=MEMINFO):
 
 
 def test_an_idle_node_full_of_file_cache_holds_little():
-    got = ND.parse("spdr01", with_memory(df("/localscratch", 10, 990, "/")), "t")
+    got = ND.parse("nd01", with_memory(df("/localscratch", 10, 990, "/")), "t")
     disk, mem = got
     assert disk["type"] == "node_disk" and mem["type"] == "node_memory"
     assert mem["total_mb"] == 384000 and mem["free_mb"] == 6836                  # MemFree: "98% used"
@@ -91,13 +91,13 @@ def test_the_timeline_draws_what_programs_hold(tmp_path):
     for i in range(6):
         t = (now - timedelta(minutes=30 * (5 - i))).isoformat(timespec="seconds")
         c.execute("INSERT INTO node_state (timestamp, node_name, state, cpus_total, cpus_alloc, memory_total_mb, "
-                  "memory_alloc_mb, memory_free_mb, cluster) VALUES (?, 'spdr01', 'IDLE', 52, 0, 384000, 0, 69000, "
-                  "'spydur')", (t,))
+                  "memory_alloc_mb, memory_free_mb, cluster) VALUES (?, 'nd01', 'IDLE', 52, 0, 384000, 0, 69000, "
+                  "'hpc1')", (t,))
         c.execute("INSERT INTO node_memory (timestamp, node, total_mb, available_mb, free_mb, cache_mb, used_mb) "
-                  "VALUES (?, 'spdr01', 384000, 371000, 69000, 300000, 13000)", (t,))
+                  "VALUES (?, 'nd01', 384000, 371000, 69000, 300000, 13000)", (t,))
     c.commit()
     c.row_factory = sqlite3.Row
-    got = node(c, None, "spdr01", now - timedelta(hours=3), now, now=now, staff=True)
+    got = node(c, None, "nd01", now - timedelta(hours=3), now, now=now, staff=True)
     assert "mem_used_pct" in got["series"] and "mem_held_pct" not in got["series"]
     assert max(v for _t, v in got["series"]["mem_used_pct"] if v is not None) == pytest.approx(3.4, abs=0.1)
     assert "doesn't allocate memory" in got["series_info"]["mem_used_pct"]["note"]

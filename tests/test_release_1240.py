@@ -260,7 +260,7 @@ def _leftover(base, tmp_path, job, state="running", made=None):
     (d / h.STATE).mkdir(parents=True)
     dest = tmp_path / "res" / job
     dest.mkdir(parents=True, exist_ok=True)
-    h.write_info(str(d), {"v": 1, "job": job, "dest": str(dest), "state": state, "node": "spdr05"})
+    h.write_info(str(d), {"v": 1, "job": job, "dest": str(dest), "state": state, "node": "nd05"})
     with open(d / h.STATE / h.MANIFEST, "w"):
         pass
     (d / "made.txt").write_text(made or job)
@@ -278,7 +278,7 @@ def test_leftovers_go_back_unless_their_job_holds_them(tmp_path, copier):
         assert h.cmd_recover(["--base", str(base), "--self", "4242"]) == 0
     finally:
         os.close(held)
-    back = list((tmp_path / "res" / "11").glob("nomad-recovered-spdr05-*"))
+    back = list((tmp_path / "res" / "11").glob("nomad-recovered-nd05-*"))
     assert len(back) == 1 and (back[0] / "made.txt").read_text() == "11" and not (base / "job_11").exists()
     assert (base / "job_12" / "made.txt").exists() and list((tmp_path / "res" / "12").iterdir()) == []
     assert not (base / "job_13").exists() and list((tmp_path / "res" / "13").iterdir()) == []

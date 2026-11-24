@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""`nomad lab accounts`: a lab's PI asks ARC for accounts (1.42.0).
+"""`nomad lab accounts`: a lab's PI asks research computing for accounts (1.42.0).
 
 On the hub, as the account the Console runs as (the requests are kept in its
 lab_check.db, and the directory's password file is its own):
@@ -45,14 +45,14 @@ def accounts_group():
     research computing is emailed. It makes the accounts as it does now, and
     closes each one here (the PI is emailed). nomad makes no account itself.
 
-    Each request has a number, as in a ticket system: ARC-0012 ([console.tickets] prefix).
+    Each request has a number, as in a ticket system: REQ-0012 ([console.tickets] prefix).
 
     \b
     nomad lab accounts check             can nomad ask the directory? (as the nomad account)
     nomad lab accounts lookup TEXT...    who each NetID or name is, as a PI would see it [--file F]
     nomad lab accounts list [--open] [--lab LAB] [--find TEXT]   the requests, and what became of each account
-    nomad lab accounts show ARC-0012     one request
-    nomad lab accounts close ARC-0012 NETID SITE made|not_made [--note "..."]   ARC made it, or not (why)
+    nomad lab accounts show REQ-0012     one request
+    nomad lab accounts close REQ-0012 NETID SITE made|not_made [--note "..."]   research computing made it, or not (why)
     nomad lab accounts report [--since DATE] [--until DATE] [--cluster C] [--json | --csv]
 
     Settings: [directory] and [console.labs.accounts] in the hub's nomad.toml
@@ -146,7 +146,7 @@ def _number(s: A.Settings, text: str) -> int:
 @click.option("--lab", help="One lab's (its group).")
 @click.option("--days", default=365, show_default=True, help="Requests of the last this many days.")
 @click.option("--find", "find", metavar="TEXT",
-              help="Those of any age with this number (ARC-0012), NetID, name, lab or PI (any part of one).")
+              help="Those of any age with this number (REQ-0012), NetID, name, lab or PI (any part of one).")
 @click.option("--json", "as_json", is_flag=True, help="As JSON.")
 @click.pass_context
 def accounts_list(ctx, open_only, lab, days, find, as_json):
@@ -177,7 +177,7 @@ def accounts_list(ctx, open_only, lab, days, find, as_json):
 @click.option("--json", "as_json", is_flag=True, help="As JSON.")
 @click.pass_context
 def accounts_show(ctx, request, as_json):
-    """One request, by its number (ARC-0012, or 12), and what became of each account."""
+    """One request, by its number (REQ-0012, or 12), and what became of each account."""
     config, _, _, _, rec_path = _ctx(ctx)
     s = _settings(config)
     got = A.find(A.open_records(rec_path), A.ref_of(_number(s, request), s), s)
@@ -201,7 +201,7 @@ def accounts_show(ctx, request, as_json):
 def accounts_close(ctx, request, netid, site, state, note, no_email, by):
     """Research computing made the account, or not (and why): the request keeps who
     closed it and when, and the PI is emailed (review_to while set).
-    REQUEST: its number, ARC-0012 (or 12)."""
+    REQUEST: its number, REQ-0012 (or 12)."""
     config, report, cs, conn, rec_path = _ctx(ctx)
     s = _settings(config)
     number = _number(s, request)

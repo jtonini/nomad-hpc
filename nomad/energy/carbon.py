@@ -28,7 +28,7 @@ from dataclasses import dataclass
 # US EPA eGRID subregions (gCO2eq/kWh). Subset of common research-computing
 # locations; extend as deployment sites are added.
 EGRID_SUBREGIONS: dict[str, float] = {
-    "SRVC": 380.0,   # SERC Virginia/Carolina  (University of Richmond)
+    "SRVC": 380.0,   # SERC Virginia/Carolina  (Example University)
     "MROE": 470.0,   # MRO East  (Iowa region, more coal)
     "CAMX": 220.0,   # WECC California  (more renewables)
     "RFCE": 320.0,   # RFC East  (Mid-Atlantic)

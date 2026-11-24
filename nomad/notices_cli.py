@@ -91,12 +91,25 @@ def notices_group(ctx):
 @click.option("--html", "html_dir", type=click.Path(file_okay=False), default=None,
               help="Without --send: write each email's laid-out copy to FOLDER/NETID.html (read only by you).")
 @click.option("--counts", is_flag=True, help="Counts only, no names (to show someone else).")
+@click.option("--db", "db_path", type=click.Path(dir_okay=False), default=None,
+              help="Read this database instead of the hub's (a demo's, say; never with --send).")
 @click.pass_context
-def notices_mail(ctx, send, only, show_text, counts, html_dir):
+def notices_mail(ctx, send, only, show_text, counts, html_dir, db_path):
     """The emails due now: each person with something new since the last one,
     at most every every_days. While review_to is set, they go there."""
     config, s, conn, combined, rec_path = _ctx(ctx)
     _problems(s)
+    if db_path is not None:
+        # 1.66.0: what the emails would say from another database (a demo); its
+        # own record beside it, so nothing of the hub's is read or changed
+        if send:
+            raise click.UsageError("--db is for reading what the emails would say: not with --send")
+        from nomad.facts import open_readonly
+        combined = Path(db_path).expanduser()
+        if not combined.is_file():
+            raise click.ClickException(f"{combined}: not there")
+        conn = open_readonly(combined)
+        rec_path = combined.with_name("notices.db")
     if conn is None:
         raise click.ClickException(f"no combined database at {combined}: run it on the hub")
     if only is not None and N.clean_netid(only) is None:

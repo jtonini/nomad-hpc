@@ -13,13 +13,13 @@ says so:
     # gate_key = "~/.config/nomad/gate/id_ed25519"   # the default (nomad gate key makes it)
 
     [[hub.sites]]
-    name = "spydur"
-    host = "spydur.richmond.edu"
+    name = "hpc1"
+    host = "hpc1.example.edu"
     ssh_user = "installer"
     submit = "gate"            # else "copy": the Console gives the person the command to paste
     # gate_user = "installer"  # default: ssh_user
     # gate_host = "..."        # default: host
-    # gate_jump = "zeus@jonimitchell"   # reached only through that host (1.40.0)
+    # gate_jump = "monitor@labhead1"   # reached only through that host (1.40.0)
 
 A request is checked here with the gate's own rules before it is sent, and
 by the gate again (as the cluster's account, then as the person). Only
@@ -27,8 +27,8 @@ the gate's key is offered: no agent, no other key, no shared connection,
 and none of this account's ssh settings (-F /dev/null: a key or a proxy
 named there is never used), so the cluster is reached directly.
 
-A cluster the hub reaches only through another host (vadur, through
-jonimitchell) says so with ``gate_jump`` (1.40.0): the gate's own key, with
+A cluster the hub reaches only through another host (hpc3, through
+labhead1) says so with ``gate_jump`` (1.40.0): the gate's own key, with
 the same settings, opens a forwarded connection to the cluster's ssh port
 there (ssh -W), and nothing else -- its line in that account's
 authorized_keys (`nomad gate jump-key`) allows only forwarding to the
@@ -323,7 +323,7 @@ def jump_line(pubkey: str, to: list, origins: str | None) -> str:
     for x in to:
         m = re.fullmatch(r"(?P<host>[A-Za-z0-9][A-Za-z0-9.-]{0,252}):(?P<port>\d{1,5})", str(x).strip())
         if not m or not 0 < int(m.group("port")) < 65536:
-            raise ValueError(f"--to {x!r}: host:port (the cluster's ssh, e.g. vadur:22)")
+            raise ValueError(f"--to {x!r}: host:port (the cluster's ssh, e.g. hpc3:22)")
         opts.append(f'permitopen="{m.group("host")}:{int(m.group("port"))}"')
     opts.append('command="/bin/false"')
     if origins:

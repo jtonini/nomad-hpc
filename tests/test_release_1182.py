@@ -119,7 +119,7 @@ def test_names_in_folders():
 
 def test_fs_type(tmp_path):
     m = tmp_path / "mounts"
-    m.write_text("/dev/sda1 / xfs rw 0 0\nspdrstor01:/scratch /scratch nfs4 rw 0 0\n"
+    m.write_text("/dev/sda1 / xfs rw 0 0\nstor01:/scratch /scratch nfs4 rw 0 0\n"
                  "/dev/sdb1 /scratch/local xfs rw 0 0\n")
     assert logs.fs_type("/scratch/amy", str(m)) == "nfs4"
     assert logs.fs_type("/scratch/local/x", str(m)) == "xfs" and logs.fs_type("/home", str(m)) == "xfs"
@@ -232,7 +232,7 @@ def test_without_a_delay_nothing_moves_its_start(tmp_path):
     assert slurm.updates() == [[f"StdOut={tmp_path}/jobs/4242-water/slurm-4242.out"]]
 
 
-# As Slurm 25.11.5 shows them (spydur, 29 Oct; the account renamed).
+# As Slurm 25.11.5 shows them (hpc1, 29 Oct; the account renamed).
 REAL_ONE = """JobId=86275 JobName=wrap
    WorkDir=/home/amy/jobtest2
    StdErr=

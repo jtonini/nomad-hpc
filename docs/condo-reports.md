@@ -206,7 +206,7 @@ condo lent out a lot is used mostly by other labs.
   second condo of the same lab (`smith2`). The owner is a NetID of up to two
   initials and that name, perhaps with a number after it (`jsmith3`), cut
   short where the institution's NetIDs stop (`netid_max_length`, 8:
-  `tanderso` for Anderson): first one with a lab group named for it, then
+  `tmontgom` for Montgomery): first one with a lab group named for it, then
   one that leads a lab in nomad.toml, then one that ran jobs in the
   partition, then an account. Several accounts that fit, none of them a
   lab's PI, are listed rather than guessed from. Two last names joined

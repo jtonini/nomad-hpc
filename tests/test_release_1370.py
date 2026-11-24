@@ -76,32 +76,32 @@ def test_a_window_a_site_takes():
 
 def test_the_hub_leaves_its_notes_with_each_read(tmp_path):
     db = site(tmp_path)
-    assert call(db, "--hub", "h1", "--init", "--hub-name", "mingus")["init"] is True
+    assert call(db, "--hub", "h1", "--init", "--hub-name", "hub")["init"] is True
     first = notes(db)["h1"]
-    assert first[0] == "mingus" and first[3] == 1 and first[4:] == (None, None, None)
+    assert first[0] == "hub" and first[3] == 1 and first[4:] == (None, None, None)
     epoch = call(db, "--hub", "h1", "--init")["epoch"]               # says nothing of itself: not noted
     assert notes(db)["h1"][3] == 1
-    got = call(db, "--hub", "h1", "--since", "0", "--epoch", epoch, "--hub-name", "mingus",
+    got = call(db, "--hub", "h1", "--since", "0", "--epoch", epoch, "--hub-name", "hub",
                "--quiet", "1000,2000", "--maint", "3000,4000,4600", "--reason", "OS   patches\n")
     assert got["h"] == "nomad-delta"
     name, start, seen, reads, quiet, maint, reason = notes(db)["h1"]
-    assert (name, reads, quiet, maint, reason) == ("mingus", 2, "1000,2000,2000", "3000,4000,4600", "OS patches")
+    assert (name, reads, quiet, maint, reason) == ("hub", 2, "1000,2000,2000", "3000,4000,4600", "OS patches")
     assert start == first[1] and seen >= start                       # when it first read is kept
     # what it does not say this time is no longer so; a reason without a window is dropped
-    call(db, "--hub", "h1", "--since", "0", "--epoch", epoch, "--hub-name", "mingus", "--reason", "x")
+    call(db, "--hub", "h1", "--since", "0", "--epoch", epoch, "--hub-name", "hub", "--reason", "x")
     assert notes(db)["h1"][3:] == (3, None, None, None)
     # alone, without reading (a window just declared): answered as kept, and not counted as a read
     before = int(time.time()) - 500
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ? WHERE hub = 'h1'", (before,))
-    assert call(db, "--hub", "h1", "--note", "--hub-name", "mingus", "--maint", "10,20") == {
+    assert call(db, "--hub", "h1", "--note", "--hub-name", "hub", "--maint", "10,20") == {
         "noted": True, "quiet": None, "maint": "10,20,20"}
     assert notes(db)["h1"][2:] == (before, 3, None, "10,20,20", None)
     # one this site does not take (too long) is answered as not taken
-    assert call(db, "--hub", "h1", "--note", "--hub-name", "mingus", "--maint", f"0,{S.MAX_WINDOW + 1}",
+    assert call(db, "--hub", "h1", "--note", "--hub-name", "hub", "--maint", f"0,{S.MAX_WINDOW + 1}",
                 "--quiet", f"0,{S.MAX_WINDOW + 1}") == {"noted": True, "quiet": None, "maint": None}
     # a reason may start with a dash, said as one word
-    call(db, "--hub", "h1", "--note", "--hub-name=mingus", "--maint=10,20", "--reason=--force reboot")
+    call(db, "--hub", "h1", "--note", "--hub-name=hub", "--maint=10,20", "--reason=--force reboot")
     assert notes(db)["h1"][6] == "--force reboot"
     # another hub keeps its own; one that leaves is forgotten; a retired one too
     call(db, "--hub", "h2", "--note", "--hub-name", "trial")
@@ -113,18 +113,18 @@ def test_the_hub_leaves_its_notes_with_each_read(tmp_path):
                   (before - 10 * DAY, f"{before - 10 * DAY},{before - DAY},{before - DAY}"))
     call(db, "--hub", "h2", "--forget")
     assert set(notes(db)) == {"h1", "old", "away"}
-    call(db, "--hub", "h1", "--note", "--hub-name", "mingus")
+    call(db, "--hub", "h1", "--note", "--hub-name", "hub")
     assert set(notes(db)) == {"h1", "away"}
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET quiet = 'x,y' WHERE hub = 'away'")       # not a window: by its last read
-    call(db, "--hub", "h1", "--note", "--hub-name", "mingus")
+    call(db, "--hub", "h1", "--note", "--hub-name", "hub")
     assert set(notes(db)) == {"h1"}
     # a log no hub read for a week goes; what the hubs said stays (one away that long on purpose)
     with sqlite3.connect(db, isolation_level=None) as c:
         assert S.expire(c, now=time.time() + 8 * DAY) == "removed"
     assert set(notes(db)) == {"h1"}
     # the log taken out by the hub (going back to whole copies): the notes go with it
-    call(db, "--hub", "h1", "--init", "--hub-name", "mingus")
+    call(db, "--hub", "h1", "--init", "--hub-name", "hub")
     call(db, "--remove")
     with sqlite3.connect(db) as c:
         assert not c.execute("SELECT name FROM sqlite_master WHERE name LIKE '\\_nomad\\_%' ESCAPE '\\'").fetchall()
@@ -136,10 +136,10 @@ def test_the_hub_passes_its_notes_to_every_read(tmp_path):
     db = site(tmp_path)
     s = {"name": "alpha", "host": "localhost", "db_path": str(db)}
     seen = []
-    H.set_notes(lambda site_: seen.append(site_["name"]) or ["--hub-name=mingus", "--maint=10,20,30",
+    H.set_notes(lambda site_: seen.append(site_["name"]) or ["--hub-name=hub", "--maint=10,20,30",
                                                               "--reason=-disk swap"])
     H.init_site(s, hub="h1")
-    assert notes(db)["h1"][0] == "mingus" and notes(db)["h1"][5:] == ("10,20,30", "-disk swap")
+    assert notes(db)["h1"][0] == "hub" and notes(db)["h1"][5:] == ("10,20,30", "-disk swap")
     H.forget_at_site(s, "h1")                                        # leaving: nothing said, the note gone
     assert seen == ["alpha"] and notes(db) == {}
     # a provider that fails still says who read: the site does not take the hub for one that stopped
@@ -151,49 +151,49 @@ def test_the_hub_passes_its_notes_to_every_read(tmp_path):
     with pytest.raises(H.DeltaError, match="refused its arguments"):
         H.run_site(s, ["--hub", "h1", "--init"], 30)
     H.set_notes(None)
-    assert H.tell_site(s, "h1", ["--hub-name=mingus", "--quiet=5,9"]) == {
+    assert H.tell_site(s, "h1", ["--hub-name=hub", "--quiet=5,9"]) == {
         "noted": True, "quiet": "5,9,9", "maint": None}
     assert notes(db)["h1"][4] == "5,9,9" and notes(db)["h1"][3] == 1  # told, not read
-    assert H.tell_site(s, "h1", ["--hub-name=mingus", f"--maint=0,{S.MAX_WINDOW + 1}"])["maint"] is None
+    assert H.tell_site(s, "h1", ["--hub-name=hub", f"--maint=0,{S.MAX_WINDOW + 1}"])["maint"] is None
     assert H.tell_site({"name": "x", "host": "localhost", "db_path": str(tmp_path / "none.db")}, "h1", []) is None
 
 
 # -- a site watches its hub ----------------------------------------------------------------------
 
-def hub(seen, reads=4320, first=None, quiet=None, maint=None, name="mingus"):
+def hub(seen, reads=4320, first=None, quiet=None, maint=None, name="hub"):
     """A hub that has read every ten minutes for a month (4320 reads)."""
     return W.Hub("h1", name, T - 30 * DAY if first is None else first, seen, reads, quiet, maint, None)
 
 
 def test_a_hub_that_stopped_reading():
     s = W.Settings()
-    assert W.due([hub(T - 59 * 60)], s, T, "spydur") == []
-    (it,) = W.due([hub(T - 61 * 60)], s, T, "spydur")
-    assert it["severity"] == "warning" and it["key"] == "hub:h1" and it["subject"] == "hub mingus"
-    assert it["message"].startswith("The hub mingus has not read spydur for 1 h (last at 2026-11-10 12:59)")
+    assert W.due([hub(T - 59 * 60)], s, T, "hpc1") == []
+    (it,) = W.due([hub(T - 61 * 60)], s, T, "hpc1")
+    assert it["severity"] == "warning" and it["key"] == "hub:h1" and it["subject"] == "hub hub"
+    assert it["message"].startswith("The hub has not read hpc1 for 1 h (last at 2026-11-10 12:59)")
     assert it["details"]["metric"] == "hub_read" and it["details"]["last_read"] == "2026-11-10T12:59:00"
-    assert W.due([hub(T - 25 * HOUR)], s, T, "spydur")[0]["severity"] == "critical"
-    late = W.due([hub(T - 6 * DAY)], s, T, "spydur")[0]["message"]
+    assert W.due([hub(T - 25 * HOUR)], s, T, "hpc1")[0]["severity"] == "critical"
+    late = W.due([hub(T - 6 * DAY)], s, T, "hpc1")[0]["message"]
     assert "After 7 days of silence this site takes it as retired" in late
-    assert W.due([hub(T - 8 * DAY)], s, T, "spydur") == []            # retired
+    assert W.due([hub(T - 8 * DAY)], s, T, "hpc1") == []            # retired
     # not a hub to miss yet: a few reads, or all within a day (a trial sync)
-    assert W.due([hub(T - 5 * HOUR, reads=W.REGULAR_READS - 1)], s, T, "spydur") == []
-    assert W.due([hub(T - 5 * HOUR, first=T - 20 * HOUR)], s, T, "spydur") == []
+    assert W.due([hub(T - 5 * HOUR, reads=W.REGULAR_READS - 1)], s, T, "hpc1") == []
+    assert W.due([hub(T - 5 * HOUR, first=T - 20 * HOUR)], s, T, "hpc1") == []
     # one that reads now and then is given three of its usual intervals (20 reads in 30 days: 38 h apart)
     seldom = hub(T - 2 * DAY, reads=20, first=T - 32 * DAY)
-    assert 37 * HOUR < seldom.usual_gap < 39 * HOUR and W.due([seldom], s, T, "spydur") == []
-    assert len(W.due([hub(T - 5 * DAY, reads=20, first=T - 35 * DAY)], s, T, "spydur")) == 1
+    assert 37 * HOUR < seldom.usual_gap < 39 * HOUR and W.due([seldom], s, T, "hpc1") == []
+    assert len(W.due([hub(T - 5 * DAY, reads=20, first=T - 35 * DAY)], s, T, "hpc1")) == 1
     # off, or another threshold
-    assert W.due([hub(T - 5 * HOUR)], W.settings({"alerts": {"hub": {"enabled": False}}}), T, "spydur") == []
-    assert W.due([hub(T - 2 * HOUR)], W.settings({"alerts": {"hub": {"after_minutes": 180}}}), T, "spydur") == []
+    assert W.due([hub(T - 5 * HOUR)], W.settings({"alerts": {"hub": {"enabled": False}}}), T, "hpc1") == []
+    assert W.due([hub(T - 2 * HOUR)], W.settings({"alerts": {"hub": {"after_minutes": 180}}}), T, "hpc1") == []
     assert W.settings({"alerts": {"hub": {"after_minutes": "x"}}}).after_minutes == 60
     assert W.settings({"alerts": {"hub": {"after_minutes": 0}}}).after_minutes == 60
     assert W.settings({"alerts": "x"}).enabled and W.settings(None).hold
     # the same hub reading under another id (its combined database moved) has not stopped
-    moved = W.Hub("h2", "mingus", T - HOUR, T - 5 * 60, 3, None, None, None)
-    assert W.due([hub(T - 5 * HOUR), moved], s, T, "spydur") == []
-    other = W.Hub("h2", "badenpowell", T - HOUR, T - 5 * 60, 3, None, None, None)
-    assert len(W.due([hub(T - 5 * HOUR), other], s, T, "spydur")) == 1
+    moved = W.Hub("h2", "hub", T - HOUR, T - 5 * 60, 3, None, None, None)
+    assert W.due([hub(T - 5 * HOUR), moved], s, T, "hpc1") == []
+    other = W.Hub("h2", "gpuws1", T - HOUR, T - 5 * 60, 3, None, None, None)
+    assert len(W.due([hub(T - 5 * HOUR), other], s, T, "hpc1")) == 1
     nameless = W.due([W.Hub("h1", None, T - 30 * DAY, T - 2 * HOUR, 4320, None, None, None)], s, T, "c1")[0]
     assert nameless["subject"] == "its hub" and nameless["message"].startswith("Its hub has not read c1 for 2 h")
 
@@ -201,11 +201,11 @@ def test_a_hub_that_stopped_reading():
 def test_only_silence_the_site_saw_counts(tmp_path):
     s = W.Settings()
     # the site itself was down: the hub is given its hour again from when collection resumed
-    assert W.due([hub(T - 5 * HOUR)], s, T, "spydur", watching_since=T - 10 * 60) == []
-    (it,) = W.due([hub(T - 5 * HOUR)], s, T, "spydur", watching_since=T - 61 * 60)
+    assert W.due([hub(T - 5 * HOUR)], s, T, "hpc1", watching_since=T - 10 * 60) == []
+    (it,) = W.due([hub(T - 5 * HOUR)], s, T, "hpc1", watching_since=T - 61 * 60)
     assert "for 5 h" in it["message"] and it["severity"] == "warning"
-    assert W.due([hub(T - 30 * HOUR)], s, T, "spydur", watching_since=T - 2 * HOUR)[0]["severity"] == "warning"
-    assert W.due([hub(T - 30 * HOUR)], s, T, "spydur")[0]["severity"] == "critical"
+    assert W.due([hub(T - 30 * HOUR)], s, T, "hpc1", watching_since=T - 2 * HOUR)[0]["severity"] == "warning"
+    assert W.due([hub(T - 30 * HOUR)], s, T, "hpc1")[0]["severity"] == "critical"
     # since when collection has run without a break
     assert W._watching_since(tmp_path, 1000.0) == 1000.0             # the first run
     assert W._watching_since(tmp_path, 1060.0) == 1000.0
@@ -226,16 +226,16 @@ def test_only_silence_the_site_saw_counts(tmp_path):
 
 def test_a_read_that_left_no_note_is_a_read(tmp_path):
     db = site(tmp_path)
-    call(db, "--hub", "h1", "--init", "--hub-name", "mingus")
+    call(db, "--hub", "h1", "--init", "--hub-name", "hub")
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET first = ?, seen = ?, reads = 4320", (T - 30 * DAY, T - 5 * HOUR))
         c.execute(f"UPDATE {S.META} SET value = ? WHERE key = 'heard:h1'", (str(int(T - 600)),))
         (h,) = W.hubs(c)
         assert h.seen == T - 600 and h.noted == T - 5 * HOUR         # the log's own record of its read
-        assert W.due([h], W.Settings(), T, "spydur") == []
+        assert W.due([h], W.Settings(), T, "hpc1") == []
         c.execute(f"UPDATE {S.META} SET value = 'x' WHERE key = 'heard:h1'")
         assert W.hubs(c)[0].seen == T - 5 * HOUR
-    assert [h.label for h in W.read_hubs(db)] == ["the hub mingus"]
+    assert [h.label for h in W.read_hubs(db)] == ["the hub"]
     assert W.read_hubs(tmp_path / "none.db") == []
     # a database that can't be read just now is not one no hub reads
     closed = sqlite3.connect(db)
@@ -247,51 +247,51 @@ def test_a_read_that_left_no_note_is_a_read(tmp_path):
 def test_a_hub_that_said_it_would_be_away():
     s = W.Settings()
     away = (T - 3 * HOUR, T + HOUR, T + HOUR)
-    assert W.due([hub(T - 3 * HOUR, quiet=away)], s, T, "spydur") == []            # in its window
+    assert W.due([hub(T - 3 * HOUR, quiet=away)], s, T, "hpc1") == []            # in its window
     over = (T - 5 * HOUR, T - 30 * 60, T - 30 * 60)
-    assert W.due([hub(T - 5 * HOUR, quiet=over)], s, T, "spydur") == []            # half an hour to come back
+    assert W.due([hub(T - 5 * HOUR, quiet=over)], s, T, "hpc1") == []            # half an hour to come back
     over = (T - 5 * HOUR, T - 61 * 60, T - 61 * 60)
-    (it,) = W.due([hub(T - 5 * HOUR, quiet=over)], s, T, "spydur")
+    (it,) = W.due([hub(T - 5 * HOUR, quiet=over)], s, T, "hpc1")
     assert "for 5 h" in it["message"]
     assert "The maintenance it declared for itself ended at 2026-11-10 12:59." in it["message"]
     # it read again after its window, then stopped: its window says nothing of that
-    (it,) = W.due([hub(T - 2 * HOUR, quiet=(T - 9 * HOUR, T - 3 * HOUR, T - 3 * HOUR))], s, T, "spydur")
+    (it,) = W.due([hub(T - 2 * HOUR, quiet=(T - 9 * HOUR, T - 3 * HOUR, T - 3 * HOUR))], s, T, "hpc1")
     assert "declared for itself" not in it["message"]
     # a window still to come changes nothing; silent before it starts is said
-    assert len(W.due([hub(T - 2 * HOUR, quiet=(T + HOUR, T + 2 * HOUR, T + 2 * HOUR))], s, T, "spydur")) == 1
+    assert len(W.due([hub(T - 2 * HOUR, quiet=(T + HOUR, T + 2 * HOUR, T + 2 * HOUR))], s, T, "hpc1")) == 1
     # away for ten days and still silent after: said then, not taken as retired on its return date
     long_ = (T - 10 * DAY, T - 2 * HOUR, T - 2 * HOUR)
-    (it,) = W.due([hub(T - 10 * DAY - 300, quiet=long_)], s, T, "spydur")
+    (it,) = W.due([hub(T - 10 * DAY - 300, quiet=long_)], s, T, "hpc1")
     assert it["severity"] == "warning" and "retired" not in it["message"] and "for 10 days" in it["message"]
     gone = (T - 20 * DAY, T - 8 * DAY, T - 8 * DAY)
-    assert W.due([hub(T - 20 * DAY - 300, quiet=gone)], s, T, "spydur") == []      # a week past its window
+    assert W.due([hub(T - 20 * DAY - 300, quiet=gone)], s, T, "hpc1") == []      # a week past its window
     # this site in maintenance: it may be the one that can't be reached
     here = (T - HOUR, T + HOUR, T + 2 * HOUR)
-    assert W.due([hub(T - 5 * HOUR, maint=here)], s, T, "spydur") == []
+    assert W.due([hub(T - 5 * HOUR, maint=here)], s, T, "hpc1") == []
 
 
 def test_the_site_s_own_window(tmp_path):
     db = site(tmp_path)
     assert W.site_window(db) is None and W.site_window(tmp_path / "none.db") is None
     win = f"{int(T - HOUR)},{int(T + HOUR)},{int(T + 2 * HOUR)}"
-    call(db, "--hub", "h1", "--note", "--hub-name", "mingus", "--maint", win, "--reason", "OS patches")
+    call(db, "--hub", "h1", "--note", "--hub-name", "hub", "--maint", win, "--reason", "OS patches")
     assert W.site_window(db, now=T) is None                          # a hub that never read it: not taken
-    call(db, "--hub", "h1", "--init", "--hub-name", "mingus", "--maint", win, "--reason", "OS patches")
+    call(db, "--hub", "h1", "--init", "--hub-name", "hub", "--maint", win, "--reason", "OS patches")
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ?", (T - 300,))
     w = W.site_window(db, now=T)
     assert w == {"start": int(T - HOUR), "until": int(T + HOUR), "held": int(T + 2 * HOUR),
-                 "reason": "OS patches", "hub": "mingus"}
-    assert W.site_window(db, now=T + 90 * 60)["hub"] == "mingus"      # the grace after it
+                 "reason": "OS patches", "hub": "hub"}
+    assert W.site_window(db, now=T + 90 * 60)["hub"] == "hub"      # the grace after it
     assert W.site_window(db, now=T + 2 * HOUR) is None and W.site_window(db, now=T - 2 * HOUR) is None
     # the hub that declared it stopped reading: after a day its word no longer holds the site's alerts
     days = (T - 30 * HOUR, T + 10 * DAY, T + 10 * DAY)
     assert W._site_window([hub(T - 23 * HOUR, maint=days)], T)["until"] == T + 10 * DAY
     assert W._site_window([hub(T - 25 * HOUR, maint=days)], T) is None
-    assert W.due([hub(T - 25 * HOUR, maint=days)], W.Settings(), T, "spydur")[0]["severity"] == "critical"
+    assert W.due([hub(T - 25 * HOUR, maint=days)], W.Settings(), T, "hpc1")[0]["severity"] == "critical"
     # the same hub under two ids (its combined database moved): the one that read last speaks
-    stale = W.Hub("h0", "mingus", T - 30 * DAY, T - 2 * HOUR, 4000, None, days, "old window")
-    fresh = W.Hub("h1", "mingus", T - HOUR, T - 300, 12, None, None, None)
+    stale = W.Hub("h0", "hub", T - 30 * DAY, T - 2 * HOUR, 4000, None, days, "old window")
+    fresh = W.Hub("h1", "hub", T - HOUR, T - 300, 12, None, None, None)
     assert W._site_window([stale, fresh], T) is None
     # can't be read just now: the alert goes out
     import unittest.mock as mock
@@ -308,15 +308,15 @@ def test_watch_says_so_once(tmp_path, monkeypatch):
     with sqlite3.connect(db) as c:
         c.execute(f"CREATE TABLE {S.HUBS} (hub TEXT PRIMARY KEY, name TEXT, first INTEGER, seen INTEGER, "
                   "reads INTEGER, quiet TEXT, maint TEXT, reason TEXT, noted INTEGER)")
-        c.execute(f"INSERT INTO {S.HUBS} VALUES ('h1', 'mingus', ?, ?, 5000, NULL, NULL, NULL, NULL)",
+        c.execute(f"INSERT INTO {S.HUBS} VALUES ('h1', 'hub', ?, ?, 5000, NULL, NULL, NULL, NULL)",
                   (T - 30 * DAY, T - 2 * HOUR))
     # collection starts (or resumes) here: the hub has an hour from now, whatever it did before
     for m in range(0, 60, 5):
         assert W.watch(db, {}, NOW + timedelta(minutes=m)) == [], m
     (it,) = W.watch(db, {}, NOW + timedelta(minutes=60))
-    assert "The hub mingus has not read" in it["message"] and "for 3 h" in it["message"]
+    assert "The hub has not read" in it["message"] and "for 3 h" in it["message"]
     (args, kw), = sent
-    assert args[:2] == ("warning", "hub") and kw["hold"] is False and kw["subject"] == "hub mingus"
+    assert args[:2] == ("warning", "hub") and kw["hold"] is False and kw["subject"] == "hub hub"
     assert W.watch(db, {}, NOW + timedelta(minutes=65)) == []                   # said once
     # can't be read this time: nothing said, and what was said is not forgotten
     monkeypatch.setattr(W, "read_hubs", lambda p: (_ for _ in ()).throw(W.Unreadable("locked")))
@@ -352,8 +352,8 @@ def _dispatch(path, backend, alerts_cfg=None, hold=True, **alert):
     d = D.AlertDispatcher({"database": {"path": path.name}, "general": {"data_dir": str(path.parent)},
                            "alerts": alerts_cfg or {}})
     d.backends = [backend]
-    a = {"severity": "critical", "source": "node_state", "host": "spdr05", "subject": "spdr05",
-         "message": "Node spdr05 is DOWN"}
+    a = {"severity": "critical", "source": "node_state", "host": "nd05", "subject": "nd05",
+         "message": "Node nd05 is DOWN"}
     a.update(alert)
     return d.dispatch(a, hold=hold)
 
@@ -363,7 +363,7 @@ def test_a_site_in_maintenance_holds_its_alerts(tmp_path):
     b = _Backend()
     now = time.time()
     win = f"{int(now - 60)},{int(now + 3600)},{int(now + 7200)}"
-    call(path, "--hub", "h1", "--init", "--hub-name", "mingus", "--maint", win, "--reason", "OS patches")
+    call(path, "--hub", "h1", "--init", "--hub-name", "hub", "--maint", win, "--reason", "OS patches")
     got = _dispatch(path, b)
     assert isinstance(got, D.Held) and b.sent == []
     with sqlite3.connect(path) as c:
@@ -371,20 +371,20 @@ def test_a_site_in_maintenance_holds_its_alerts(tmp_path):
         assert c.execute("SELECT COUNT(*) FROM alert_state").fetchone() == (0,)
     _dispatch(path, b, source="test", message="a test")                         # a test is always sent
     assert [a["message"] for a in b.sent] == ["a test"]
-    _dispatch(path, b, hold=False, source="hub", subject="hub mingus")          # not about this site's state
-    _dispatch(path, b, alerts_cfg={"maintenance_hold": False}, subject="spdr06", host="spdr06")
+    _dispatch(path, b, hold=False, source="hub", subject="hub hub")          # not about this site's state
+    _dispatch(path, b, alerts_cfg={"maintenance_hold": False}, subject="nd06", host="nd06")
     assert len(b.sent) == 3
     # the hub that declared it has not read for a day: its word no longer holds this site's alerts
     with sqlite3.connect(path) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ?", (int(now - 25 * HOUR),))
         c.execute(f"UPDATE {S.META} SET value = ? WHERE key = 'heard:h1'", (str(int(now - 25 * HOUR)),))
-    assert _dispatch(path, b, subject="spdr07", host="spdr07") and len(b.sent) == 4
+    assert _dispatch(path, b, subject="nd07", host="nd07") and len(b.sent) == 4
     with sqlite3.connect(path) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ?", (int(now),))
     assert isinstance(_dispatch(path, b), D.Held)
     # the window over: what still holds is raised then, as news
-    call(path, "--hub", "h1", "--note", "--hub-name", "mingus")
-    assert _dispatch(path, b) and b.sent[-1]["message"] == "Node spdr05 is DOWN"
+    call(path, "--hub", "h1", "--note", "--hub-name", "hub")
+    assert _dispatch(path, b) and b.sent[-1]["message"] == "Node nd05 is DOWN"
 
 
 # -- declaring maintenance ---------------------------------------------------------------------------
@@ -406,92 +406,92 @@ def test_a_time_as_someone_types_it():
 
 def test_declaring_a_window(tmp_path):
     f = tmp_path / "m" / "maintenance.json"
-    kw = {"now": NOW, "path": f, "known": ["spydur", "arachne"]}
+    kw = {"now": NOW, "path": f, "known": ["hpc1", "hpc2"]}
     with pytest.raises(M.MaintenanceError, match="say why"):
-        M.declare("spydur", NOW + timedelta(hours=4), "  ", **kw)
+        M.declare("hpc1", NOW + timedelta(hours=4), "  ", **kw)
     with pytest.raises(M.MaintenanceError, match="has passed"):
-        M.declare("spydur", NOW - timedelta(hours=1), "x", **kw)
+        M.declare("hpc1", NOW - timedelta(hours=1), "x", **kw)
     with pytest.raises(M.MaintenanceError, match="before it starts"):
-        M.declare("spydur", NOW + timedelta(hours=1), "x", start=NOW + timedelta(hours=2), **kw)
+        M.declare("hpc1", NOW + timedelta(hours=1), "x", start=NOW + timedelta(hours=2), **kw)
     with pytest.raises(M.MaintenanceError, match="longer than 14 days"):
-        M.declare("spydur", NOW + timedelta(days=15), "x", **kw)
+        M.declare("hpc1", NOW + timedelta(days=15), "x", **kw)
     with pytest.raises(M.MaintenanceError, match="longer than 2 days"):
-        M.declare("spydur", NOW + timedelta(days=3), "x", config={"hub": {"maintenance_max_days": 2}}, **kw)
-    with pytest.raises(M.MaintenanceError, match="not one of this hub's sites \\(arachne, spydur, or hub\\)"):
+        M.declare("hpc1", NOW + timedelta(days=3), "x", config={"hub": {"maintenance_max_days": 2}}, **kw)
+    with pytest.raises(M.MaintenanceError, match="not one of this hub's sites \\(hpc1, hpc2, or hub\\)"):
         M.declare("spydr", NOW + timedelta(hours=1), "x", **kw)
     assert not f.exists()
-    new, replaced = M.declare("spydur", NOW + timedelta(hours=4), "OS  patches\n", by="jtonini", write=False, **kw)
-    assert new.site == "spydur" and replaced is None and not f.exists()         # checked, not declared
-    new, replaced = M.declare("spydur", NOW + timedelta(hours=4), "OS  patches\n", by="jtonini", **kw)
+    new, replaced = M.declare("hpc1", NOW + timedelta(hours=4), "OS  patches\n", by="rcadmin", write=False, **kw)
+    assert new.site == "hpc1" and replaced is None and not f.exists()         # checked, not declared
+    new, replaced = M.declare("hpc1", NOW + timedelta(hours=4), "OS  patches\n", by="rcadmin", **kw)
     assert (new.site, new.start, new.until, new.reason, new.by) == (
-        "spydur", "2026-11-10T14:00:00", "2026-11-10T18:00:00", "OS patches", "jtonini") and replaced is None
+        "hpc1", "2026-11-10T14:00:00", "2026-11-10T18:00:00", "OS patches", "rcadmin") and replaced is None
     M.declare("hub", NOW + timedelta(days=2, hours=2), "new disk", start=NOW + timedelta(days=2), **kw)
-    assert set(M.current(now=NOW, path=f)) == {"spydur"}
-    assert set(M.held(now=NOW + timedelta(hours=4, minutes=59), path=f)) == {"spydur"}     # the grace after it
+    assert set(M.current(now=NOW, path=f)) == {"hpc1"}
+    assert set(M.held(now=NOW + timedelta(hours=4, minutes=59), path=f)) == {"hpc1"}     # the grace after it
     assert M.held(now=NOW + timedelta(hours=5), path=f) == {}
     assert M.current(now=NOW + timedelta(hours=4), path=f) == {}
     assert M.ended_lately(now=NOW + timedelta(hours=4, minutes=30), path=f) == {}           # still held
-    assert M.ended_lately(now=NOW + timedelta(hours=6), path=f) == {"spydur": datetime(2026, 11, 10, 18, 0)}
+    assert M.ended_lately(now=NOW + timedelta(hours=6), path=f) == {"hpc1": datetime(2026, 11, 10, 18, 0)}
     assert M.ended_lately(now=NOW + timedelta(hours=30), path=f) == {}
     assert M.held({"hub": {"maintenance_grace_minutes": 0}}, NOW + timedelta(hours=4), f) == {}
     # declaring again changes it: the one running is kept as ended, one not started leaves no trace
-    later, replaced = M.declare("spydur", NOW + timedelta(hours=9), "patches run long", **{**kw, "now": NOW + timedelta(hours=1)})
+    later, replaced = M.declare("hpc1", NOW + timedelta(hours=9), "patches run long", **{**kw, "now": NOW + timedelta(hours=1)})
     assert replaced.until == "2026-11-10T18:00:00"
     M.declare("hub", NOW + timedelta(days=3), "new disk, later", start=NOW + timedelta(days=2, hours=12), **kw)
     all_ = M.load(path=f)
     assert [(w.site, w.reason, bool(w.ended)) for w in all_] == [
-        ("spydur", "OS patches", True), ("spydur", "patches run long", False), ("hub", "new disk, later", False)]
+        ("hpc1", "OS patches", True), ("hpc1", "patches run long", False), ("hub", "new disk, later", False)]
     rows = M.listing(now=NOW + timedelta(hours=2), path=f)
-    assert [(r["site"], r["status"]) for r in rows] == [("spydur", "now"), ("hub", "coming"), ("spydur", "over")]
+    assert [(r["site"], r["status"]) for r in rows] == [("hpc1", "now"), ("hub", "coming"), ("hpc1", "over")]
     assert M.next_for("hub", now=NOW, path=f).reason == "new disk, later"
-    assert M.next_for("arachne", now=NOW, path=f) is None
+    assert M.next_for("hpc2", now=NOW, path=f) is None
     # ended by hand: over now, no grace; who ended it is kept
-    assert M.end("spydur", now=NOW + timedelta(hours=2), path=f, write=False).reason == "patches run long"
-    assert set(M.held(now=NOW + timedelta(hours=2), path=f)) == {"spydur"}      # only looked at
-    w = M.end("spydur", now=NOW + timedelta(hours=2), path=f, by="zeus")
+    assert M.end("hpc1", now=NOW + timedelta(hours=2), path=f, write=False).reason == "patches run long"
+    assert set(M.held(now=NOW + timedelta(hours=2), path=f)) == {"hpc1"}      # only looked at
+    w = M.end("hpc1", now=NOW + timedelta(hours=2), path=f, by="monitor")
     assert w.reason == "patches run long" and M.held(now=NOW + timedelta(hours=2, minutes=1), path=f) == {}
-    assert [x.ended_by for x in M.load(path=f) if x.reason == "patches run long"] == ["zeus"]
-    assert M.end("spydur", now=NOW + timedelta(hours=3), path=f) is None
+    assert [x.ended_by for x in M.load(path=f) if x.reason == "patches run long"] == ["monitor"]
+    assert M.end("hpc1", now=NOW + timedelta(hours=3), path=f) is None
     assert M.end("hub", now=NOW, path=f).site == "hub" and M.next_for("hub", now=NOW, path=f) is None
-    assert [w.site for w in M.load(path=f)] == ["spydur", "spydur"]            # the hub's never started
+    assert [w.site for w in M.load(path=f)] == ["hpc1", "hpc1"]            # the hub's never started
     assert M.shown("2026-11-12T18:00:00") == "Thu 12 Nov 18:00"
 
 
 def test_one_window_after_another(tmp_path):
     f = tmp_path / "maintenance.json"
-    kw = {"path": f, "known": ["spydur"]}
-    M.declare("spydur", NOW + timedelta(hours=4), "OS patches", now=NOW, **kw)
+    kw = {"path": f, "known": ["hpc1"]}
+    M.declare("hpc1", NOW + timedelta(hours=4), "OS patches", now=NOW, **kw)
     grace = NOW + timedelta(hours=4, minutes=30)                                # over, its alerts still held
-    assert M.next_for("spydur", now=grace, path=f).reason == "OS patches"
+    assert M.next_for("hpc1", now=grace, path=f).reason == "OS patches"
     # the work was not done: another window declared while the first's grace holds
-    new, replaced = M.declare("spydur", NOW + timedelta(hours=7), "patches, second try",
+    new, replaced = M.declare("hpc1", NOW + timedelta(hours=7), "patches, second try",
                               start=NOW + timedelta(hours=5), now=grace, **kw)
     assert replaced is None and len(M.load(path=f)) == 2
-    both = M.next_for("spydur", now=grace, path=f)                              # told to the site as one
+    both = M.next_for("hpc1", now=grace, path=f)                              # told to the site as one
     assert (both.start, both.until, both.reason) == ("2026-11-10T14:00:00", "2026-11-10T21:00:00",
                                                      "patches, second try")
-    args = M.site_args("spydur", {"hub": {"maintenance_file": str(f)}}, grace)
+    args = M.site_args("hpc1", {"hub": {"maintenance_file": str(f)}}, grace)
     assert args[1] == f"--maint={int(T)},{int(T + 7 * HOUR)},{int(T + 8 * HOUR)}"
     assert S.window(args[1].split("=")[1]) is not None
-    assert set(M.held(now=grace, path=f)) == {"spydur"}
-    assert set(M.held(now=NOW + timedelta(hours=6), path=f)) == {"spydur"}      # then the second
+    assert set(M.held(now=grace, path=f)) == {"hpc1"}
+    assert set(M.held(now=NOW + timedelta(hours=6), path=f)) == {"hpc1"}      # then the second
     # ending now ends the grace, not what is declared for later; ending again calls that off
-    assert M.end("spydur", now=grace, path=f).reason == "OS patches"
+    assert M.end("hpc1", now=grace, path=f).reason == "OS patches"
     assert M.held(now=grace + timedelta(minutes=1), path=f) == {}
-    assert M.next_for("spydur", now=grace + timedelta(minutes=1), path=f).reason == "patches, second try"
-    assert M.end("spydur", now=grace + timedelta(minutes=2), path=f).reason == "patches, second try"
-    assert M.next_for("spydur", now=grace + timedelta(minutes=3), path=f) is None
+    assert M.next_for("hpc1", now=grace + timedelta(minutes=1), path=f).reason == "patches, second try"
+    assert M.end("hpc1", now=grace + timedelta(minutes=2), path=f).reason == "patches, second try"
+    assert M.next_for("hpc1", now=grace + timedelta(minutes=3), path=f) is None
     assert [w.reason for w in M.load(path=f)] == ["OS patches"]
     # one far enough after the first is its own window
-    M.declare("spydur", NOW + timedelta(hours=12), "later", start=NOW + timedelta(hours=10),
+    M.declare("hpc1", NOW + timedelta(hours=12), "later", start=NOW + timedelta(hours=10),
               now=NOW + timedelta(hours=4, minutes=10), **kw)
-    assert M.next_for("spydur", now=NOW + timedelta(hours=4, minutes=5), path=f).reason == "later"
+    assert M.next_for("hpc1", now=NOW + timedelta(hours=4, minutes=5), path=f).reason == "later"
     # two long ones joined are still a window a site takes
     g = tmp_path / "long.json"
-    M.declare("spydur", NOW + timedelta(days=14), "a", now=NOW, path=g)
+    M.declare("hpc1", NOW + timedelta(days=14), "a", now=NOW, path=g)
     end1 = NOW + timedelta(days=14, minutes=10)
-    M.declare("spydur", end1 + timedelta(days=13), "b", start=end1 + timedelta(minutes=30), now=end1, path=g)
-    joined = M.site_args("spydur", {"hub": {"maintenance_file": str(g)}}, end1)[1]
+    M.declare("hpc1", end1 + timedelta(days=13), "b", start=end1 + timedelta(minutes=30), now=end1, path=g)
+    joined = M.site_args("hpc1", {"hub": {"maintenance_file": str(g)}}, end1)[1]
     assert joined.startswith("--maint=") and S.window(joined.split("=")[1]) is not None
     # the hub's own window has no grace: nothing of the hub's is held
     h = tmp_path / "hub.json"
@@ -504,21 +504,21 @@ def test_one_window_after_another(tmp_path):
 
 def test_a_store_that_cant_be_read_is_no_windows(tmp_path):
     f = tmp_path / "maintenance.json"
-    good = {"site": "spydur", "start": "2026-11-10T14:00:00", "until": "2026-11-10T18:00:00", "reason": "x"}
+    good = {"site": "hpc1", "start": "2026-11-10T14:00:00", "until": "2026-11-10T18:00:00", "reason": "x"}
     for text in ("{not json", "[1, 2]", '"x"', "null", '{"windows": "x"}', '{"windows": [1, "y", null]}'):
         f.write_text(text)
         assert M.load(path=f) == [] and M.held(now=NOW, path=f) == {}, text
-        assert M.listing(now=NOW, path=f) == [] and M.site_args("spydur", now=NOW, path=f)[1:] == []
+        assert M.listing(now=NOW, path=f) == [] and M.site_args("hpc1", now=NOW, path=f)[1:] == []
     # entries that aren't windows are left out; the others stand
     f.write_text(json.dumps({"windows": [{"site": "a"}, {**good, "start": "soon"}, {**good, "until": None},
                                          good, {**good, "site": "b", "start": "2026-11-10T19:00:00+00:00",
                                                 "until": "2026-11-11T19:00:00+00:00", "ended": ""}]}))
     got = M.load(path=f)
-    assert [w.site for w in got] == ["spydur", "b"] or [w.site for w in got] == ["b", "spydur"]
+    assert [w.site for w in got] == ["hpc1", "b"] or [w.site for w in got] == ["b", "hpc1"]
     assert all(w.starts.tzinfo is None and w.ends.tzinfo is None for w in got)  # one clock for all of them
-    assert set(M.held(now=NOW, path=f)) >= {"spydur"}
+    assert set(M.held(now=NOW, path=f)) >= {"hpc1"}
     assert M.declare("c1", NOW + timedelta(hours=1), "y", now=NOW, path=f)[0].site == "c1"
-    assert {w.site for w in M.load(path=f)} == {"spydur", "b", "c1"}
+    assert {w.site for w in M.load(path=f)} == {"hpc1", "b", "c1"}
 
 
 def test_what_the_hub_tells_a_site(tmp_path):
@@ -531,10 +531,10 @@ def test_what_the_hub_tells_a_site(tmp_path):
     assert M.state_path({"hub": {"output_db": "/srv/nomad/combined.db"}}) == Path("/srv/nomad/maintenance.json")
     assert M.state_path({}) == combined_db_path(None).parent / "maintenance.json"
     assert M.state_path({"hub": "x"}) == M.state_path(None)
-    assert M.site_args("spydur", cfg, NOW) == ["--hub-name=" + socket.gethostname().split(".")[0]]
-    M.declare("spydur", NOW + timedelta(hours=4), "-OS patches", config=cfg, now=NOW)
+    assert M.site_args("hpc1", cfg, NOW) == ["--hub-name=" + socket.gethostname().split(".")[0]]
+    M.declare("hpc1", NOW + timedelta(hours=4), "-OS patches", config=cfg, now=NOW)
     M.declare("hub", NOW + timedelta(days=1, hours=2), "new disk", start=NOW + timedelta(days=1), config=cfg, now=NOW)
-    args = M.site_args("spydur", cfg, NOW)
+    args = M.site_args("hpc1", cfg, NOW)
     assert args[1:] == [f"--quiet={int(T + DAY)},{int(T + DAY + 2 * HOUR)}",
                         f"--maint={int(T)},{int(T + 4 * HOUR)},{int(T + 5 * HOUR)}", "--reason=-OS patches"]
     # the site's own parser takes them as they are, a reason that starts with a dash too
@@ -543,11 +543,11 @@ def test_what_the_hub_tells_a_site(tmp_path):
         "noted": True, "quiet": f"{int(T + DAY)},{int(T + DAY + 2 * HOUR)},{int(T + DAY + 2 * HOUR)}",
         "maint": f"{int(T)},{int(T + 4 * HOUR)},{int(T + 5 * HOUR)}"}
     assert notes(db)["h1"][6] == "-OS patches"
-    assert not [a for a in M.site_args("arachne", cfg, NOW) if a.startswith("--maint")]
-    assert [a for a in M.site_args("spydur", cfg, NOW + timedelta(hours=4, minutes=30))
+    assert not [a for a in M.site_args("hpc2", cfg, NOW) if a.startswith("--maint")]
+    assert [a for a in M.site_args("hpc1", cfg, NOW + timedelta(hours=4, minutes=30))
             if a.startswith("--maint")]                                         # in its grace
-    assert not [a for a in M.site_args("spydur", cfg, NOW + timedelta(hours=5)) if a.startswith("--maint")]
-    assert not [a for a in M.site_args("spydur", cfg, NOW + timedelta(days=1, hours=3))
+    assert not [a for a in M.site_args("hpc1", cfg, NOW + timedelta(hours=5)) if a.startswith("--maint")]
+    assert not [a for a in M.site_args("hpc1", cfg, NOW + timedelta(days=1, hours=3))
                 if a.startswith("--quiet")]                                     # the hub's is over
     assert M.grace_minutes({"hub": {"maintenance_grace_minutes": 99999}}) == M.MAX_GRACE_MINUTES
     assert M.max_days({"hub": {"maintenance_max_days": 60}}) == M.MAX_DAYS
@@ -562,24 +562,24 @@ def test_the_hub_holds_what_it_would_say_of_a_site_in_maintenance(tmp_path, monk
     stamp = tmp_path / "sync_alerts.json"
     sent = []
     monkeypatch.setattr(D, "send_alert", lambda sev, src, msg, **k: sent.append(msg) or {"Email": True})
-    due = [{"key": "site:spydur", "cluster": "spydur", "host": "mingus", "subject": "spydur",
-            "severity": "warning", "message": "Site spydur: not synced for 3 h", "details": {}},
-           {"key": "node:spydur:spdr05", "site": "spydur/spdr05", "cluster": "spydur", "host": "spdr05",
-            "subject": "spdr05", "severity": "critical", "message": "Node spdr05 is DOWN", "details": {}},
-           {"key": "collector:arachne:gpu", "site": "arachne", "host": "arachne", "subject": "gpu",
-            "severity": "warning", "message": "Site arachne: gpu stopped", "details": {}}]
+    due = [{"key": "site:hpc1", "cluster": "hpc1", "host": "hub", "subject": "hpc1",
+            "severity": "warning", "message": "Site hpc1: not synced for 3 h", "details": {}},
+           {"key": "node:hpc1:nd05", "site": "hpc1/nd05", "cluster": "hpc1", "host": "nd05",
+            "subject": "nd05", "severity": "critical", "message": "Node nd05 is DOWN", "details": {}},
+           {"key": "collector:hpc2:gpu", "site": "hpc2", "host": "hpc2", "subject": "gpu",
+            "severity": "warning", "message": "Site hpc2: gpu stopped", "details": {}}]
     assert len(O.send_once(due, stamp, "sync", cfg, NOW)) == 3                  # nothing declared
-    M.declare("spydur", NOW + timedelta(hours=4), "OS patches", config=cfg, now=NOW)
+    M.declare("hpc1", NOW + timedelta(hours=4), "OS patches", config=cfg, now=NOW)
     sent.clear()
-    got = O.send_once(due, stamp, "sync", cfg, NOW + timedelta(hours=1), hold_sites={"spydur/spdr05"})
+    got = O.send_once(due, stamp, "sync", cfg, NOW + timedelta(hours=1), hold_sites={"hpc1/nd05"})
     assert got == [] and sent == []
-    assert set(json.loads(stamp.read_text())) == {"collector:arachne:gpu"}      # what was said of spydur: forgotten
+    assert set(json.loads(stamp.read_text())) == {"collector:hpc2:gpu"}      # what was said of hpc1: forgotten
     assert O.send_once(due, stamp, "sync", cfg, NOW + timedelta(hours=4, minutes=30)) == []   # the grace
     got = O.send_once(due, stamp, "sync", cfg, NOW + timedelta(hours=5, minutes=1))
-    assert [i["key"] for i in got] == ["site:spydur", "node:spydur:spdr05"]     # still so: news again
-    assert sent[0] == ("Site spydur: not synced for 3 h (The maintenance declared for spydur ended at "
+    assert [i["key"] for i in got] == ["site:hpc1", "node:hpc1:nd05"]     # still so: news again
+    assert sent[0] == ("Site hpc1: not synced for 3 h (The maintenance declared for hpc1 ended at "
                        "2026-11-10 18:00.)")
-    assert due[0]["message"] == "Site spydur: not synced for 3 h"               # the caller's item untouched
+    assert due[0]["message"] == "Site hpc1: not synced for 3 h"               # the caller's item untouched
     assert O._about({"site": "c1/n1"}) == "c1" and O._about({"key": "hub:combined"}) is None
     # the hub's own window holds nothing the hub says, and windows that can't be read hold nothing
     M.declare("hub", NOW + timedelta(days=2), "new disk", start=NOW + timedelta(days=1), config=cfg, now=NOW)
@@ -600,11 +600,11 @@ def test_sync_alerts_say_which_site(tmp_path, monkeypatch):
     old = (NOW - timedelta(hours=3)).isoformat()
     with sqlite3.connect(combined) as c:
         c.execute("CREATE TABLE sync_sites (name TEXT, last_success TEXT, synced_at TEXT)")
-        c.executemany("INSERT INTO sync_sites VALUES (?, ?, ?)", [("spydur", old, old), ("arachne", old, old)])
-    failing = {"spydur": "ssh: connect to host spydur: timed out", "arachne": "no answer"}
-    M.declare("spydur", NOW + timedelta(hours=4), "OS patches", config=cfg, now=NOW)
+        c.executemany("INSERT INTO sync_sites VALUES (?, ?, ?)", [("hpc1", old, old), ("hpc2", old, old)])
+    failing = {"hpc1": "ssh: connect to host hpc1: timed out", "hpc2": "no answer"}
+    M.declare("hpc1", NOW + timedelta(hours=4), "OS patches", config=cfg, now=NOW)
     got = cli_mod._sync_alerts(combined, failing, cache_dir=tmp_path, config=cfg, now=NOW)
-    assert [g["site"] for g in got] == ["arachne"] and len(sent) == 1
+    assert [g["site"] for g in got] == ["hpc2"] and len(sent) == 1
 
 
 # -- the commands ----------------------------------------------------------------------------------------
@@ -743,29 +743,29 @@ def test_nomad_maintenance_at_a_site(tmp_path, monkeypatch):
         return r.output
     assert nomad() == "No maintenance declared.\n"
     now = int(time.time())
-    call(db, "--hub", "h1", "--note", "--hub-name=mingus", f"--maint={now + HOUR},{now + 2 * HOUR},{now + 3 * HOUR}",
+    call(db, "--hub", "h1", "--note", "--hub-name=hub", f"--maint={now + HOUR},{now + 2 * HOUR},{now + 3 * HOUR}",
          "--reason=OS patches")
     out = nomad()
-    assert "The hub mingus has not read this site yet." in out
+    assert "The hub has not read this site yet." in out
     assert "It says this site: maintenance coming," in out and "(OS patches); this site's alerts are held from then" in out
-    call(db, "--hub", "h1", "--init", "--hub-name=mingus", f"--maint={now - 60},{now + HOUR},{now + 2 * HOUR}",
+    call(db, "--hub", "h1", "--init", "--hub-name=hub", f"--maint={now - 60},{now + HOUR},{now + 2 * HOUR}",
          "--reason=OS patches", f"--quiet={now + DAY},{now + DAY + HOUR}")
     out = nomad()
-    assert "The hub mingus last read this site " in out and "No maintenance declared" not in out
+    assert "The hub last read this site " in out and "No maintenance declared" not in out
     assert "It says this site: in maintenance," in out and "(OS patches); this site's alerts are held until" in out
     assert "It says it will be away " in out
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ?", (now - 25 * HOUR,))
         c.execute(f"UPDATE {S.META} SET value = ? WHERE key = 'heard:h1'", (str(now - 25 * HOUR),))
     assert "this site's alerts are not held: that hub has not read it for 24 hours." in nomad()
-    call(db, "--hub", "h1", "--note", "--hub-name=mingus", f"--maint={now - 2 * HOUR},{now - 60},{now + HOUR}")
+    call(db, "--hub", "h1", "--note", "--hub-name=hub", f"--maint={now - 2 * HOUR},{now - 60},{now + HOUR}")
     with sqlite3.connect(db) as c:
         c.execute(f"UPDATE {S.HUBS} SET seen = ?", (now - 60,))
     assert "It says this site: maintenance over, coming back," in nomad()
     # a hub that reads it and has declared nothing: said so, with when it last read
-    call(db, "--hub", "h1", "--note", "--hub-name=mingus")
+    call(db, "--hub", "h1", "--note", "--hub-name=hub")
     out = nomad()
-    assert out.startswith("No maintenance declared.\nThe hub mingus last read this site ") and out.count("\n") == 2
+    assert out.startswith("No maintenance declared.\nThe hub last read this site ") and out.count("\n") == 2
 
 
 def test_the_console_may_ask_for_maintenance():
@@ -773,13 +773,13 @@ def test_the_console_may_ask_for_maintenance():
     from nomad.actions.runner import build_argv
     a = spec.get("maintenance.start")
     assert a.changes and a.where == frozenset({spec.HUB}) and a.schema()["apply"] == "apply"
-    v = spec.check(a, {"site": "spydur", "until": "+4h", "reason": "-OS patches", "by": "jtonini", "apply": True},
-                   sites=["spydur"])
+    v = spec.check(a, {"site": "hpc1", "until": "+4h", "reason": "-OS patches", "by": "rcadmin", "apply": True},
+                   sites=["hpc1"])
     argv = build_argv(a, v)
     assert argv[2:] == ["nomad.cli", "maintenance", "start", "--json", "--until=+4h", "--reason=-OS patches",
-                        "--by", "jtonini", "--apply", "--", "spydur"]
+                        "--by", "rcadmin", "--apply", "--", "hpc1"]
     with pytest.raises(spec.ActionError):
-        spec.check(a, {"site": "spydur", "until": "+4h"})                      # no reason
+        spec.check(a, {"site": "hpc1", "until": "+4h"})                      # no reason
     with pytest.raises(spec.ActionError):
         spec.check(a, {"site": "--apply", "until": "+4h", "reason": "x"})
     e = spec.get("maintenance.end")

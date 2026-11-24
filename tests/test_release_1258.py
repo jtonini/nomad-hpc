@@ -1,5 +1,5 @@
 """1.25.8: the boards' power supplies, voltages and fans (IPMI), read by a
-root helper and judged by the power collector; vadur's gpu09 (a supply with
+root helper and judged by the power collector; hpc3's gpu09 (a supply with
 no input power since February) and node03 (a supply that reports no power,
 logged as 0 W under a 0 W threshold since 2017), as their boards said."""
 import importlib.util
@@ -28,7 +28,7 @@ def _helper():
 
 H = _helper()
 
-# What vadur's boards answered (3 Nov 2026), trimmed.
+# What hpc3's boards answered (3 Nov 2026), trimmed.
 SDR = {
     "gpu09": {
         "Power Supply": """PSU1 AC Lost     | 94h | ok  |  0.0 | Power Supply AC lost
@@ -302,15 +302,15 @@ def test_the_hub_alerts_for_a_site_that_leaves_them_to_it(tmp_path, boards, monk
         cols = [r[1] for r in src.execute(f"PRAGMA table_info({t})")]
         dst.execute(f"CREATE TABLE {t} ({', '.join(cols)}, source_site TEXT)")
         for row in src.execute(f"SELECT {', '.join(cols)} FROM {t}"):
-            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "vadur"))
+            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "hpc3"))
     dst.commit()
     sent = []
     monkeypatch.setattr("nomad.alerts.dispatcher.send_alert",
                         lambda severity, source, message, **k: sent.append((severity, source, message, k)) or {"x": 1})
-    cfg = {"hub": {"sites": [{"name": "vadur", "alerts": "hub"}, {"name": "spydur"}]}}
+    cfg = {"hub": {"sites": [{"name": "hpc3", "alerts": "hub"}, {"name": "hpc1"}]}}
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg)
-    assert [(s[1], s[3]["subject"]) for s in sent] == [("power", "vadur/gpu09 power supply")]
-    assert "gpu09 at vadur:" in sent[0][2] and sent[0][2].endswith("Sent by the hub for vadur.")
+    assert [(s[1], s[3]["subject"]) for s in sent] == [("power", "hpc3/gpu09 power supply")]
+    assert "gpu09 at hpc3:" in sent[0][2] and sent[0][2].endswith("Sent by the hub for hpc3.")
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg)
     assert len(sent) == 1                                          # once, then every reminder_hours
     hub_power.hub_power_alerts(hub, tmp_path, config=dict(cfg, alerts={"power": {"ignore": ["gpu09:PSU1*"]}}),
@@ -471,7 +471,7 @@ def test_the_hub_holds_one_unread_host_not_its_site(tmp_path, boards, monkeypatc
         cols = [r[1] for r in src.execute(f"PRAGMA table_info({t})")]
         dst.execute(f"CREATE TABLE {t} ({', '.join(cols)}, source_site TEXT)")
         for row in src.execute(f"SELECT {', '.join(cols)} FROM {t}"):
-            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "vadur"))
+            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "hpc3"))
     # node03's last read: an error, and a new (not history) log entry made by hand
     dst.execute("UPDATE power_hosts SET error = 'no answer in 240 s' WHERE node = 'node03'")
     dst.execute("UPDATE power_events SET history = 0, severity = 'warning', problem = 'PS failed', "
@@ -480,11 +480,11 @@ def test_the_hub_holds_one_unread_host_not_its_site(tmp_path, boards, monkeypatc
     sent = []
     monkeypatch.setattr("nomad.alerts.dispatcher.send_alert",
                         lambda severity, source, message, **k: sent.append((k["subject"], k["details"])) or {"x": 1})
-    cfg = {"hub": {"sites": [{"name": "vadur", "alerts": "hub"}]}}
-    items, held = hub_power.due_power_alerts(sqlite3.connect(hub), ["vadur"], cfg, datetime.now())
-    assert held == {"vadur/node03"}
+    cfg = {"hub": {"sites": [{"name": "hpc3", "alerts": "hub"}]}}
+    items, held = hub_power.due_power_alerts(sqlite3.connect(hub), ["hpc3"], cfg, datetime.now())
+    assert held == {"hpc3/node03"}
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg)
-    assert sorted(s for s, _d in sent) == ["vadur/gpu09 power events", "vadur/gpu09 power supply"]
+    assert sorted(s for s, _d in sent) == ["hpc3/gpu09 power events", "hpc3/gpu09 power supply"]
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg)
     assert len(sent) == 2                                          # each once
 
@@ -556,27 +556,27 @@ def test_the_hub_sends_a_batch_that_arrives_late(tmp_path, boards, monkeypatch):
         cols = [r[1] for r in src.execute(f"PRAGMA table_info({t})")]
         dst.execute(f"CREATE TABLE {t} ({', '.join(cols)}, source_site TEXT)")
         for row in src.execute(f"SELECT {', '.join(cols)} FROM {t}"):
-            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "vadur"))
-    # an entry the site read 13 hours ago reaches the hub now (vadur not pulled meanwhile)
+            dst.execute(f"INSERT INTO {t} VALUES ({', '.join('?' * (len(cols) + 1))})", (*row, "hpc3"))
+    # an entry the site read 13 hours ago reaches the hub now (hpc3 not pulled meanwhile)
     long_ago = (datetime.now() - timedelta(hours=13)).isoformat(timespec="seconds")
     dst.execute("UPDATE power_events SET history = 0, first_seen = ? WHERE record_id = 'a'", (long_ago,))
     dst.commit()
     sent = []
     monkeypatch.setattr("nomad.alerts.dispatcher.send_alert",
                         lambda severity, source, message, **k: sent.append(k["subject"]) or {"x": 1})
-    cfg = {"hub": {"sites": [{"name": "vadur", "alerts": "hub"}]}}
+    cfg = {"hub": {"sites": [{"name": "hpc3", "alerts": "hub"}]}}
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg)
-    assert sent.count("vadur/gpu09 power events") == 1
+    assert sent.count("hpc3/gpu09 power events") == 1
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg, now=datetime.now() + timedelta(hours=1))
     hub_power.hub_power_alerts(hub, tmp_path, config=cfg, now=datetime.now() + timedelta(hours=13))
-    assert sent.count("vadur/gpu09 power events") == 1           # once
+    assert sent.count("hpc3/gpu09 power events") == 1           # once
 
 
 
 # ── 1.26.0: a fan never seen turning is a header with no fan ─────────────────
 
 def test_a_fan_is_alerted_when_it_stops_not_when_it_never_turned(tmp_path, boards, monkeypatch):
-    """vadur's CPU nodes: SYS_FAN1-4 at 0 RPM on every board (headers with no fan), 4 Nov 2026."""
+    """hpc3's CPU nodes: SYS_FAN1-4 at 0 RPM on every board (headers with no fan), 4 Nov 2026."""
     fans = "SYS_FAN1         | 41h | lnr | 29.1 | 0 RPM\nFRNT_FAN1        | 44h | ok  | 29.4 | 4200 RPM"
     SDR["node03"]["Fan"], before = fans, SDR["node03"]["Fan"]
     GET["SYS_FAN1"] = (600.0, 600.0, 700.0)

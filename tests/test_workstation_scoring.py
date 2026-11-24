@@ -13,7 +13,7 @@ from nomad.edu.scoring import (
     score_memory_pressure,
     score_session,
     select_cluster_target,
-    SPYDUR_MEMORY_TIERS_MB,
+    DEFAULT_MEMORY_TIERS_MB,
 )
 
 
@@ -21,13 +21,13 @@ from nomad.edu.scoring import (
 
 @pytest.fixture
 def host_boyi():
-    """boyi: 256 GB host (real Parish lab workstation)."""
+    """boyi: 256 GB host (real Ames lab workstation)."""
     return {"hostname": "boyi", "memory_total_mb": 256_904, "cpu_count": 64}
 
 
 @pytest.fixture
 def host_thais():
-    """thais: 64 GB host (smaller Parish lab box, the headline example)."""
+    """thais: 64 GB host (smaller Ames lab box, the headline example)."""
     return {"hostname": "thais", "memory_total_mb": 63_642, "cpu_count": 32}
 
 

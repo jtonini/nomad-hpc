@@ -2,7 +2,7 @@
 # Copyright (C) 2026 João Tonini
 """Power alerts the hub sends for sites that leave their alerts to it (1.25.8).
 
-A site set to ``alerts = "hub"`` in [[hub.sites]] (vadur: a head node with no
+A site set to ``alerts = "hub"`` in [[hub.sites]] (hpc3: a head node with no
 way to the mail server) collects its boards' power readings (the power
 collector) like any other; after each sync the hub reads them and sends what
 the site's own collector would: one alert a host for each of "power supply",

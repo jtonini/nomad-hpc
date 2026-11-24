@@ -139,10 +139,10 @@ check_services = ["slurmd", "munge"]
 # below port 1024, or to a system service on that host; no proxy or jump;
 # loopback on the far end. It stays so while the same ssh runs. Names are
 # resolved by the collector, not by anyone's ssh config.
-# trusted_hosts = ["vadur"]               # or "vadur:2222", "172.28.122.224", "10.9.0.0/24"
+# trusted_hosts = ["hpc3"]               # or "hpc3:2222", "172.28.122.224", "10.9.0.0/24"
 # Public ranges that are campus: only a label ("on campus" or "connects
 # outside"); private addresses beyond the cluster are campus already.
-# campus_networks = ["141.166.0.0/16", "192.67.49.0/24"]
+# campus_networks = ["172.40.0.0/16", "172.41.49.0/24"]
 # The cluster's own networks are found on each host (private, reached
 # directly, on an interface with no default route); list one a node
 # routes out through, or with a spare default route on it:
@@ -618,7 +618,7 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # outside the lab show as "another user" there). One table per lab group:
 # [console.labs.resources."NETID$"]
 # workstations = ["adam", "eve"]
-# storage = ["sarahvaughan"]           # a server, or "server:/export"
+# storage = ["nas1"]           # a server, or "server:/export"
 
 # A lab's research assistants see it as its PI does, while they are one of
 # its members (`nomad lab assistant LAB NETID` writes this). A group made a
@@ -641,7 +641,7 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # review_to = ["rc@example.edu"]        # while set, every email goes here instead
 # db = "/home/nomad/.local/share/nomad/lab_check.db"   # default: beside combined.db
 # not_sites = ["teaching"]              # sites whose groups it leaves out (a teaching server's course groups)
-# salutation = "Dr. {last}"             # the greeting: "Dear Dr. Parish," ({first}, {last}, {name})
+# salutation = "Dr. {last}"             # the greeting: "Dear Dr. Ames," ({first}, {last}, {name})
 # names = { jsmith = "Jane Smith" }     # where the account's full name (getent passwd) won't do
 #                                       # (nomad lab check names --set finds and asks for them)
 # directory = { uri = "ldap://ldap.example.edu", base = "ou=people,dc=example,dc=edu" }   # names --set, no login (default: ldap.conf)
@@ -653,7 +653,7 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # one (made, or not and why) and the PI is emailed as the check's emails go
 # (`nomad lab accounts`, docs/lab-accounts.md). On once [directory] is set.
 # [console.labs.accounts]
-# sites = ["spydur"]                    # where a PI may ask (default: sites with Slurm nodes read this week)
+# sites = ["hpc1"]                    # where a PI may ask (default: sites with Slurm nodes read this week)
 # notify = ["hpc@example.edu"]          # new requests are emailed here
 # most = 100                            # people in one request
 # link = "https://nomad.example.edu/diagnostics?tab=labs"   # ARC's page, in its email
@@ -724,7 +724,7 @@ leads = {}                   # e.g. { NETID = ["chemlab$"] }
 # server as the mounts name it (often an address). Say when everyone shares
 # it, or its use reads as the lab's own.
 # [console.storage."10.0.0.28"]
-# name = "sarahvaughan"
+# name = "nas1"
 # note = "community $HOME, all users"
 
 # What each machine is (a head node, the hub, a NAS, a cluster), shown beside
@@ -1096,7 +1096,7 @@ min_jobs = 50
 # enabled = true
 # engine = "tessera"                    # or "baseline": a logistic regression only
 # predicts = ["failure", "idle"]        # failing; most of the cores left idle (1.46.0); or "waste"
-# trainer = "badenpowell"               # the worker's name, as the Console says it
+# trainer = "gpuws1"               # the worker's name, as the Console says it
 # jobs_days = 365
 # max_jobs = 50000                      # the newest ended jobs (0: all; time grows as the square)
 # waste_threshold = 0.6                 # "wasted": more than this share of the time asked unused
@@ -1222,7 +1222,7 @@ ignore_states   = []
 #
 # A site whose gate the hub reaches only through another host, in its
 # [[hub.sites]] (1.40.0; there, nomad gate jump-key):
-# gate_jump = "zeus@jonimitchell"
+# gate_jump = "monitor@labhead1"
 
 # [alerts.node_jobs] — A node that fails every job at start (1.25.4): among the
 # jobs that started on a node in the last window_minutes, at least min_jobs
@@ -1253,7 +1253,7 @@ share = 0.8
 # Console's Submit page ("No script yet? Make one"; 1.26.0, the hub's
 # nomad.toml; docs/submit.md, "Making a script"). The versions offered are
 # the modules the cluster has ([collectors.modules] on the cluster).
-# [submit.build.spydur]
+# [submit.build.hpc1]
 # module_paths = ["/usr/local/sw/modulefiles"]
 # scratch = "/scratch/$USER/$SLURM_JOB_ID"
 # [[submit.templates]]
@@ -1300,9 +1300,9 @@ share = 0.8
 # dirs = ["/usr/local/sw/nomad-demos"]   # a site's own kits (folders of kit folders)
 # bundled = true                         # also the kits that come with nomad
 # into = "~/nomad-demos"                 # where nomad demos copy puts a copy: a new folder each time
-# partition = { spydur = "condos" }      # where practice runs with no GPU are sent (default: the template's)
+# partition = { hpc1 = "condos" }      # where practice runs with no GPU are sent (default: the template's)
 # gpu_partition = "gpunodes"             # and those with one (a name: every site)
-# site_dirs = { spydur = "/usr/local/sw/nomad-demos" }   # the hub's (1.35.0): each cluster's built kits, for the Console
+# site_dirs = { hpc1 = "/usr/local/sw/nomad-demos" }   # the hub's (1.35.0): each cluster's built kits, for the Console
 #                                        (there: owned by root or nomad's installer, writable by no one else)
 
 # [submit.preemption] — Guests on condos, and the owners' first claim (1.28.0;

@@ -247,9 +247,9 @@ def node_cmd(ctx, site, name, hours, since, until, netid, db, as_json):
     out-of-memory kills, power events, alerts, maintenance.
 
     \b
-    nomad facts node spydur                           the site's nodes, by name
-    nomad facts node spydur n012                      the last 24 hours
-    nomad facts node spydur n012 --from 2026-11-10T14:00 --to 2026-11-10T18:00
+    nomad facts node hpc1                           the site's nodes, by name
+    nomad facts node hpc1 n012                      the last 24 hours
+    nomad facts node hpc1 n012 --from 2026-11-10T14:00 --to 2026-11-10T18:00
     """
     from datetime import datetime, timedelta
     from nomad.facts import NodeFactsError, node

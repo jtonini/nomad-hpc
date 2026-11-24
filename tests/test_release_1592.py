@@ -106,13 +106,13 @@ def test_the_collector_tries_the_nodes(tmp_path, monkeypatch):
 
 
 def test_the_email_says_machines():
-    notes = [{"row": {"site": "spydur", "program": "Q-Chem", "version": "6.1.1", "install": "/sw/qchem611",
+    notes = [{"row": {"site": "hpc1", "program": "Q-Chem", "version": "6.1.1", "install": "/sw/qchem611",
                       "machine": "n2", "result": "license", "reason": "this machine isn't in the license"},
               "why": "notrun", "what": "x"}]
     subj, lines = T.section(notes)
     assert subj == "Q-Chem doesn't run on some machines"
     assert lines[0].startswith("Licensed programs on the machines nomad tries them on")
-    assert "Q-Chem 6.1.1 (spydur) doesn't run on 1 machine: n2" in lines[2]
+    assert "Q-Chem 6.1.1 (hpc1) doesn't run on 1 machine: n2" in lines[2]
 
 
 def test_tries_setup_nodes(tmp_path):

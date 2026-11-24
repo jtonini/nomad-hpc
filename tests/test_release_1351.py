@@ -91,7 +91,7 @@ def test_a_practice_jobs_folder_described(tmp_path):
     K.copy(k, dest=tmp_path / "w")
     (tmp_path / "w" / "water.out").write_text(" ENERGY| Total FORCE_EVAL ( QS ) energy [hartree]   -17.2193\n")
     got = K.practice_of(str(tmp_path / "w"))
-    assert got["kit"] == "cp2k-water" and got["recorded_text"].startswith("A run of it on spydur")
+    assert got["kit"] == "cp2k-water" and got["recorded_text"].startswith("A run of it (")
     first = got["look"][0]
     assert first["found"][0]["lines"] == [" ENERGY| Total FORCE_EVAL ( QS ) energy [hartree]   -17.2193"]
     rec = got["recorded"][0]["found"][0]
@@ -211,7 +211,7 @@ def test_scores_and_advice_leave_practice_runs_out(tmp_path):
     for jid, name, tail in (("1", "practice-r-bootstrap", "amy/r-bootstrap"), ("2", "bootstrap", "nomad-practice/r-bootstrap"),
                             ("3", "fit", "thesis/chapter2")):
         c.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                  (jid, "spydur", "amy", name, "COMPLETED", "condos", t, t, t, 60, 1, 2048, 600, "/home", tail))
+                  (jid, "hpc1", "amy", name, "COMPLETED", "condos", t, t, t, 60, 1, 2048, 600, "/home", tail))
     c.commit()
     c.close()
     assert [r["job_id"] for r in progress._load_user_jobs(str(db), "amy", days=30)] == ["3"]

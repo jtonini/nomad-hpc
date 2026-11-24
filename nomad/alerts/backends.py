@@ -105,7 +105,7 @@ class EmailBackend(NotificationBackend):
 
     def _format_subject(self, alert: dict) -> str:
         # Where it is and what happened, readable in an inbox list:
-        # "[WARNING] NØMAÐ spydur: Disk /scratch at 85.0% (threshold: 80%)"
+        # "[WARNING] NØMAÐ hpc1: Disk /scratch at 85.0% (threshold: 80%)"
         severity = alert.get('severity', 'INFO').upper()
         where = f" {alert['site']}" if alert.get('site') else ""
         what = " ".join(str(alert.get('message') or alert.get('source') or 'alert').split())

@@ -12,7 +12,7 @@ import pytest
 from nomad.collectors import job_live as J
 from nomad.collectors.base import CollectionError
 
-# spydur, 6 Nov 2026: bchen's 87790 on spdr10 (52 cores, 350 GB asked), and an array task of jgyasi's on vadur
+# hpc1, 6 Nov 2026: bchen's 87790 on nd10 (52 cores, 350 GB asked), and an array task of jgyasi's on hpc3
 SQUEUE = ("87790|87790|bchen|52|1|2026-11-06T13:17:30\n"
           "12281|12267_14|jgyasi|6|1|2026-11-06T16:15:00\n"
           "bad line\n"
@@ -145,7 +145,7 @@ def test_who_runs_sstat(tmp_path, monkeypatch):
 # --- 1.32.1 ------------------------------------------------------------------------------
 
 def test_an_arrays_tasks_counted_once(tmp_path, tools):
-    """vadur, 6 Nov: asked for 12266 (array 12266's last task, its own id), sstat also
+    """hpc3, 6 Nov: asked for 12266 (array 12266's last task, its own id), sstat also
     answered for the array's other running tasks, 12987 (12266_48) and 13020 (12266_81),
     which were asked for by their own ids too: they came back twice and read 10.7 and
     10.5 cores busy of the 6 asked, twice their 5.3."""

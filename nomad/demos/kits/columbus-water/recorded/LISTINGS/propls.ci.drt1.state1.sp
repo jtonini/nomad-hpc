@@ -41,7 +41,7 @@ echo of the input file:
 
 Header information of AO-integral file:
 
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 
 irrep                  A1     B1     B2     A2 
 basis functions        11      7      4      2

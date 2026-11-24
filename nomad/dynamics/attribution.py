@@ -4,7 +4,7 @@
 
 The group analyses (diversity by group, niche overlap, externalities) count
 jobs per group. They used to join jobs to ``group_membership`` by username,
-so a job was counted once for every group its owner belongs to: on spydur
+so a job was counted once for every group its owner belongs to: on hpc1
 7,946 jobs became 38,971 rows, groups sharing one busy member looked
 identical (overlap 1.00), and correlations between groups were drawn from
 the same jobs counted twice.

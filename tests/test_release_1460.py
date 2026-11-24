@@ -51,14 +51,14 @@ def _db(path, rows):
 
 
 def test_which_jobs_are_asked_whether_they_left_cores_idle(tmp_path):
-    rows = [("1", "spydur", "COMPLETED", 8, 3600, 20.0),      # 80% idle: yes
-            ("2", "spydur", "COMPLETED", 8, 3600, 80.0),      # 20% idle: no
-            ("3", "spydur", "COMPLETED", 1, 3600, 10.0),      # one core: nothing to ask less of
-            ("4", "spydur", "COMPLETED", 8, 120, 10.0),       # 2 minutes: starting up
-            ("5", "spydur", "FAILED", 8, 3600, 10.0),         # failed: not asked
-            ("6", "spydur", "COMPLETED", 8, 3600, None),      # not measured
-            ("7", "arachne", "COMPLETED", 8, 3600, None)]     # job 7's figure is spydur's only
-    c = _db(tmp_path / "c.db", rows + [("7x", "spydur", "COMPLETED", 8, 3600, 50.0)])
+    rows = [("1", "hpc1", "COMPLETED", 8, 3600, 20.0),      # 80% idle: yes
+            ("2", "hpc1", "COMPLETED", 8, 3600, 80.0),      # 20% idle: no
+            ("3", "hpc1", "COMPLETED", 1, 3600, 10.0),      # one core: nothing to ask less of
+            ("4", "hpc1", "COMPLETED", 8, 120, 10.0),       # 2 minutes: starting up
+            ("5", "hpc1", "FAILED", 8, 3600, 10.0),         # failed: not asked
+            ("6", "hpc1", "COMPLETED", 8, 3600, None),      # not measured
+            ("7", "hpc2", "COMPLETED", 8, 3600, None)]     # job 7's figure is hpc1's only
+    c = _db(tmp_path / "c.db", rows + [("7x", "hpc1", "COMPLETED", 8, 3600, 50.0)])
     c.execute("UPDATE job_summary SET job_id = '7' WHERE job_id = '7x'")
     plan = {**Settings(enabled=True, holdout_share=0.0).plan()}
     data, mapping = D.build(c, plan, NOW)

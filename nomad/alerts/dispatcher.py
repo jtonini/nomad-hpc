@@ -516,7 +516,7 @@ CREATE INDEX IF NOT EXISTS idx_alert_episodes_key ON alert_episodes(key, first_s
 CREATE INDEX IF NOT EXISTS idx_alert_episodes_seen ON alert_episodes(last_seen);
 """
 # The waits mailing holds what may pass on its own for (minutes), by source
-# or source.kind; [alerts.wait] in nomad.toml over these. spydur, one week:
+# or source.kind; [alerts.wait] in nomad.toml over these. hpc1, one week:
 # 24 CPU clock alerts, each over in 15-90 minutes.
 WAITS = {"clock": 60.0, "policy_watch.heavy": 30.0}
 RECUR_TIMES, RECUR_DAYS = 3, 7

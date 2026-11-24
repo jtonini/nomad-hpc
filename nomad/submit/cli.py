@@ -945,10 +945,10 @@ def submit_cmd(script, args, job, cpus, mem, time_, gpus, partition, keep, yes, 
 # ── when it would start (1.25.4) ─────────────────────────────────────────────
 # sbatch --test-only: Slurm's own plan for the job, given the queue and its
 # backfill, in each partition; nothing is submitted. "sbatch: Job 86313 to
-# start at 2026-11-02T13:55:12 using 1 processors on nodes spdr01 in
+# start at 2026-11-02T13:55:12 using 1 processors on nodes nd01 in
 # partition basic". Where no job has a time limit Slurm can't tell when a
 # node frees: then it is only "now" or "later".
-# Slurm says more between the time and "using" in some versions (spydur's 25.11: "...T09:49:39 a using 1
+# Slurm says more between the time and "using" in some versions (hpc1's 25.11: "...T09:49:39 a using 1
 # processors ..."): whatever is there, on the same line.
 _TEST_ONLY = re.compile(r"to start at (\S+)[^\n]*? using (\d+) processors? on nodes? (\S+) in partition (\S+)")
 MAX_STARTS = 12

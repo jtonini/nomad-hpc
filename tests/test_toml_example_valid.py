@@ -126,7 +126,7 @@ def test_dashboard_binds_to_loopback_by_default():
     """The example must not bind the dashboard to all interfaces by default.
 
     0.0.0.0 exposes the dashboard to anyone on the network. Sites that
-    want centralized monitoring (like mingus) can opt in by setting
+    want centralized monitoring (like hub) can opt in by setting
     host = "0.0.0.0", but new installs should be safe by default.
     """
     import tomllib

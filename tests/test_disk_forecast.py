@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Disk fill forecasts, and the thresholds a site sets.
 
-spydur's /home (16.5 TB) grew about 0.01 TB a day for weeks, then about
+hpc1's /home (16.5 TB) grew about 0.01 TB a day for weeks, then about
 2 TB a day from Friday 2 October: 80% Friday 15:35, 90% Saturday 11:55, 95%
 Saturday 22:35, 99% Sunday 06:15. nomad's one alert came at 95%, eight hours
 before 99%. A forecast from the last hours of readings says on Friday that
@@ -72,7 +72,7 @@ def _classify(hours, t=None):
     return None
 
 
-def test_spydur_home_weekend_replayed():
+def test_hpc1_home_weekend_replayed():
     fri = datetime(2026, 10, 2)
     pts = [(fri - timedelta(days=2), 0.74), (fri + timedelta(hours=6), 0.7415),
            (fri + timedelta(hours=15, minutes=35), 0.80),
@@ -126,7 +126,7 @@ def fs(path="/home", pct=50.0, **extra):
 
 
 def test_each_alert_names_its_disk(sent):
-    th.ThresholdChecker({}).check("disk", [fs("/home", 85), fs("/scratch", 87)], host="spydur")
+    th.ThresholdChecker({}).check("disk", [fs("/home", 85), fs("/scratch", 87)], host="hpc1")
     assert [(a["subject"], a["severity"]) for a in sent] == [("/home", "warning"),
                                                              ("/scratch", "warning")]
 
@@ -169,7 +169,7 @@ def test_a_disk_filling_fast_is_forecast(sent):
         fs("/home", 84, hours_until_full=40, fill_rate_bytes_per_day=rate, forecast_window_hours=6),
         fs("/data", 50, hours_until_full=10, fill_rate_bytes_per_day=rate, forecast_window_hours=6),
         fs("/scratch", 60, hours_until_full=500, fill_rate_bytes_per_day=1e9,
-           forecast_window_hours=6)], host="spydur")
+           forecast_window_hours=6)], host="hpc1")
     got = [(a["source"], a["subject"], a["severity"]) for a in sent]
     assert ("disk_forecast", "/home", "warning") in got
     assert ("disk_forecast", "/data", "critical") in got
@@ -181,7 +181,7 @@ def test_a_disk_filling_fast_is_forecast(sent):
 
 
 def test_past_its_critical_threshold_a_disk_is_forecast_only_when_filling_fast(sent):
-    # spydur /home at 97%, 529 GB left: slowly, the 95% alert says it all...
+    # hpc1 /home at 97%, 529 GB left: slowly, the 95% alert says it all...
     th.ThresholdChecker({}).check("disk", [fs("/home", 97.0, hours_until_full=30,
                                               fill_rate_bytes_per_day=0.4 * TB,
                                               forecast_window_hours=6)])

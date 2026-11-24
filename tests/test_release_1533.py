@@ -2,7 +2,7 @@
 
 Every task of a job array carries the array's submission and eligible time.
 An array sent five weeks ago whose tasks run a few at a time has tasks that
-start today "eligible" for five weeks: on spydur and vadur, nearly all the
+start today "eligible" for five weeks: on hpc1 and hpc3, nearly all the
 hours the lab figures counted as waiting for room were such tasks. Now:
 
 - a wait counts an array once, by its first task (the condo figures, the

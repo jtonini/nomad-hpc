@@ -993,10 +993,10 @@ def score_gpu(job: dict, summary: dict) -> DimensionScore:
 # v1.7.0 design notes.
 
 
-# Smallest-fit cluster memory tiers (MB). Sourced from node_state on
-# spydur as of 2026-05. Ideally pulled live at runtime; constant here
-# keeps the scorer DB-free for testability.
-SPYDUR_MEMORY_TIERS_MB: tuple[int, ...] = (384_000, 768_000, 1_536_000)
+# Smallest-fit cluster memory tiers (MB): an example of a cluster's node
+# sizes (384 GB, 768 GB, 1.5 TB). Callers pass their cluster's own, read from
+# node_state; the default keeps the scorer DB-free for testability.
+DEFAULT_MEMORY_TIERS_MB: tuple[int, ...] = (384_000, 768_000, 1_536_000)
 
 
 @dataclass
@@ -1124,7 +1124,7 @@ def score_memory_pressure(session: dict, host_state: dict) -> DimensionScore:
                   f"other users will see slowdowns.")
 
     # No Suggestion attached: the actionable recommendation
-    # ("move to spydur") is a cross-cutting verdict produced in
+    # ("move to hpc1") is a cross-cutting verdict produced in
     # insights.py, not a per-dimension tuning suggestion.
     return DimensionScore(
         name="Memory Pressure",
@@ -1246,7 +1246,7 @@ def score_session(session: dict, host_state: dict) -> SessionFingerprint:
 def select_cluster_target(
     peak_mb: float,
     host_mb: int,
-    tiers: tuple[int, ...] = SPYDUR_MEMORY_TIERS_MB,
+    tiers: tuple[int, ...] = DEFAULT_MEMORY_TIERS_MB,
 ) -> tuple[int, float] | None:
     """
     Pick the smallest cluster memory tier that gives meaningful headroom.

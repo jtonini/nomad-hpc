@@ -76,7 +76,7 @@ def check_group():
     nomad lab check status          this term: each lab, answered or not, emails sent
     nomad lab check show LAB        what the lab's PI is asked, and their answers
     nomad lab check answer LAB NETID here|left|not_mine|mine|guest [--data keep|remove|ask]
-    nomad lab check todo            what ARC is left to do, a cluster at a time
+    nomad lab check todo            what research computing is left to do, a cluster at a time
     nomad lab check done LAB NETID remove|add|data|no_answer --note "..."
     nomad lab check mail [--send] [--lab LAB] [--text|--counts]   the emails due today (review_to while set)
     nomad lab check email LAB [--reminder]   LAB's email as its PIs would get it now (nothing sent)
@@ -328,7 +328,7 @@ def check_name(ctx, netid, name, remove, apply):
         else:
             kind, val = N.parse(" ".join(name))
             if kind != "name":
-                why = val or "a person's name, e.g. Carol Parish"
+                why = val or "a person's name, e.g. Robin Ames"
                 raise click.ClickException(f"{' '.join(name)!r}: {why}")
             changes = N.set_names(edit, {n: val})
             want[n] = val

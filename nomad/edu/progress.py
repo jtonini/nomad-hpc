@@ -161,7 +161,7 @@ def summary_join(conn: sqlite3.Connection) -> str:
 
     Job IDs are unique within a site but repeat across sites, so in a combined
     database -- where every table carries source_site -- the match must be on
-    job ID *and* site; matching on job ID alone gives a spydur job an arachne
+    job ID *and* site; matching on job ID alone gives a hpc1 job an hpc2
     job's numbers.
     """
     def has_site(table):

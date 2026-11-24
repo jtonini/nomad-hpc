@@ -3,7 +3,7 @@
 """How fast each CPU really runs when busy (1.27.0): a CPU held far below its
 clock (a power brake, PROCHOT) is found the day it starts.
 
-arachne's node01-03 lost one power supply's input on 4 October 2026 and ran
+hpc2's node01-03 lost one power supply's input on 4 October 2026 and ran
 on the other; their boards answered by braking the CPUs to their lowest
 clock, about 400 MHz instead of 3,700. Nothing failed and Slurm saw healthy
 nodes: every job there ran ten times slower for a month. What the OS reports
@@ -31,7 +31,7 @@ whose CPUs are busy (load per CPU 0.5 or more) is judged against what it and
 the busy hosts alike give busy (their median), else its CPU's rated clock (or
 60% of its top clock), below ``busy_min_fraction`` (0.4): with every core at
 work a CPU runs far below its top clock, and lower on heavy vector code (1.49.0;
-spydur's Xeon 6230Rs: 3,970 MHz idle, 2,700 busy, dips to 1,420). A host is
+hpc1's Xeon 6230Rs: 3,970 MHz idle, 2,700 busy, dips to 1,420). A host is
 throttled after ``sustain`` (2) low readings in a row: alerted (source
 ``clock``, subject "cpu clock"), critical when its power readings show a
 supply problem too (the power collector, on the same site). Its board
@@ -91,9 +91,9 @@ PEER_HOURS = 2             # hosts like it: their readings this recent
 DEFAULTS = {"enabled": True, "min_fraction": 0.5, "sha_min_fraction": 0.25, "sustain": 2,
             "busy_min_fraction": 0.4}
 # A host this busy (load per CPU) is judged against busy readings (1.49.0): with every core at work a
-# CPU runs well below its top clock, and lower still on heavy vector code (spydur's Xeon 6230Rs: about
+# CPU runs well below its top clock, and lower still on heavy vector code (hpc1's Xeon 6230Rs: about
 # 3,970 MHz idle, 2,700 busy, dips to 1,420), none of it a brake. A brake (PROCHOT) holds the lowest
-# clock at any load: arachne's 400 of 3,700 MHz.
+# clock at any load: hpc2's 400 of 3,700 MHz.
 BUSY = 0.5
 
 # The probe, run by the host's own python3 (3.6+): one line, CLOCK|key=value|...
@@ -325,7 +325,7 @@ def reference(r: dict, own: list[dict], peers: list[dict]) -> tuple[float | None
             found.append((mine, "its usual clock"))
         like = [p["mhz"] for p in peers if p.get("mhz")]
         if like:
-            # the most one of them gives: braked ones among them (arachne's node01-03) don't lower it
+            # the most one of them gives: braked ones among them (hpc2's node01-03) don't lower it
             found.append((max(like), f"{len(like)} host{'s' if len(like) > 1 else ''} with its CPU"))
         if r.get("max_mhz"):
             found.append((float(r["max_mhz"]), "its CPU's top clock"))

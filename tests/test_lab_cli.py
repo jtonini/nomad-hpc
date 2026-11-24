@@ -17,9 +17,9 @@ from nomad.config.edit import TomlEdit, key_path, loads
 
 TB = 10 ** 12
 
-MINGUS = '''# the hub
+HUB_TOML = '''# the hub
 [general]
-data_dir = "/home/zeus/.local/share/nomad"
+data_dir = "/home/monitor/.local/share/nomad"
 
 [console.labs]
 group_pattern = "{netid}$"
@@ -45,7 +45,7 @@ department = "pi3$"
 @pytest.fixture
 def toml(tmp_path):
     p = tmp_path / "nomad.toml"
-    p.write_text(MINGUS)
+    p.write_text(HUB_TOML)
     return p
 
 
@@ -81,7 +81,7 @@ def test_nothing_is_written_unless_it_reads_back(toml):
     e.add_entry(("x",), {"a": "b"})
     with pytest.raises(ValueError, match="read back"):
         e.save(lambda d: False)
-    assert toml.read_text() == MINGUS
+    assert toml.read_text() == HUB_TOML
     assert not list(toml.parent.glob("*.bak-lab-*"))
 
 
@@ -288,7 +288,7 @@ def test_commands_show_then_write(toml, monkeypatch):
     r = run(cli, ["-c", str(toml), "lab", "add-machine", "pi1", "ws9"])
     assert r.exit_code == 0, r.output
     assert "+ ws9: a workstation collected here, tagged pi1$" in r.output
-    assert "Nothing changed" in r.output and toml.read_text() == MINGUS
+    assert "Nothing changed" in r.output and toml.read_text() == HUB_TOML
     r = run(cli, ["-c", str(toml), "lab", "add-machine", "pi1", "ws9", "--apply"])
     assert "Written. Backup:" in r.output
     assert any(w["hostname"] == "ws9" for w in
@@ -317,7 +317,7 @@ def test_add_nas_says_when_cron_leaves_the_storage_collector_out(toml, monkeypat
 def _hub(path, now_rows=True):
     c = sqlite3.connect(path)
     c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
-    c.execute("INSERT INTO group_membership VALUES ('s1', 'pi3$', 'spydur')")
+    c.execute("INSERT INTO group_membership VALUES ('s1', 'pi3$', 'hpc1')")
     c.execute("CREATE TABLE workstation_state (timestamp TEXT, hostname TEXT, department TEXT, "
               "status TEXT)")
     c.executemany("INSERT INTO workstation_state VALUES (?, ?, ?, ?)", [

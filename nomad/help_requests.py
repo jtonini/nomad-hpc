@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""Ask ARC: help requests with a number, the person's own context, and the
+"""Ask research computing: help requests with a number, the person's own context, and the
 conversation kept (1.54.0).
 
 Every name here is the site's: the computing center is ``[support] team``
-(its short name, as people say it: "Ask ARC", "ARC answered"; default
+(its short name, as people say it: "Ask RC", "RC answered"; default
 "Research Computing"), the numbers' prefix ``[console.tickets] prefix``, the
 addresses below. Nothing about one institution is written into nomad.
 
@@ -12,27 +12,27 @@ Someone asks the computing center for help from the Console: what it is about
 (one of their jobs, or anything else), their words, and the context they
 chose to attach after seeing it in full -- the job as nomad read it, the end
 of its output, its nodes now, their storage, the page they were on. The
-request gets a number from the one sequence (ARC-0042, nomad.tickets),
+request gets a number from the one sequence (REQ-0042, nomad.tickets),
 Research Computing is emailed with the number in the subject, and the person
 gets a copy saying the number. Each message after that is kept with the
-request: the person's, ARC's answers (emailed to the person), ARC's own
+request: the person's, research computing's answers (emailed to the person), research computing's own
 notes (never shown or sent to the person). States:
 
-    open (waiting for ARC) -> answered -> closed
+    open (waiting for research computing) -> answered -> closed
     a message from the person opens it again
 
 A reply to one of these emails keeps the number in its subject but goes to
-ARC's mailbox, not here: replies on the Console are the ones kept with the
+research computing's mailbox, not here: replies on the Console are the ones kept with the
 request (mail read back into it would come later).
 
 Settings, in the hub's nomad.toml::
 
     [support]
-    team = "ARC"                   # the computing center, as people call it (default "Research Computing")
+    team = "RC"                    # the computing center, as people call it (default "Research Computing")
     email = "hpc@example.edu"      # where help requests go, unless [console.help] notify says
 
     [console.help]
-    notify = ["hpc@example.edu"]   # ARC's addresses (default: [support] email)
+    notify = ["hpc@example.edu"]   # research computing's addresses (default: [support] email)
     mail_domain = "example.edu"    # a person's address: NETID@mail_domain
                                    #   (default: [support] user_email_domain)
     send_from = "nomad@example.edu"   # default: [mail] from
@@ -156,7 +156,7 @@ def open_records(path, write: bool = False):
 
 
 def ref_of(number, s: Settings | None = None) -> str:
-    """A request's number as shown: ARC-0042."""
+    """A request's number as shown: REQ-0042."""
     return T.ref(number, (s or Settings()).tickets)
 
 
@@ -240,7 +240,7 @@ def _request(row: dict, s: Settings | None, messages: list | None = None) -> dic
 
 
 def request_of(rec, number: int, s: Settings | None = None, notes: bool = True) -> dict | None:
-    """One request with its messages (ARC's notes too unless ``notes`` is
+    """One request with its messages (research computing's notes too unless ``notes`` is
     False: what the person sees)."""
     got = _rows(rec, "SELECT * FROM help_requests WHERE number = ?", (int(number),))
     if not got:
@@ -281,11 +281,11 @@ def requests(rec, by: str | None = None, open_only: bool = False, days: int = 36
 def say(rec, number: int, by: str, side: str, text: str, state: str | None = None,
         s: Settings | None = None) -> dict:
     """A message on a request: the person's (it opens the request again),
-    ARC's answer (the request is then answered, unless ``state`` says), or
-    ARC's note (kept for ARC only; the state as it was, unless ``state``)."""
+    research computing's answer (the request is then answered, unless ``state`` says), or
+    research computing's note (kept for research computing only; the state as it was, unless ``state``)."""
     by = _who(by)
     if side not in SIDES:
-        raise HelpError(f"{side!r}: a message is the person's, ARC's or a note")
+        raise HelpError(f"{side!r}: a message is the person's, research computing's or a note")
     if state is not None and state not in STATES:
         raise HelpError(f"{state!r} isn't a state")
     text = _text(text, "The message", TEXT_MAX)
@@ -342,7 +342,7 @@ def _link(req: dict, s: Settings) -> str:
 
 
 def letter_to_arc(req: dict, text: str, s: Settings, first: bool) -> tuple[str, str]:
-    """The email for ARC: a new request (``first``), or the person's next
+    """The email for research computing: a new request (``first``), or the person's next
     message on it."""
     ref = req["ref"]
     subject = f"[{ref}] {req['subject']}" if first else f"Re: [{ref}] {req['subject']}"
@@ -363,7 +363,7 @@ def letter_to_arc(req: dict, text: str, s: Settings, first: bool) -> tuple[str, 
 
 def letter_to_person(req: dict, text: str | None, s: Settings, first: bool) -> tuple[str, str]:
     """The email for the person: their copy of a new request (``first``,
-    ``text`` their message), or ARC's answer (``text``)."""
+    ``text`` their message), or research computing's answer (``text``)."""
     ref = req["ref"]
     subject = f"[{ref}] {req['subject']}" if first else f"Re: [{ref}] {req['subject']}"
     link = _link(req, s)
@@ -414,7 +414,7 @@ def send(config, s: Settings, subject: str, text: str, to: list, reply_to: list 
 
 
 def tell_arc(config, s: Settings, req: dict, text: str, first: bool) -> str:
-    """Email ARC (``notify``): a new request, or the person's next message;
+    """Email research computing (``notify``): a new request, or the person's next message;
     the person's address as Reply-To."""
     if not s.notify:
         return "not sent: no one to tell ([console.help] notify, or [support] email)"
@@ -424,7 +424,7 @@ def tell_arc(config, s: Settings, req: dict, text: str, first: bool) -> str:
 
 
 def tell_person(config, s: Settings, req: dict, text: str, first: bool) -> str:
-    """Email the person: their copy of the request, or ARC's answer; ARC's
+    """Email the person: their copy of the request, or research computing's answer; research computing's
     address as Reply-To."""
     to, reviewing = person_address(req["asked_by"], s)
     subject, body = letter_to_person(req, text, s, first)

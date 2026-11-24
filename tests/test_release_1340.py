@@ -79,7 +79,7 @@ def test_every_bundled_kit_reads_and_fits_ur_templates():
     for k in got:
         assert k.bundled and k.licence in K.LICENCES
         assert sum((k.path / f).stat().st_size for f in k.files if (k.path / f).exists()) <= K.MAX_BYTES
-        why = K.check(k, CONFIG, "spydur")
+        why = K.check(k, CONFIG, "hpc1")
         if k.build:
             assert not k.ready and why == [f"not built yet: nomad demos build {k.name}"]
         else:
@@ -91,10 +91,10 @@ def test_every_bundled_kit_reads_and_fits_ur_templates():
 def test_a_kit_that_doesnt_fit_its_template_is_said():
     k = K.find(CONFIG, "gaussian-benzene")
     cfg = {"submit": {"templates": [dict(TEMPLATES[0], inputs=[".com"])]}}
-    assert "takes a file ending in .com" in K.check(k, cfg, "spydur")[0]
-    assert K.check(k, {"submit": {"templates": []}}, "spydur") == ["spydur has no Gaussian template"]
+    assert "takes a file ending in .com" in K.check(k, cfg, "hpc1")[0]
+    assert K.check(k, {"submit": {"templates": []}}, "hpc1") == ["hpc1 has no Gaussian template"]
     amber = K.find(CONFIG, "amber-peptide")
-    assert amber.gpus == 1 and not any("GPUs" in w for w in K.check(amber, CONFIG, "spydur"))
+    assert amber.gpus == 1 and not any("GPUs" in w for w in K.check(amber, CONFIG, "hpc1"))
 
 
 def test_kits_are_checked_as_they_are_read(tmp_path):
@@ -166,13 +166,13 @@ def test_building_a_kit_once_at_a_site(tmp_path):
         seen["script"] = Path(cwd, "build.sh").read_text()
         Path(cwd, "water.tpr").write_bytes(b"tpr")
         return subprocess.CompletedProcess(argv, 0, "made\n", "")
-    cfg = {"submit": {"templates": TEMPLATES, "build": {"spydur": {"module_paths": ["/usr/local/sw/modulefiles"]}}}}
-    got = K.build(k, tmp_path / "kits", config=cfg, site="spydur", run=run)
+    cfg = {"submit": {"templates": TEMPLATES, "build": {"hpc1": {"module_paths": ["/usr/local/sw/modulefiles"]}}}}
+    got = K.build(k, tmp_path / "kits", config=cfg, site="hpc1", run=run)
     assert got["made"] == ["water.tpr"]
     assert "module use /usr/local/sw/modulefiles\nmodule load gromacs/2026.2-gpu\n" in seen["script"]
     assert "gmx grompp -f md.mdp -c em.gro -p topol.top -o water.tpr" in seen["script"]
     built = K.load(tmp_path / "kits" / "gromacs-water")
-    assert built.ready and K.check(built, CONFIG, "spydur") == []
+    assert built.ready and K.check(built, CONFIG, "hpc1") == []
     with pytest.raises(K.KitError, match="there already"):
         K.build(k, tmp_path / "kits", run=run)
 
@@ -191,14 +191,14 @@ def test_the_commands(tmp_path, monkeypatch):
     cfg = {"submit": {"templates": TEMPLATES, "demos": {"into": str(tmp_path / "demos")}}}
     monkeypatch.setattr(C, "_config", lambda ctx: cfg)
     run = CliRunner()
-    r = run.invoke(cli, ["demos", "list", "--site", "spydur"])
+    r = run.invoke(cli, ["demos", "list", "--site", "hpc1"])
     assert r.exit_code == 0, r.output
-    assert "gaussian-benzene" in r.output and "spydur: fits its template" in r.output and K.PRACTICE in r.output
+    assert "gaussian-benzene" in r.output and "hpc1: fits its template" in r.output and K.PRACTICE in r.output
     r = run.invoke(cli, ["demos", "show", "orca-benzene"])
     assert "Free for academic use" in r.output and "%pal" in r.output
     r = run.invoke(cli, ["demos", "copy", "molcas-water"])
     assert r.exit_code == 0 and "Copied molcas-water to " + str(tmp_path / "demos") in r.output
-    r = run.invoke(cli, ["demos", "check", "--site", "spydur"])
+    r = run.invoke(cli, ["demos", "check", "--site", "hpc1"])
     assert r.exit_code == 1 and "!! gromacs-water" in r.output and "ok gaussian-benzene" in r.output
     r = run.invoke(cli, ["demos", "show", "nothing"])
     assert r.exit_code != 0 and "no kit named nothing" in r.output
@@ -236,7 +236,7 @@ def test_staffs_scripts_for_every_kit(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "_config", lambda ctx: cfg)
     monkeypatch.setattr("nomad.collectors.modules.available",
                         lambda conn, site=None: ["gaussian/g16", "R/4.4.2", "amber/26", "cp2k/2026.2"])
-    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "spydur", "--hub", "--root", "/home/me/practice",
+    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "hpc1", "--hub", "--root", "/home/me/practice",
                                  "--out", str(tmp_path / "out")])
     assert r.exit_code == 0, r.output
     text = (tmp_path / "out" / "gaussian-benzene.sh").read_text()
@@ -244,7 +244,7 @@ def test_staffs_scripts_for_every_kit(tmp_path, monkeypatch):
     amber = (tmp_path / "out" / "amber-peptide.sh").read_text()
     assert "--gres=gpu:1" in amber and "not built yet" in r.output
     assert "ORCA" in r.output and not (tmp_path / "out" / "orca-benzene.sh").exists()   # no orca module there
-    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "spydur", "--hub", "--root", "/home/me/practice",
+    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "hpc1", "--hub", "--root", "/home/me/practice",
                                  "--out", str(tmp_path / "out")])
     assert "not written over" in r.output
 
@@ -268,9 +268,9 @@ def test_copy_from_a_sites_built_kits(tmp_path, monkeypatch):
 
 
 def test_where_practice_runs_are_sent(tmp_path, monkeypatch):
-    s = K.settings({"submit": {"demos": {"partition": {"spydur": "condos"}, "gpu_partition": "gpunodes"}}})
-    assert s.partition_for("spydur", 0) == "condos" and s.partition_for("arachne", 0) is None
-    assert s.partition_for("spydur", 1) == "gpunodes" and s.partition_for("arachne", 1) == "gpunodes"
+    s = K.settings({"submit": {"demos": {"partition": {"hpc1": "condos"}, "gpu_partition": "gpunodes"}}})
+    assert s.partition_for("hpc1", 0) == "condos" and s.partition_for("hpc2", 0) is None
+    assert s.partition_for("hpc1", 1) == "gpunodes" and s.partition_for("hpc2", 1) == "gpunodes"
     bad = K.settings({"submit": {"demos": {"partition": "no spaces"}}})
     assert bad.partition == {} and bad.problems
     import sqlite3
@@ -278,12 +278,12 @@ def test_where_practice_runs_are_sent(tmp_path, monkeypatch):
     from nomad.demos import cli as C
     db = tmp_path / "combined.db"
     sqlite3.connect(db).close()
-    cfg = {"submit": {"templates": TEMPLATES, "demos": {"partition": {"spydur": "condos"}}},
+    cfg = {"submit": {"templates": TEMPLATES, "demos": {"partition": {"hpc1": "condos"}}},
            "hub": {"output_db": str(db)}}
     monkeypatch.setattr(C, "_config", lambda ctx: cfg)
     monkeypatch.setattr("nomad.collectors.modules.available",
                         lambda conn, site=None: ["R/4.4.2", "gromacs/2026.2-gpu", "rfdiffusion/latest"])
-    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "spydur", "--hub", "--root", "/home/me/p",
+    r = CliRunner().invoke(cli, ["demos", "scripts", "--site", "hpc1", "--hub", "--root", "/home/me/p",
                                  "--out", str(tmp_path / "out")])
     assert r.exit_code == 0, r.output
     assert "--partition=condos" in (tmp_path / "out" / "r-bootstrap.sh").read_text()

@@ -23,7 +23,7 @@ CMDLINES = {
     101: ["ngrok", "http", "8080"],
     102: ["/usr/bin/ssh", "-N", "-R", "8080:localhost:22", "me@outside.example.org"],
     103: ["ssh", "-fND", "1080", "me@outside.example.org"],
-    104: ["ssh", "-L", "8888:spdr12:8888", "spydur"],                 # a local forward: fine
+    104: ["ssh", "-L", "8888:nd12:8888", "hpc1"],                 # a local forward: fine
     105: ["/opt/xmrig/xmrig", "-o", "pool.example:3333"],
     106: ["python3", "run.py", "--url", "stratum+tcp://pool.example:3333"],
     107: ["socat", "TCP-LISTEN:9000,fork", "TCP:inside:22"],
@@ -252,7 +252,7 @@ def test_the_probe_is_python_36():
 
 # ── the collector ───────────────────────────────────────────────────────────
 
-def answer(user="amy", uid=1500, host="spdr12", extra=()):
+def answer(user="amy", uid=1500, host="nd12", extra=()):
     return {"host": host, "uid": 990, "hidepid": False, "processes": 300, "others": 290,
             "others_readable": 200,
             "findings": [{"uid": uid, "user": user, "kind": "tunnel", "program": "cloudflared", "detail": "",
@@ -266,11 +266,11 @@ def answer(user="amy", uid=1500, host="spdr12", extra=()):
 def test_an_ignored_name_leaves_out_only_what_goes_by_it_alone():
     a = answer(extra=[{"uid": 1500, "user": "amy", "kind": "tunnel", "program": "tailscaled", "detail": "",
                        "aka": ["cloudflared", "tailscaled"], "processes": 1}])     # exec -a tailscaled ./cloudflared
-    kept = pw.findings_of(a, "spydur", "login", ignore_programs=["tailscaled"])
+    kept = pw.findings_of(a, "hpc1", "login", ignore_programs=["tailscaled"])
     assert ("tunnel", "tailscaled") in {(f["kind"], f["program"]) for f in kept}
     a["findings"][-1]["aka"] = ["tailscaled"]
     assert ("tunnel", "tailscaled") not in {(f["kind"], f["program"]) for f in
-                                            pw.findings_of(a, "spydur", "login", ignore_programs=["tailscaled"])}
+                                            pw.findings_of(a, "hpc1", "login", ignore_programs=["tailscaled"])}
 
 
 def test_what_a_user_writes_lowers_nothing():
@@ -281,7 +281,7 @@ def test_what_a_user_writes_lowers_nothing():
                        "processes": 1}])                                          # a shape that's never verified
     a["listeners"].append({"uid": 1500, "user": "amy", "port": 45123, "scope": "network", "program": "",
                            "ephemeral": True})
-    for host, role in (("spdr12", "node"), ("spydur", "login")):
+    for host, role in (("nd12", "node"), ("hpc1", "login")):
         sev = {(f["kind"], f["detail"]): f["severity"] for f in pw.findings_of(a, host, role, listeners_on_nodes=True)}
         assert sev[("ssh_reverse", "8888")] == "warning"
         assert sev[("ssh_reverse", "2222")] == "warning"
@@ -309,7 +309,7 @@ def test_listeners_are_capped_per_account(tmp_path):
     (p / "net" / "tcp").write_text("\n".join(rows) + "\n")
     ls = probe.listeners(str(p), 1000)
     assert len(ls) == probe.MAX_PER + 1 and ls[-1]["port"] == "+35 more"
-    f = pw.findings_of({"findings": [], "listeners": ls}, "spydur", "login")
+    f = pw.findings_of({"findings": [], "listeners": ls}, "hpc1", "login")
     assert len(f) == probe.MAX_PER + 1 and f[-1]["program"] == "+35 more" and f[-1]["severity"] == "warning"
 
 
@@ -329,29 +329,29 @@ def test_a_fixed_interpreter_without_site_packages_over_plain_ssh(monkeypatch):
     seen = {}
     monkeypatch.setattr(pw.subprocess, "run", lambda argv, **k: seen.setdefault("argv", argv) and
                         subprocess.CompletedProcess(argv, 0, pw.MARK + "\n" + json.dumps(answer()), ""))
-    c.probe_over_ssh("/usr/bin/ssh", "spdr12")
+    c.probe_over_ssh("/usr/bin/ssh", "nd12")
     a = seen["argv"]
-    assert "-a" in a and "-x" in a and "ClearAllForwardings=yes" in a and a[a.index("--") + 1] == "spdr12"
+    assert "-a" in a and "-x" in a and "ClearAllForwardings=yes" in a and a[a.index("--") + 1] == "nd12"
     assert pw.PolicyWatchCollector({"python": ["/opt/py; rm -rf ~", "/usr/bin/python3\nrm -rf ~",
                                                "/usr/bin/python3"]}, ":memory:").pythons == ["/usr/bin/python3"]
     assert "[ -f /usr/bin/python3 ] && [ -x /usr/bin/python3 ]" in cmd
 
 
 def test_findings_on_login_and_compute_nodes():
-    login = pw.findings_of(answer(), "spydur", "login")
-    node = pw.findings_of(answer(), "spdr12", "node")
+    login = pw.findings_of(answer(), "hpc1", "login")
+    node = pw.findings_of(answer(), "nd12", "node")
     assert {f["kind"] for f in login} == {"tunnel", "ssh_socks", "listening"}
     assert {f["kind"] for f in node} == {"tunnel", "ssh_socks"}       # MPI, Dask, Ray listen on nodes
-    assert {f["kind"] for f in pw.findings_of(answer(), "spdr12", "node", listeners_on_nodes=True)} == \
+    assert {f["kind"] for f in pw.findings_of(answer(), "nd12", "node", listeners_on_nodes=True)} == \
         {"tunnel", "ssh_socks", "listening"}
-    assert pw.findings_of(answer(), "spydur", "login", ignore_users=["amy"]) == []
-    assert {f["kind"] for f in pw.findings_of(answer(), "spydur", "login", ignore_programs=["cloudflared"],
+    assert pw.findings_of(answer(), "hpc1", "login", ignore_users=["amy"]) == []
+    assert {f["kind"] for f in pw.findings_of(answer(), "hpc1", "login", ignore_programs=["cloudflared"],
                                               ignore_ports=[8888])} == {"ssh_socks"}
 
 
 def test_parse_probe_past_a_banner():
-    out = "Welcome to spydur!\nlast login ...\n" + pw.MARK + "\n" + json.dumps(answer()) + "\n"
-    assert pw.parse_probe(out)["host"] == "spdr12"
+    out = "Welcome to hpc1!\nlast login ...\n" + pw.MARK + "\n" + json.dumps(answer()) + "\n"
+    assert pw.parse_probe(out)["host"] == "nd12"
     assert pw.parse_probe("no json here") is None
 
 
@@ -372,10 +372,10 @@ def dispatcher_like(sent):
 
 @pytest.fixture
 def watch(db_path, monkeypatch):
-    c = pw.PolicyWatchCollector({"enabled": True, "nodes": ["spdr12", "spdr13"]}, db_path)
+    c = pw.PolicyWatchCollector({"enabled": True, "nodes": ["nd12", "nd13"]}, db_path)
     assert "amy" not in c.ignore_users
-    monkeypatch.setattr(c, "probe_here", lambda: (answer(host="spydur"), ""))
-    answers = {"spdr12": (answer(), ""), "spdr13": (None, "Permission denied (publickey)")}
+    monkeypatch.setattr(c, "probe_here", lambda: (answer(host="hpc1"), ""))
+    answers = {"nd12": (answer(), ""), "nd13": (None, "Permission denied (publickey)")}
     monkeypatch.setattr(c, "probe_over_ssh", lambda ssh, h: answers[h])
     monkeypatch.setattr(pw, "find_tool", lambda name: "/usr/bin/" + name)
     sent = []
@@ -395,12 +395,12 @@ def test_a_sweep_keeps_findings_and_what_each_host_could_see(watch):
     data = c.collect()
     c.store(data)
     rows = _rows(db)
-    assert {(r[0], r[3]) for r in rows} == {("spydur", "tunnel"), ("spydur", "ssh_socks"), ("spydur", "listening"),
-                                            ("spdr12", "tunnel"), ("spdr12", "ssh_socks")}
+    assert {(r[0], r[3]) for r in rows} == {("hpc1", "tunnel"), ("hpc1", "ssh_socks"), ("hpc1", "listening"),
+                                            ("nd12", "tunnel"), ("nd12", "ssh_socks")}
     with sqlite3.connect(db) as conn:
         hosts = conn.execute("SELECT host, role, answered, error FROM policy_watch_hosts ORDER BY host").fetchall()
-    assert hosts == [("spdr12", "node", 1, None), ("spdr13", "node", 0, "Permission denied (publickey)"),
-                     ("spydur", "login", 1, None)]
+    assert hosts == [("hpc1", "login", 1, None), ("nd12", "node", 1, None),
+                     ("nd13", "node", 0, "Permission denied (publickey)")]
     # alerts: one per account and kind; naming no one; keyed by finding number
     msgs = [k.get("subject") or "" for a, k in sent]
     assert not any("amy" in str(a) + str(k) or "1500" in str(k) for a, k in sent)
@@ -427,7 +427,7 @@ def test_a_new_finding_in_a_known_group_alerts(watch, monkeypatch):
     c.store(c.collect())
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE policy_watch_sweeps SET timestamp = '2000-01-01T00:00:00'")
-    a = answer(host="spydur")
+    a = answer(host="hpc1")
     a["listeners"].append({"uid": 1500, "user": "amy", "port": 7000, "scope": "network", "program": ""})
     monkeypatch.setattr(c, "probe_here", lambda: (a, ""))
     sent.clear()
@@ -447,13 +447,13 @@ def test_a_host_gone_quiet_alerts(watch, monkeypatch):
         sent.clear()
         c.store(c.collect())
     quiet = [k["subject"] for a, k in sent if k["subject"].startswith("silent:")]
-    assert quiet == ["silent:spdr12"]                     # spdr13 never answered: not news
+    assert quiet == ["silent:nd12"]                     # nd13 never answered: not news
     with sqlite3.connect(db) as conn:                      # a week later: its last answer is still known
         conn.execute("UPDATE policy_watch_hosts SET timestamp = '2000-01-01T00:00:00'")
         conn.execute("UPDATE policy_watch_sweeps SET timestamp = '2000-01-01T00:00:00'")
     c.store(c.collect())
     with sqlite3.connect(db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM policy_watch_hosts WHERE host = 'spdr12' AND answered = 1"
+        assert conn.execute("SELECT COUNT(*) FROM policy_watch_hosts WHERE host = 'nd12' AND answered = 1"
                             ).fetchone()[0] == 1
 
 
@@ -480,7 +480,7 @@ def test_watch_list_and_status(watch):
     assert r.exit_code == 0, r.output
     assert "amy" in r.output and "a tunnel program cloudflared" in r.output and "port 8888" in r.output
     r = CliRunner().invoke(watch_group, ["list", "--db", db, "--mask"])
-    assert "amy" not in r.output and "spydur" not in r.output and "user1" in r.output
+    assert "amy" not in r.output and "hpc1" not in r.output and "user1" in r.output
     r = CliRunner().invoke(watch_group, ["list", "--db", db, "--json"])
     assert {f["kind"] for f in json.loads(r.output)} >= {"tunnel", "listening"}
     r = CliRunner().invoke(watch_group, ["status", "--db", db])

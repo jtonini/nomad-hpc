@@ -40,8 +40,8 @@ tmpfs /run tmpfs rw,nosuid,nodev,seclabel,size=393216k 0 0
 cgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime 0 0
 /dev/sda3 /home xfs rw,relatime,attr2,inode64,logbufs=8 0 0
 /dev/sda4 /scratch xfs rw,relatime,attr2,inode64,logbufs=8 0 0
-141.166.186.35:/mnt/usrlocal/intel-tools /opt/intel nfs ro,relatime,vers=4.2 0 0
-141.166.186.35:/mnt/usrlocal/8 /usr/local/chem.sw nfs ro,relatime,vers=4.2 0 0
+172.40.186.35:/mnt/usrlocal/intel-tools /opt/intel nfs ro,relatime,vers=4.2 0 0
+172.40.186.35:/mnt/usrlocal/8 /usr/local/chem.sw nfs ro,relatime,vers=4.2 0 0
 tmpfs /tmp tmpfs rw,nosuid,nodev,seclabel 0 0
 devpts /dev/pts devpts rw,nosuid,noexec,relatime 0 0
 """
@@ -105,7 +105,7 @@ class TestParseProcMounts(unittest.TestCase):
         rows = self._parse_from_string(PROC_MOUNTS_TYPICAL)
         for source, mp_path, fstype, _ in rows:
             if mp_path == "/opt/intel":
-                self.assertEqual(source, "141.166.186.35:/mnt/usrlocal/intel-tools")
+                self.assertEqual(source, "172.40.186.35:/mnt/usrlocal/intel-tools")
                 self.assertEqual(fstype, "nfs")
                 return
         self.fail("/opt/intel not found in parsed output")

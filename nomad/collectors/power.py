@@ -3,7 +3,7 @@
 """Power supplies, voltages and fans, as the boards' own controllers read them
 (1.25.8).
 
-vadur's gpu09 ran on one of its two power supplies from February to
+hpc3's gpu09 ran on one of its two power supplies from February to
 November 2026: the other had no input power ("PSU1 AC Lost"), and nothing
 said so. Its board knew. Reading what the board knows takes root (ipmitool
 on /dev/ipmi0), which nomad never runs as: a small helper does, by root's
@@ -20,7 +20,7 @@ a host's readings already stored are skipped. For each host:
   power, failed, failing or misconfigured; redundancy lost; a voltage past
   its board's thresholds; a fan stopped; a supply giving 0 W while another
   carries the node. A threshold of 0 isn't one: a supply that doesn't
-  report its power reads 0 W "below" it at every start (vadur's CPU nodes),
+  report its power reads 0 W "below" it at every start (hpc3's CPU nodes),
   and that is said, not alerted;
 - the board's event log: each entry not seen before (``power_events``),
   the log's first read kept as history.
@@ -153,7 +153,7 @@ def judge(sensor: dict) -> tuple[str | None, str | None]:
         if limit is None and (value is None or value == 0) and unit.lower() in ("watts", "amps"):
             return None, None    # the same, where the threshold couldn't be read
         if unit.upper() == "RPM" and (value or 0) == 0 and sensor.get("spun") is False:
-            return None, None    # never seen turning: a header with no fan on it (vadur's SYS_FAN1-4)
+            return None, None    # never seen turning: a header with no fan on it (hpc3's SYS_FAN1-4)
     if kind == "fan" or kind == "power_supply" and unit.upper() == "RPM":
         severity = "warning"
     elif kind == "voltage":

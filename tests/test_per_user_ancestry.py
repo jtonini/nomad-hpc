@@ -5,7 +5,7 @@ Tests for nomad.collectors.per_user.ancestry
 
 Synthetic process trees calibrated against validation findings:
 
-  - arobbins's clusterbackup: sshd -> ... -> /usr/local/sw/clusterbackup/...
+  - kfisher's clusterbackup: sshd -> ... -> /usr/local/sw/clusterbackup/...
     Should match parent_paths whitelist and be excluded.
   - ia3nk's gmx_mpi: sshd -> bash -> singularity -> bash -> gmx -> gmx_mpi
     No whitelist match. Depth 6, must be walked completely.
@@ -102,18 +102,18 @@ def test_handles_lookup_failure_for_leaf():
 # Whitelist: parent_paths (the headline validation finding)
 # ---------------------------------------------------------------------------
 
-def test_arobbins_clusterbackup_matches_parent_path_whitelist():
-    """The 5/7 false positives in spydur validation. With parent_paths,
+def test_kfisher_clusterbackup_matches_parent_path_whitelist():
+    """The 5/7 false positives in hpc1 validation. With parent_paths,
     these are eliminated."""
     procs = [
         ProcessInfo(pid=1, ppid=None, uid=0, username="root", command="systemd", exe_path=None),
         ProcessInfo(pid=2000, ppid=1, uid=0, username="root", command="cron", exe_path="/usr/sbin/cron"),
         ProcessInfo(
-            pid=2100, ppid=2000, uid=10500, username="arobbins",
+            pid=2100, ppid=2000, uid=10500, username="kfisher",
             command="bash", exe_path="/usr/local/sw/clusterbackup/clusterbackup.sh",
         ),
         ProcessInfo(
-            pid=2101, ppid=2100, uid=10500, username="arobbins",
+            pid=2101, ppid=2100, uid=10500, username="kfisher",
             command="python3", exe_path="/usr/local/sw/clusterbackup/clusterbackup.py",
         ),
     ]

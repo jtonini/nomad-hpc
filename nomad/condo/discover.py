@@ -160,7 +160,7 @@ NETID_MAX = 8      # where an institution's NetIDs are cut short ([report.labs] 
 def _initials_then(name: str, netid: str, netid_max: int = NETID_MAX) -> bool:
     """A NetID made of up to two initials then the last name ('jsmith'),
     perhaps a number after it ('jsmith3', two people of the same name), the
-    name cut short where NetIDs stop ('tanderso' for Anderson, 'tanders2')."""
+    name cut short where NetIDs stop ('tmontgom' for Montgomery, 'tmontgo2')."""
     netid = netid.lower()
     core = netid.rstrip("0123456789")
     for k in (1, 2, 0):
@@ -401,7 +401,7 @@ def draft(existing_text: str, existing: dict, layouts: list[tuple[str, Found, li
                 "name_members = true                # an owner's report names their own lab's members",
                 "formats = [\"html\", \"pdf\", \"json\"]",
                 "owner_patterns = [\"{name}\", \"{name}lab\", \"{name}_lab\", \"{name}-lab\"]",
-                "netid_max_length = 8               # NetIDs cut short here (tanderso for Anderson); 0: never",
+                "netid_max_length = 8               # NetIDs cut short here (tmontgom for Montgomery); 0: never",
                 "# contact = \"Questions: rc@example.edu\"",
                 "# out_dir = \"/var/lib/nomad/reports/condos\"",
                 "# institution = \"Research Computing\""]

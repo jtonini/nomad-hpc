@@ -146,9 +146,9 @@ entries:
         [issue_reporting]
         enabled = true
         github_token = "ghp_xxxxxxxxxxxx"
-        institution_name = "University of Richmond"
-        contact_email = "hpc-team@richmond.edu"
-        support_email = "nomad-support@richmond.edu"
+        institution_name = "Example University"
+        contact_email = "hpc-team@example.edu"
+        support_email = "nomad-support@example.edu"
     see_also:
       - issue
       - issue.report

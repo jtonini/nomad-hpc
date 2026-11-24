@@ -12,12 +12,12 @@ from tests.test_alert_episodes import _Backend, _db, _run, clock  # noqa: F401  
 
 
 def test_a_sockets_cores_are_one_reading_their_hottest():
-    # spydur's Xeons: 26 cores a socket, 1,674 rows a round in 1.25.6
+    # hpc1's Xeons: 26 cores a socket, 1,674 rows a round in 1.25.6
     lines = ["T|coretemp|coretemp.0|temp1|Package id 0|61000|100000"]
     lines += [f"T|coretemp|coretemp.0|temp{i + 2}|Core {i}|{40000 + i * 500}|100000" for i in range(26)]
     lines += ["T|coretemp|coretemp.1|temp1|Package id 1|58000|100000",
               "T|coretemp|coretemp.1|temp2|Core 0|52000|100000", "T|nvme|nvme0|temp1|Composite|41000|"]
-    rows = T.parse("spdr01", "\n".join(lines), "2026-11-03T11:30:00")
+    rows = T.parse("nd01", "\n".join(lines), "2026-11-03T11:30:00")
     got = sorted((r["chip"], r["sensor"], r["label"], r["temp_c"]) for r in rows)
     assert got == [("coretemp@coretemp.0", "cores", "Cores (hottest)", 52.5),
                    ("coretemp@coretemp.0", "temp1", "Package id 0", 61.0),
@@ -47,7 +47,7 @@ def test_the_per_core_rows_kept_before_are_taken_out(tmp_path):
 
 
 class _Nothing(_Backend):
-    """A site with no alert backends (mingus until 3 Nov): dispatch gets none."""
+    """A site with no alert backends (hub until 3 Nov): dispatch gets none."""
 
 
 def test_an_alert_with_nowhere_to_go_is_not_counted_as_sent(tmp_path, clock):  # noqa: F811
@@ -119,9 +119,9 @@ def test_the_gpu_collector_skips_a_login_banner(tmp_path, monkeypatch):
     argv = seen[-1]
     assert "-l" not in argv and argv[-3:-1] == ["--", "peterslabworkstation"]     # ssh's own User
     assert argv[-1] == f"echo {gpu.SSH_MARK}; nvidia-smi -L"
-    c = gpu.GPUCollector({"gpu_nodes": ["node51"], "ssh_user": "zeus"}, tmp_path / "db")
+    c = gpu.GPUCollector({"gpu_nodes": ["node51"], "ssh_user": "monitor"}, tmp_path / "db")
     c._run_command_ssh("true", "node51")
-    assert seen[-1][seen[-1].index("-l") + 1] == "zeus"
+    assert seen[-1][seen[-1].index("-l") + 1] == "monitor"
     # no mark (the login failed before the command): nothing read from the banner
     monkeypatch.setattr(gpu.subprocess, "run", lambda argv, **kw: subprocess.CompletedProcess(argv, 0, banner, ""))
     assert c._run_command_ssh("nvidia-smi -L", "node51") is None

@@ -61,26 +61,26 @@ def conn(tmp_path):
             state, alloc, reason = "IDLE+DRAIN", 0, "checking it"
         c.execute("INSERT INTO node_state VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (i, ts(t), "n012", state, 48, alloc, 30.0, 256000, 0, 128000, "basic,cpunodes", reason,
-                   "gpu:a100:2", "spydur", "spydur"))
+                   "gpu:a100:2", "hpc1", "hpc1"))
         # another node, and the same name at another site: not this node
         c.execute("INSERT INTO node_state VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (100000 + i, ts(t), "n013", "ALLOCATED", 48, 48, 48.0, 256000, 0, 1000, "basic", None, "",
-                   "spydur", "spydur"))
+                   "hpc1", "hpc1"))
         c.execute("INSERT INTO node_state VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (200000 + i, ts(t), "n012", "ALLOCATED", 16, 16, 16.0, 64000, 0, 1000, "batch", None, "",
-                   "vadur", "vadur"))
+                   "hpc3", "hpc3"))
         for g in (0, 1):
             c.execute("INSERT INTO gpu_stats (timestamp, node_name, gpu_index, gpu_util_percent, real_util_pct, "
                       "data_source, memory_used_mb, memory_total_mb, temperature_c, source_site) "
                       "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                      (ts(t), "n012", g, 100.0, 40.0 + 20 * g, "dcgm", 20000, 40000, 60 + g, "spydur"))
+                      (ts(t), "n012", g, 100.0, 40.0 + 20 * g, "dcgm", 20000, 40000, 60 + g, "hpc1"))
         c.execute("INSERT INTO hw_temps (timestamp, node, chip, sensor, temp_c, crit_c, source_site) "
                   "VALUES (?,?,?,?,?,?,?)", (ts(t), "n012", "coretemp", "Package id 0",
-                                             81.0 if 15 <= hour < 15.1 else 55.0, 100.0, "spydur"))
+                                             81.0 if 15 <= hour < 15.1 else 55.0, 100.0, "hpc1"))
         c.execute("INSERT INTO cpu_clock (timestamp, node, mhz, max_mhz, source_site) VALUES (?,?,?,?,?)",
-                  (ts(t), "n012", 2400, 3000, "spydur"))
+                  (ts(t), "n012", 2400, 3000, "hpc1"))
         c.execute("INSERT INTO node_disks (timestamp, node, path, used_percent, source_site) VALUES (?,?,?,?,?)",
-                  (ts(t), "n012", "/localscratch", 40.0, "spydur"))
+                  (ts(t), "n012", "/localscratch", 40.0, "hpc1"))
         t += timedelta(minutes=5)
     jobs = [("101", "amy", "fit", "COMPLETED", "n[010-012]", SINCE + timedelta(hours=1), SINCE + timedelta(hours=3)),
             ("102", "bob", "sim", "FAILED", "n012", SINCE + timedelta(hours=2), SINCE + timedelta(hours=4)),
@@ -91,15 +91,15 @@ def conn(tmp_path):
     for jid, user, name, state, nodes, start, end in jobs:
         c.execute("INSERT INTO jobs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                   (jid, user, name, state, "basic", nodes, ts(start), ts(end) if end else "Unknown", 8, 0,
-                   "spydur", "spydur"))
+                   "hpc1", "hpc1"))
     c.execute("INSERT INTO oom_kills VALUES (?,?,?,?,?,?,?)",
-              (ts(SINCE + timedelta(hours=3, minutes=50)), "n012", 4242, "python3", 1001, "bob", "spydur"))
+              (ts(SINCE + timedelta(hours=3, minutes=50)), "n012", 4242, "python3", 1001, "bob", "hpc1"))
     c.execute("INSERT INTO power_events (node, key, first_seen, sensor, event, severity, source_site) "
               "VALUES (?,?,?,?,?,?,?)", ("n012", "k1", ts(SINCE + timedelta(hours=9)), "PS1 Status",
-                                         "Power Supply AC lost", "warning", "spydur"))
+                                         "Power Supply AC lost", "warning", "hpc1"))
     c.execute("INSERT INTO alerts (timestamp, severity, source, host, message, source_site) VALUES (?,?,?,?,?,?)",
               (ts(SINCE + timedelta(hours=10, minutes=5)), "critical", "node_state", "n012",
-               "n012 down: jsmith's job wedged it", "spydur"))
+               "n012 down: jsmith's job wedged it", "hpc1"))
     c.commit()
     c.close()
     ro = facts.open_readonly(path)
@@ -107,15 +107,15 @@ def conn(tmp_path):
     ro.close()
 
 
-MAINT = [Window(site="spydur", start=ts(SINCE + timedelta(hours=13)), until=ts(SINCE + timedelta(hours=14)),
-                reason="new disk", by="jtonini"),
-         Window(site="arachne", start=ts(SINCE), until=ts(NOW), reason="elsewhere", by="jtonini")]
+MAINT = [Window(site="hpc1", start=ts(SINCE + timedelta(hours=13)), until=ts(SINCE + timedelta(hours=14)),
+                reason="new disk", by="rcadmin"),
+         Window(site="hpc2", start=ts(SINCE), until=ts(NOW), reason="elsewhere", by="rcadmin")]
 
 
 def ask(conn, **kw):
     kw.setdefault("now", NOW)
     kw.setdefault("maintenance", MAINT)
-    return facts.node(conn, "spydur", "n012", SINCE, NOW, **kw)
+    return facts.node(conn, "hpc1", "n012", SINCE, NOW, **kw)
 
 
 def test_steps_keep_points_few():
@@ -157,10 +157,10 @@ def test_what_happened(conn):
     assert r["jobs"]["failed"] == 1 and r["jobs"]["node_fail"] == 1 and r["jobs"]["running_at_end"] == 1
     assert {"oom", "power", "alert", "maintenance"} <= set(kinds)
     m = next(e for e in r["events"] if e["kind"] == "maintenance")
-    assert m["text"] == "maintenance: new disk" and m["by"] == "jtonini"
+    assert m["text"] == "maintenance: new disk" and m["by"] == "rcadmin"
     assert next(e for e in r["events"] if e["kind"] == "oom")["user"] == "bob"
     said = " ".join(r["summary"])
-    for words in ("spydur n012 (48 cores", "Down or not responding from", "(jsmith's job wedged it)",
+    for words in ("hpc1 n012 (48 cores", "Down or not responding from", "(jsmith's job wedged it)",
                   "Cores allocated: 50%.", "4 jobs started and 3 ended",
                   "1 ended by a node failure", "Hottest sensor: 81 °C", "maintenance window"):
         assert words in said, words
@@ -186,29 +186,29 @@ def test_a_person_sees_their_own_and_counts_of_the_rest(conn):
 
 def test_what_cannot_be_answered(conn):
     with pytest.raises(NodeFactsError, match="92 days"):
-        facts.node(conn, "spydur", "n012", NOW - timedelta(days=100), NOW, now=NOW)
+        facts.node(conn, "hpc1", "n012", NOW - timedelta(days=100), NOW, now=NOW)
     with pytest.raises(NodeFactsError, match="no readings of n999"):
-        facts.node(conn, "spydur", "n999", SINCE, NOW, now=NOW)
+        facts.node(conn, "hpc1", "n999", SINCE, NOW, now=NOW)
     with pytest.raises(NodeFactsError, match="ends before"):
-        facts.node(conn, "spydur", "n012", NOW, SINCE, now=NOW)
+        facts.node(conn, "hpc1", "n012", NOW, SINCE, now=NOW)
 
 
 def test_the_command(conn, tmp_path):
     from nomad.cli import cli
     db = tmp_path / "combined.db"
-    out = CliRunner().invoke(cli, ["facts", "node", "spydur", "n012", "--db", str(db),
+    out = CliRunner().invoke(cli, ["facts", "node", "hpc1", "n012", "--db", str(db),
                                    "--from", ts(SINCE), "--to", ts(NOW), "--json"])
     assert out.exit_code == 0, out.output
     data = json.loads(out.output)
     assert data["kind"] == "node" and data["scope"] == "staff"
-    out = CliRunner().invoke(cli, ["facts", "node", "spydur", "n012", "--db", str(db),
+    out = CliRunner().invoke(cli, ["facts", "node", "hpc1", "n012", "--db", str(db),
                                    "--from", ts(SINCE), "--to", ts(NOW)])
     assert out.exit_code == 0, out.output
-    assert "spydur n012 (48 cores" in out.output and "job 102 ended (failed), bob" in out.output
-    out = CliRunner().invoke(cli, ["facts", "node", "spydur", "n999", "--db", str(db), "--hours", "6"])
+    assert "hpc1 n012 (48 cores" in out.output and "job 102 ended (failed), bob" in out.output
+    out = CliRunner().invoke(cli, ["facts", "node", "hpc1", "n999", "--db", str(db), "--hours", "6"])
     assert out.exit_code != 0 and "no readings of n999" in out.output
-    out = CliRunner().invoke(cli, ["facts", "node", "spydur", "--db", str(db)])
-    assert out.exit_code == 0 and "spydur's nodes in its latest reading (2):\n  n012 n013" in out.output
+    out = CliRunner().invoke(cli, ["facts", "node", "hpc1", "--db", str(db)])
+    assert out.exit_code == 0 and "hpc1's nodes in its latest reading (2):\n  n012 n013" in out.output
 
 
 def test_memory_allocated_where_slurm_allocates_it(conn, tmp_path):

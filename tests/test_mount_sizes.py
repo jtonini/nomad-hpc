@@ -402,10 +402,10 @@ def test_together_needs_a_run_that_read_them_all(tmp_path):
 
 def test_one_filesystem_listed_twice_counts_once(tmp_path):
     # A directory of an export, listed as an export too, reads the same figures.
-    sub = HOME + "/carol"
+    sub = HOME + "/robin"
     c = _sized_db(tmp_path / "c.db", [
         ("2026-10-05T22:21:00", "adam", "/home", HOME, 1, 40 * TB, 3 * TB, 37 * TB),
-        ("2026-10-05T22:21:00", "adam", "/carol", sub, 1, 40 * TB, 3 * TB, 37 * TB),
+        ("2026-10-05T22:21:00", "adam", "/robin", sub, 1, 40 * TB, 3 * TB, 37 * TB),
         ("2026-10-05T22:21:00", "adam", "/scratch", SCRATCH, 1, 45 * TB, 8 * TB, 37 * TB),
     ])
     group, = shared_free(c, export_sizes(c, [HOME, sub, SCRATCH]))
@@ -451,7 +451,7 @@ def test_cli_roles_shows_the_space(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_mod, "_now", lambda: datetime(2026, 10, 5, 22, 30))
     cfg = tmp_path / "nomad.toml"
     cfg.write_text('[console.labs]\ngroup_pattern = "{netid}$"\n\n'
-                   '[console.labs.resources."carol$"]\n'
+                   '[console.labs.resources."robin$"]\n'
                    f'storage = ["{HOME}", "{SCRATCH}", "{LOGP}"]\n\n'
                    '[console.storage."nas"]\nname = "bigstore"\n'
                    'note = "community $HOME, all users"\n')
@@ -465,9 +465,9 @@ def test_cli_roles_shows_the_space(tmp_path, monkeypatch):
         ("2026-10-05T22:21:00", "adam", "/projects", LOGP, 1, None, None, None),  # v1 probe since
     ])
     c.execute("CREATE TABLE group_membership (username TEXT, group_name TEXT, cluster TEXT)")
-    c.execute("INSERT INTO group_membership VALUES ('s1', 'carol$', 'spydur')")
+    c.execute("INSERT INTO group_membership VALUES ('s1', 'robin$', 'hpc1')")
     c.commit()
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp)])
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(dbp)])
     assert r.exit_code == 0, r.output
     out = r.output
     assert "  storage:   1 server named (bigstore)" in out
@@ -487,7 +487,7 @@ def test_cli_roles_shows_the_space(tmp_path, monkeypatch):
     # older than the last sign of life: it says when.
     assert ("    nas2:\n      /mnt/data/projects: mounted and responding, 2026-10-05T22:21; "
             "12% used (1.0 TB of 9.0 TB), 8.0 TB free at 2026-10-05T21:00") in out
-    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "carol", "--db", str(dbp),
+    r = CliRunner().invoke(cli, ["-c", str(cfg), "console", "roles", "robin", "--db", str(dbp),
                                  "--mask"])
     masked = r.output
     for secret in ("everything", "nas", "bigstore", "community", "projects"):
@@ -517,10 +517,10 @@ def test_wrong_storage_settings_are_said_and_left_out(storage, problem):
 def test_storage_names_and_notes():
     from nomad.config.access import access_from
     a = access_from({"console": {"storage": {
-        " 10.0.0.28 ": {"name": "sarahvaughan", "note": "community  $HOME,\nall users"},
+        " 10.0.0.28 ": {"name": "nas1", "note": "community  $HOME,\nall users"},
         "10.0.0.43": {"note": "cold storage"},
         "empty": {}}}}, log=False)
-    assert a.servers == {"10.0.0.28": ("sarahvaughan", "community $HOME, all users"),
+    assert a.servers == {"10.0.0.28": ("nas1", "community $HOME, all users"),
                          "10.0.0.43": ("", "cold storage")}
     assert a.problems == ()
 

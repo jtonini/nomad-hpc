@@ -468,7 +468,7 @@ def my_condos(report, site: str, user: str, rows: list, people_of) -> list:
     condo reports' own reading -- a list, "group:NAME", "account:NAME").
     Without ``members``, only its owners (1.25.6): the reports fall back on
     the owners' lab groups, but such a group can be far more than the lab
-    (spydur's myang$: some 170 people), and "yours" takes away the guest
+    (hpc1's tchen$: some 170 people), and "yours" takes away the guest
     limit. One not yet confirmed is still a condo's nodes, never anyone's
     own: nomad doesn't offer them as shared."""
     by_part = {r["partition"]: r for r in rows}

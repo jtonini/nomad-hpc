@@ -35,7 +35,7 @@ link = "https://nomad.example.edu/lab"
 
 # PIs' names for the lab check email ("Dear Dr. LAST,").
 [console.labs.check.names]
-cparish = "Carol Parish"
+rames = "Robin Ames"
 
 [alerts]
 email = false
@@ -97,38 +97,38 @@ def test_ldap_conf_and_the_setting(tmp_path):
 
 def test_the_directory_without_a_login():
     ran = []
-    ldif = ("dn: uid=cparish,ou=people,dc=example,dc=edu\nuid: cparish\ngivenName: Carol\nsn: Parish\n\n"
+    ldif = ("dn: uid=rames,ou=people,dc=example,dc=edu\nuid: rames\ngivenName: Robin\nsn: Ames\n\n"
             "dn: uid=mdc,ou=people,dc=example,dc=edu\nuid: mdc\ngivenName: Maria\nsn:: ZGUgbGEgQ3J1eg==\n\n"
-            "dn: uid=kd,ou=people\n dc=example\nuid: kd\ncn: Kay Donald\n\n"
+            "dn: uid=kd,ou=people\n dc=example\nuid: kd\ncn: Kay Dunn\n\n"
             "dn: uid=x\nuid: x\ncn: x\n\n")
 
     def fake(cmd, **kw):
         ran.append((cmd, kw))
         return SimpleNamespace(returncode=0, stdout=ldif, stderr="")
-    got, why = N.from_directory(["cparish", "mdc", "kd", "x", "BAD!"], ("ldap://ldap.example.edu", "dc=example,dc=edu", "uid"),
+    got, why = N.from_directory(["rames", "mdc", "kd", "x", "BAD!"], ("ldap://ldap.example.edu", "dc=example,dc=edu", "uid"),
                                 run=fake, which=lambda x: "/usr/bin/ldapsearch")
     assert why is None
-    assert got == {"cparish": ("Carol", "Parish"), "mdc": ("Maria", "de la Cruz"), "kd": ("Kay", "Donald")}
+    assert got == {"rames": ("Robin", "Ames"), "mdc": ("Maria", "de la Cruz"), "kd": ("Kay", "Dunn")}
     cmd, kw = ran[0]
     assert cmd[:3] == ["/usr/bin/ldapsearch", "-x", "-LLL"] and "-D" not in cmd and "-w" not in cmd and "-W" not in cmd
-    assert "(|(uid=cparish)(uid=mdc)(uid=kd)(uid=x))" in cmd
+    assert "(|(uid=rames)(uid=mdc)(uid=kd)(uid=x))" in cmd
     assert kw["env"]["LDAPRC"] == ".nomad-reads-no-ldaprc" and kw["stdin"] == subprocess.DEVNULL
     # UR's: the base answers, its people don't without a login
-    no = N.from_directory(["cparish"], ("ldap://l.edu", "dc=e", "uid"),
+    no = N.from_directory(["rames"], ("ldap://l.edu", "dc=e", "uid"),
                           run=lambda c, **k: SimpleNamespace(returncode=32, stdout="", stderr="No such object"),
                           which=lambda x: "/bin/ldapsearch")
     assert no == ({}, "shows no one without a login")
-    assert N.from_directory(["cparish"], ("ldap://l.edu", "dc=e", "uid"), which=lambda x: None)[1].startswith(
+    assert N.from_directory(["rames"], ("ldap://l.edu", "dc=e", "uid"), which=lambda x: None)[1].startswith(
         "ldapsearch is not installed")
     assert N._escape("a*(b)\\") == "a\\2a\\28b\\29\\5c"
 
 
 def test_what_each_source_gave():
     s = L.settings({}, None)
-    found, said = N.find(["cparish", "myang", "kd"], s, account=lambda n: ("Carol", "Parish") if n == "cparish" else None,
+    found, said = N.find(["rames", "tchen", "kd"], s, account=lambda n: ("Robin", "Ames") if n == "rames" else None,
                          directory=(("ldap://l.edu", "dc=e", "uid"), "from ldap.conf"),
-                         search=lambda left, d: ({"myang": ("Mei", "Yang")}, None))
-    assert found == {"cparish": (("Carol", "Parish"), "account"), "myang": (("Mei", "Yang"), "directory")}
+                         search=lambda left, d: ({"tchen": ("Mei", "Chen")}, None))
+    assert found == {"rames": (("Robin", "Ames"), "account"), "tchen": (("Mei", "Chen"), "directory")}
     assert said == ["the account's full name (getent passwd): 1 of 3",
                     "the directory ldap://l.edu (from ldap.conf, no login): 1 of 2"]
     _, said = N.find(["kd"], s, directory=(("ldap://l.edu", "dc=e", "uid"), "from ldap.conf"),
@@ -142,19 +142,19 @@ def test_what_a_person_types():
     assert N.parse("-") == ("not a lab", None)
     assert N.parse("Tom Zylkin") == ("name", "Tom Zylkin")
     assert N.parse("Maria | de la Cruz") == ("name", {"first": "Maria", "last": "de la Cruz"})
-    assert N.parse("tzylkin@richmond.edu")[0] == "bad" and N.parse("x = 3")[0] == "bad"
+    assert N.parse("tzylkin@example.edu")[0] == "bad" and N.parse("x = 3")[0] == "bad"
     assert N.parse("Maria |")[0] == "bad"
     assert N.as_value("Maria", "de la Cruz") == {"first": "Maria", "last": "de la Cruz"}
-    assert N.as_value("Carol", "Parish") == "Carol Parish"
+    assert N.as_value("Robin", "Ames") == "Robin Ames"
 
 
 def test_names_from_a_file(tmp_path):
     t = tmp_path / "pi_names.toml"
-    t.write_text('[console.labs.check.names]\ncparish = "Carol Parish"\npkvam = ""\nmdc = { first = "Maria", last = "de la Cruz" }\n')
-    assert N.load(t) == {"cparish": "Carol Parish", "pkvam": "", "mdc": {"first": "Maria", "last": "de la Cruz"}}
+    t.write_text('[console.labs.check.names]\nrames = "Robin Ames"\npkvam = ""\nmdc = { first = "Maria", last = "de la Cruz" }\n')
+    assert N.load(t) == {"rames": "Robin Ames", "pkvam": "", "mdc": {"first": "Maria", "last": "de la Cruz"}}
     c = tmp_path / "names.csv"
-    c.write_text("# NETID,Name\ncparish,Carol Parish\nmyang\tMei Yang\nrcargill: -\n")
-    assert N.load(c) == {"cparish": "Carol Parish", "myang": "Mei Yang", "rcargill": "-"}
+    c.write_text("# NETID,Name\nrames,Robin Ames\ntchen\tMei Chen\nrcargill: -\n")
+    assert N.load(c) == {"rames": "Robin Ames", "tchen": "Mei Chen", "rcargill": "-"}
     (tmp_path / "bad.txt").write_text("just words here\n")
     with pytest.raises(ValueError):
         N.load(tmp_path / "bad.txt")
@@ -167,11 +167,11 @@ def test_the_names_table_where_it_is(tmp_path):
     p.write_text(TOML)
     edit = TomlEdit(p)
     before = edit.data
-    ch = N.set_names(edit, {"myang": "Mei Yang", "mdc": {"first": "Maria", "last": "de la Cruz"}, "cparish": "Carol Parish"})
-    assert ch == ["myang = Mei Yang", "mdc = Maria | de la Cruz"]
-    want = {"cparish": "Carol Parish", "myang": "Mei Yang", "mdc": {"first": "Maria", "last": "de la Cruz"}}
+    ch = N.set_names(edit, {"tchen": "Mei Chen", "mdc": {"first": "Maria", "last": "de la Cruz"}, "rames": "Robin Ames"})
+    assert ch == ["tchen = Mei Chen", "mdc = Maria | de la Cruz"]
+    want = {"rames": "Robin Ames", "tchen": "Mei Chen", "mdc": {"first": "Maria", "last": "de la Cruz"}}
     assert N.check(before, want)(edit.data)
-    assert '# PIs\' names for the lab check email ("Dear Dr. LAST,").\n[console.labs.check.names]\ncparish' in edit.text
+    assert '# PIs\' names for the lab check email ("Dear Dr. LAST,").\n[console.labs.check.names]\nmdc' in edit.text
     assert 'mdc = { first = "Maria", last = "de la Cruz" }' in edit.text
     assert "[alerts]\nemail = false" in edit.text and "not_labs = [\"installer$\"]   # service accounts" in edit.text
     assert not N.check(before, {**want, "x": "Y Z"})(edit.data)
@@ -179,13 +179,13 @@ def test_the_names_table_where_it_is(tmp_path):
     q = tmp_path / "plain.toml"
     q.write_text(TOML.split("# PIs'")[0] + "[alerts]\nemail = false\n")
     e2 = TomlEdit(q)
-    N.set_names(e2, {"cparish": "Carol Parish"})
+    N.set_names(e2, {"rames": "Robin Ames"})
     assert e2.text.index("[console.labs.check.names]") < e2.text.index("[alerts]")
     # names written inline: left for a person
     r = tmp_path / "inline.toml"
-    r.write_text('[console.labs.check]\nopens = []\nnames = { cparish = "Carol Parish" }\n')
+    r.write_text('[console.labs.check]\nopens = []\nnames = { rames = "Robin Ames" }\n')
     with pytest.raises(ValueError, match="written another way"):
-        N.set_names(TomlEdit(r), {"myang": "Mei Yang"})
+        N.set_names(TomlEdit(r), {"tchen": "Mei Chen"})
     assert value({"first": "A", "last": "B C"}) == '{ first = "A", last = "B C" }'
 
 
@@ -202,23 +202,23 @@ def test_a_settings_file_anyone_can_read(tmp_path):
 
 def test_set_asks_for_the_rest_and_writes_once_told(world, monkeypatch):
     monkeypatch.setattr(N, "find", lambda netids, s, lookup=True: (
-        ({"myang": (("Mei", "Yang"), "directory")} if "myang" in netids else {}),
+        ({"tchen": (("Mei", "Chen"), "directory")} if "tchen" in netids else {}),
         ["the directory ldap://l.edu (no login): 1 of 4"]) if lookup else ({}, []))
-    # missing: cbukach, kdonald, knolin, myang (cparish has a name); found myang, kept;
-    # then cbukach -> a name, kdonald -> later, knolin -> not a lab; then yes, write it
-    r = run(world, "names", "--set", input="y\nCatherine Bukach\n\n-\ny\n", monkeypatch=monkeypatch)
+    # missing: cwalsh, kdunn, lnovak, tchen (rames has a name); found tchen, kept;
+    # then cwalsh -> a name, kdunn -> later, lnovak -> not a lab; then yes, write it
+    r = run(world, "names", "--set", input="y\nCasey Walsh\n\n-\ny\n", monkeypatch=monkeypatch)
     assert r.exit_code == 0, r.output
     assert "4 PIs with no name." in r.output and "Found 1:" in r.output
-    assert "  + cbukach = Catherine Bukach" in r.output and "  + myang = Mei Yang" in r.output
-    assert "  + knolin$: not a lab" in r.output and "Written. Backup:" in r.output
+    assert "  + cwalsh = Casey Walsh" in r.output and "  + tchen = Mei Chen" in r.output
+    assert "  + lnovak$: not a lab" in r.output and "Written. Backup:" in r.output
     data = loads(world.read_text())
-    assert data["console"]["labs"]["check"]["names"] == {"cparish": "Carol Parish", "cbukach": "Catherine Bukach",
-                                                         "myang": "Mei Yang"}
-    assert data["console"]["labs"]["not_labs"] == ["installer$", "knolin$"]
+    assert data["console"]["labs"]["check"]["names"] == {"rames": "Robin Ames", "cwalsh": "Casey Walsh",
+                                                         "tchen": "Mei Chen"}
+    assert data["console"]["labs"]["not_labs"] == ["installer$", "lnovak$"]
     assert data["alerts"] == {"email": False} and data["hub"]["output_db"] == "/var/lib/nomad/combined.db"
     assert oct(os.stat(world).st_mode & 0o777) == "0o640"
     assert list(world.parent.glob("nomad.toml.bak-names-*"))
-    # again: only kdonald is left (knolin$ is no lab now); Enter leaves it, nothing to write
+    # again: only kdunn is left (lnovak$ is no lab now); Enter leaves it, nothing to write
     r = run(world, "names", "--set", "--no-lookup", input="\n", monkeypatch=monkeypatch)
     assert "1 PI with no name." in r.output and "Nothing to change" in r.output
 
@@ -226,12 +226,12 @@ def test_set_asks_for_the_rest_and_writes_once_told(world, monkeypatch):
 def test_set_writes_nothing_unless_told(world, monkeypatch):
     monkeypatch.setattr(N, "find", lambda netids, s, lookup=True: ({}, []))
     before = world.read_text()
-    r = run(world, "names", "--set", input="Catherine Bukach\nKay Donald\nKim Nolin\nMei Yang\nn\n",
+    r = run(world, "names", "--set", input="Casey Walsh\nKay Dunn\nKim Novak\nMei Chen\nn\n",
             monkeypatch=monkeypatch)
     assert r.exit_code == 0, r.output
     assert "Nothing changed." in r.output and world.read_text() == before
     # a name that isn't one is asked again
-    r = run(world, "names", "--set", input="bukach@example.edu\nCatherine Bukach\n\n\n\nn\n", monkeypatch=monkeypatch)
+    r = run(world, "names", "--set", input="bukach@example.edu\nCasey Walsh\n\n\n\nn\n", monkeypatch=monkeypatch)
     assert "a person's name" in r.output
     # not at a terminal, without --from
     r = run(world, "names", "--set", tty=False, monkeypatch=monkeypatch)
@@ -240,15 +240,15 @@ def test_set_writes_nothing_unless_told(world, monkeypatch):
 
 def test_set_from_a_file(world, tmp_path, monkeypatch):
     f = tmp_path / "pi_names.toml"
-    f.write_text('[console.labs.check.names]\ncbukach = "Catherine Bukach"\nkdonald = ""\nknolin = "-"\nmyang = "m@x"\n')
+    f.write_text('[console.labs.check.names]\ncwalsh = "Casey Walsh"\nkdunn = ""\nlnovak = "-"\ntchen = "m@x"\n')
     r = run(world, "names", "--set", "--from", str(f), tty=False, monkeypatch=monkeypatch)
     assert r.exit_code == 0, r.output
-    assert "+ cbukach = Catherine Bukach" in r.output and "+ knolin$: not a lab" in r.output
-    assert "myang = 'm@x'" in r.output and "Run again with --apply" in r.output
-    assert "cbukach" not in world.read_text()
+    assert "+ cwalsh = Casey Walsh" in r.output and "+ lnovak$: not a lab" in r.output
+    assert "tchen = 'm@x'" in r.output and "Run again with --apply" in r.output
+    assert "cwalsh" not in world.read_text()
     r = run(world, "names", "--set", "--from", str(f), "--apply", tty=False, monkeypatch=monkeypatch)
     assert r.exit_code == 0 and "Written." in r.output
-    assert loads(world.read_text())["console"]["labs"]["check"]["names"]["cbukach"] == "Catherine Bukach"
+    assert loads(world.read_text())["console"]["labs"]["check"]["names"]["cwalsh"] == "Casey Walsh"
     r = run(world, "names", "--from", str(f), monkeypatch=monkeypatch)
     assert r.exit_code != 0 and "go with --set" in r.output
 

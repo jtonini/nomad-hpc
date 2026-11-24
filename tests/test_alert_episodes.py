@@ -6,7 +6,7 @@ Before 1.7.16 an alert was "the same" when its source, host and severity
 matched: /home and /scratch on one head node were one alert, so a /home
 warning waited behind the /scratch warning that had stood for weeks, and
 that one was stored (and sent) every 15 minutes -- 2,405 times in two weeks
-at spydur while /home filled.
+at hpc1 while /home filled.
 """
 
 import sqlite3
@@ -70,7 +70,7 @@ def _run(path, backend, alerts_cfg=None, **alert):
                          "general": {"data_dir": str(path.parent)},
                          "alerts": alerts_cfg or {}})
     d.backends = [backend]
-    a = {"severity": "warning", "source": "disk", "host": "spydur", "subject": "/scratch",
+    a = {"severity": "warning", "source": "disk", "host": "hpc1", "subject": "/scratch",
          "message": "Disk /scratch at 87.0% (threshold: 80%)"}
     a.update(alert)
     return d.dispatch(a)
@@ -98,7 +98,7 @@ def test_each_disk_on_a_host_is_its_own_condition(tmp_path, clock):
     _run(path, backend)
     _run(path, backend, subject="/home", message="Disk /home at 80.4% (threshold: 80%)")
     assert [a["subject"] for a in backend.sent] == ["/scratch", "/home"]
-    assert [r[2] for r in _stored(path)] == ["disk|spydur|/scratch", "disk|spydur|/home"]
+    assert [r[2] for r in _stored(path)] == ["disk|hpc1|/scratch", "disk|hpc1|/home"]
 
 
 def test_getting_worse_is_raised_and_a_dip_back_is_not(tmp_path, clock):
@@ -172,7 +172,7 @@ def test_without_a_database_a_cooldown_in_this_process(tmp_path, clock):
 
 
 def test_a_database_that_cannot_be_written_still_sends_once(tmp_path, clock, monkeypatch):
-    # spydur, 4 Oct: nomad's database is on the /home that filled. Each cron
+    # hpc1, 4 Oct: nomad's database is on the /home that filled. Each cron
     # run is a new process; a local file remembers what was sent.
     monkeypatch.setattr(dispatcher_mod.tempfile, "gettempdir", lambda: str(tmp_path))
     backend = _Backend()
@@ -207,12 +207,12 @@ def test_nomad_test_alerts_is_always_sent(tmp_path, clock):
 def test_alerts_without_a_subject_keep_one_condition_per_source_and_host(tmp_path, clock):
     # node_state names the node as the host; it needs no subject.
     path, backend = _db(tmp_path), _Backend()
-    _run(path, backend, source="node_state", host="spdr03", subject=None)
-    _run(path, backend, source="node_state", host="spdr04", subject=None)
+    _run(path, backend, source="node_state", host="nd03", subject=None)
+    _run(path, backend, source="node_state", host="nd04", subject=None)
     clock.advance(minutes=5)
-    _run(path, backend, source="node_state", host="spdr03", subject=None)
-    assert [a["host"] for a in backend.sent] == ["spdr03", "spdr04"]
-    assert alert_key({"source": "node_state", "host": "spdr03"}) == "node_state|spdr03|"
+    _run(path, backend, source="node_state", host="nd03", subject=None)
+    assert [a["host"] for a in backend.sent] == ["nd03", "nd04"]
+    assert alert_key({"source": "node_state", "host": "nd03"}) == "node_state|nd03|"
     assert alert_key({"source": "a|b", "host": "h", "subject": "/x"}) == "a/b|h|/x"
 
 
@@ -222,7 +222,7 @@ def test_the_subject_is_kept_in_the_stored_details(tmp_path, clock):
     _run(path, backend, subject="/home")
     c = sqlite3.connect(path)
     details = json.loads(c.execute("SELECT details FROM alerts").fetchone()[0])
-    assert details["subject"] == "/home" and details["host"] == "spydur"
+    assert details["subject"] == "/home" and details["host"] == "hpc1"
 
 
 def test_two_metrics_of_one_mount_are_two_conditions(tmp_path, clock):
@@ -231,7 +231,7 @@ def test_two_metrics_of_one_mount_are_two_conditions(tmp_path, clock):
         _run(path, backend, source="nfs", subject="/home", message=metric,
              details={"metric": metric})
     assert [a["message"] for a in backend.sent] == ["avg_rtt_ms", "retrans_percent"]
-    assert _stored(path)[1][2] == "nfs|spydur|/home|retrans_percent"
+    assert _stored(path)[1][2] == "nfs|hpc1|/home|retrans_percent"
 
 
 def test_critical_again_after_a_while_at_warning_is_raised(tmp_path, clock):

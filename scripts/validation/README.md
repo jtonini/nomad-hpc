@@ -14,8 +14,8 @@ deploying Idea 18 alerting thresholds. Passive: collects, doesn't alert.
 
 ## Setup
 
-On each target machine, as the user that NØMAÐ runs as (cazuza on badenpowell,
-jtonini on arachne):
+On each target machine, as the user that NØMAÐ runs as (cazuza on gpuws1,
+rcadmin on hpc2):
 
     python3 -c "import psutil; print(psutil.__version__)"
     # If not present:
@@ -26,33 +26,33 @@ to `~/nomad_validation/<machine>_baseline_<timestamp>.db`.
 
 ## Run
 
-### spydur (head node, 1 week)
+### hpc1 (head node, 1 week)
 
     cd ~/nomad_validation
     nohup python3 nomad_validation_probe.py \
-        --machine spydur \
+        --machine hpc1 \
         --duration 168h \
         --interval 60 \
-        > spydur_probe.log 2>&1 &
-    echo $! > spydur_probe.pid
+        > hpc1_probe.log 2>&1 &
+    echo $! > hpc1_probe.pid
 
-### arachne head node (1 week)
+### hpc2 head node (1 week)
 
     nohup python3 nomad_validation_probe.py \
-        --machine arachne-head \
+        --machine hpc2-head \
         --duration 168h \
-        > arachne_head_probe.log 2>&1 &
+        > hpc2_head_probe.log 2>&1 &
 
-### arachne compute node (24-48h, with fd walking)
+### hpc2 compute node (24-48h, with fd walking)
 
 Pick a node that's actually running jobs. The fd walking is what validates
 that NFS-vs-local I/O attribution will work when component 1 is built.
 
     nohup python3 nomad_validation_probe.py \
-        --machine arachne-node05 \
+        --machine hpc2-node05 \
         --duration 48h \
         --walk-fds \
-        > arachne_node05_probe.log 2>&1 &
+        > hpc2_node05_probe.log 2>&1 &
 
 ### Test run first
 
@@ -75,7 +75,7 @@ user processes are running.
 
 ## Stop early
 
-    kill $(cat spydur_probe.pid)
+    kill $(cat hpc1_probe.pid)
 
 The probe traps `SIGINT`/`SIGTERM`, flushes, and writes `ended_utc` to meta.
 
@@ -84,8 +84,8 @@ The probe traps `SIGINT`/`SIGTERM`, flushes, and writes `ended_utc` to meta.
 When the runs finish, copy the DBs to wherever you want to analyze (or run
 in place):
 
-    python3 analyze_validation.py ~/nomad_validation/spydur_baseline_*.db
-    python3 analyze_validation.py ~/nomad_validation/arachne-node05_baseline_*.db --cpu-threshold 10 --duration-minutes 5
+    python3 analyze_validation.py ~/nomad_validation/hpc1_baseline_*.db
+    python3 analyze_validation.py ~/nomad_validation/hpc2-node05_baseline_*.db --cpu-threshold 10 --duration-minutes 5
 
 To test alternative thresholds without rerunning the probe:
 

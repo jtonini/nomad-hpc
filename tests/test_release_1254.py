@@ -15,12 +15,12 @@ TOML = '''[hub]
 gate_key = "x"
 
 [[hub.sites]]
-name = "spydur"
+name = "hpc1"
 submit = "gate"
 edit = "true"
 
 [[hub.sites]]
-name = "arachne"
+name = "hpc2"
 edit = "False"   # a comment
 
 [collectors.nfs]
@@ -36,8 +36,8 @@ label = "truly"
 def test_switches_written_as_text_are_said_with_the_fix():
     got = quoted_switches(tomllib.loads(TOML), TOML)
     assert got == [
-        'line 7, [[hub.sites]] (spydur): edit = "true" is text, not a switch: write edit = true (no quotes)',
-        'line 11, [[hub.sites]] (arachne): edit = "False" is text, not a switch: write edit = false (no quotes)',
+        'line 7, [[hub.sites]] (hpc1): edit = "true" is text, not a switch: write edit = true (no quotes)',
+        'line 11, [[hub.sites]] (hpc2): edit = "False" is text, not a switch: write edit = false (no quotes)',
         'line 14, [collectors.nfs]: enabled = "false" is text, not a switch: write enabled = false (no quotes)',
     ]                                                   # password: a secret's key, left alone
     assert quoted_switches(tomllib.loads(TOML)) and all(not g.startswith("line") for g in quoted_switches(
@@ -57,7 +57,7 @@ def test_config_check_says_them(tmp_path):
     p.write_text(TOML)
     r = CliRunner().invoke(cli, ["-c", str(p), "config", "check"])
     assert r.exit_code == 0, r.output
-    assert 'line 7, [[hub.sites]] (spydur): edit = "true" is text' in r.output
+    assert 'line 7, [[hub.sites]] (hpc1): edit = "true" is text' in r.output
 
 
 # ── a node that fails every job at start ────────────────────────────────────
@@ -79,7 +79,7 @@ def _jobs(rows):
     return conn
 
 
-def _vadur():
+def _hpc3():
     """29 Oct: node03 back after a Slurm reinstall fails 16 tasks in six
     minutes; the same array runs for hours on node04 and node06."""
     rows = []
@@ -95,7 +95,7 @@ def _vadur():
 
 
 def test_a_node_failing_every_job_at_start_is_found():
-    got = node_jobs.failing_nodes(_jobs(_vadur()), NOW)
+    got = node_jobs.failing_nodes(_jobs(_hpc3()), NOW)
     assert [(f["node"], f["failed"], f["started"], f["people"]) for f in got] == [("node03", 16, 16, 1)]
     f = got[0]
     assert f["first"] == datetime(2026, 10, 29, 16, 29, 12) and f["jobs"][0] == "12271_56"
@@ -109,31 +109,31 @@ def test_a_node_failing_every_job_at_start_is_found():
 
 def test_not_the_node_when_the_job_fails_everywhere_or_rarely():
     # the same people's jobs failed on every node too: it is the job
-    rows = [r for r in _vadur() if r[0] not in ("12271_80", "12271_81")]
+    rows = [r for r in _hpc3() if r[0] not in ("12271_80", "12271_81")]
     assert node_jobs.failing_nodes(_jobs(rows), NOW) == []
     # a few fast failures among many that ran: not every job
-    rows = _vadur()[:4] + [(f"9_{i}", "jgyasi", "node03", "2026-10-29T16:10:00", None, "COMPLETED", 900)
-                          for i in range(10)] + _vadur()[16:18]
+    rows = _hpc3()[:4] + [(f"9_{i}", "jgyasi", "node03", "2026-10-29T16:10:00", None, "COMPLETED", 900)
+                          for i in range(10)] + _hpc3()[16:18]
     assert node_jobs.failing_nodes(_jobs(rows), NOW) == []
     # drained already: someone is on it
-    assert node_jobs.failing_nodes(_jobs(_vadur()), NOW, skip={"node03"}) == []
+    assert node_jobs.failing_nodes(_jobs(_hpc3()), NOW, skip={"node03"}) == []
     # an old window, and a table without the columns
-    assert node_jobs.failing_nodes(_jobs(_vadur()), NOW + timedelta(hours=3)) == []
+    assert node_jobs.failing_nodes(_jobs(_hpc3()), NOW + timedelta(hours=3)) == []
     assert node_jobs.failing_nodes(sqlite3.connect(":memory:"), NOW) == []
 
 
 def test_not_the_node_when_only_other_work_of_theirs_ran():
     # (1.25.4's review) a broken array that landed on the free node, while another job of the person's
     # ran elsewhere: the person's other work proves nothing about the node
-    rows = [r for r in _vadur() if r[0] not in ("12271_80", "12271_81")]
+    rows = [r for r in _hpc3() if r[0] not in ("12271_80", "12271_81")]
     rows.append(("12300", "jgyasi", "node04", "2026-10-29T15:00:00", None, "RUNNING", None))
     assert node_jobs.failing_nodes(_jobs(rows), NOW) == []
     # the array's other task started elsewhere seconds ago: not yet "ran well"
-    rows = [r for r in _vadur() if r[0] not in ("12271_80", "12271_81")]
+    rows = [r for r in _hpc3() if r[0] not in ("12271_80", "12271_81")]
     rows.append(("12271_90", "jgyasi", "node04", (NOW - timedelta(seconds=20)).isoformat(), None, "RUNNING", None))
     assert node_jobs.failing_nodes(_jobs(rows), NOW) == []
     # the array failing fast on other nodes too (more than a quarter): the array, not the node
-    rows = _vadur() + [(f"12271_{100 + i}", "jgyasi", "node06", "2026-10-29T16:20:00", None, "FAILED", 3)
+    rows = _hpc3() + [(f"12271_{100 + i}", "jgyasi", "node06", "2026-10-29T16:20:00", None, "FAILED", 3)
                        for i in range(3)]
     assert node_jobs.failing_nodes(_jobs(rows), NOW) == []
 
@@ -175,16 +175,16 @@ def test_its_settings():
 def test_the_collector_raises_it_once_per_node(tmp_path, monkeypatch):
     from nomad.collectors import node_state
     db = tmp_path / "site.db"
-    conn = _jobs(_vadur())
+    conn = _jobs(_hpc3())
     disk = sqlite3.connect(db)
     conn.backup(disk)
     disk.close()
     sent = []
     monkeypatch.setattr(node_state, "send_alert", lambda **k: sent.append(k) or {})
-    c = node_state.NodeStateCollector({"cluster_name": "vadur"}, str(db))
+    c = node_state.NodeStateCollector({"cluster_name": "hpc3"}, str(db))
     c._dispatch_job_alerts([{"node_name": "node03", "state": "IDLE"}], now=NOW)
     assert [(s["source"], s["host"], s["severity"]) for s in sent] == [("node_jobs", "node03", "warning")]
-    assert sent[0]["details"]["failed"] == 16 and sent[0]["details"]["cluster"] == "vadur"
+    assert sent[0]["details"]["failed"] == 16 and sent[0]["details"]["cluster"] == "hpc3"
     sent.clear()
     c._dispatch_job_alerts([{"node_name": "node03", "state": "DRAINED"}], now=NOW)
     assert sent == []
@@ -202,7 +202,7 @@ from tests.test_release_1182 import Sent, scratch  # noqa: F401,E402  (fixture)
 def test_starts_asks_slurm_for_each_partition_and_submits_nothing(scratch, monkeypatch):  # noqa: F811
     import nomad.submit.cli as sc
     tmp, w, sent, slurm = scratch
-    plans = {"basic": "2026-11-03T04:10:00", "medium": "2026-11-02T22:40:30", "parish": None}
+    plans = {"basic": "2026-11-03T04:10:00", "medium": "2026-11-02T22:40:30", "ames": None}
 
     def sbatch(argv, cwd, data=None):
         sent.append(Sent(argv, data))
@@ -211,17 +211,17 @@ def test_starts_asks_slurm_for_each_partition_and_submits_nothing(scratch, monke
             return subprocess.CompletedProcess(argv, 1, "", "sbatch: error: Batch job submission failed: "
                                                             "Invalid account or account/partition combination")
         return subprocess.CompletedProcess(argv, 0, "", f"sbatch: Job 4243 to start at {plans[part]} using 4 "
-                                                        f"processors on nodes spdr09 in partition {part}\n")
+                                                        f"processors on nodes nd09 in partition {part}\n")
     monkeypatch.setattr(sc, "_test_only", sbatch)
     monkeypatch.setattr(sc, "_node_states", lambda names: {"medium": {"idle": 2, "mixed": 3}})
     sha = hashlib.sha256((w / "job.sh").read_bytes()).hexdigest()
     r = CliRunner().invoke(sc.submit_cmd, ["--via", "console", "--script-sha256", sha, "--starts",
-                                           "basic,medium,parish", "--cpus", "2", "job.sh"])
+                                           "basic,medium,ames", "--cpus", "2", "job.sh"])
     assert r.exit_code == 0, r.output
     doc = json.loads(r.output.strip().splitlines()[-1])
     by = {s["partition"]: s for s in doc["starts"]}
-    assert by["basic"]["start"] == "2026-11-03T04:10:00" and by["medium"]["nodes"] == "spdr09"
-    assert "Invalid account" in by["parish"]["error"] and by["parish"]["start"] is None
+    assert by["basic"]["start"] == "2026-11-03T04:10:00" and by["medium"]["nodes"] == "nd09"
+    assert "Invalid account" in by["ames"]["error"] and by["ames"]["start"] is None
     assert doc["nodes"] == {"medium": {"idle": 2, "mixed": 3}}
     assert len(sent) == 3
     for argv in sent:
@@ -277,59 +277,59 @@ def test_starts_soon_is_within_two_minutes(scratch, monkeypatch):  # noqa: F811
     tmp, w, sent, slurm = scratch
     now = datetime(2026, 11, 2, 22, 40)
     pl = sc.plan("job.sh")
-    outs = iter(["sbatch: Job 1 to start at 2026-11-02T22:41:00 using 4 processors on nodes spdr01 in partition basic",
-                 "sbatch: Job 1 to start at 2026-11-02T23:41:00 using 4 processors on nodes spdr09 in partition medium"])
+    outs = iter(["sbatch: Job 1 to start at 2026-11-02T22:41:00 using 4 processors on nodes nd01 in partition basic",
+                 "sbatch: Job 1 to start at 2026-11-02T23:41:00 using 4 processors on nodes nd09 in partition medium"])
     monkeypatch.setattr(sc, "_node_states", lambda names: {})
     doc = sc.start_times(pl, [], "basic,medium", now=now,
                          run=lambda argv, cwd, data=None: subprocess.CompletedProcess(argv, 0, "", next(outs)))
     assert [(s["partition"], s["soon"]) for s in doc["starts"]] == [("basic", True), ("medium", False)]
     # (review 3) the site's job_submit sent it to another partition: not an estimate for the one asked
-    outs = iter(["sbatch: Job 1 to start at 2026-11-02T22:41:00 using 4 processors on nodes spdr01 in partition basic"])
+    outs = iter(["sbatch: Job 1 to start at 2026-11-02T22:41:00 using 4 processors on nodes nd01 in partition basic"])
     doc = sc.start_times(pl, [], "condos", now=now,
                          run=lambda argv, cwd, data=None: subprocess.CompletedProcess(argv, 0, "", next(outs)))
     assert doc["starts"][0]["error"] == "Slurm would run it in partition basic, not condos"
     assert doc["starts"][0]["start"] is None
 
 
-# ── where a job starts soonest: spydur's layout ─────────────────────────────
+# ── where a job starts soonest: hpc1's layout ─────────────────────────────
 
 from nomad.submit import where  # noqa: E402
 
-SPYDUR = {"all": "spdr[01-15]", "all_15tb": "spdr[14-15]", "all_768": "spdr[09-13]", "basic": "spdr[01-08]",
-          "bukach": "spdr50", "communitynodes": "spdr[01-15]", "condos": "spdr[50-61]", "cpunodes": "spdr[01-15]",
-          "dias": "spdr[51-52]", "erickson": "spdr53", "gpunodes": "spdr[16-18]", "johnson": "spdr54",
-          "large": "spdr[14-15]", "luckythirteen": "spdr13", "medium": "spdr[09-13]", "ml": "spdr16",
-          "parish": "spdr[55-58]", "sci": "spdr[17-18]", "yang1": "spdr59", "yang2": "spdr60", "yangnolin": "spdr61"}
-OWNERS = {"bukach": "cbukach", "dias": "mrebello", "erickson": "perickso", "johnson": "mj6im",
-          "parish": "cparish", "yang1": "myang", "yang2": "myang", "yangnolin": "myang"}
+HPC1 = {"all": "nd[01-15]", "all_15tb": "nd[14-15]", "all_768": "nd[09-13]", "basic": "nd[01-08]",
+          "bukach": "nd50", "communitynodes": "nd[01-15]", "condos": "nd[50-61]", "cpunodes": "nd[01-15]",
+          "ortega": "nd[51-52]", "erickson": "nd53", "gpunodes": "nd[16-18]", "johnson": "nd54",
+          "large": "nd[14-15]", "luckythirteen": "nd13", "medium": "nd[09-13]", "ml": "nd16",
+          "ames": "nd[55-58]", "sci": "nd[17-18]", "yang1": "nd59", "yang2": "nd60", "chennovak": "nd61"}
+OWNERS = {"bukach": "cwalsh", "ortega": "mrebello", "erickson": "perickso", "johnson": "mj6im",
+          "ames": "rames", "yang1": "tchen", "yang2": "tchen", "chennovak": "tchen"}
 
 
 def _rows():
-    return [{"partition": p, "nodes": n, "is_default": p == "basic"} for p, n in SPYDUR.items()]
+    return [{"partition": p, "nodes": n, "is_default": p == "basic"} for p, n in HPC1.items()]
 
 
 def _specs():
     from nomad.hostlist import expand_hostlist
     out = {}
-    for n in expand_hostlist("spdr[01-08]"):
+    for n in expand_hostlist("nd[01-08]"):
         out[n] = (384000, 0)
-    for n in expand_hostlist("spdr[09-13]"):
+    for n in expand_hostlist("nd[09-13]"):
         out[n] = (768000, 0)
-    for n in expand_hostlist("spdr[14-15]"):
+    for n in expand_hostlist("nd[14-15]"):
         out[n] = (1536000, 0)
-    for n in expand_hostlist("spdr[16-18]"):
+    for n in expand_hostlist("nd[16-18]"):
         out[n] = (384000, 4)
-    for n in expand_hostlist("spdr[50-61]"):
+    for n in expand_hostlist("nd[50-61]"):
         out[n] = (384000, 0)
     return out
 
 
 def _condos(mine=()):
     from nomad.hostlist import expand_hostlist
-    return [(c, expand_hostlist(SPYDUR[c]), c in mine) for c in OWNERS]
+    return [(c, expand_hostlist(HPC1[c]), c in mine) for c in OWNERS]
 
 
-def test_spydurs_partitions_sorted():
+def test_hpc1s_partitions_sorted():
     parts = {p.name: p for p in where.partitions(_rows(), _specs(), _condos())}
     kinds = {k: sorted(n for n, p in parts.items() if p.kind == k) for k in ("small", "big", "gpu", "condo", "mixed")}
     assert kinds["small"] == ["basic"]
@@ -358,9 +358,9 @@ def test_the_order_for_a_small_job_a_member_and_a_big_one():
     # 3 days: a guest condo yes (10 days), the big nodes no (24 h)
     assert order(where.Job(mem_mb=8000, time_s=3 * 86400))[1:] == [
         ("condos", "guest", True), ("medium", "overflow", False), ("large", "overflow", False)]
-    # a Parish lab member: their condo first
-    mine = where.partitions(_rows(), _specs(), _condos(mine={"parish"}))
-    assert order(where.Job(mem_mb=8000, time_s=3600), mine)[:2] == [("parish", "yours", True), ("basic", "shared", True)]
+    # a Ames lab member: their condo first
+    mine = where.partitions(_rows(), _specs(), _condos(mine={"ames"}))
+    assert order(where.Job(mem_mb=8000, time_s=3600), mine)[:2] == [("ames", "yours", True), ("basic", "shared", True)]
     # a job that needs 700 GB: the big nodes are its own, not overflow
     assert order(where.Job(mem_mb=700000, time_s=5 * 86400)) == [("medium", "shared", True), ("large", "shared", True)]
     # GPUs: the GPU nodes
@@ -424,27 +424,27 @@ def test_a_start_a_year_away_is_later_not_a_date_to_rank_by():
 
 def test_settings_from_the_hub():
     cfg = where.settings({"submit": {"where": {"overflow_max_hours": 12, "reserve_nodes": 2, "guests": "yes",
-                                               "spydur": {"fastest_guests": True, "reserve_nodes": -1}}}},
-                         "spydur", policy_guest_days=7)
+                                               "hpc1": {"fastest_guests": True, "reserve_nodes": -1}}}},
+                         "hpc1", policy_guest_days=7)
     assert (cfg.overflow_max_hours, cfg.reserve_nodes, cfg.guests, cfg.fastest_guests, cfg.guest_max_days) == \
         (12.0, 2, True, True, 7.0)
 
 
 def test_whose_condo(tmp_path):
     from nomad.condo import config as ccfg
-    report = ccfg.from_dict({"report": {"clusters": {"spydur": {"condos": {
-        "parish": {"owner": "cparish", "partition": "parish"},
-        "yangnolin": {"owner": ["myang", "knolin"], "partition": "yangnolin", "members": "group:nolinlab"},
-        "draft": {"owner": "x", "partition": "dias", "confirmed": False}}}}}})
-    people = {"parish": {"amy", "cparish"}, "yangnolin": {"bo", "myang", "knolin"}, "draft": {"x"}}
-    got = where.my_condos(report, "spydur", "amy", _rows(), lambda c: people[c.name])
+    report = ccfg.from_dict({"report": {"clusters": {"hpc1": {"condos": {
+        "ames": {"owner": "rames", "partition": "ames"},
+        "chennovak": {"owner": ["tchen", "lnovak"], "partition": "chennovak", "members": "group:nolinlab"},
+        "draft": {"owner": "x", "partition": "ortega", "confirmed": False}}}}}})
+    people = {"ames": {"amy", "rames"}, "chennovak": {"bo", "tchen", "lnovak"}, "draft": {"x"}}
+    got = where.my_condos(report, "hpc1", "amy", _rows(), lambda c: people[c.name])
     # one not confirmed yet: still a condo's nodes (never shared), never anyone's own;
-    # parish lists no members: only its owner's own (1.25.6), whatever its owner's lab group holds
-    assert [(c, len(n), m) for c, n, m in got] == [("parish", 4, False), ("yangnolin", 1, False), ("draft", 2, False)]
-    got = where.my_condos(report, "spydur", "BO", _rows(), lambda c: people[c.name])
+    # ames lists no members: only its owner's own (1.25.6), whatever its owner's lab group holds
+    assert [(c, len(n), m) for c, n, m in got] == [("ames", 4, False), ("chennovak", 1, False), ("draft", 2, False)]
+    got = where.my_condos(report, "hpc1", "BO", _rows(), lambda c: people[c.name])
     assert [m for _c, _n, m in got] == [False, True, False]
-    assert where.my_condos(report, "spydur", "x", _rows(), lambda c: people[c.name])[2][2] is False
-    assert where.my_condos(report, "spydur", "cparish", _rows(), lambda c: set())[0][2] is True   # an owner
+    assert where.my_condos(report, "hpc1", "x", _rows(), lambda c: people[c.name])[2][2] is False
+    assert where.my_condos(report, "hpc1", "rames", _rows(), lambda c: set())[0][2] is True   # an owner
 
 
 def test_whose_condo_is_the_condo_reports_reading_of_members():
@@ -452,21 +452,21 @@ def test_whose_condo_is_the_condo_reports_reading_of_members():
     from nomad.condo import config as ccfg
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE jobs (job_id TEXT, user_name TEXT, account TEXT, end_time TEXT, source_site TEXT)")
-    conn.executemany("INSERT INTO jobs VALUES (?,?,?,?,?)", [("1", "eve", "yanglab", "2026-10-30", "spydur"),
-                                                             ("2", "dan", "other", "2026-10-30", "spydur")])
-    report = ccfg.from_dict({"report": {"clusters": {"spydur": {"condos": {
-        "parish": {"owner": "cparish", "partition": "parish", "members": ["amy", "bo"]},
-        "yang1": {"owner": "myang", "partition": "yang1", "members": "account:yanglab"}}}}}})
-    people_of = where.people_lookup(conn, {"console": {"labs": {"group_pattern": "{netid}$"}}}, "spydur",
+    conn.executemany("INSERT INTO jobs VALUES (?,?,?,?,?)", [("1", "eve", "yanglab", "2026-10-30", "hpc1"),
+                                                             ("2", "dan", "other", "2026-10-30", "hpc1")])
+    report = ccfg.from_dict({"report": {"clusters": {"hpc1": {"condos": {
+        "ames": {"owner": "rames", "partition": "ames", "members": ["amy", "bo"]},
+        "yang1": {"owner": "tchen", "partition": "yang1", "members": "account:yanglab"}}}}}})
+    people_of = where.people_lookup(conn, {"console": {"labs": {"group_pattern": "{netid}$"}}}, "hpc1",
                                     now=datetime(2026, 11, 2))
-    mine = lambda who: {c: m for c, _n, m in where.my_condos(report, "spydur", who, _rows(), people_of)}  # noqa: E731
-    assert mine("amy") == {"parish": True, "yang1": False} and mine("bo")["parish"]
-    assert mine("carl") == {"parish": False, "yang1": False}       # not listed: a guest, whatever group he is in
+    mine = lambda who: {c: m for c, _n, m in where.my_condos(report, "hpc1", who, _rows(), people_of)}  # noqa: E731
+    assert mine("amy") == {"ames": True, "yang1": False} and mine("bo")["ames"]
+    assert mine("carl") == {"ames": False, "yang1": False}       # not listed: a guest, whatever group he is in
     assert mine("eve")["yang1"] and not mine("dan")["yang1"]       # the account's users this past year
     # a condo whose partition Slurm no longer has, and no nodes given: its nodes can't be told from shared ones
-    moved = ccfg.from_dict({"report": {"clusters": {"spydur": {"condos": {
-        "parish": {"owner": "cparish", "partition": "parishlab"}}}}}})
-    assert where.unplaced_condos(moved, "spydur", _rows()) == ["parish"]
+    moved = ccfg.from_dict({"report": {"clusters": {"hpc1": {"condos": {
+        "ames": {"owner": "rames", "partition": "ameslab"}}}}}})
+    assert where.unplaced_condos(moved, "hpc1", _rows()) == ["ames"]
 
 
 def test_the_gate_asks_nomad_as_the_person(tmp_path, monkeypatch, capsys):
@@ -543,12 +543,12 @@ def test_starts_take_a_few_of_the_gates_places_at_most(tmp_path, monkeypatch):
 
 def test_a_guest_partition_report_toml_names_is_a_condo_for_guests():
     from nomad.hostlist import expand_hostlist
-    only_parish = [("parish", expand_hostlist("spdr[55-58]"), False)]
-    parts = {p.name: p for p in where.partitions(_rows(), _specs(), only_parish)}
+    only_ames = [("ames", expand_hostlist("nd[55-58]"), False)]
+    parts = {p.name: p for p in where.partitions(_rows(), _specs(), only_ames)}
     # named like "condo": its nodes are condos' (unlisted ones too: no one's own), offered to guests
-    assert parts["condos"].kind == "condo" and parts["condos"].condos == ["parish"] and not parts["condos"].mine
+    assert parts["condos"].kind == "condo" and parts["condos"].condos == ["ames"] and not parts["condos"].mine
     assert parts["johnson"].kind == "condo" and parts["johnson"].condos == [] and not parts["johnson"].mine
-    parts = {p.name: p for p in where.partitions(_rows(), _specs(), only_parish, guest_parts=["condos", "basic"])}
+    parts = {p.name: p for p in where.partitions(_rows(), _specs(), only_ames, guest_parts=["condos", "basic"])}
     assert parts["condos"].kind == "condo" and parts["basic"].kind == "small"   # never the default
     cands = where.candidates(list(parts.values()), where.Job(mem_mb=8000, time_s=3600), where.Settings())
     assert [c["partition"] for c in cands if c["role"] == "guest"] == ["condos"]
@@ -559,16 +559,16 @@ def test_advise_settles_with_the_values_nomad_would_send(tmp_path):
     db = sqlite3.connect(tmp_path / "combined.db")
     db.execute("CREATE TABLE partition_settings (cluster TEXT, partition TEXT, nodes TEXT, is_default INTEGER, "
                "source_site TEXT, settings TEXT, gone_at TEXT)")
-    for p, n in SPYDUR.items():
-        db.execute("INSERT INTO partition_settings VALUES ('spydur', ?, ?, ?, 'spydur', '{}', NULL)",
+    for p, n in HPC1.items():
+        db.execute("INSERT INTO partition_settings VALUES ('hpc1', ?, ?, ?, 'hpc1', '{}', NULL)",
                    (p, n, int(p == "basic")))
     db.execute("CREATE TABLE node_state (node_name TEXT, memory_total_mb INTEGER, gres TEXT, timestamp TEXT, "
                "source_site TEXT)")
     for node, (mem, gpus) in _specs().items():
-        db.execute("INSERT INTO node_state VALUES (?, ?, ?, '2026-11-02T22:00:00', 'spydur')",
+        db.execute("INSERT INTO node_state VALUES (?, ?, ?, '2026-11-02T22:00:00', 'hpc1')",
                    (node, mem, f"gpu:{gpus}" if gpus else ""))
     db.commit()
-    report = ccfg.from_dict({"report": {"clusters": {"spydur": {"guest_partitions": ["condos"], "condos": {
+    report = ccfg.from_dict({"report": {"clusters": {"hpc1": {"guest_partitions": ["condos"], "condos": {
         c: {"owner": o, "partition": c} for c, o in OWNERS.items()}}}}})
     asked = []
 
@@ -577,39 +577,39 @@ def test_advise_settles_with_the_values_nomad_would_send(tmp_path):
         return {"ok": True, "now": "2026-11-02T22:40:00", "nodes": {"medium": {"idle": 4}},
                 "job": {"mem_mb": 8000, "time_s": 3 * 86400, "gpus": 0},     # nomad's own: 3 days
                 "starts": [{"partition": n, "start": "2026-11-02T22:40:30", "soon": True} for n in names]}
-    out = where.advise(db, "spydur", "amy", where.Job(), config={}, report=report, ask_starts=ask)
+    out = where.advise(db, "hpc1", "amy", where.Job(), config={}, report=report, ask_starts=ask)
     assert asked == [["basic", "condos", "medium", "large", "gpunodes"]]   # all it might suggest, once
     rows = {r["partition"]: r for r in out["rows"]}
     assert set(rows) == {"basic", "condos", "medium", "large"}               # no GPUs asked: not gpunodes
     assert rows["condos"]["allowed"] and not rows["medium"]["allowed"]       # 3 days: a condo yes, big no
     assert out["recommended"] == "basic" and out["job"]["time_s"] == 3 * 86400
     # the gate not answering: said, and nothing recommended
-    out = where.advise(db, "spydur", "amy", where.Job(), config={}, report=report,
+    out = where.advise(db, "hpc1", "amy", where.Job(), config={}, report=report,
                        ask_starts=lambda names: {"ok": False, "error": "ssh: timed out"})
     assert out["ok"] and out["error"] == "ssh: timed out" and out["fastest"] is None
     assert out["recommended"] == "basic"                                     # the site's first: nothing timed
     assert not {r["partition"]: r for r in out["rows"]}["medium"]["allowed"]  # no node states: no overflow
     # a gate older than 1.25.4
-    out = where.advise(db, "spydur", "amy", where.Job(), config={}, report=report, ask_starts=lambda names: {
+    out = where.advise(db, "hpc1", "amy", where.Job(), config={}, report=report, ask_starts=lambda names: {
         "ok": False, "error": "not something the gate does: starts"})
     assert "older than 1.25.4" in out["error"]
     # report.toml unreadable, or no condos table for the site: only the default partition, and why
-    for rep_ in (None, ccfg.from_dict({"report": {"clusters": {"spydur": {"label": "Spydur"}}}})):
+    for rep_ in (None, ccfg.from_dict({"report": {"clusters": {"hpc1": {"label": "Hpc1"}}}})):
         asked.clear()
-        out = where.advise(db, "spydur", "amy", where.Job(), config={}, report=rep_, ask_starts=ask)
+        out = where.advise(db, "hpc1", "amy", where.Job(), config={}, report=rep_, ask_starts=ask)
         assert asked == [["basic"]] and [r["partition"] for r in out["rows"]] == ["basic"]
-        assert "report.toml lists no condos for spydur" in out["note"]
+        assert "report.toml lists no condos for hpc1" in out["note"]
     # a site with none says so with an empty table: then every partition is weighed
     asked.clear()
-    none = ccfg.from_dict({"report": {"clusters": {"spydur": {"condos": {}}}}})
-    where.advise(db, "spydur", "amy", where.Job(), config={}, report=none, ask_starts=ask)
+    none = ccfg.from_dict({"report": {"clusters": {"hpc1": {"condos": {}}}}})
+    where.advise(db, "hpc1", "amy", where.Job(), config={}, report=none, ask_starts=ask)
     assert "medium" in asked[0] and "condos" in asked[0]          # named like condo: to guests, no one's own
     # a listed condo nomad can't find the nodes of: only the default partition, and why
     asked.clear()
-    moved = ccfg.from_dict({"report": {"clusters": {"spydur": {"condos": {
-        "parish": {"owner": "cparish", "partition": "parishlab"}}}}}})
-    out = where.advise(db, "spydur", "amy", where.Job(), config={}, report=moved, ask_starts=ask)
-    assert asked == [["basic"]] and "can't find the nodes of parish" in out["note"]
+    moved = ccfg.from_dict({"report": {"clusters": {"hpc1": {"condos": {
+        "ames": {"owner": "rames", "partition": "ameslab"}}}}}})
+    out = where.advise(db, "hpc1", "amy", where.Job(), config={}, report=moved, ask_starts=ask)
+    assert asked == [["basic"]] and "can't find the nodes of ames" in out["note"]
 
 
 def test_partitions_sorted_shows_the_admin_what_the_console_will(tmp_path):
@@ -617,29 +617,29 @@ def test_partitions_sorted_shows_the_admin_what_the_console_will(tmp_path):
     db = sqlite3.connect(tmp_path / "combined.db")
     db.execute("CREATE TABLE partition_settings (cluster TEXT, partition TEXT, nodes TEXT, is_default INTEGER, "
                "source_site TEXT, settings TEXT, gone_at TEXT)")
-    for p, n in SPYDUR.items():
-        db.execute("INSERT INTO partition_settings VALUES ('spydur', ?, ?, ?, 'spydur', '{}', NULL)",
+    for p, n in HPC1.items():
+        db.execute("INSERT INTO partition_settings VALUES ('hpc1', ?, ?, ?, 'hpc1', '{}', NULL)",
                    (p, n, int(p == "basic")))
     db.execute("CREATE TABLE node_state (node_name TEXT, memory_total_mb INTEGER, gres TEXT, timestamp TEXT, "
                "source_site TEXT)")
     for node, (mem, gpus) in _specs().items():
-        db.execute("INSERT INTO node_state VALUES (?, ?, ?, '2026-11-02T22:00:00', 'spydur')",
-                   (node, None if node == "spdr14" else mem, f"gpu:{gpus}" if gpus else ""))
+        db.execute("INSERT INTO node_state VALUES (?, ?, ?, '2026-11-02T22:00:00', 'hpc1')",
+                   (node, None if node == "nd14" else mem, f"gpu:{gpus}" if gpus else ""))
     db.commit()
     db.close()
     (tmp_path / "nomad.toml").write_text("[general]\n")
-    owners = "".join(f'[report.clusters.spydur.condos.{c}]\nowner = "{o}"\n' +
+    owners = "".join(f'[report.clusters.hpc1.condos.{c}]\nowner = "{o}"\n' +
                      ('confirmed = false\n' if c == "johnson" else "") for c, o in OWNERS.items())
-    (tmp_path / "report.toml").write_text('[report.clusters.spydur]\nguest_partitions = ["condos"]\n' + owners)
+    (tmp_path / "report.toml").write_text('[report.clusters.hpc1]\nguest_partitions = ["condos"]\n' + owners)
     r = CliRunner().invoke(cli, ["-c", str(tmp_path / "nomad.toml"), "partitions", "--db", str(tmp_path / "combined.db"),
-                                 "--site", "spydur", "--sorted"])
+                                 "--site", "hpc1", "--sorted"])
     assert r.exit_code == 0, r.output
     lines = {ln.split()[0]: ln for ln in r.output.splitlines() if ln.startswith("  ") and "Note" not in ln}
-    # spdr14 never read: the least memory might be lower still, so nothing is "small" for sure (basic: the default)
+    # nd14 never read: the least memory might be lower still, so nothing is "small" for sure (basic: the default)
     assert "several kinds" in lines["basic"] and "the default: always offered" in lines["basic"]
     assert "big memory" in lines["medium"] and "several kinds" in lines["large"]
     assert "condo" in lines["johnson"] and "GPU nodes" in lines["gpunodes"]
-    assert "not confirmed yet" in r.output and "johnson" in r.output and "no memory reading for spdr14" in r.output
+    assert "not confirmed yet" in r.output and "johnson" in r.output and "no memory reading for nd14" in r.output
     r = CliRunner().invoke(cli, ["-c", str(tmp_path / "nomad.toml"), "partitions", "--db", str(tmp_path / "combined.db"),
                                  "--sorted"])
     assert r.exit_code != 0 and "--sorted needs --site" in r.output
@@ -648,18 +648,18 @@ def test_partitions_sorted_shows_the_admin_what_the_console_will(tmp_path):
 def test_it_fails_closed_on_what_it_doesnt_know():
     from nomad.hostlist import expand_hostlist
     specs = _specs()
-    for n in expand_hostlist("spdr[09-15]"):
+    for n in expand_hostlist("nd[09-15]"):
         specs[n] = (None, 0)                              # the big nodes' memory not read yet
     parts = {p.name: p for p in where.partitions(_rows(), specs, _condos())}
     assert parts["medium"].kind == "mixed" and parts["large"].kind == "mixed"       # not small: unknown
     assert parts["cpunodes"].kind == "mixed" and parts["basic"].kind == "mixed"     # nothing small for sure
     cands = where.candidates(list(parts.values()), where.Job(mem_mb=8000), where.Settings())
     assert [(c["partition"], c["role"]) for c in cands if c["allowed"]] == [("basic", "default")]  # still offered
-    del specs["spdr16"]                                   # a GPU node never read
+    del specs["nd16"]                                   # a GPU node never read
     assert {p.name: p for p in where.partitions(_rows(), specs, _condos())}["gpunodes"].kind == "mixed"
     # (review 3) one small node unread: the big ones must not become "small" (shared, no reserve, no limit)
     specs = _specs()
-    specs["spdr03"] = (None, 0)
+    specs["nd03"] = (None, 0)
     parts = {p.name: p for p in where.partitions(_rows(), specs, _condos())}
     assert parts["basic"].kind == "mixed" and parts["medium"].kind == "big" and parts["large"].kind == "big"
     cands = {c["partition"]: c for c in where.candidates(list(parts.values()), where.Job(mem_mb=8000),
@@ -667,7 +667,7 @@ def test_it_fails_closed_on_what_it_doesnt_know():
     assert cands["basic"]["role"] == "default" and cands["medium"]["role"] == "overflow"
     assert not cands["medium"]["allowed"]                 # no time limit: no overflow
     # nor a condo's or a GPU node in the small partition
-    rows = _rows() + [{"partition": "odd", "nodes": "spdr[08,54]", "is_default": False}]
+    rows = _rows() + [{"partition": "odd", "nodes": "nd[08,54]", "is_default": False}]
     parts = {p.name: p for p in where.partitions(rows, _specs(), _condos())}
     assert parts["medium"].kind == "big" and parts["odd"].kind == "mixed"
     # a condo report.toml doesn't list, inside the guest partition: a condo's nodes, no one's own
@@ -675,8 +675,8 @@ def test_it_fails_closed_on_what_it_doesnt_know():
     parts = {p.name: p for p in where.partitions(_rows(), _specs(), some)}
     assert parts["johnson"].kind == "condo" and not parts["johnson"].mine
     # the default partition is always offered, whatever its kind
-    rows = [{"partition": "all", "nodes": "spdr[01-15]", "is_default": True},
-            {"partition": "basic", "nodes": "spdr[01-08]", "is_default": False}]
+    rows = [{"partition": "all", "nodes": "nd[01-15]", "is_default": True},
+            {"partition": "basic", "nodes": "nd[01-08]", "is_default": False}]
     parts = where.partitions(rows, _specs(), [])
     assert [(c["partition"], c["role"]) for c in where.candidates(parts, where.Job(time_s=3600), where.Settings())] \
         == [("basic", "shared"), ("all", "default")]

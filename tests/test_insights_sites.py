@@ -117,16 +117,16 @@ def _big(c, now):
             c.execute("INSERT INTO group_membership (username, group_name, source_site)"
                       " VALUES (?, ?, 'big')", (user, g))
 
-    # Nodes every 15 minutes for 3 days. spdr06 drained for repair two days
-    # ago and still is; spdr07 went down for an hour and came back.
+    # Nodes every 15 minutes for 3 days. nd06 drained for repair two days
+    # ago and still is; nd07 went down for an hour and came back.
     for k in range(3 * 96 + 1):
         ts = now - timedelta(minutes=15 * (3 * 96 - k))
         for n in range(1, 11):
-            name = f"spdr{n:02d}"
+            name = f"nd{n:02d}"
             state, reason, healthy = "MIXED", None, 1
-            if name == "spdr06" and ts >= now - timedelta(days=2):
+            if name == "nd06" and ts >= now - timedelta(days=2):
                 state, reason, healthy = "IDLE+DRAIN", "vendor repair", 0
-            if name == "spdr07" and now - timedelta(hours=40) <= ts < now - timedelta(hours=39):
+            if name == "nd07" and now - timedelta(hours=40) <= ts < now - timedelta(hours=39):
                 state, reason, healthy = "DOWN*", "Not responding", 0
             alloc = 0 if healthy == 0 else 13
             c.execute(
@@ -137,7 +137,7 @@ def _big(c, now):
                 (ts.isoformat(), name, state, alloc, alloc * 8000, reason, healthy))
 
     # /home steady at 73%; /scratch filling: 83.7% -> 87% over 30 days,
-    # about 10 TB a month (spydur's rate in September 2026).
+    # about 10 TB a month (hpc1's rate in September 2026).
     for d in range(31):
         for h in (0, 6, 12, 18):
             ts = now - timedelta(days=30 - d, hours=-h) if d < 30 else now - timedelta(minutes=10 * (4 - h // 6))
@@ -348,7 +348,7 @@ def test_alerts_are_read_from_nomads_own_columns_and_never_called_active(combine
 
 def test_node_health_reads_the_latest_snapshot(combined):
     got = sig.read_node_health_signals(combined, site="big", config={})
-    assert [(s.title, s.metrics["node"]) for s in got] == [("node_drain", "spdr06")]
+    assert [(s.title, s.metrics["node"]) for s in got] == [("node_drain", "nd06")]
     assert got[0].metrics["reason"] == "vendor repair"
 
 
@@ -471,7 +471,7 @@ def test_unambiguous_membership_places_each_job_once(tmp_path):
 def test_capacity_names_the_busiest_and_binds_only_near_the_limit(combined):
     cap = compute_capacity(combined, hours=168, site="big")
     dims = {d.dimension: d for d in cap.dimensions}
-    # 9 nodes allocatable with 13 of 64 cores used (spdr06 drained, not counted)
+    # 9 nodes allocatable with 13 of 64 cores used (nd06 drained, not counted)
     assert dims["cpu"].current_utilization == pytest.approx(13 / 64, abs=0.01)
     assert dims["io"].current_utilization == pytest.approx(0.40, abs=0.01)   # busiest device
     assert cap.binding_constraint is None
@@ -484,8 +484,8 @@ def test_capacity_names_the_busiest_and_binds_only_near_the_limit(combined):
 def test_resilience_scores_failures_and_lists_drains(combined):
     res = compute_resilience(combined, hours=720, site="big")
     kinds = sorted(d.event_type for d in res.disturbances)
-    assert kinds.count("node_failure") == 1              # spdr07, back after an hour
-    assert kinds.count("node_drain") == 1                # spdr06, not scored
+    assert kinds.count("node_failure") == 1              # nd07, back after an hour
+    assert kinds.count("node_drain") == 1                # nd06, not scored
     assert res.drains == 1
     assert "not scored" in res.summary
     empty = compute_resilience(combined, hours=720, site="fsonly")
@@ -730,8 +730,8 @@ def test_numbers_in_names_keep_alert_conditions_apart(tmp_path):
     now = datetime.now()
     msgs = ["GPU 0 memory at 91.0% (threshold: 90%)", "GPU 3 memory at 95.2% (threshold: 90%)",
             "GPU 0 memory at 92.5% (threshold: 90%)", "Disk /data1 at 81.0% (threshold: 80%)",
-            "Disk /data2 at 81.0% (threshold: 80%)", "Node spdr06 load 12.40 (threshold: 8)",
-            "Node spdr17 load 9.10 (threshold: 8)"]
+            "Disk /data2 at 81.0% (threshold: 80%)", "Node nd06 load 12.40 (threshold: 8)",
+            "Node nd17 load 9.10 (threshold: 8)"]
     for k, m in enumerate(msgs):
         c.execute("INSERT INTO alerts (timestamp, severity, category, source, message, details,"
                   " source_site) VALUES (?, 'warning', 'x', 'head', ?, '{}', 'x')",

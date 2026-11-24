@@ -87,7 +87,7 @@ NVSHMEM:             disabled
 
 
 Running on 1 node with total 4 cores, 4 processing units, 1 compatible GPU
-Hardware detected on host spdr17.cluster:
+Hardware detected on host nd17.cluster:
   CPU info:
     Vendor: Intel
     Brand:  Intel(R) Xeon(R) Gold 6230R CPU @ 2.10GHz

@@ -20,7 +20,7 @@ import pytest
 from nomad.edu.insights import user_insights
 
 
-# Site-agnostic synthetic cluster tiers (mirrors realistic spydur layout).
+# Site-agnostic synthetic cluster tiers (mirrors realistic hpc1 layout).
 CLUSTER_TIERS = [
     {"cluster": "primary", "memory_mb": 384_000, "memory_gb": 375.0,
      "node_count": 16, "partitions": "basic"},
@@ -103,7 +103,7 @@ def _build_db(path, *, with_jobs=False, with_sessions=False):
     """)
 
     if with_sessions:
-        # One host: 62 GB, 32 cores (small Parish-tier workstation).
+        # One host: 62 GB, 32 cores (small Ames-tier workstation).
         c.execute(
             "INSERT INTO workstation_state (timestamp, hostname, memory_total_mb, cpu_count) "
             "VALUES (datetime('now'), 'wks1', 63642, 32)"

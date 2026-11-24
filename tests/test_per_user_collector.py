@@ -452,9 +452,9 @@ def test_a_clock_step_does_not_make_every_process_new(host, db_path):
 
 
 def test_nomads_own_cpu_in_its_accounts_slice_is_not_that_accounts(host, db_path):
-    # Cron runs nomad in a session of its account (zeus): its CPU, and that
-    # of the commands it runs, lands in zeus's slice.
-    host.start(5001, user="zeus", uid=4321, command="bash", cores=0.0, age=60)
+    # Cron runs nomad in a session of its account (monitor): its CPU, and that
+    # of the commands it runs, lands in monitor's slice.
+    host.start(5001, user="monitor", uid=4321, command="bash", cores=0.0, age=60)
     used = 0.0
     cfg = {"enabled": True, "cgroup_root": str(host.cgroup), "whitelist": {"min_uid": 1000}}
     for i in range(3):
@@ -476,7 +476,7 @@ def test_nomads_own_cpu_in_its_accounts_slice_is_not_that_accounts(host, db_path
 
 def test_only_ones_own_processes_visible_says_so(host, db_path, monkeypatch):
     monkeypatch.setattr(collector_mod.os, "geteuid", lambda: 4321)
-    host.start(5001, user="zeus", uid=4321, age=60)
+    host.start(5001, user="monitor", uid=4321, age=60)
     assert "hidepid" in reading(host, db_path).note
     host.start(5002, user="ann", uid=10001, age=60)
     assert reading(host, db_path).note is None
@@ -685,9 +685,9 @@ def test_report_on_a_hub_groups_by_site(host, db_path):
     with sqlite3.connect(db_path) as c:
         for t in ("per_user_alert", "per_user_daily", "per_user_sample"):
             c.execute(f"ALTER TABLE {t} ADD COLUMN source_site TEXT")
-            c.execute(f"UPDATE {t} SET source_site = 'arachne'")
+            c.execute(f"UPDATE {t} SET source_site = 'hpc2'")
         lines = report(c, days=36500)
-    assert any(line.startswith("arachne · ") for line in lines)
+    assert any(line.startswith("hpc2 · ") for line in lines)
 
 
 def test_report_without_per_user_tables(tmp_path):

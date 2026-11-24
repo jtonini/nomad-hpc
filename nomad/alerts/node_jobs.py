@@ -6,7 +6,7 @@ A node that is up, idle and accepting jobs, but whose jobs all fail within
 seconds -- a mount missing after a reboot, slurmd set up wrong after a
 reinstall, a program gone -- looks healthy to Slurm and to the node_state
 alerts. Each job it fails frees it at once for the next, so it can swallow a
-whole array in minutes (vadur's node03, 29 Oct 2026: 46 tasks of one array
+whole array in minutes (hpc3's node03, 29 Oct 2026: 46 tasks of one array
 in six minutes, while the same array ran for hours on the other nodes).
 
 From this site's ``jobs`` table, at each node_state collection: a node where,

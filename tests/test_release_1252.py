@@ -252,7 +252,7 @@ def test_an_account_others_could_change(tmp_path):
     assert why.endswith(f"chmod -R go-w {home}/.local")                         # all of it, at once
     os.chmod(home / ".local/lib/python3.9/site-packages", 0o755)
     for d in (".local", ".local/share"):
-        os.chmod(home / d, 0o2775)                                              # as on spydur: people's
+        os.chmod(home / d, 0o2775)                                              # as on hpc1: people's
     assert gate.account_open(str(home), uid).startswith(f"{home}/.local can be changed by")
     assert gate.account_open(str(home), uid, private={os.stat(home / ".local").st_gid}) is None   # their own
     os.chmod(home / ".local", 0o755)
@@ -384,14 +384,14 @@ def test_a_note_is_for_its_cluster_its_folder_and_its_time(tmp_path, monkeypatch
     b = stage.carry(stage.carry_path("/home/amy/b/job.sh", b"#!/bin/bash\necho b\n"), b"#!/bin/bash\necho b\n",
                     "/home/amy/b/job.sh")
     t = stage.epoch("2026-11-02T13:08:00")
-    stage.note_job("4242", a, cluster="spydur", folder="/home/amy/a", when=t)
-    stage.note_job("4242", b, cluster="spiderweb", folder="/home/amy/b", when=t)    # one home, two clusters
-    assert stage.record_of_job("4242", cluster="spydur") == a
-    assert stage.record_of_job("4242", cluster="spiderweb") == b
-    assert stage.record_of_job("4242", cluster="arachne") is None
-    assert stage.record_of_job("4242", cluster="spydur", folder="/home/amy/b") is None      # not that job
-    assert stage.record_of_job("4242", cluster="spydur", submitted="2026-11-02T13:09:30") == a
-    assert stage.record_of_job("4242", cluster="spydur", submitted="2027-03-01T08:00:00") is None   # number reused
+    stage.note_job("4242", a, cluster="hpc1", folder="/home/amy/a", when=t)
+    stage.note_job("4242", b, cluster="interactive1", folder="/home/amy/b", when=t)    # one home, two clusters
+    assert stage.record_of_job("4242", cluster="hpc1") == a
+    assert stage.record_of_job("4242", cluster="interactive1") == b
+    assert stage.record_of_job("4242", cluster="hpc2") is None
+    assert stage.record_of_job("4242", cluster="hpc1", folder="/home/amy/b") is None      # not that job
+    assert stage.record_of_job("4242", cluster="hpc1", submitted="2026-11-02T13:09:30") == a
+    assert stage.record_of_job("4242", cluster="hpc1", submitted="2027-03-01T08:00:00") is None   # number reused
     assert stage.record_of_job("4242", folder="/home/amy/b") == b                # its cluster's name unknown here
 
 
@@ -400,7 +400,7 @@ def test_the_clusters_own_name():
 
     def config(out, code=0):
         return lambda argv: subprocess.CompletedProcess(argv, code, out, "")
-    assert cluster.cluster_name(config("AccountingStorageType = x\nClusterName             = spydur\n")) == "spydur"
+    assert cluster.cluster_name(config("AccountingStorageType = x\nClusterName             = hpc1\n")) == "hpc1"
     assert cluster.cluster_name(config("ClusterName = a/b\n")) is None
     assert cluster.cluster_name(config("", 1)) is None
 

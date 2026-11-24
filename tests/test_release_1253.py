@@ -13,8 +13,8 @@ import sqlite3
 from nomad.edu import explain
 from nomad.edu.scoring import SHORT_JOB_SECONDS, score_cpu, score_job, score_memory, score_time
 
-# Job 86315 on spydur: a one-minute test sent from the Console with the script's own values
-TEST_JOB = {"job_id": "86315", "user_name": "jtonini", "state": "COMPLETED", "partition": "basic",
+# Job 86315 on hpc1: a one-minute test sent from the Console with the script's own values
+TEST_JOB = {"job_id": "86315", "user_name": "rcadmin", "state": "COMPLETED", "partition": "basic",
             "req_cpus": 1, "req_mem_mb": 1024, "req_time_seconds": 2400, "runtime_seconds": 61}
 TEST_SUMMARY = {"avg_cpu_percent": 1.0, "peak_memory_gb": 0.012}
 
@@ -70,8 +70,8 @@ def _db(tmp_path):
     conn.execute("CREATE TABLE jobs (job_id TEXT, user_name TEXT, state TEXT, partition TEXT, req_cpus INTEGER, "
                  "req_mem_mb INTEGER, req_time_seconds INTEGER, runtime_seconds INTEGER, end_time TEXT, "
                  "node_list TEXT)")
-    conn.execute("INSERT INTO jobs VALUES ('86315','jtonini','COMPLETED','basic',1,1024,2400,61,"
-                 "'2026-11-02T14:06:11','spdr01')")
+    conn.execute("INSERT INTO jobs VALUES ('86315','rcadmin','COMPLETED','basic',1,1024,2400,61,"
+                 "'2026-11-02T14:06:11','nd01')")
     conn.execute("CREATE TABLE job_summary (job_id TEXT, avg_cpu_percent REAL, peak_memory_gb REAL)")
     conn.execute("INSERT INTO job_summary VALUES ('86315', 1.0, 0.012)")
     conn.commit()

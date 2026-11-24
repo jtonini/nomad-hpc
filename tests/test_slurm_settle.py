@@ -309,7 +309,7 @@ def test_old_guesses_are_repaired_or_marked_unknown(site):
     assert job(site.db, "2004")["state"] == "FAILED"
     lost = job(site.db, "2002")
     assert lost["state"] == "UNKNOWN" and lost["failure_reason"] is None
-    assert lost["end_time"] == "2026-09-02T12:30:00"   # 16:30 UTC is 12:30 in Richmond
+    assert lost["end_time"] == "2026-09-02T12:30:00"   # 16:30 UTC is 12:30 in New York
     assert job(site.db, "2003")["state"] == "COMPLETED"
     assert "2003" not in fake.looked_up
 

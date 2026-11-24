@@ -118,9 +118,9 @@ here, not the account). ``ignore_users``, ``ignore_programs`` and
     # max_seconds = 180
     # ssh_user = "..."
     # python = ["/usr/bin/python3", "/usr/libexec/platform-python"]
-    # trusted_hosts = []           # e.g. ["vadur"]: servers an ssh -R may go to (ports below 1024,
-    #                              # or "vadur:2222"); names, addresses or networks
-    # campus_networks = []         # e.g. ["141.166.0.0/16"]: public ranges that are campus (a label)
+    # trusted_hosts = []           # e.g. ["hpc3"]: servers an ssh -R may go to (ports below 1024,
+    #                              # or "hpc3:2222"); names, addresses or networks
+    # campus_networks = []         # e.g. ["172.40.0.0/16"]: public ranges that are campus (a label)
     # cluster_networks = []        # e.g. ["10.1.1.0/24"]: where a host's way out is the cluster network
     # agents = []                  # AI agent programs to add to the built-in list (listed, not alerted)
     # root_report = ""             # path a root helper writes (scripts/watch_root_probe.py); off by default
@@ -432,7 +432,7 @@ def config_problems(conf, *, resolve=None) -> tuple[list[str], list[str]]:
         hint = " (1.19.1: trusted_hosts lists the servers an ssh -R may go to)" if k == "inside_hosts" else ""
         problems.append(f"[collectors.policy_watch] {k}: not a setting{hint}")
     lists = {}
-    like = {"trusted_hosts": '["vadur"]', "campus_networks": '["141.166.0.0/16"]',
+    like = {"trusted_hosts": '["hpc3"]', "campus_networks": '["172.40.0.0/16"]',
             "cluster_networks": '["10.1.1.0/24"]', "login_hosts": '["login02"]', "ignore_users": '["slurm"]',
             "ignore_programs": '["tailscaled"]', "agents": '["myorg-agent"]',
             "workstations": '["ml-ws01"]', "gpu_serve_hosts": '["shared-infer01"]'}

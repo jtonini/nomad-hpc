@@ -12,7 +12,7 @@ On the hub::
     engine = "tessera"               # or "baseline": logistic regression only
     predicts = ["failure", "idle"]   # a job failing; most of its cores left idle (1.46.0);
                                      # also "waste": most of its time asked unused
-    trainer = "badenpowell"          # the worker's name, as the Console says it
+    trainer = "gpuws1"          # the worker's name, as the Console says it
     jobs_days = 365                  # jobs submitted in the last this many days
     max_jobs = 50000                 # the newest this many ended jobs (0: all; the similarity
                                      # network's time grows as the square: ~12,000 jobs take
@@ -61,7 +61,7 @@ On the worker::
     key_file = "~/.config/nomad/ml_worker_key"
     device = "cuda"                  # or "cpu", or "auto"
     # ca_file = "/etc/pki/tls/certs/campus-ca.pem"   # if the Console's certificate needs it
-    # name = "badenpowell"           # default: this machine's short name
+    # name = "gpuws1"           # default: this machine's short name
 """
 from __future__ import annotations
 

@@ -2,8 +2,8 @@
 #
 # NØMAÐ Dashboard Quick Start
 # 
-# Run this on badenpowell, then from your laptop:
-#   ssh -L 8050:localhost:8050 badenpowell
+# Run this on gpuws1, then from your laptop:
+#   ssh -L 8050:localhost:8050 gpuws1
 #   Open http://localhost:8050 in your browser
 #
 
@@ -34,7 +34,7 @@ echo
 echo "==========================================================="
 echo "To view from your laptop:"
 echo "  1. Open a new terminal"
-echo "  2. Run: ssh -L 8050:localhost:8050 badenpowell"
+echo "  2. Run: ssh -L 8050:localhost:8050 gpuws1"
 echo "  3. Open: http://localhost:8050"
 echo "==========================================================="
 echo

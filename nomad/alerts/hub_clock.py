@@ -2,7 +2,7 @@
 # Copyright (C) 2026 João Tonini
 """CPU clock alerts the hub sends for sites that leave their alerts to it (1.27.0).
 
-A site set to ``alerts = "hub"`` in [[hub.sites]] (vadur) judges its CPUs'
+A site set to ``alerts = "hub"`` in [[hub.sites]] (hpc3) judges its CPUs'
 clocks with its own clock collector (cpu_clock_hosts: throttled, severity,
 the problem in words); after each sync the hub sends what the site's own
 collector would: one alert a throttled host while it lasts (once, again when

@@ -8,7 +8,7 @@ and closes the tunnel on Ctrl-C.  It is what ``nomad console launch`` runs.
 It uses the Python standard library only, so the file also runs on its own on
 a computer without nomad (Python 3.8 or later):
 
-    python3 launch.py NETID@mingus.richmond.edu
+    python3 launch.py NETID@hub.example.edu
 
 Nothing secret is kept: ssh asks for the password itself, and only the
 machine names of the last successful launch are remembered, so that next time
@@ -19,7 +19,7 @@ prints the one ssh line to run on their own computer instead, through this
 cluster. A site sets two names for that, in the environment (the shared
 ``nomad`` command on a cluster sets them):
 
-    NOMAD_CONSOLE_HOST   the machine that serves the Console (mingus.richmond.edu)
+    NOMAD_CONSOLE_HOST   the machine that serves the Console (hub.example.edu)
     NOMAD_LOGIN_HOST     this cluster, as people's computers reach it
 
 With no password: ``nomad console --key-setup`` prints a setup that a person
@@ -708,7 +708,7 @@ def resolve(destination: str | None, via: str | None, remote_port: int | None,
         saved = Target(host if "@" in host else f"{_user()}@{host}")
     if saved is None:
         raise LaunchError("Which machine serves the Console? For example:\n"
-                          "  nomad console launch NETID@mingus.richmond.edu")
+                          "  nomad console launch NETID@hub.example.edu")
     if via:
         saved.via = via
     if remote_port is not None:

@@ -144,6 +144,7 @@ nomad notices mail                     # who is due now, and why others are not 
 nomad notices mail --counts            # the same as counts only, no names (to show someone)
 nomad notices mail --user NETID --text # one person's email, as it would go
 nomad notices mail --html FOLDER       # each email's formatted copy, FOLDER/NETID.html (1.62.0)
+nomad notices mail --db DB --text      # what they would say from another database, a demo's (1.66.0)
 nomad notices mail --send              # send them (while review_to is set, to review_to)
 nomad notices set NETID off --apply    # someone asked not to be emailed
 nomad notices timer --apply            # every Monday at 09:10, from systemd (as root)

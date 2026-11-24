@@ -36,7 +36,7 @@ _SEQ = [0]
 
 
 def row(rule="cpu_50pct_2min", user="stu01", held=20 * MIN, end=NOW - timedelta(hours=2), command="python3",
-        cmdline=None, session="s1", host="spydur.cluster", role="headnode", site="spydur", cpu=150.0, mem=None):
+        cmdline=None, session="s1", host="hpc1.cluster", role="headnode", site="hpc1", cpu=150.0, mem=None):
     _SEQ[0] += 1
     n = _SEQ
     rtype, threshold, unit = RULES[rule]
@@ -78,7 +78,7 @@ def test_what_is_worth_telling():
     assert tell(row(held=14 * MIN)) == []
     (f,) = tell(row(held=15 * MIN))
     assert (f.kind, f.title, f.program, f.site, f.host) == (
-        "cpu", "A long computation on the login node", "python3", "spydur", "spydur")
+        "cpu", "A long computation on the login node", "python3", "hpc1", "hpc1")
     assert f.minutes == 15 and f.cores == 1.5 and f.memory_gb is None and not f.ongoing
     assert "login node" in f.why and "srun --pty" in " ".join(f.better) and "Submit a job" in f.better[0]
     # memory: 16 GB in one program is told, 4 GB is not; 32 GB together is
@@ -126,7 +126,7 @@ def test_one_entry_per_process_and_per_together_time():
 
 
 @pytest.fixture
-def richmond(monkeypatch):
+def new_york(monkeypatch):
     import time
     monkeypatch.setenv("TZ", "America/New_York")
     time.tzset()
@@ -135,8 +135,8 @@ def richmond(monkeypatch):
     time.tzset()
 
 
-def test_times_are_the_readers_local_time(richmond):
-    # the collector writes UTC: 20:00 UTC on 10 Nov is 15:00 in Richmond
+def test_times_are_the_readers_local_time(new_york):
+    # the collector writes UTC: 20:00 UTC on 10 Nov is 15:00 in New York
     (f,) = tell(row(held=30 * MIN, end=NOW - timedelta(hours=1)))
     assert (f.started, f.last_seen) == ("2026-11-10T14:30", "2026-11-10T15:00")
     # still going at the last reading
@@ -155,9 +155,9 @@ def test_findings_from_the_database(db, tmp_path):
     put(db, row(user="stu01"), row(user="stu02", session="other"),
         row(user="stu01", session="old", end=NOW - timedelta(days=40)),
         row("interactive_user_cpu_800pct_30min", user="stu01", session="user-5000", role="interactive",
-            host="spdrweb.example.edu", site="spiderweb", cpu=900.0))
+            host="interactive1.example.edu", site="interactive1", cpu=900.0))
     got = L.findings(db, "stu01", {}, now=NOW)
-    assert [(f.site, f.program) for f in got] == [("spydur", "python3")]       # theirs, a login node, 30 days
+    assert [(f.site, f.program) for f in got] == [("hpc1", "python3")]       # theirs, a login node, 30 days
     assert L.findings(db, "stu01", {"notices": {"login_node": {"days": 60}}}, now=NOW)[-1].minutes == 20
     assert len(L.findings(db, "stu01", {"notices": {"login_node": {"days": 60}}}, now=NOW)) == 2
     assert L.findings(db, "stu01", {"notices": {"login_node": {"show": False}}}, now=NOW) == []
@@ -172,7 +172,7 @@ def test_findings_from_the_database(db, tmp_path):
     r = row(user="stu01")
     del r["source_site"]
     put(site_db, r)
-    assert L.findings(site_db, "stu01", {}, now=NOW)[0].site == "spydur"
+    assert L.findings(site_db, "stu01", {}, now=NOW)[0].site == "hpc1"
 
 
 def test_what_the_console_and_the_command_line_get():
@@ -185,7 +185,7 @@ def test_what_the_console_and_the_command_line_get():
     json.dumps(s)
     text = L.text(found[:1], 30)
     assert text.startswith("\nOn the login nodes (last 30 days)")
-    assert "python3 on spydur" in text and "for 20 min (1.5 cores)" in text and "python3 run.py --big" in text
+    assert "python3 on hpc1" in text and "for 20 min (1.5 cores)" in text and "python3 run.py --big" in text
     assert "srun --pty" in text
     assert L.text([], 30) == ""
     assert L._span(75) == "1 h 15 min" and L._span(120) == "2 h" and L._span(5) == "5 min"

@@ -4,7 +4,7 @@ A lab's PI asks Research Computing for accounts for their students on
 **My lab** in the Console, and the request is kept: who asked, for whom, on
 which clusters, and what became of each account, with who closed it and
 when. It is the record a team with no ticket system doesn't otherwise have:
-each request has a number, as a ticket would (ARC-0012). nomad never makes
+each request has a number, as a ticket would (REQ-0012). nomad never makes
 an account itself: Research Computing makes them as it does now, and closes
 each one here.
 
@@ -55,32 +55,37 @@ From the hub's shell, as the account the Console runs as:
 ```
 sudo -u nomad nomad lab accounts list --open
 sudo -u nomad nomad lab accounts list --find jdoe
-sudo -u nomad nomad lab accounts show ARC-0012
-sudo -u nomad nomad lab accounts close ARC-0012 jdoe hpc1 made
-sudo -u nomad nomad lab accounts close ARC-0012 asmith hpc1 not_made --note "not enrolled this term"
+sudo -u nomad nomad lab accounts show REQ-0012
+sudo -u nomad nomad lab accounts close REQ-0012 jdoe hpc1 made
+sudo -u nomad nomad lab accounts close REQ-0012 asmith hpc1 not_made --note "not enrolled this term"
 sudo -u nomad nomad lab accounts lookup "Jane Doe" jdoe --file students.csv
 sudo -u nomad nomad lab accounts check
 ```
 
 ## Request numbers
 
-Each request has a number, shown as `ARC-0012`: on the PI's card, first in
-the subject of both emails (`[ARC-0012] Account request: doelab, 3 people on
-hpc1`, `[ARC-0012] The account for jdoe on hpc1 is ready`), on the Admin
+Each request has a number, shown as `REQ-0012`: on the PI's card, first in
+the subject of both emails (`[REQ-0012] Account request: doelab, 3 people on
+hpc1`, `[REQ-0012] The account for jdoe on hpc1 is ready`), on the Admin
 page and in the log. A reply keeps the subject, so the number comes back
 with it. Requests made before nomad 1.44.0 keep their number: #12 is
-ARC-0012.
+REQ-0012.
 
 The numbers are one sequence, kept in lab_check.db, that other kinds of
 request will share: a number is never given twice, whatever it numbers.
 
 ```toml
 [console.tickets]
-prefix = "ARC"          # letters and digits, at most 10
+prefix = "REQ"          # letters and digits, at most 10 (the default; before 1.66.0 "ARC")
 digits = 4              # the width, with leading zeros (3 to 8); a larger number just grows
 ```
 
-To find a request, give its number (`ARC-0012`, `#12` or `12`), or a NetID,
+Before 1.66.0 the default prefix was `ARC`. A site whose numbers read
+`ARC-0012` keeps them by setting `prefix = "ARC"`: the numbers themselves
+never change, only how they are shown, and a reply to an older email is
+still found by its number.
+
+To find a request, give its number (`REQ-0012`, `#12` or `12`), or a NetID,
 a name, a lab or the PI who asked (any part of one): `nomad lab accounts
 list --find TEXT`, or the search box on the Admin page.
 

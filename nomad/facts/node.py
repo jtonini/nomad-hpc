@@ -2,7 +2,7 @@
 # Copyright (C) 2026 João Tonini
 """One node over a window: its readings and what happened on it (1.41.0).
 
-    node(conn, "spydur", "n012", since, until, staff=True)
+    node(conn, "hpc1", "n012", since, until, staff=True)
 
 The question Grafana answers with a query ("what was this node doing on
 Tuesday afternoon?"), answered once, so the Console's node timeline, a link

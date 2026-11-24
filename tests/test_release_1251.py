@@ -149,7 +149,7 @@ def person(monkeypatch, tmp_path):
 
 
 SHOW = ("JobId=86307 JobName=job.sh UserId=jdoe(5123) GroupId=people(100) JobState=RUNNING Reason=None "
-        "RunTime=00:01:02 TimeLimit=00:40:00 NodeList=spdr01 WorkDir=/home/jdoe/my run StdOut={out} "
+        "RunTime=00:01:02 TimeLimit=00:40:00 NodeList=nd01 WorkDir=/home/jdoe/my run StdOut={out} "
         "StdErr={out} TRES=cpu=1,mem=1G,node=1")
 
 
@@ -165,9 +165,9 @@ def test_a_jobs_details_its_record_and_the_end_of_its_output(person, capsys):
         if argv[7] == "scontrol":
             return subprocess.CompletedProcess(argv, 0, SHOW.format(out=out).encode() + b"\n")
         rows = ("86307|job.sh|jdoe|RUNNING|0:0|2026-11-02T09:46:00|2026-11-02T09:46:05|Unknown|00:01:02|"
-                "00:40:00|1|spdr01|1|1G||00:00:01|cpu=1,mem=1G,node=1|/home/jdoe/my run\n"
+                "00:40:00|1|nd01|1|1G||00:00:01|cpu=1,mem=1G,node=1|/home/jdoe/my run\n"
                 "86307.batch|batch||RUNNING|0:0|2026-11-02T09:46:05|2026-11-02T09:46:05|Unknown|00:01:02||1|"
-                "spdr01|1||12M|00:00:01|cpu=1,mem=1G,node=1|\n"
+                "nd01|1||12M|00:00:01|cpu=1,mem=1G,node=1|\n"
                 "86307|another's|amy|RUNNING|0:0|a|b|c|d|e|1|n|1|1G||0|cpu=1|/home/amy\n")   # a reused number
         return subprocess.CompletedProcess(argv, 0, rows.replace("|", gate.SEP).encode())
     assert gate.run(["job", "--job", "86307"], str(person / "bin" / "nomad-gate"), run_=run_) == 0

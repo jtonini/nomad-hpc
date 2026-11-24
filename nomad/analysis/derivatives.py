@@ -494,6 +494,91 @@ def analyze_disk_trend(
     )
 
 
+def analyze_disk_fit(
+    history: list[dict[str, Any]],
+    limit_bytes: int | None = None,
+) -> DerivativeAnalysis:
+    """A disk's trend over the whole window (1.66.0, `nomad analyze`): a
+    curve fitted to every reading (least squares, v = a + b·x + c·x², x in
+    days before the last reading), not the last three readings, which a few
+    gigabytes of noise turn into an absurd acceleration. The rate is the
+    curve's slope now; the acceleration counts only when it changes the
+    rate by a quarter or more over the window, else the trend is a line."""
+    pts = []
+    for r in history:
+        t, v = r.get("timestamp"), r.get("used_bytes")
+        if t is None or v is None:
+            continue
+        if isinstance(t, str):
+            try:
+                t = datetime.fromisoformat(t)
+            except ValueError:
+                continue
+        pts.append((t, float(v)))
+    pts.sort(key=lambda x: x[0])
+    empty = DerivativeAnalysis(
+        current_value=pts[-1][1] if pts else 0, first_derivative=None, second_derivative=None,
+        trend=Trend.UNKNOWN, alert_level=AlertLevel.NONE, projected_value_1d=None, projected_value_7d=None,
+        days_until_limit=None, n_points=len(pts),
+        time_span_hours=(pts[-1][0] - pts[0][0]).total_seconds() / 3600 if pts else 0)
+    if len(pts) < 3:
+        return empty
+    t_end, v_end = pts[-1]
+    xs = [(t - t_end).total_seconds() / 86400 for t, _ in pts]
+    ys = [v - v_end for _, v in pts]
+    span = -xs[0]
+    if span <= 0:
+        return empty
+    # the normal equations of the fit, solved by elimination
+    S = [sum(x ** k for x in xs) for k in range(5)]
+    T = [sum((x ** k) * y for x, y in zip(xs, ys)) for k in range(3)]
+    m = [[S[0], S[1], S[2], T[0]], [S[1], S[2], S[3], T[1]], [S[2], S[3], S[4], T[2]]]
+    for i in range(3):
+        piv = max(range(i, 3), key=lambda r: abs(m[r][i]))
+        m[i], m[piv] = m[piv], m[i]
+        if abs(m[i][i]) < 1e-12:
+            return empty
+        for r in range(3):
+            if r != i:
+                f = m[r][i] / m[i][i]
+                m[r] = [a - f * b for a, b in zip(m[r], m[i])]
+    a, b, c = (m[i][3] / m[i][i] for i in range(3))
+    d1, d2 = b, 2 * c                                  # bytes a day, bytes a day a day
+    if abs(d2 * span) < 0.25 * abs(d1):
+        d2 = 0.0
+    level = max(abs(v) for _, v in pts) or 1.0
+    if abs(d1 * span) < 1e-3 * level and not d2:
+        trend = Trend.STABLE
+    elif not d2:
+        trend = Trend.INCREASING_LINEAR if d1 > 0 else Trend.DECREASING_LINEAR
+    elif d1 >= 0:
+        trend = Trend.ACCELERATING_GROWTH if d2 > 0 else Trend.DECELERATING_GROWTH
+    else:
+        trend = Trend.ACCELERATING_DECLINE if d2 < 0 else Trend.DECELERATING_DECLINE
+    now = v_end + a                                    # the curve's value now (the last reading, less its noise)
+
+    def at(days):
+        return now + d1 * days + 0.5 * d2 * days * days
+    until = None
+    if limit_bytes and d1 > 0:
+        room = limit_bytes - now
+        if room <= 0:
+            until = 0.0
+        elif d2:
+            disc = d1 * d1 + 2 * d2 * room
+            until = (-d1 + disc ** 0.5) / d2 if disc >= 0 else None
+        else:
+            until = room / d1
+    alert = AlertLevel.NONE
+    if until is not None:
+        alert = AlertLevel.CRITICAL if until <= 3 else AlertLevel.WARNING if until <= 14 else AlertLevel.INFO \
+            if until <= 60 else AlertLevel.NONE
+    return DerivativeAnalysis(
+        current_value=v_end, first_derivative=d1, second_derivative=d2 or None, trend=trend, alert_level=alert,
+        projected_value_1d=at(1), projected_value_7d=at(7), days_until_limit=until, n_points=len(pts),
+        time_span_hours=span * 24)
+
+
 def analyze_queue_trend(
     history: list[dict[str, Any]],
     smoothing: str = 'moving_average',

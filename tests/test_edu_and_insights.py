@@ -79,7 +79,7 @@ def test_read_per_user_signals_returns_all_recent(db_with_alerts):
 
 
 def test_read_per_user_signals_filters_by_hostname(db_with_alerts):
-    signals = read_per_user_signals(db_with_alerts, hostname="spydur")
+    signals = read_per_user_signals(db_with_alerts, hostname="hpc1")
     assert len(signals) == 2
     assert {s.username for s in signals} == {"ia3nk", "perickso"}
 
@@ -91,19 +91,19 @@ def test_signals_carry_severity_in_category(db_with_alerts):
     assert by_sev["abezerra"] == "informational"
 
 
-def test_aggregate_cluster_culture_for_spydur(db_with_alerts):
+def test_aggregate_cluster_culture_for_hpc1(db_with_alerts):
     signals = read_per_user_signals(db_with_alerts)
-    agg = aggregate_cluster_culture_signal(signals, "spydur")
+    agg = aggregate_cluster_culture_signal(signals, "hpc1")
     assert agg is not None
     assert agg.context["distinct_users"] == 2
     assert agg.context["severity_breakdown"]["actionable"] == 2
 
 
-def test_aggregate_cluster_culture_for_arachne(db_with_alerts):
-    """Arachne's culture: 1 user, all informational. The validation report's
-    'arachne is better disciplined' observation lands here as data."""
+def test_aggregate_cluster_culture_for_hpc2(db_with_alerts):
+    """Hpc2's culture: 1 user, all informational. The validation report's
+    'hpc2 is better disciplined' observation lands here as data."""
     signals = read_per_user_signals(db_with_alerts)
-    agg = aggregate_cluster_culture_signal(signals, "arachne")
+    agg = aggregate_cluster_culture_signal(signals, "hpc2")
     assert agg is not None
     assert agg.context["distinct_users"] == 1
     assert agg.context["severity_breakdown"] == {"informational": 1}

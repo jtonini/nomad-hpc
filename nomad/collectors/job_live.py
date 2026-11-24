@@ -125,7 +125,7 @@ def parse_squeue(text: str) -> list[dict]:
 def parse_sstat(text: str) -> dict[str, list[dict]]:
     """sstat's lines by job (its id before the step: "87790" of
     "87790.batch", "5005_7" of "5005_7.0"), each step once (1.32.1): asked
-    for an array's own id, sstat also answers for its running tasks (vadur:
+    for an array's own id, sstat also answers for its running tasks (hpc3:
     -j 12266 gave 12987.batch and 13020.batch too), so a task asked for by
     its own id as well came back twice, and counted twice."""
     out: dict[str, dict[str, dict]] = {}

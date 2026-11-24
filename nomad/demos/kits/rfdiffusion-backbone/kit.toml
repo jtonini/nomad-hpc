@@ -27,7 +27,7 @@ what = "How long the design took"
 match = "Finished design"
 
 [recorded]                      # one real run, kept with the kit
-site = "spydur"
+site = "hpc1"
 date = "2026-11-09"
 module = "rfdiffusion/latest"
 partition = "gpunodes"

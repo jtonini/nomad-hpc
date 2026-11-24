@@ -67,7 +67,7 @@ def test_the_kits_ready_here(person, capsys, tmp_path):
     assert call("kits", "--kits-dir", str(tmp_path / "site")) == 0
     got = {k["name"]: k for k in _out(capsys)["kits"]}
     assert got["gromacs-water"]["from"] == str(tmp_path / "site") and "from" not in got["r-bootstrap"]
-    assert got["gromacs-water"]["recorded_text"].startswith("A run of it on spydur")     # nomad's, for a built kit
+    assert got["gromacs-water"]["recorded_text"].startswith("A run of it (")     # nomad's, for a built kit
 
 
 def test_a_copy_and_a_new_folder_as_the_person(person, capsys):
@@ -116,9 +116,9 @@ def test_practice_runs_size_nothing_but_themselves(tmp_path):
 
 
 def test_the_hub_names_each_sites_kits():
-    s = K.settings({"submit": {"demos": {"site_dirs": {"spydur": "/usr/local/sw/nomad-demos"}}}})
-    assert s.site_dirs == {"spydur": "/usr/local/sw/nomad-demos"} and not s.problems
-    bad = K.settings({"submit": {"demos": {"site_dirs": {"spydur": "relative"}}}})
+    s = K.settings({"submit": {"demos": {"site_dirs": {"hpc1": "/usr/local/sw/nomad-demos"}}}})
+    assert s.site_dirs == {"hpc1": "/usr/local/sw/nomad-demos"} and not s.problems
+    bad = K.settings({"submit": {"demos": {"site_dirs": {"hpc1": "relative"}}}})
     assert bad.site_dirs == {} and bad.problems
 
 
@@ -130,17 +130,17 @@ def test_the_recorded_runs_come_with_their_kits():
             "amber-peptide": []}                                       # AMBER: an academic licence, its output not kept
     for name, files in kept.items():
         k = got[name]
-        assert k.recorded["site"] == "spydur" and k.recorded["files"] == files, name
+        assert k.recorded["site"] == "hpc1" and k.recorded["files"] == files, name
         assert k.minutes <= 2 and k.recorded["runtime_s"] < 60 * k.minutes, name
         text = K.recorded_text(k)
-        assert text.startswith("A run of it on spydur (2026-11-09") and json.dumps(k.to_dict()), name
+        assert text.startswith("A run of it (2026-11-09") and json.dumps(k.to_dict()), name
         for x in K.recorded_look(k):
             assert x["found"], (name, x["file"])                        # every thing to look at, kept
             for f in x["found"]:
                 assert "lines" not in f or f["lines"], (name, x["file"])
         for f in files:                                                # no one's name in what is shipped
             data = (k.path / f).read_bytes()
-            assert b"jtonini" not in data and b"/home/" not in data.replace(b"/home/you", b""), (name, f)
+            assert b"rcadmin" not in data and b"/home/" not in data.replace(b"/home/you", b""), (name, f)
     assert "about 3.4 of its 4 core(s) kept busy" in K.recorded_text(got["cp2k-water"])
     assert "1 GPU(s) (NVIDIA A40)" in K.recorded_text(got["gromacs-water"])
     assert "at most 5.0 GB" in K.recorded_text(got["rfdiffusion-backbone"])
@@ -160,9 +160,9 @@ def _kit(tmp_path, recorded):
 
 
 def test_a_recorded_run_is_checked(tmp_path):
-    good = 'site = "spydur"\ndate = "2026-11-09"\ncpus = 1\nruntime_s = 3\n'
+    good = 'site = "hpc1"\ndate = "2026-11-09"\ncpus = 1\nruntime_s = 3\n'
     k = K.load(_kit(tmp_path, good + 'files = ["recorded/a.out", "recorded/sub/b.out"]\n'))
-    assert k.recorded == {"site": "spydur", "date": "2026-11-09", "cpus": 1, "gpus": 0, "runtime_s": 3, "files": []}
+    assert k.recorded == {"site": "hpc1", "date": "2026-11-09", "cpus": 1, "gpus": 0, "runtime_s": 3, "files": []}
     (tmp_path / "k" / "recorded" / "sub").mkdir(parents=True)
     (tmp_path / "k" / "recorded" / "a.out").write_text("x\n")
     os.symlink("/etc/passwd", tmp_path / "k" / "recorded" / "sub" / "b.out")
@@ -215,18 +215,18 @@ def test_a_built_kit_keeps_nomads_recorded_run(tmp_path):
 
 def test_a_kits_script_is_made_with_its_own_values_and_says_so():
     k = K.find({}, "gromacs-water")
-    conf = {"submit": {"demos": {"partition": {"spydur": "condos"}, "gpu_partition": "gpunodes"}}}
-    assert K.job_values(k, conf, "spydur") == {"cpus": 4, "mem": k.mem, "time": k.time, "gpus": 1,
+    conf = {"submit": {"demos": {"partition": {"hpc1": "condos"}, "gpu_partition": "gpunodes"}}}
+    assert K.job_values(k, conf, "hpc1") == {"cpus": 4, "mem": k.mem, "time": k.time, "gpus": 1,
                                                "partition": "gpunodes", "choose": dict(k.choose) or None}
     r = K.find({}, "r-bootstrap")
-    assert K.job_values(r, conf, "spydur")["partition"] == "condos" and K.job_values(r, {}, "spydur")["partition"] is None
+    assert K.job_values(r, conf, "hpc1")["partition"] == "condos" and K.job_values(r, {}, "hpc1")["partition"] is None
     text = K.mark("#!/bin/bash\n#SBATCH -c 4\nsrun x\n", k)
     assert text.startswith("#!/bin/bash\n# A practice run (nomad's gromacs-water kit)") and "#SBATCH -c 4" in text
     assert K.mark("echo\n", k).startswith("# A practice run")
 
 
 TEMPLATES = {"submit": {
-    "demos": {"partition": {"spydur": "condos"}, "gpu_partition": "gpunodes"},
+    "demos": {"partition": {"hpc1": "condos"}, "gpu_partition": "gpunodes"},
     "templates": [
         {"program": "R", "modules": ["R/*"], "inputs": [".R"], "run": "Rscript {input}", "cpus": 1, "mem": "8G",
          "time": "1-00:00:00", "options": [{"name": "cores", "label": "Cores", "choices": [
@@ -244,28 +244,28 @@ TEMPLATES = {"submit": {
 
 def test_the_persons_own_choice_is_sized_as_the_template_sizes_it():
     r, a, g = (K.find({}, n) for n in ("r-bootstrap", "amber-peptide", "gromacs-water"))
-    assert K.job_values(r, TEMPLATES, "spydur")["cpus"] == 1
-    v = K.job_values(r, TEMPLATES, "spydur", choose={"cores": 2})                     # R's second run: 8 cores
+    assert K.job_values(r, TEMPLATES, "hpc1")["cpus"] == 1
+    v = K.job_values(r, TEMPLATES, "hpc1", choose={"cores": 2})                     # R's second run: 8 cores
     assert (v["cpus"], v["gpus"], v["choose"], v["mem"], v["time"], v["partition"]) == (
         8, 0, {"cores": 2}, r.mem, r.time, "condos")
     # the "(usual)" first choice, clicked: what the kit has anyway -- its own size
-    assert K.job_values(r, TEMPLATES, "spydur", choose={"cores": 1}) == K.job_values(r, TEMPLATES, "spydur")
-    assert K.job_values(g, TEMPLATES, "spydur", choose={"ranks": 1})["cpus"] == 4      # not the template's 16
-    v = K.job_values(g, TEMPLATES, "spydur", choose={"precision": 2})                # changes neither size
+    assert K.job_values(r, TEMPLATES, "hpc1", choose={"cores": 1}) == K.job_values(r, TEMPLATES, "hpc1")
+    assert K.job_values(g, TEMPLATES, "hpc1", choose={"ranks": 1})["cpus"] == 4      # not the template's 16
+    v = K.job_values(g, TEMPLATES, "hpc1", choose={"precision": 2})                # changes neither size
     assert (v["cpus"], v["gpus"], v["choose"], v["partition"]) == (4, 1, {"precision": 2}, "gpunodes")
-    assert K.job_values(g, TEMPLATES, "spydur", choose={"ranks": 2})["cpus"] == 32     # what the choice says
+    assert K.job_values(g, TEMPLATES, "hpc1", choose={"ranks": 2})["cpus"] == 32     # what the choice says
     # AMBER on one CPU core: no GPU, and not sent to the GPU nodes
-    v = K.job_values(a, TEMPLATES, "spydur", choose={"engine": 2})
+    v = K.job_values(a, TEMPLATES, "hpc1", choose={"engine": 2})
     assert (v["cpus"], v["gpus"], v["partition"]) == (1, 0, "condos")
-    v = K.job_values(dict(K.kit_values(a), cpus=2), TEMPLATES, "spydur", choose={"engine": 2})
+    v = K.job_values(dict(K.kit_values(a), cpus=2), TEMPLATES, "hpc1", choose={"engine": 2})
     assert (v["cpus"], v["gpus"]) == (2, 0)                                          # the kit's CPUs stay
-    assert (K.job_values(a, TEMPLATES, "spydur")["gpus"], K.job_values(a, TEMPLATES, "spydur")["partition"]) == (
+    assert (K.job_values(a, TEMPLATES, "hpc1")["gpus"], K.job_values(a, TEMPLATES, "hpc1")["partition"]) == (
         1, "gpunodes")
     # a CPU kit never takes a GPU template's GPUs
     from nomad.submit import templates as TT
-    text = TT.make(TEMPLATES, "spydur", "GROMACS", module="gromacs/2026.2-gpu", input_path="/home/a/w.tpr",
+    text = TT.make(TEMPLATES, "hpc1", "GROMACS", module="gromacs/2026.2-gpu", input_path="/home/a/w.tpr",
                    available=["gromacs/2026.2-gpu"], **K.job_values(dict(K.kit_values(g), gpus=0), TEMPLATES,
-                                                                      "spydur"))["text"]
+                                                                      "hpc1"))["text"]
     assert "--gres=gpu" not in text and "--partition=condos" in text
 
 

@@ -103,8 +103,8 @@ class _SMTP(smtplib.SMTP):
     """smtplib, checking the server's certificate against a chosen name.
 
     smtplib checks it against the name it connected to. A server in a pool may
-    present the pool's certificate instead (cotton.richmond.edu presents
-    smtp.richmond.edu); verification then still demands a valid certificate for
+    present the pool's certificate instead (relay.example.edu presents
+    smtp.example.edu); verification then still demands a valid certificate for
     exactly that name.
     """
 

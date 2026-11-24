@@ -3,15 +3,15 @@
 """The campus directory, asked who a NetID or a name is (1.42.0).
 
 For account requests (nomad.account_requests): a PI types NetIDs or names,
-and nomad says who each is before anything goes to ARC. Asked through
+and nomad says who each is before anything goes to research computing. Asked through
 ``ldapsearch`` (openldap-clients), as a service account, so nomad needs no
 LDAP library of its own and the password is handed over in a file, never on
 a command line. From nomad.toml::
 
     [directory]
-    uri = "ldaps://ldap.richmond.edu"           # ldaps: the password is never sent in the clear
-    base = "ou=people,dc=richmond,dc=edu"       # where people are
-    bind_dn = "uid=...,ou=...,dc=richmond,dc=edu"   # the service account
+    uri = "ldaps://ldap.example.edu"           # ldaps: the password is never sent in the clear
+    base = "ou=people,dc=example,dc=edu"       # where people are
+    bind_dn = "uid=...,ou=...,dc=example,dc=edu"   # the service account
     password_file = "/home/nomad/.config/nomad/directory_password"   # its password, the nomad account's (600)
     timeout = 15                                # seconds a search may take
 

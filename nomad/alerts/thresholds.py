@@ -327,7 +327,7 @@ class ThresholdChecker:
             return []
         # Past its critical threshold the disk has that alert, reminded of
         # once a day. A forecast adds to it only when the rest is going fast
-        # -- full within hours (spydur /home at 97%, 529 GB left: a fill like
+        # -- full within hours (hpc1 /home at 97%, 529 GB left: a fill like
         # the weekend's would take them in six) -- not each time a little
         # space is freed and taken again.
         if (item.get('used_percent') or 0) >= t.get('used_percent_critical', 95):

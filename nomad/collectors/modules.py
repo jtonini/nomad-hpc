@@ -7,7 +7,7 @@ versions the cluster really has (nomad.submit.templates).
 It runs ``module -t avail`` in a login shell of the account collecting
 (Lmod, or Environment Modules: ``module`` is a shell function a login sets
 up), after ``module use`` for each of ``module_paths`` -- a folder of modules
-a login doesn't add on its own (spydur's /usr/local/sw/modulefiles)::
+a login doesn't add on its own (hpc1's /usr/local/sw/modulefiles)::
 
     [collectors.modules]
     enabled = true

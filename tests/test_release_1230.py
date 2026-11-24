@@ -21,7 +21,7 @@ NOW = datetime(2026, 10, 30, 16, 0, 0)
 
 @pytest.fixture(autouse=True)
 def _known_uids():
-    probe._UIDS.update({"alice": 1000, "bob": 1001, "carol": 1002, "evil": 1003,
+    probe._UIDS.update({"alice": 1000, "bob": 1001, "robin": 1002, "evil": 1003,
                         "dave": 1004, "root": 0})
     yield
 
@@ -35,40 +35,40 @@ def _auth_log(lines):
 
 def test_failed_sudo_su_counted_per_account():
     log = _auth_log([
-        "Oct 30 15:59:01 spydur sudo:    alice : 1 incorrect password attempt ; USER=root ; COMMAND=/bin/su\n",
-        "Oct 30 15:58:00 spydur su: pam_unix(su-l:auth): authentication failure; logname=bob ruser=bob user=root\n",
-        "Oct 30 15:57:00 spydur su: FAILED SU (to root) carol on pts/2\n",
+        "Oct 30 15:59:01 hpc1 sudo:    alice : 1 incorrect password attempt ; USER=root ; COMMAND=/bin/su\n",
+        "Oct 30 15:58:00 hpc1 su: pam_unix(su-l:auth): authentication failure; logname=bob ruser=bob user=root\n",
+        "Oct 30 15:57:00 hpc1 su: FAILED SU (to root) robin on pts/2\n",
     ])
     rows = probe.auth_failures(log, window_hours=24, min_uid=1000, now=NOW)
     got = {r["user"]: int(r["detail"]) for r in rows}
-    assert got == {"alice": 1, "bob": 1, "carol": 1}
+    assert got == {"alice": 1, "bob": 1, "robin": 1}
     assert all(r["kind"] == "auth_failures" and r["processes"] == int(r["detail"]) for r in rows)
 
 
 def test_su_to_root_counts_the_actor_not_the_target():
     # user=root is the TARGET; the actor (ruser/by) is who tried, and must be counted.
-    log = _auth_log(["Oct 30 15:57:00 spydur su: FAILED SU (to root) carol on pts/2\n"])
+    log = _auth_log(["Oct 30 15:57:00 hpc1 su: FAILED SU (to root) robin on pts/2\n"])
     rows = probe.auth_failures(log, 24, 1000, NOW)
-    assert [r["user"] for r in rows] == ["carol"]
+    assert [r["user"] for r in rows] == ["robin"]
 
 
 def test_a_command_string_cannot_inject_an_account():
     # a *successful* sudo running echo, whose argument spells a fake failure after COMMAND=
     log = _auth_log([
-        "Oct 30 15:56:00 spydur sudo:    alice : USER=root ; COMMAND=/bin/echo evil : authentication failure\n"])
+        "Oct 30 15:56:00 hpc1 sudo:    alice : USER=root ; COMMAND=/bin/echo evil : authentication failure\n"])
     assert probe.auth_failures(log, 24, 1000, NOW) == []
 
 
 def test_old_attempts_fall_outside_the_window():
     log = _auth_log([
-        "Oct 28 10:00:00 spydur sudo:    dave : 1 incorrect password attempt ; COMMAND=/x\n",
-        "Oct 30 15:59:00 spydur sudo:    alice : 1 incorrect password attempt ; COMMAND=/x\n"])
+        "Oct 28 10:00:00 hpc1 sudo:    dave : 1 incorrect password attempt ; COMMAND=/x\n",
+        "Oct 30 15:59:00 hpc1 sudo:    alice : 1 incorrect password attempt ; COMMAND=/x\n"])
     got = {r["user"] for r in probe.auth_failures(log, 24, 1000, NOW)}
     assert got == {"alice"}
 
 
 def test_roots_own_failures_are_excluded():
-    log = _auth_log(["Oct 30 15:55:00 spydur su: FAILED SU (to x) root on pts/9\n"])
+    log = _auth_log(["Oct 30 15:55:00 hpc1 su: FAILED SU (to x) root on pts/9\n"])
     assert probe.auth_failures(log, 24, 1000, NOW) == []
 
 
@@ -79,7 +79,7 @@ def test_an_unreadable_or_missing_log_is_silent():
 
 def test_iso_timestamps_are_understood():
     log = _auth_log([
-        "2026-10-30T15:59:00.123456-04:00 spydur sudo:    alice : 1 incorrect password attempt ; COMMAND=/x\n"])
+        "2026-10-30T15:59:00.123456-04:00 hpc1 sudo:    alice : 1 incorrect password attempt ; COMMAND=/x\n"])
     assert [r["user"] for r in probe.auth_failures(log, 24, 1000, NOW)] == ["alice"]
 
 

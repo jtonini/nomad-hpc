@@ -1,4 +1,4 @@
-"""1.27.0: how fast each CPU really runs when busy. arachne's node01-03 lost a
+"""1.27.0: how fast each CPU really runs when busy. hpc2's node01-03 lost a
 supply's input on 4 Oct 2026 and their boards braked the CPUs to ~400 MHz for
 a month; the readings are João's from 5 Nov (node02 braked, node51 not)."""
 import ast
@@ -171,8 +171,8 @@ def test_the_hub_alerts_for_a_site_that_leaves_them_to_it(tmp_path, monkeypatch)
                       .replace("every_minutes REAL);", "every_minutes REAL, source_site TEXT);"))
     now = datetime.now().isoformat(timespec="seconds")
     # node06: throttled, but the site's [alerts.clock] leaves it out (no severity stored)
-    for site, node, throttled, sev in (("vadur", "node04", 1, "warning"), ("vadur", "node05", 0, None),
-                                       ("vadur", "node06", 1, None), ("spydur", "spdr01", 1, "warning")):
+    for site, node, throttled, sev in (("hpc3", "node04", 1, "warning"), ("hpc3", "node05", 0, None),
+                                       ("hpc3", "node06", 1, None), ("hpc1", "nd01", 1, "warning")):
         hub.execute("INSERT INTO cpu_clock_hosts (node, read_at, mhz, reference, basis, measure, ratio, low_since, "
                     "throttled, severity, problem, source_site) VALUES (?, ?, 400, 3000, 'its usual clock', 'mhz', "
                     "0.13, ?, ?, ?, 'its CPU runs at 400 MHz busy, 13% of 3000 MHz (its usual clock)', ?)",
@@ -181,11 +181,11 @@ def test_the_hub_alerts_for_a_site_that_leaves_them_to_it(tmp_path, monkeypatch)
     sent = []
     monkeypatch.setattr("nomad.alerts.dispatcher.send_alert",
                         lambda severity, source, message, **k: sent.append((severity, source, message, k)) or {"x": 1})
-    cfg = {"hub": {"sites": [{"name": "vadur", "alerts": "hub"}, {"name": "spydur"}]}}
+    cfg = {"hub": {"sites": [{"name": "hpc3", "alerts": "hub"}, {"name": "hpc1"}]}}
     hub_clock.hub_clock_alerts(tmp_path / "combined.db", tmp_path, config=cfg)
-    assert [(s[1], s[3]["subject"]) for s in sent] == [("clock", "vadur/node04 cpu clock")]
-    assert sent[0][2].startswith("node04 at vadur: its CPU runs at 400 MHz") and sent[0][2].endswith(
-        "Sent by the hub for vadur.")
+    assert [(s[1], s[3]["subject"]) for s in sent] == [("clock", "hpc3/node04 cpu clock")]
+    assert sent[0][2].startswith("node04 at hpc3: its CPU runs at 400 MHz") and sent[0][2].endswith(
+        "Sent by the hub for hpc3.")
     hub_clock.hub_clock_alerts(tmp_path / "combined.db", tmp_path, config=cfg)
     assert len(sent) == 1
 
@@ -274,9 +274,9 @@ def test_one_slow_node_doesnt_send_the_job_to_a_guest_condo():
     cfg = W.Settings()
     now = datetime(2026, 11, 5, 10, 0)
     cands = [{"partition": "cpunodes", "role": "small", "allowed": True, "why": "", "nodes": 50},
-             {"partition": "parishcondo", "role": "guest", "allowed": True, "why": "", "nodes": 4}]
+             {"partition": "amescondo", "role": "guest", "allowed": True, "why": "", "nodes": 4}]
     starts = {"now": now.isoformat(), "starts": [{"partition": "cpunodes", "soon": True},
-                                                 {"partition": "parishcondo",
+                                                 {"partition": "amescondo",
                                                   "start": (now + timedelta(days=4)).isoformat()}]}
     got = W.rank(cands, starts, cfg, slow={"cpunodes": [("node02", {"mhz": 396, "ratio": 0.105})]})
     assert got["recommended"] == "cpunodes"                         # it starts now: one slow node of 50 is said
@@ -320,9 +320,9 @@ def test_the_pick_stays_with_the_kind_the_site_puts_first():
     from nomad.submit import where as W
     cfg = W.Settings(reserve_nodes=0)
     cands = [{"partition": "cpunodes", "role": "small", "allowed": True, "why": "", "nodes": 50},
-             {"partition": "parishcondo", "role": "guest", "allowed": True, "why": "", "nodes": 4},
+             {"partition": "amescondo", "role": "guest", "allowed": True, "why": "", "nodes": 4},
              {"partition": "bigmem", "role": "overflow", "allowed": True, "why": "", "nodes": 5}]
-    starts = {"starts": [{"partition": p, "soon": True} for p in ("cpunodes", "parishcondo", "bigmem")],
+    starts = {"starts": [{"partition": p, "soon": True} for p in ("cpunodes", "amescondo", "bigmem")],
               "nodes": {"bigmem": {"idle": 3}}}
     got = W.rank(cands, starts, cfg, slow={"cpunodes": [("node02", {"mhz": 396, "ratio": 0.1})]})
     assert got["recommended"] == "cpunodes" and got["fastest"] == "cpunodes"

@@ -26,16 +26,16 @@ def _combined(path):
         CREATE TABLE per_user_daily (day TEXT, hostname TEXT, username TEXT);
     """)
     for user in ("kim", "pat", "ann", "lee"):
-        db.execute("INSERT INTO group_membership VALUES (?, 'kim$', 'spydur', 'spydur', '2026-11-20 10:00:00', 1, "
+        db.execute("INSERT INTO group_membership VALUES (?, 'kim$', 'hpc1', 'hpc1', '2026-11-20 10:00:00', 1, "
                    "'2024-01-01')", (user,))
-    db.execute("INSERT INTO group_membership VALUES ('zed', 'pat$', 'spydur', 'spydur', '2026-11-20 10:00:00', 1, "
+    db.execute("INSERT INTO group_membership VALUES ('zed', 'pat$', 'hpc1', 'hpc1', '2026-11-20 10:00:00', 1, "
                "'2024-01-01')")
-    db.executemany("INSERT INTO jobs VALUES (?, ?, 'spydur')", [
+    db.executemany("INSERT INTO jobs VALUES (?, ?, 'hpc1')", [
         ("kim", "2026-10-30T09:00:00"), ("kim", "2025-01-02T09:00:00"),
         ("pat", "2024-06-01T09:00:00"), ("zed", "2026-11-01T09:00:00")])
     db.execute("INSERT INTO workstation_user_snapshot VALUES ('2026-11-14 12:00:00', 'ws1', 'lee', 2001)")
     db.execute("INSERT INTO workstation_user_snapshot VALUES ('not a time', 'ws1', 'ann', 2002)")
-    db.execute("INSERT INTO per_user_daily VALUES ('2026-09-01', 'spydur', 'joe')")
+    db.execute("INSERT INTO per_user_daily VALUES ('2026-09-01', 'hpc1', 'joe')")
     db.commit()
     return db
 
@@ -93,7 +93,7 @@ def _config(tmp_path):
     db.close()
     cfg = tmp_path / "nomad.toml"
     cfg.write_text(f'[general]\ndata_dir = "{tmp_path}"\n\n[hub]\noutput_db = "{tmp_path / "combined.db"}"\n\n'
-                   '[[hub.sites]]\nname = "spydur"\nhost = "spydur.example.edu"\n\n'
+                   '[[hub.sites]]\nname = "hpc1"\nhost = "hpc1.example.edu"\n\n'
                    '[console.files]\nmax_mb = 1024\n\n[[console.files.machines]]\nname = "ws1"\n'
                    'host = "ws1.example.edu"\n')
     return cfg

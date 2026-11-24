@@ -11,7 +11,7 @@ might do differently from another.
     name_members = true                    # an owner's report names their lab's members
     formats = ["html", "pdf", "json"]
     owner_patterns = ["{name}", "{name}lab", "{name}_lab"]
-    netid_max_length = 8                   # NetIDs cut short here ("tanderso"); 0: never
+    netid_max_length = 8                   # NetIDs cut short here ("tmontgom"); 0: never
     contact = "Questions: rc@example.edu"
     out_dir = "/var/lib/nomad/reports/condos"
     institution = "Research Computing"     # the name at the top, without [console.branding]
@@ -402,7 +402,7 @@ def _members(value, what: str):
 
 def member_groups(members) -> list[str]:
     """The groups a condo's ``members`` names (1.28.1: one or several):
-    "group:myang$,knolin$" -> ["myang$", "knolin$"]; anything else -> []."""
+    "group:tchen$,lnovak$" -> ["tchen$", "lnovak$"]; anything else -> []."""
     if isinstance(members, str) and members.startswith("group:"):
         return [g.strip() for g in members[len("group:"):].split(",") if g.strip()]
     return []

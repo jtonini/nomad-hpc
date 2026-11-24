@@ -16,7 +16,7 @@ each partition's settings (nomad.partitions), Slurm's own preemption settings
 reports' report.toml (each condo's owners, nodes and members).
 
 Nothing here changes Slurm. The switch is Slurm's configuration, applied by
-the site's staff (with a committee's approval, at Richmond): nomad follows
+the site's staff (with a committee's approval, at one site): nomad follows
 what Slurm does -- the Submit page's warning, the requeue checks and the
 messages after a preemption appear only where Slurm really preempts.
 
@@ -137,7 +137,7 @@ def settings(config: dict | None) -> Settings:
 
 def member_groups(c) -> list[str]:
     """The groups report.toml's ``members`` names: the string form,
-    "group:cparish$", or several, "group:myang$,knolin$" (Slurm's AllowGroups
+    "group:rames$", or several, "group:tchen$,lnovak$" (Slurm's AllowGroups
     admits anyone in any of them; a list is NetIDs, as the condo reports read
     it)."""
     from nomad.condo.config import member_groups as groups
@@ -145,7 +145,7 @@ def member_groups(c) -> list[str]:
 
 
 def member_account(c) -> str | None:
-    """The account report.toml's ``members`` names ("account:parish"), else
+    """The account report.toml's ``members`` names ("account:ames"), else
     the condo's own ``account`` (as the condo reports read it)."""
     m = c.members
     if isinstance(m, str) and m.startswith("account:") and len(m) > 8:
@@ -335,7 +335,7 @@ def check(rows: list[dict], cfg: dict, report_cluster, s: Settings,
 
 
 def _hostlist(nodes: list) -> str:
-    """spdr50 ... spdr61 -> spdr[50-61] (Slurm's form), runs of one width."""
+    """nd50 ... nd61 -> nd[50-61] (Slurm's form), runs of one width."""
     import re
     groups: dict = {}
     loose = []

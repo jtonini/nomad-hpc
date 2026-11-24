@@ -95,7 +95,7 @@ def demo_db(tmp_path):
     groups = [
         ("alice", "chem_sim", 1001, "test"),
         ("bob", "chem_sim", 1001, "test"),
-        ("carol", "ml_team", 1002, "test"),
+        ("robin", "ml_team", 1002, "test"),
         ("dave", "ml_team", 1002, "test"),
         ("eve", "genomics", 1003, "test"),
         ("frank", "genomics", 1003, "test"),
@@ -114,7 +114,7 @@ def demo_db(tmp_path):
     job_profiles = {
         "alice": {"partition": "compute", "cpus": (16, 64), "mem": (32000, 128000), "gpus": 0, "runtime": (3600, 28800)},
         "bob": {"partition": "compute", "cpus": (8, 32), "mem": (16000, 64000), "gpus": 0, "runtime": (1800, 14400)},
-        "carol": {"partition": "gpu", "cpus": (8, 16), "mem": (32000, 64000), "gpus": 4, "runtime": (7200, 86400)},
+        "robin": {"partition": "gpu", "cpus": (8, 16), "mem": (32000, 64000), "gpus": 4, "runtime": (7200, 86400)},
         "dave": {"partition": "gpu", "cpus": (4, 8), "mem": (16000, 32000), "gpus": 2, "runtime": (3600, 43200)},
         "eve": {"partition": "compute", "cpus": (32, 64), "mem": (64000, 256000), "gpus": 0, "runtime": (14400, 86400)},
         "frank": {"partition": "compute", "cpus": (16, 48), "mem": (32000, 128000), "gpus": 0, "runtime": (7200, 43200)},

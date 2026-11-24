@@ -29,7 +29,7 @@ what = "How fast it ran: ns/day"
 match = "^Performance:"
 
 [recorded]                      # one real run, kept with the kit
-site = "spydur"
+site = "hpc1"
 date = "2026-11-09"
 module = "gromacs/2026.2-gpu"
 partition = "gpunodes"

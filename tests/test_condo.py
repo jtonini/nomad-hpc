@@ -612,18 +612,18 @@ def test_init_never_declares_a_table_twice(tmp_path, db):
 # --- owners from the name and from the users (1.15.1) ------------------------------
 
 @pytest.mark.parametrize("name, netid, ok", [
-    ("anderson", "tanderso", True),      # cut at 8 letters
-    ("anderson", "manderson", True),
+    ("montgomery", "tmontgom", True),      # cut at 8 letters
+    ("montgomery", "mmontgomery", True),
     ("hughes", "jhughes", True), ("hughes", "hughes", True), ("hughes", "abjhughes", False),
-    ("anderson", "tander", False),       # too short to be cut at 8
+    ("montgomery", "tmontg", False),       # too short to be cut at 8
     ("smith", "jsmithx", False),
     ("smith", "jsmith3", True),          # a number for the second of the name
-    ("anderson", "tanders2", True),      # cut short to make room for it
+    ("montgomery", "tmontgo2", True),      # cut short to make room for it
     ("smith", "jsmiths2", False),
 ])
 def test_netids_cut_short_still_match(name, netid, ok):
     assert discover._initials_then(name, netid) is ok
-    assert discover._initials_then("anderson", "tanderso", netid_max=0) is False
+    assert discover._initials_then("montgomery", "tmontgom", netid_max=0) is False
 
 
 def _owners_db():
@@ -632,14 +632,14 @@ def _owners_db():
               "has_account INTEGER, source_site TEXT, cluster TEXT)")
     c.execute("CREATE TABLE jobs (job_id TEXT, user_name TEXT, partition TEXT, req_cpus INTEGER, "
               "runtime_seconds INTEGER, end_time TEXT, source_site TEXT)")
-    labs = {"tanderso$": ["tanderso", "e1", "e2", "e3"], "jhughes$": ["jhughes", "h1"],
+    labs = {"tmontgom$": ["tmontgom", "e1", "e2", "e3"], "jhughes$": ["jhughes", "h1"],
             "mcosta$": ["mcosta", "d1", "d2", "d3"], "mgarcia$": ["mgarcia", "y1", "y2"],
             "dnovak$": ["dnovak", "b0"], "pwhite$": ["pwhite", "k1", "k2", "k3"],
             "other": ["rkhan"]}
     for g, people in labs.items():
         for u in people:
             c.execute("INSERT INTO group_membership VALUES (?, ?, '2026-10-01', 1, 's', 's')", (u, g))
-    jobs = [("anderson", u, 1) for u in ("e1", "e2", "e3")] + [("anderson", "h1", 100)] \
+    jobs = [("montgomery", u, 1) for u in ("e1", "e2", "e3")] + [("montgomery", "h1", 100)] \
         + [("silva", u, 10) for u in ("d1", "d2", "d3")] \
         + [("garciakhan", u, 10) for u in ("y1", "y2")] \
         + [("novak", u, 10) for u in ("k1", "k2", "k3")] + [("novak", "y1", 1)]
@@ -649,7 +649,7 @@ def _owners_db():
 
 
 @pytest.mark.parametrize("partition, owners, disagree", [
-    ("anderson", ["tanderso"], False),          # the name, cut short; the users agree (by people)
+    ("montgomery", ["tmontgom"], False),          # the name, cut short; the users agree (by people)
     ("silva", ["mcosta"], False),              # the name names nobody: the users' lab
     ("garciakhan", ["mgarcia", "rkhan"], False),  # two names joined
     ("novak", ["dnovak"], True),              # the name's lab, but guests' lab uses it most

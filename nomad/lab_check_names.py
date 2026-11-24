@@ -2,7 +2,7 @@
 # Copyright (C) 2026 João Tonini
 """The PIs' names for the lab check's email (1.36.0).
 
-The email greets each lab's PI by name ("Dear Dr. Parish,"). nomad finds
+The email greets each lab's PI by name ("Dear Dr. Ames,"). nomad finds
 what it can on the system, read-only, and asks a person for the rest:
 
 1. the account's full name (getent passwd, its GECOS field);
@@ -219,7 +219,7 @@ def parse(text: str):
             return "bad", "First | Last, e.g. Maria | de la Cruz"
         return "name", {"first": first, "last": last}
     if L.split_name(t) is None or any(c.isdigit() or c in "@<>/\\=" for c in t):
-        return "bad", "a person's name, e.g. Carol Parish"
+        return "bad", "a person's name, e.g. Robin Ames"
     return "name", t
 
 

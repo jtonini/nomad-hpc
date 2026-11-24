@@ -16,7 +16,7 @@ A process is whitelisted if ANY of:
     (recursive — children of whitelisted ancestors are also whitelisted)
   - (username, command_basename) is in `user_commands`
 
-The validation showed 5/7 false positives on spydur came from arobbins's
+The validation showed 5/7 false positives on hpc1 came from kfisher's
 clusterbackup tool — a system-installed cron job. Parent-path whitelisting
 on /usr/local/sw/ eliminates these without name lists.
 """

@@ -61,23 +61,23 @@ def db_with_alerts(tmp_path) -> str:
 
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     rows = [
-        (now, "spydur", "headnode", "ia3nk", 10001, 5001,
+        (now, "hpc1", "headnode", "ia3nk", 10001, 5001,
          "sid_ia3nk", "cpu_10pct_5min", "cpu", "actionable", 10.0, "percent",
          9660, "gmx_mpi", "gmx_mpi -f production.tpr",
          '["sshd","bash","singularity","bash","gmx"]',
-         95.2, 2_500_000_000, "spydur|sid_ia3nk|cpu_10pct_5min", 1, now,
+         95.2, 2_500_000_000, "hpc1|sid_ia3nk|cpu_10pct_5min", 1, now,
          "head_node_cpu_sustained"),
-        (now, "spydur", "headnode", "perickso", 10002, 5002,
+        (now, "hpc1", "headnode", "perickso", 10002, 5002,
          "sid_peri", "memory_16gb_2min", "memory", "actionable", 16.0, "gb",
          6540, "R", "R --no-save",
          '["sshd","bash"]',
-         670.0, 75 * 1024**3, "spydur|sid_peri|memory_16gb_2min", 1, now,
+         670.0, 75 * 1024**3, "hpc1|sid_peri|memory_16gb_2min", 1, now,
          "head_node_memory_high"),
-        (now, "arachne", "headnode", "abezerra", 10003, 5003,
+        (now, "hpc2", "headnode", "abezerra", 10003, 5003,
          "sid_abe", "memory_4gb_10min", "memory", "informational", 4.0, "gb",
          23040, "language_server", "node language_server_linux_x64",
          '["sshd","bash","sh","node","node"]',
-         34.0, 2_400_000_000, "arachne|sid_abe|memory_4gb_10min", 4, now,
+         34.0, 2_400_000_000, "hpc2|sid_abe|memory_4gb_10min", 4, now,
          "head_node_memory_moderate"),
     ]
     with sqlite3.connect(p) as conn:
@@ -107,7 +107,7 @@ def db_with_node_states(db_path) -> str:
     Node names and cluster come from DEMO_CLUSTER (nomad.demo) so test
     data is consistent with what `nomad demo` generates. State values
     are uppercase, matching what scontrol produces on real Slurm
-    clusters (see arachne production DB).
+    clusters (see hpc2 production DB).
 
     Mix:
       node01-node02: healthy (IDLE, MIXED)

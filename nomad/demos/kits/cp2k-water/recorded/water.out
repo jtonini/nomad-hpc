@@ -19,7 +19,7 @@
 
 
   **** **** ******  **  PROGRAM STARTED AT               2026-11-09 11:59:22.381
- ***** ** ***  *** **   PROGRAM STARTED ON                        spdr61.cluster
+ ***** ** ***  *** **   PROGRAM STARTED ON                        nd61.cluster
  **    ****   ******    PROGRAM STARTED BY                                   you
  ***** **    ** ** **   PROGRAM PROCESS ID                               2616186
   **** **  *******  **  PROGRAM STARTED IN /home/you/nomad-practice/cp2k-wat
@@ -32,7 +32,7 @@
  CP2K|            te libvori libbqb
  CP2K| is freely available from                            https://www.cp2k.org/
  CP2K| Program compiled at                                   2026-11-04 23:12:48
- CP2K| Program compiled on                                        spydur.cluster
+ CP2K| Program compiled on                                        hpc1.cluster
  CP2K| Program compiled for                                               x86_64
  CP2K| Data directory path             /usr/local/sw/cp2k/2026.2/share/cp2k/data
  CP2K| Input file name                                                 water.inp
@@ -981,7 +981,7 @@
  
  -------------------------------------------------------------------------------
   **** **** ******  **  PROGRAM ENDED AT                 2026-11-09 11:59:26.633
- ***** ** ***  *** **   PROGRAM RAN ON                            spdr61.cluster
+ ***** ** ***  *** **   PROGRAM RAN ON                            nd61.cluster
  **    ****   ******    PROGRAM RAN BY                                       you
  ***** **    ** ** **   PROGRAM PROCESS ID                               2616186
   **** **  *******  **  PROGRAM STOPPED IN /home/you/nomad-practice/cp2k-wat

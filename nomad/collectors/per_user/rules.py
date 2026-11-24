@@ -85,7 +85,7 @@ class Rule:
         return None
 
 
-# Thresholds from the spydur/arachne validation (May 2026). Durations are
+# Thresholds from the hpc1/hpc2 validation (May 2026). Durations are
 # minimums: readings come every few minutes. cpu_10pct_5min is
 # informational: under cron it means 30 CPU-seconds in one 5-minute
 # interval, which a pip install or a short compile reaches.

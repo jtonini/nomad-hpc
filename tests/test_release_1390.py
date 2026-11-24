@@ -40,15 +40,15 @@ def world(tmp_path):
               "has_account INTEGER)")
     for user, ago in (("amy", 2), ("ben", 3), ("stu1", 1), ("cara", 20)):
         end = datetime.now() - timedelta(days=ago)
-        c.execute("INSERT INTO per_user_alert VALUES ('spydur.cluster', 'headnode', ?, 'cpu_50pct_2min', 'cpu', 50, "
-                  "3600, 'python3', 'python3 fit.py', 150, NULL, ?, ?, 'spydur')", (user, f"s-{user}", utc(end)))
+        c.execute("INSERT INTO per_user_alert VALUES ('hpc1.cluster', 'headnode', ?, 'cpu_50pct_2min', 'cpu', 50, "
+                  "3600, 'python3', 'python3 fit.py', 150, NULL, ?, ?, 'hpc1')", (user, f"s-{user}", utc(end)))
     c.execute("INSERT INTO jobs VALUES ('1', 'dan', ?)", ((NOW - timedelta(days=1)).isoformat(),))
     c.execute("INSERT INTO jobs VALUES ('2', 'eve', ?)", ((NOW - timedelta(days=30)).isoformat(),))
     c.execute("INSERT INTO jobs VALUES ('3', 'root', ?)", ((NOW - timedelta(days=1)).isoformat(sep=' '),))
     stamp = NOW.isoformat(sep=" ")
     for user, group in (("stu1", "bio101"), ("amy", "bio101"), ("amy", "cpi$"), ("cpi", "cpi$"),
                         ("ben", "chem201"), ("ben", "faculty")):
-        c.execute("INSERT INTO group_membership VALUES (?, ?, 'spydur', ?, 1)", (user, group, stamp))
+        c.execute("INSERT INTO group_membership VALUES (?, ?, 'hpc1', ?, 1)", (user, group, stamp))
     c.commit()
     c.close()
     return db
@@ -58,7 +58,7 @@ def jobs_issue(**kw):
     base = {"dimension": "Memory Efficiency", "dimension_key": "memory", "affected_jobs": 7, "total_applicable": 9,
             "avg_score": 20.0, "severity": "critical", "trajectory": "stable", "directive": "mem",
             "suggested_value": 8192, "suggested_display": "8G", "current_display": "64G", "direction": "lower",
-            "current_value_typical": 65536.0, "cluster": "spydur", "partition": "basic",
+            "current_value_typical": 65536.0, "cluster": "hpc1", "partition": "basic",
             "usage_stats": UsageStats(6348.8, 5000, 7000, 4000, 9000, "MB"),
             "rationale": "Memory you ask for and leave unused keeps other jobs waiting."}
     base.update(kw)
@@ -103,12 +103,12 @@ def test_who_gets_an_email_and_what_it_says(tmp_path, insights):
     assert amy["review"] and amy["to"] == ["rc@example.edu"] and amy["address"] == "amy@example.edu"
     (e,) = amy["entries"]
     assert e.kind == "login_node" and e.title == "A long computation on the login node"
-    assert e.lines[0].startswith("python3 on spydur, ") and "for 1 h" in e.lines[0] and "1.5 cores" in e.lines[0]
+    assert e.lines[0].startswith("python3 on hpc1, ") and "for 1 h" in e.lines[0] and "1.5 cores" in e.lines[0]
     assert "srun --pty" in " ".join(e.todo) and e.command == "python3 fit.py"         # 1.62.0: parts apart
     # jobs: only a pattern, of the severities and size asked, of asking for more than used
     (j,) = got["dan"]["entries"]
     assert j.kind == "jobs" and j.title == "Your jobs ask for more memory than they use"
-    assert j.lines[0] == ("On spydur (basic), 7 of your last 9 jobs asked for more memory than they used: "
+    assert j.lines[0] == ("On hpc1 (basic), 7 of your last 9 jobs asked for more memory than they used: "
                           "they typically asked for 64 GB; most used about 6.2 GB.")
     assert j.change == ["#SBATCH --mem=8G"]                                   # 1.62.0: apart from the words
     s = N.settings(CONFIG)
@@ -178,8 +178,8 @@ def test_a_person_stops_it(tmp_path, insights):
     assert not N.wants_email(rec, "amy")
     p = due(db, rec)
     assert "amy" not in {m["user"] for m in p["mail"]} and p["left"]["stopped"] == 1
-    N.set_email(rec, "amy", True, by="jtonini")
-    assert N.wants_email(rec, "amy") and N.choices(rec)["amy"][2] == "jtonini"
+    N.set_email(rec, "amy", True, by="rcadmin")
+    assert N.wants_email(rec, "amy") and N.choices(rec)["amy"][2] == "rcadmin"
     with pytest.raises(N.NoticesError):
         N.set_email(rec, "Amy Smith", False)
 
@@ -250,7 +250,7 @@ def test_nomad_notices_commands(tmp_path, insights, monkeypatch):
     db = world(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     cfg = tmp_path / "nomad.toml"
-    cfg.write_text(f'[hub]\noutput_db = "{db}"\n[[hub.sites]]\nname = "spydur"\nhost = "spydur"\n'
+    cfg.write_text(f'[hub]\noutput_db = "{db}"\n[[hub.sites]]\nname = "hpc1"\nhost = "hpc1"\n'
                    '[console.courses]\n[console.labs]\ngroup_pattern = "{netid}$"\n'
                    '[notices]\nreview_to = ["rc@example.edu"]\nmail_domain = "example.edu"\n'
                    'send_from = "rc@example.edu"\nlink = "https://nomad.example.edu"\n')

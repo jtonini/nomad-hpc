@@ -37,17 +37,17 @@ def test_a_request_and_its_conversation(rec):
     s = H.settings(CONFIG)
     T.ensure(rec)
     with rec:
-        T.take(rec, "accounts")                     # an account request took ARC-0001
-    req = H.ask(rec, "Amy", "  My job   ended early ", "It stopped after an hour.", about="job", site="spydur",
+        T.take(rec, "accounts")                     # an account request took REQ-0001
+    req = H.ask(rec, "Amy", "  My job   ended early ", "It stopped after an hour.", about="job", site="hpc1",
                 job="123", page="/job?job_id=123", context="Job 123: TIMEOUT", s=s)
-    assert req["ref"] == "ARC-0002" and req["asked_by"] == "amy" and req["subject"] == "My job ended early"
+    assert req["ref"] == "REQ-0002" and req["asked_by"] == "amy" and req["subject"] == "My job ended early"
     assert req["state"] == "open" and req["said"] == "waiting for Helpdesk"
     assert [m["side"] for m in req["messages"]] == ["person"]
     assert T.kind_of(rec, req["number"]) == "help"
     n = req["number"]
-    H.say(rec, n, "jtonini", "note", "Probably the time limit.", s=s)
+    H.say(rec, n, "rcadmin", "note", "Probably the time limit.", s=s)
     assert H.request_of(rec, n, s)["state"] == "open"                      # a note changes nothing
-    got = H.say(rec, n, "jtonini", "arc", "It reached its time limit: ask for more.", s=s)
+    got = H.say(rec, n, "rcadmin", "arc", "It reached its time limit: ask for more.", s=s)
     assert got["state"] == "answered"
     seen = H.request_of(rec, n, s, notes=False)
     assert [m["side"] for m in seen["messages"]] == ["person", "arc"]           # the note is ARC's own
@@ -79,22 +79,22 @@ def test_what_is_refused(rec):
         H.ask(rec, "amy", "three", "x", s=s)
     H.ask(rec, "pat", "pat's own", "x", s=s)                                   # per person
     with pytest.raises(H.HelpError, match="no request"):
-        H.say(rec, 999, "jtonini", "arc", "x", s=s)
+        H.say(rec, 999, "rcadmin", "arc", "x", s=s)
     with pytest.raises(H.HelpError):
-        H.set_state(rec, 1, "jtonini", "lost", s=s)
+        H.set_state(rec, 1, "rcadmin", "lost", s=s)
 
 
 def test_the_letters(rec):
     s = H.settings(CONFIG)
-    req = H.ask(rec, "amy", "Out of memory", "My job ran out of memory.", about="job", site="spydur", job="77",
-                page="/job?job_id=77", context="Job 77 on spydur: OUT_OF_MEMORY", s=s)
+    req = H.ask(rec, "amy", "Out of memory", "My job ran out of memory.", about="job", site="hpc1", job="77",
+                page="/job?job_id=77", context="Job 77 on hpc1: OUT_OF_MEMORY", s=s)
     subject, text = H.letter_to_arc(req, "My job ran out of memory.", s, first=True)
     assert subject == f"[{req['ref']}] Out of memory"
-    assert "from amy, about a job (job 77 on spydur)" in text and "OUT_OF_MEMORY" in text
+    assert "from amy, about a job (job 77 on hpc1)" in text and "OUT_OF_MEMORY" in text
     assert "https://nomad.example.edu/help?request=" in text and f"Keep {req['ref']}" in text
     subject, text = H.letter_to_person(req, "My job ran out of memory.", s, first=True)
     assert subject == f"[{req['ref']}] Out of memory" and text.startswith("Helpdesk has your request")
-    assert "Ask Helpdesk page" in text and "ARC" not in text.replace(req["ref"], "")
+    assert "Ask Helpdesk page" in text and "REQ" not in text.replace(req["ref"], "")
     subject, text = H.letter_to_person(req, "Ask for 8 GB.", s, first=False)
     assert subject.startswith("Re: [") and "Ask for 8 GB." in text
     assert H.person_address("amy", s) == (["amy@example.edu"], False)

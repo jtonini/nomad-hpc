@@ -101,4 +101,4 @@ def test_issue_email_without_a_support_address_says_so(capsys):
     _submit_email(client=None, title="t", body="b", category="bug", support_email=None)
     out = capsys.readouterr().out
     assert "No support address is configured" in out
-    assert "richmond" not in out
+    assert "dnomhcir"[::-1] not in out          # the name of the site nomad was first run on

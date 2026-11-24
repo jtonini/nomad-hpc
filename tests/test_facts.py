@@ -76,8 +76,8 @@ def build_hub(path):
         ("3", "alice", "CANCELLED by 1234", 3, 4, 8000, 0, 600, 180),
         ("4", "bob", "TIMEOUT", 4, 8, 16000, 1, 7200, 600),
         ("5", "bob", "OUT_OF_MEMORY", 5, 8, 16000, 0, 1800, 1200),
-        ("6", "carol", "NODE_FAIL", 6, 2, 4000, 0, 1800, 30),
-        ("7", "carol", "COMPLETED", 40, 2, 4000, 0, 1800, 30),           # outside 30 days
+        ("6", "robin", "NODE_FAIL", 6, 2, 4000, 0, 1800, 30),
+        ("7", "robin", "COMPLETED", 40, 2, 4000, 0, 1800, 30),           # outside 30 days
     ]
     for jid, user, state, ago, cpus, mem, gpus, rt, wait in jobs:
         end = t(days=ago)
@@ -207,7 +207,7 @@ def test_workstations_online_now(hub):
 
 def test_sites_names_nobody(hub):
     text = json.dumps(facts.sites(hub, now=NOW, config=CONFIG))
-    for name in ("alice", "bob", "carol", "dave"):
+    for name in ("alice", "bob", "robin", "dave"):
         assert name not in text
 
 
@@ -251,7 +251,7 @@ def test_a_person_sees_only_their_own(hub):
     assert me["now"]["by_site"]["hpc1"]["stale"] is False
     assert me["score"] is None and me["advice"] == []
     text = json.dumps(me)
-    assert "bob" not in text and "carol" not in text
+    assert "bob" not in text and "robin" not in text
 
 
 def test_a_person_with_no_jobs(hub):
@@ -297,13 +297,13 @@ def test_a_lab_taken_together(hub):
 
 def test_a_lab_names_no_member(hub):
     text = json.dumps(facts.labs(hub, CONFIG, "alice", now=NOW))
-    for name in ("bob", "carol", "dave"):
+    for name in ("bob", "robin", "dave"):
         assert f'"{name}"' not in text
     assert "alice" in text                                  # the group's own name
 
 
 def test_leading_nothing_and_staff_asking_by_group(hub):
-    assert facts.labs(hub, CONFIG, "carol", now=NOW)["labs"] == []
+    assert facts.labs(hub, CONFIG, "robin", now=NOW)["labs"] == []
     staff = facts.labs(hub, CONFIG, groups=["alice$"], now=NOW)
     assert staff["labs"][0]["members"]["current"] == 2
     no_db = facts.labs(None, CONFIG, "alice", now=NOW)

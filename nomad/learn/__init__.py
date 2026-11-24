@@ -4,7 +4,7 @@
 
 An administrator asks on Data readiness ("Train…"); the request waits on the
 hub, in ml.db (beside lab_check.db, the nomad account's). A worker machine
-(badenpowell: ``[ml.worker]``) asks the Console every few minutes whether
+(gpuws1: ``[ml.worker]``) asks the Console every few minutes whether
 there is one (``nomad ml work``, from a timer), takes it, downloads the jobs'
 request-time figures, trains, and sends back how well it did and its scores.
 Nothing logs in to the worker, and the worker logs in to nothing: it speaks

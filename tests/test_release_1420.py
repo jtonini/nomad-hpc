@@ -200,12 +200,12 @@ def conn(tmp_path):
             has_account INTEGER);
         CREATE TABLE per_user_daily (day TEXT, hostname TEXT, username TEXT, source_site TEXT);
         CREATE TABLE node_state (timestamp TEXT, node_name TEXT, source_site TEXT);
-        INSERT INTO jobs VALUES ('1', 'jdoe', 'spydur', 'spydur');
-        INSERT INTO group_membership VALUES ('bkim', 'kimlab', 'arachne', 'arachne', 1),
-            ('mlee', 'leelab', 'spydur', 'spydur', 0);
-        INSERT INTO per_user_daily VALUES ('2026-11-01', 'jonimitchell', 'asmith', 'jonimitchell');
+        INSERT INTO jobs VALUES ('1', 'jdoe', 'hpc1', 'hpc1');
+        INSERT INTO group_membership VALUES ('bkim', 'kimlab', 'hpc2', 'hpc2', 1),
+            ('mlee', 'leelab', 'hpc1', 'hpc1', 0);
+        INSERT INTO per_user_daily VALUES ('2026-11-01', 'labhead1', 'asmith', 'labhead1');
     """)
-    c.execute("INSERT INTO node_state VALUES (datetime('now', 'localtime'), 'n1', 'spydur')")
+    c.execute("INSERT INTO node_state VALUES (datetime('now', 'localtime'), 'n1', 'hpc1')")
     c.execute("INSERT INTO node_state VALUES (datetime('now', 'localtime', '-30 days'), 'n1', 'old')")
     return c
 
@@ -218,19 +218,19 @@ def rec(tmp_path, monkeypatch):
 
 def test_has_account_and_sites(conn):
     got = A.has_account(conn, ["jdoe", "bkim", "mlee", "asmith", "zed"])
-    assert got == {"jdoe": ["spydur"], "bkim": ["arachne"], "mlee": [], "asmith": ["jonimitchell"], "zed": []}
-    assert A.has_account(conn, ["jdoe", "bkim"], sites=["arachne"]) == {"jdoe": [], "bkim": ["arachne"]}
-    assert A.sites_with_nodes(conn) == ["spydur"]
+    assert got == {"jdoe": ["hpc1"], "bkim": ["hpc2"], "mlee": [], "asmith": ["labhead1"], "zed": []}
+    assert A.has_account(conn, ["jdoe", "bkim"], sites=["hpc2"]) == {"jdoe": [], "bkim": ["hpc2"]}
+    assert A.sites_with_nodes(conn) == ["hpc1"]
 
 
 def test_resolve(conn, rec):
     rows = A.resolve(A.parse_text("jdoe\nAlex Smith\nNo Body\nSmith\nkim\nzzz qqq\njdoe asmith\n???"), directory(),
                      conn, rec)
     by = {r["text"]: r for r in rows}
-    assert by["jdoe"]["status"] == "found" and by["jdoe"]["has"] == ["spydur"]
+    assert by["jdoe"]["status"] == "found" and by["jdoe"]["has"] == ["hpc1"]
     assert by["Alex Smith"]["status"] == "choose" and [c["netid"] for c in by["Alex Smith"]["choices"]] == [
         "asmith", "asmith2"]
-    assert by["Alex Smith"]["choices"][0]["has"] == ["jonimitchell"]
+    assert by["Alex Smith"]["choices"][0]["has"] == ["labhead1"]
     assert by["No Body"]["status"] == "not_found"
     assert by["Smith"]["status"] == "not_found" and "surname" in by["Smith"]["why"]
     assert by["zzz qqq"]["status"] == "not_found"
@@ -245,34 +245,34 @@ def test_resolve_partial_netids_keep_the_missing_one(conn, rec):
 
 # --- the requests -----------------------------------------------------------------------
 
-S = A.Settings(enabled=True, sites=("spydur", "arachne"), notify=("hpc@example.edu",), most=3)
+S = A.Settings(enabled=True, sites=("hpc1", "hpc2"), notify=("hpc@example.edu",), most=3)
 
 
 def test_ask_close_and_list(rec):
     with pytest.raises(A.RequestError, match="pick the clusters"):
         A.ask(rec, "doelab", [{"netid": "jdoe"}], [], S, by="pi1")
     with pytest.raises(A.RequestError, match="not a cluster"):
-        A.ask(rec, "doelab", [{"netid": "jdoe"}], ["vadur"], S, by="pi1")
+        A.ask(rec, "doelab", [{"netid": "jdoe"}], ["hpc3"], S, by="pi1")
     with pytest.raises(A.RequestError, match="at most"):
-        A.ask(rec, "doelab", [{"netid": n} for n in ("a1", "a2", "a3", "a4")], ["spydur"], S, by="pi1")
+        A.ask(rec, "doelab", [{"netid": n} for n in ("a1", "a2", "a3", "a4")], ["hpc1"], S, by="pi1")
     req = A.ask(rec, "doelab", [{"netid": "JDoe", "name": "Jane Doe"}, {"netid": "bkim", "name": "Bo Kim"}],
-                ["spydur", "arachne"], S, by="PI1", note="  new  students\x07 ")
+                ["hpc1", "hpc2"], S, by="PI1", note="  new  students\x07 ")
     assert len(req["rows"]) == 4 and req["by"] == "pi1" and req["note"] == "new students"
-    again = A.ask(rec, "doelab", [{"netid": "jdoe"}, {"netid": "mlee"}], ["spydur"], S, by="pi1")
-    assert again["skipped"] == [{"netid": "jdoe", "site": "spydur"}] and [r["netid"] for r in again["rows"]] == ["mlee"]
+    again = A.ask(rec, "doelab", [{"netid": "jdoe"}, {"netid": "mlee"}], ["hpc1"], S, by="pi1")
+    assert again["skipped"] == [{"netid": "jdoe", "site": "hpc1"}] and [r["netid"] for r in again["rows"]] == ["mlee"]
     with pytest.raises(A.RequestError, match="already asked"):
-        A.ask(rec, "doelab", [{"netid": "jdoe"}], ["spydur"], S, by="pi1")
-    assert A.asked(rec, ["jdoe", "zed"]) == {"jdoe": ["arachne", "spydur"]}
+        A.ask(rec, "doelab", [{"netid": "jdoe"}], ["hpc1"], S, by="pi1")
+    assert A.asked(rec, ["jdoe", "zed"]) == {"jdoe": ["hpc1", "hpc2"]}
 
     with pytest.raises(A.RequestError, match="say why"):
-        A.close(rec, req["id"], "jdoe", "spydur", "not_made", by="arc1")
-    done = A.close(rec, req["id"], "jdoe", "spydur", "made", by="arc1")
+        A.close(rec, req["id"], "jdoe", "hpc1", "not_made", by="arc1")
+    done = A.close(rec, req["id"], "jdoe", "hpc1", "made", by="arc1")
     assert done["state"] == "made" and done["closed_by"] == "arc1"
     with pytest.raises(A.RequestError, match="already closed"):
-        A.close(rec, req["id"], "jdoe", "spydur", "made", by="arc1")
+        A.close(rec, req["id"], "jdoe", "hpc1", "made", by="arc1")
     with pytest.raises(A.RequestError, match="no such"):
-        A.close(rec, req["id"], "zed", "spydur", "made", by="arc1")
-    A.close(rec, req["id"], "bkim", "arachne", "withdrawn", by="pi1")
+        A.close(rec, req["id"], "zed", "hpc1", "made", by="arc1")
+    A.close(rec, req["id"], "bkim", "hpc2", "withdrawn", by="pi1")
     got = A.requests(rec, lab="doelab")
     assert [r["id"] for r in got] == [again["id"], req["id"]] and got[1]["open"] == 2
     assert [r["id"] for r in A.requests(rec, open_only=True)] == [again["id"], req["id"]]
@@ -290,9 +290,9 @@ def test_settings():
     on = {"directory": {"uri": "ldaps://ldap.example.edu", "base": "dc=x"}}
     s = A.settings(on)
     assert s.enabled and s.notify == () and s.most == 100
-    s = A.settings({**on, "console": {"labs": {"accounts": {"notify": "hpc@example.edu", "sites": ["spydur"],
+    s = A.settings({**on, "console": {"labs": {"accounts": {"notify": "hpc@example.edu", "sites": ["hpc1"],
                                                             "link": "https://n.example.edu/x", "most": 900}}}})
-    assert s.notify == ("hpc@example.edu",) and s.sites == ("spydur",) and s.most == 500 and s.link
+    assert s.notify == ("hpc@example.edu",) and s.sites == ("hpc1",) and s.most == 500 and s.link
     s = A.settings({"console": {"labs": {"accounts": {"enabled": True}}}})
     assert not s.enabled and any("[directory]" in p for p in s.problems)
     assert not A.settings({**on, "console": {"labs": {"accounts": {"enabled": False}}}}).enabled
@@ -314,35 +314,35 @@ def sent(monkeypatch):
 
 
 CONFIG = {"console": {"labs": {"check": {"mail_domain": "example.edu", "send_from": "RC <rc@example.edu>",
-                                         "names": {"pi1": "Carol Parish"}, "signature": ["Research Computing"]}}}}
+                                         "names": {"pi1": "Robin Ames"}, "signature": ["Research Computing"]}}}}
 
 
 def test_emails_to_arc_and_to_the_pi(rec, sent):
     cs = L.settings(CONFIG)
-    req = A.ask(rec, "doelab", [{"netid": "jdoe", "name": "Jane Doe"}], ["spydur"], S, by="pi1", note="REU")
+    req = A.ask(rec, "doelab", [{"netid": "jdoe", "name": "Jane Doe"}], ["hpc1"], S, by="pi1", note="REU")
     assert A.tell_arc(CONFIG, cs, S, req) == "sent"
     m = sent[-1]
     assert m["To"] == "hpc@example.edu" and m["Reply-To"] == "pi1@example.edu"
     # 1.44.0: the request's number first, as a ticket system's (was "Account request #1: ...")
-    assert m["Subject"].startswith(f"[{req['ref']}] Account request: doelab, 1 person on spydur")
+    assert m["Subject"].startswith(f"[{req['ref']}] Account request: doelab, 1 person on hpc1")
     assert "jdoe" in m.get_content() and "Their note: REU" in m.get_content()
 
-    done = A.close(rec, req["id"], "jdoe", "spydur", "made", by="arc1", note="home on /scratch too")
+    done = A.close(rec, req["id"], "jdoe", "hpc1", "made", by="arc1", note="home on /scratch too")
     assert A.tell_pi(CONFIG, cs, S, req, [done]) == "sent"
     m = sent[-1]
     assert m["To"] == "pi1@example.edu" and m["Reply-To"] == "hpc@example.edu"
-    assert m["Subject"] == f"[{req['ref']}] The account for jdoe on spydur is ready"
+    assert m["Subject"] == f"[{req['ref']}] The account for jdoe on hpc1 is ready"
     body = m.get_content()
-    assert body.startswith("Dear Dr. Parish,") and "Jane Doe (jdoe) on spydur" in body and "home on /scratch" in body
+    assert body.startswith("Dear Dr. Ames,") and "Jane Doe (jdoe) on hpc1" in body and "home on /scratch" in body
 
 
 def test_review_to_holds_the_pis_email(rec, sent):
     cfg = json.loads(json.dumps(CONFIG))
     cfg["console"]["labs"]["check"]["review_to"] = ["rc@example.edu"]
     cs = L.settings(cfg)
-    req = A.ask(rec, "doelab", [{"netid": "jdoe"}, {"netid": "bkim"}], ["spydur"], S, by="pi1")
-    a = A.close(rec, req["id"], "jdoe", "spydur", "made", by="arc1")
-    b = A.close(rec, req["id"], "bkim", "spydur", "not_made", by="arc1", note="not a student this term")
+    req = A.ask(rec, "doelab", [{"netid": "jdoe"}, {"netid": "bkim"}], ["hpc1"], S, by="pi1")
+    a = A.close(rec, req["id"], "jdoe", "hpc1", "made", by="arc1")
+    b = A.close(rec, req["id"], "bkim", "hpc1", "not_made", by="arc1", note="not a student this term")
     assert A.tell_pi(cfg, cs, S, req, [a, b]) == "sent"
     m = sent[-1]
     assert m["To"] == "rc@example.edu" and m["Subject"].startswith(f"[review] [{req['ref']}] Your account request")
@@ -351,7 +351,7 @@ def test_review_to_holds_the_pis_email(rec, sent):
 
 def test_no_sender_no_email(rec, sent):
     cs = L.settings({"console": {"labs": {"check": {"mail_domain": "example.edu"}}}})
-    req = A.ask(rec, "doelab", [{"netid": "jdoe"}], ["spydur"], S, by="pi1")
+    req = A.ask(rec, "doelab", [{"netid": "jdoe"}], ["hpc1"], S, by="pi1")
     assert A.tell_arc({}, cs, S, req).startswith("not sent: no sender") and not sent
     assert A.tell_arc({}, cs, A.Settings(), req).startswith("not sent: no one to tell")
 
@@ -361,12 +361,12 @@ def test_no_sender_no_email(rec, sent):
 def test_cli_list_and_close(tmp_path, rec, sent, monkeypatch):
     from nomad import lab_accounts_cli as C
     from nomad.cli import cli
-    req = A.ask(rec, "doelab", [{"netid": "jdoe", "name": "Jane Doe"}], ["spydur"], S, by="pi1")
+    req = A.ask(rec, "doelab", [{"netid": "jdoe", "name": "Jane Doe"}], ["hpc1"], S, by="pi1")
     monkeypatch.setattr(C, "_ctx", lambda ctx: (CONFIG, None, L.settings(CONFIG), None, tmp_path / "lab_check.db"))
     r = CliRunner().invoke(cli, ["lab", "accounts", "list", "--open"])
     assert r.exit_code == 0, r.output
-    assert req["ref"] in r.output and "jdoe" in r.output and "asked for" in r.output     # 1.44.0: ARC-0001
-    r = CliRunner().invoke(cli, ["lab", "accounts", "close", str(req["id"]), "jdoe", "spydur", "made", "--by", "arc1"])
+    assert req["ref"] in r.output and "jdoe" in r.output and "asked for" in r.output     # 1.44.0: REQ-0001
+    r = CliRunner().invoke(cli, ["lab", "accounts", "close", str(req["id"]), "jdoe", "hpc1", "made", "--by", "arc1"])
     assert r.exit_code == 0, r.output
     assert "made" in r.output and "Email to pi1: sent" in r.output
     r = CliRunner().invoke(cli, ["lab", "accounts", "list", "--open"])
@@ -380,7 +380,7 @@ def test_cli_lookup(tmp_path, rec, conn, monkeypatch):
     monkeypatch.setattr(C, "_directory", lambda config: directory())
     r = CliRunner().invoke(cli, ["lab", "accounts", "lookup", "jdoe", "Alex Smith", "nobody"])
     assert r.exit_code == 0, r.output
-    assert "Jane Doe; has an account on spydur" in r.output and "several: asmith Alex Smith" in r.output
+    assert "Jane Doe; has an account on hpc1" in r.output and "several: asmith Alex Smith" in r.output
     assert "not found" in r.output
     csv = tmp_path / "s.csv"
     csv.write_text("NetID\nbkim\n")

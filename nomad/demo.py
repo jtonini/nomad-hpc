@@ -869,7 +869,7 @@ class DemoDatabase:
 
         Generates data matching the production schema used by
         WorkstationCollector.store() — 29 columns. This schema is also
-        what gets synced from jonimitchell.db into combined.db on mingus.
+        what gets synced from labhead1.db into combined.db on the hub.
         """
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
@@ -1057,6 +1057,117 @@ class DemoDatabase:
         conn.close()
         print(f"    Workstation samples: {2016 * len(workstations)} (14 hosts x 7 days)")
 
+
+    def write_workstation_user_snapshot(self):
+        """People's sessions on the lab workstations (1.66.0): a reading every
+        5 minutes of each person's slice while they are logged in, the
+        counters growing as the collector reads them (CPU time, memory
+        peak), so My activity, `nomad edu me` and the weekly email have lab
+        machines to read. One long CPU-heavy run, for the advice to use a
+        cluster instead."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS workstation_user_snapshot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME NOT NULL,
+                hostname TEXT NOT NULL,
+                username TEXT NOT NULL,
+                uid INTEGER NOT NULL,
+                session_epoch INTEGER,
+                cpu_usage_usec INTEGER,
+                cpu_user_usec INTEGER,
+                cpu_system_usec INTEGER,
+                memory_current_bytes INTEGER,
+                memory_peak_bytes INTEGER,
+                io_read_bytes INTEGER,
+                io_write_bytes INTEGER,
+                pids_current INTEGER,
+                collector_version TEXT,
+                source TEXT DEFAULT 'cgroup_v2',
+                memory_anon_bytes INTEGER
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wus_host_user_ts "
+                  "ON workstation_user_snapshot(hostname, username, timestamp)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_wus_timestamp ON workstation_user_snapshot(timestamp)")
+        # (person, uid, machine, its cores, the cores they keep busy at work, a long run: (start day, hours, cores))
+        people = [("alice", 2001, "chem-ws03", 16, 0.6, (2, 40, 12)),
+                  ("charlie", 2003, "phys-ws02", 16, 1.2, None),
+                  ("diana", 2004, "bio-ws01", 4, 0.4, None),
+                  ("eve", 2005, "chem-ws01", 8, 0.8, None)]
+        start = (datetime.now() - timedelta(days=7)).replace(minute=0, second=0, microsecond=0)
+        rows = []
+        for user, uid, host, cores, usual, run in people:
+            cpu = 0.0
+            peak = 0
+            epoch = int(start.timestamp())
+            t = start
+            while t < datetime.now():
+                at_work = t.weekday() < 5 and 9 <= t.hour < 17
+                busy = 0.0
+                if run is not None:
+                    a = start + timedelta(days=run[0], hours=10)
+                    if a <= t < a + timedelta(hours=run[1]):
+                        busy = run[2] * random.uniform(0.9, 1.0)
+                if busy or at_work:
+                    if not busy and t.hour == 9 and t.minute == 0:
+                        epoch = int(t.timestamp())          # a new login each morning: a new slice
+                        cpu, peak = 0.0, 0
+                    busy = busy or usual * random.uniform(0.3, 1.7)
+                    cpu += busy * 300 * 1_000_000
+                    mem = int(random.uniform(1.0, 4.0) * 2 ** 30) + (int(10 * 2 ** 30) if busy > 4 else 0)
+                    peak = max(peak, mem)
+                    rows.append((t.isoformat(), host, user, uid, epoch, int(cpu), int(cpu * 0.9), int(cpu * 0.1),
+                                 mem, peak, 0, 0, random.randint(3, 40), "demo", "cgroup_v2", int(mem * 0.8)))
+                t += timedelta(minutes=5)
+        c.executemany("""
+            INSERT INTO workstation_user_snapshot (timestamp, hostname, username, uid, session_epoch,
+                cpu_usage_usec, cpu_user_usec, cpu_system_usec, memory_current_bytes, memory_peak_bytes,
+                io_read_bytes, io_write_bytes, pids_current, collector_version, source, memory_anon_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", rows)
+        conn.commit()
+        conn.close()
+        print(f"    Lab workstation sessions: {len(rows)} readings ({len(people)} people)")
+
+    def write_filesystems(self):
+        """The disk collector's readings (1.66.0): /home, /scratch and
+        /localscratch every 5 minutes for 7 days, /scratch filling, so
+        `nomad analyze` and the storage pages have something to read."""
+        conn = sqlite3.connect(self.db_path)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS filesystems (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                total_bytes INTEGER NOT NULL,
+                used_bytes INTEGER NOT NULL,
+                available_bytes INTEGER NOT NULL,
+                used_percent REAL NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                fill_rate_bytes_per_day REAL,
+                days_until_full REAL,
+                first_derivative REAL,
+                second_derivative REAL
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_filesystems_path_ts ON filesystems(path, timestamp)")
+        tb = 10 ** 12
+        # (path, size, used at the start, bytes a day it grows by)
+        paths = [("/home", 50 * tb, 31 * tb, 0.02 * tb), ("/scratch", 100 * tb, 62 * tb, 1.6 * tb),
+                 ("/localscratch", 2 * tb, 0.4 * tb, 0.05 * tb)]
+        start = datetime.now() - timedelta(days=7)
+        rows = []
+        for i in range(2016):
+            t = start + timedelta(minutes=5 * i)
+            for path, total, used0, per_day in paths:
+                used = int(min(total * 0.99, used0 + per_day * i / 288 + random.uniform(-2e-5, 2e-5) * total))
+                rows.append((path, total, used, total - used, round(100.0 * used / total, 2), t.isoformat()))
+        c.executemany("INSERT INTO filesystems (path, total_bytes, used_bytes, available_bytes, used_percent, "
+                      "timestamp) VALUES (?, ?, ?, ?, ?, ?)", rows)
+        conn.commit()
+        conn.close()
+        print(f"    Disk readings: {len(rows)} ({len(paths)} filesystems x 7 days)")
 
     def write_storage_state(self):
         """Write demo storage/NAS monitoring data."""
@@ -1498,6 +1609,8 @@ def run_demo(
     db.write_alerts()
     db.write_network_perf()
     db.write_workstation_state()
+    db.write_workstation_user_snapshot()
+    db.write_filesystems()
     db.write_storage_state()
     db.write_queue_state()
     db.write_iostat()

@@ -111,7 +111,7 @@ def test_collector_alert_failure_does_not_break_collection():
 def test_collector_classification_uses_defaults_when_unconfigured():
     """No config = sensible Slurm defaults."""
     collector = NodeStateCollector({}, ":memory:")
-    # Critical: from arachne production DB
+    # Critical: from hpc2 production DB
     assert collector._classify_state('DOWN') == 'critical'
     assert collector._classify_state('DOWN+NOT_RESPONDING') == 'critical'
     assert collector._classify_state('NOT_RESPONDING') == 'critical'

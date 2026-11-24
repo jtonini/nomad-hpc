@@ -3,7 +3,7 @@
 """Regression tests for the `nomad test-alerts` CLI subcommand.
 
 Guards against three real bugs discovered during v1.6.4 SMTP wiring
-on arachne:
+on hpc2:
 
   1. test-alerts shipped severity='info' against default
      min_severity='warning'. dispatch() silently filtered it,

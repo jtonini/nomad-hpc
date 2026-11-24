@@ -94,7 +94,7 @@ def create_bin_symlink(force: bool = False) -> Path | None:
 
 SYSTEMD_SERVICE = """[Unit]
 Description=NØMAÐ HPC Monitoring Daemon
-Documentation=https://github.com/jtonini/nomad
+Documentation=https://github.com/jtonini/nomad-hpc
 After=network.target slurmd.service
 
 [Service]
@@ -124,7 +124,7 @@ WantedBy=multi-user.target
 
 SYSTEMD_LEARNING_SERVICE = """[Unit]
 Description=NØMAÐ Continuous Learning Daemon
-Documentation=https://github.com/jtonini/nomad
+Documentation=https://github.com/jtonini/nomad-hpc
 After=network.target nomad.service
 
 [Service]
@@ -153,7 +153,7 @@ WantedBy=multi-user.target
 
 SYSTEMD_TIMER = """[Unit]
 Description=NØMAÐ ML Training Timer
-Documentation=https://github.com/jtonini/nomad
+Documentation=https://github.com/jtonini/nomad-hpc
 
 [Timer]
 OnBootSec=15min
@@ -166,7 +166,7 @@ WantedBy=timers.target
 
 SYSTEMD_TRAIN_SERVICE = """[Unit]
 Description=NØMAÐ ML Training (triggered by timer)
-Documentation=https://github.com/jtonini/nomad
+Documentation=https://github.com/jtonini/nomad-hpc
 
 [Service]
 Type=oneshot
@@ -510,10 +510,10 @@ Next steps:
      sudo systemctl status nomad
      sudo journalctl -u nomad -f
 
-  6. View dashboard (from head node):
-     nomad dashboard --host 0.0.0.0
+  6. See it: the Console, on the hub that gathers every site's data
+     (https://jtonini.github.io/nomad-hpc/console/); on this machine,
+     its own data on a page of its own: nomad dashboard
 
-For module-based environments (Lmod):
-  Create module file at /opt/apps/modulefiles/nomad/0.3.0
-  See: https://github.com/jtonini/nomad/docs/lmod.md
+For people to run nomad themselves (a module, or a link on their PATH):
+  https://jtonini.github.io/nomad-hpc/installation/
 """)

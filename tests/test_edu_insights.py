@@ -232,7 +232,7 @@ class TestFramingFollowsTheSuggestion:
         assert "reached their time limit" in text and "finished well before" not in text
 
     def test_mixed_requests_advise_for_the_usual_one(self):
-        # Seen on spydur: most jobs ask 160G and use ~10G, a few ask 4G and
+        # Seen on hpc1: most jobs ask 160G and use ~10G, a few ask 4G and
         # use 16G. One value can't fit both; it used to say "4G -> 128G".
         jobs = [(32768, 163840, 10240)] * 10 + [(24576, 4096, 16384)] * 3
         issue = self._issue("memory", "mem", jobs)

@@ -24,6 +24,22 @@ from urllib.parse import parse_qs, urlparse
 from nomad.hostlist import expand_hostlist, like_clause, node_in
 
 
+
+def _gpu_nodes(conn) -> set:
+    """The nodes the GPU collector has read (1.66.0), once a connection."""
+    cached = _GPU_NODES.get(id(conn))
+    if cached is not None:
+        return cached
+    try:
+        found = {r[0] for r in conn.execute("SELECT DISTINCT node_name FROM gpu_stats") if r[0]}
+    except Exception:                       # noqa: BLE001 -- no GPU table: no GPU nodes
+        found = set()
+    _GPU_NODES[id(conn)] = found
+    return found
+
+
+_GPU_NODES: dict = {}
+
 def _top_users_on(node_name, rows, limit=5):
     """The users with most jobs on node_name, from (username, node_list) rows
     (node lists in Slurm's range form; LIKE only narrowed them down)."""
@@ -251,7 +267,7 @@ def load_clusters_from_db(db_path: Path) -> dict:
                     pass  # No sync_sites table
 
                 # Also detect non-SLURM clusters from source_site
-                # (e.g., spiderweb has no node_state but has data
+                # (e.g., interactive1 has no node_state but has data
                 # in other tables with source_site column)
                 try:
                     site_tables = [
@@ -608,10 +624,8 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                     # Status can be 'ok', 'online', or other values
                     is_down = not row['is_available'] or row['status'] not in ('ok', 'online', 'up')
 
-                    # Detect GPU by node name pattern
-                    has_gpu = any(x in node_name.lower() for x in ['gpu']) or \
-                              node_name in ('node51', 'node52', 'node53') or \
-                              (node_name.startswith('arachne') and node_name[-2:] in ['04', '05', '06'])
+                    # GPU nodes: named so, or read by the GPU collector (1.66.0: no site's names here)
+                    has_gpu = 'gpu' in node_name.lower() or node_name in _gpu_nodes(conn)
 
                     nodes[node_name] = {
                         "name": node_name,
@@ -1506,7 +1520,7 @@ def generate_demo_node_data(clusters):
     """Generate realistic node statistics."""
     nodes = {}
     failure_types = ["OOM", "Timeout", "Cancelled", "NodeFail", "DiskFull"]
-    users = ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry"]
+    users = ["alice", "bob", "robin", "dave", "eve", "frank", "grace", "henry"]
 
     for cluster_id, cluster in clusters.items():
         for node_name in cluster["nodes"]:

@@ -3,7 +3,7 @@
 """Who may see what in the Console: ``[console.roles]`` and ``[console.labs]``.
 
     [console.roles]
-    admin = ["jtonini"]            # everything, settings included
+    admin = ["rcadmin"]            # everything, settings included
     operator = []                  # everything, no settings
     viewer = []                    # named: their own work, whatever else says so
 
@@ -14,13 +14,13 @@
     [console.labs.resources."group$"]
     name = "Smith Lab"            # how the lab is shown (else its group)
     workstations = ["adam", "eve"] # the lab's own machines
-    storage = ["sarahvaughan"]     # its storage: a server, or server:/export
+    storage = ["nas1"]     # its storage: a server, or server:/export
 
     [console.labs.assistants]
     "group$" = ["eve"]             # research assistants: see the lab as its PI does
 
     [console.storage."10.0.0.28"]   # a storage server, as the mounts name it
-    name = "sarahvaughan"
+    name = "nas1"
     note = "community $HOME, all users"
 
 Anyone the file does not name who signs in is a viewer: they see their own

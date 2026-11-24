@@ -1,6 +1,6 @@
 """1.45.0: training the model from the Console, on a worker with a GPU (#117).
 
-The hub keeps requests in ml.db; a worker (badenpowell) asks the Console for
+The hub keeps requests in ml.db; a worker (gpuws1) asks the Console for
 one, downloads the jobs' request-time figures (no person, job name, job ID,
 partition or cluster name), trains TESSERA and a logistic regression on the
 older jobs, measures both on the newest ones neither learned from, and sends
@@ -34,10 +34,10 @@ def test_settings_and_their_problems():
         False, "tessera", ("failure", "idle"), 0.2, 20, ())                # idle by default since 1.46.0
     assert s.epochs == {"gnn": 100, "lstm": 60, "ae": 60}
     on = settings({"ml": {"enabled": False, "epochs": 100, "train": {
-        "enabled": True, "engine": "baseline", "predicts": "waste", "trainer": "badenpowell",
+        "enabled": True, "engine": "baseline", "predicts": "waste", "trainer": "gpuws1",
         "jobs_days": 90, "max_jobs": 50000, "epochs": {"gnn": 20}}}})
     assert (on.enabled, on.engine, on.predicts, on.trainer, on.jobs_days, on.max_jobs, on.epochs["gnn"]) == (
-        True, "baseline", ("waste",), "badenpowell", 90, 50000, 20)
+        True, "baseline", ("waste",), "gpuws1", 90, 50000, 20)
     assert on.plan() == {"engine": "baseline", "predicts": ["waste"], "jobs_days": 90, "max_jobs": 50000,
                          "waste_threshold": 0.6, "holdout_share": 0.2, "epochs": {"gnn": 20, "lstm": 60, "ae": 60},
                          "compare": True, "tessera": {"similarity": "euclidean", "n_bins": 3, "k_neighbors": 10},
@@ -49,8 +49,8 @@ def test_settings_and_their_problems():
         False, "tessera", ("failure", "idle"), 0.2, 365, 60)
     assert len(bad.problems) == 6
     w = worker_settings({"ml": {"worker": {"console": "https://nomad.example.edu/", "device": "cpu",
-                                           "name": "badenpowell"}}})
-    assert (w.console, w.device, w.name, w.problems) == ("https://nomad.example.edu", "cpu", "badenpowell", ())
+                                           "name": "gpuws1"}}})
+    assert (w.console, w.device, w.name, w.problems) == ("https://nomad.example.edu", "cpu", "gpuws1", ())
     assert worker_settings({}).problems                                   # no console said
 
 
@@ -82,10 +82,10 @@ def jobs_db(path, n=400, seed=0):
         c.execute("INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                   (f"{1000 + i}", f"user{i % 7}", f"secret_job_{i}", ["basicpart", "gpupart"][i % 2], cpus, i % 2, 4096,
                    asked, ran, sub.isoformat(), (sub + timedelta(seconds=ran)).isoformat(), state,
-                   ["spydur", "arachne"][i % 3 == 0]))
+                   ["hpc1", "hpc2"][i % 3 == 0]))
     for i in range(5):
         c.execute("INSERT INTO jobs VALUES (?, 'user1', 'waiting_job', 'basicpart', 8, 0, 2048, 7200, NULL, ?, NULL, "
-                  "?, 'spydur')", (f"9{i}", (NOW - timedelta(hours=i)).isoformat(), ["PENDING", "RUNNING"][i % 2]))
+                  "?, 'hpc1')", (f"9{i}", (NOW - timedelta(hours=i)).isoformat(), ["PENDING", "RUNNING"][i % 2]))
     c.commit()
     return c
 
@@ -97,7 +97,7 @@ def test_the_dataset_has_numbers_only(tmp_path):
     conn = jobs_db(tmp_path / "combined.db")
     data, mapping = D.build(conn, PLAN, NOW)
     text = json.dumps(data)
-    for word in ("user1", "secret_job", "basicpart", "gpupart", "spydur", "arachne", "1001", "waiting_job"):
+    for word in ("user1", "secret_job", "basicpart", "gpupart", "hpc1", "hpc2", "1001", "waiting_job"):
         assert word not in text, word
     n_ended = sum(1 for p in data["part"] if p != "now")
     assert data["counts"]["now"] == 5 and data["counts"]["holdout"] == round(n_ended * 0.2)
@@ -140,17 +140,17 @@ def test_a_request_from_asked_to_done(hub):
     assert (r["state"], r["asked_by"], r["note"], r["plan"]["engine"]) == ("queued", "adam", "first one", "tessera")
     with pytest.raises(R.RequestError, match="queued already"):
         R.ask(rec, s, "adam")
-    got = R.claim(rec, s, "badenpowell")
-    assert (got["id"], got["state"], got["worker"]) == (r["id"], "running", "badenpowell")
-    assert R.claim(rec, s, "badenpowell") is None
+    got = R.claim(rec, s, "gpuws1")
+    assert (got["id"], got["state"], got["worker"]) == (r["id"], "running", "gpuws1")
+    assert R.claim(rec, s, "gpuws1") is None
     with pytest.raises(R.RequestError, match="isn't running on other"):
         R.dataset(rec, conn, r["id"], "other")
-    data = R.dataset(rec, conn, r["id"], "badenpowell", NOW)
+    data = R.dataset(rec, conn, r["id"], "gpuws1", NOW)
     assert data["request"] == r["id"] and rec.execute("SELECT COUNT(*) FROM ml_jobs").fetchone()[0] == len(data["rows"])
-    R.progress(rec, r["id"], "badenpowell", "training\n on   400 jobs")
+    R.progress(rec, r["id"], "gpuws1", "training\n on   400 jobs")
     assert R.request_of(rec, r["id"])["progress"] == "training on 400 jobs"
     result = T.run({**data, "plan": {**data["plan"], "engine": "baseline"}}, "cpu")
-    done = R.finish(rec, s, r["id"], "badenpowell", result)
+    done = R.finish(rec, s, r["id"], "gpuws1", result)
     assert done["state"] == "done" and done["summary"]["targets"]["failure"]["auc"]["baseline"] > 0.6
     st = R.status(rec, s)
     assert st["current"] is None and st["last"]["id"] == r["id"] and st["enabled"] is True
@@ -288,7 +288,7 @@ class Console:
 
 def test_a_worker_pass(hub):
     conn, rec, s = hub
-    ws = WorkerSettings(console="https://x", name="badenpowell", device="cpu")
+    ws = WorkerSettings(console="https://x", name="gpuws1", device="cpu")
     console = Console(conn, rec, Settings(enabled=True, engine="baseline"))
     assert W.work_once(ws, say=lambda t: None, client=console) == "no training request"
     r = R.ask(rec, Settings(enabled=True, engine="baseline"), "adam")
@@ -298,7 +298,7 @@ def test_a_worker_pass(hub):
     # a failure is told to the Console, then raised
     r = R.ask(rec, Settings(enabled=True), "adam")                  # tessera, on a GPU this test hasn't
     with pytest.raises(T.TrainError):
-        W.work_once(WorkerSettings(console="https://x", name="badenpowell", device="cuda"), say=lambda t: None,
+        W.work_once(WorkerSettings(console="https://x", name="gpuws1", device="cuda"), say=lambda t: None,
                     client=console)
     assert R.request_of(rec, r["id"])["state"] == "failed"
 
@@ -359,7 +359,7 @@ def test_cli_on_the_hub(tmp_path, monkeypatch):
     key = tmp_path / "key"
     toml = tmp_path / "nomad.toml"
     toml.write_text(f'[ml]\nenabled = false\nepochs = 100\n[ml.train]\nenabled = true\nengine = "baseline"\n'
-                    f'trainer = "badenpowell"\nkey_file = "{key}"\n')
+                    f'trainer = "gpuws1"\nkey_file = "{key}"\n')
     run = lambda *a: CliRunner().invoke(main, ["-c", str(toml), "ml", *a])  # noqa: E731
     r = run("status")
     assert r.exit_code == 0, r.output
@@ -437,10 +437,10 @@ def test_two_passes_never_take_the_same_request(tmp_path, monkeypatch):
             got = real(sql, *args)
             if sql.startswith("SELECT id FROM ml_requests WHERE state = 'queued'"):
                 row = got.fetchone()
-                assert R.claim(a, s, "badenpowell")["state"] == "running"
+                assert R.claim(a, s, "gpuws1")["state"] == "running"
                 return type("C", (), {"fetchone": lambda self: row})()
             return got
-    assert R.claim(Racing(), s, "badenpowell") is None
+    assert R.claim(Racing(), s, "gpuws1") is None
 
 
 def test_lab_check_untouched():
@@ -449,13 +449,13 @@ def test_lab_check_untouched():
 
 # ── #121: size advice only from jobs that completed ─────────────────────────────────────────
 
-SIZING_TIERS = [{"cluster": "spydur", "memory_mb": 384_000, "memory_gb": 375.0, "node_count": 16,
+SIZING_TIERS = [{"cluster": "hpc1", "memory_mb": 384_000, "memory_gb": 375.0, "node_count": 16,
                  "partitions": "basic"}]
 
 
 def _sized_db(path, jobs):
     """jobs: (state, cpu_percent, runtime_s, mem_gb) for one person on one partition: 52 cores,
-    350 GB and 12 days asked each time (as on spdr01)."""
+    350 GB and 12 days asked each time (as on nd01)."""
     c = sqlite3.connect(path)
     c.execute("CREATE TABLE jobs (job_id TEXT PRIMARY KEY, cluster TEXT, user_name TEXT, partition TEXT, "
               "node_list TEXT, job_name TEXT, state TEXT, exit_code INTEGER, exit_signal INTEGER, "
@@ -470,11 +470,11 @@ def _sized_db(path, jobs):
         jid = str(9000 + i)
         c.execute("INSERT INTO jobs (job_id, cluster, user_name, partition, state, end_time, req_cpus, req_mem_mb, "
                   "req_gpus, req_time_seconds, runtime_seconds, wait_time_seconds) VALUES "
-                  "(?, 'spydur', 'pat', 'basic', ?, datetime('now', ?), 52, 358400, 0, 1036800, ?, 60)",
+                  "(?, 'hpc1', 'pat', 'basic', ?, datetime('now', ?), 52, 358400, 0, 1036800, ?, 60)",
                   (jid, state, f"-{i + 1} hours", run))
         c.execute("INSERT INTO job_summary (job_id, cluster, peak_cpu_percent, avg_cpu_percent, peak_memory_gb, "
                   "avg_memory_gb, avg_io_wait_percent, nfs_ratio, used_gpu, health_score) VALUES "
-                  "(?, 'spydur', ?, ?, ?, ?, 1.0, 0.1, 0, 50.0)", (jid, cpu, cpu, mem, mem))
+                  "(?, 'hpc1', ?, ?, ?, ?, 1.0, 0.1, 0, 50.0)", (jid, cpu, cpu, mem, mem))
     c.commit()
     c.close()
 
@@ -488,7 +488,7 @@ def _insights(tmp_path, jobs, name="sized"):
 
 
 def test_failed_jobs_give_no_advice_to_ask_for_less(tmp_path):
-    """Three jobs failed in their first minutes (as on spdr01): no "52 → 2 cores", "12 days → 2:30"
+    """Three jobs failed in their first minutes (as on nd01): no "52 → 2 cores", "12 days → 2:30"
     or "350G → 64G"; a card says they failed, and how many."""
     got = _insights(tmp_path, [("FAILED", 2.0, 300, 3.0)] * 3)
     assert not {"cpu", "memory", "time"} & set(got), sorted(got)
@@ -519,7 +519,7 @@ def test_one_failure_among_many_is_no_card(tmp_path):
 
 
 def test_a_job_that_used_all_it_asked_for_is_no_cpu_advice(tmp_path):
-    """The running job on spdr01 used all 52 cores: when such jobs complete, no advice to ask for less."""
+    """The running job on nd01 used all 52 cores: when such jobs complete, no advice to ask for less."""
     got = _insights(tmp_path, [("COMPLETED", 95.0, 900_000, 330.0)] * 3 + [("FAILED", 2.0, 300, 3.0)] * 3)
     assert "cpu" not in got and "memory" not in got
     assert got["failed"].completed_jobs == 3

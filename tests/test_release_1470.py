@@ -101,7 +101,7 @@ def test_a_card_lists_its_jobs_newest_first(tmp_path):
     cpu = next(c for c in cards if c.dimension_key == "cpu")
     assert [j["job_id"] for j in cpu.jobs] == ["9000", "9001", "9002"]     # 9000 ended last
     j = cpu.jobs[0]
-    assert j["site"] == "spydur" and j["partition"] == "basic" and j["state"] == "COMPLETED"
+    assert j["site"] == "hpc1" and j["partition"] == "basic" and j["state"] == "COMPLETED"
     assert j["name"] == "align_9000" and j["ended"] and j["score"] < 40
     assert j["asked"] == 52 and j["unit"] == "cores" and j["used"] == pytest.approx(1.04, abs=0.05)
     assert j["detail"]

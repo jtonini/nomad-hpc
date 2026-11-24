@@ -51,7 +51,7 @@ def fingerprint(peak_gb, span_hours, host_gb, epoch=1_700_000_000):
 
 
 # Synthetic cluster capacity lists — site-agnostic.
-# These mimic real spydur tiers (375, 750, 1500) without naming spydur.
+# These mimic real hpc1 tiers (375, 750, 1500) without naming hpc1.
 CLUSTER_TIERS_REALISTIC = [
     {"cluster": "primary", "memory_mb": 384_000, "memory_gb": 375.0,
      "node_count": 16, "partitions": "basic"},

@@ -229,7 +229,7 @@ entries:
       - nomad edu trajectory
     examples:
       - "nomad edu explain 12345 --db nomad.db"
-      - "nomad edu explain 12345 --db nomad.db --cluster arachne"
+      - "nomad edu explain 12345 --db nomad.db --cluster hpc2"
       - "nomad edu explain 12345 --json"
       - "nomad edu explain 12345 --no-progress"
     tags:
@@ -346,7 +346,7 @@ entries:
       - nomad diag network
     examples:
       - "nomad diag node demo node01 --db nomad.db"
-      - "nomad diag node arachne gpu-03 --db nomad.db"
+      - "nomad diag node hpc2 gpu-03 --db nomad.db"
       - "nomad diag node demo node01 --json"
     tags:
       - diag

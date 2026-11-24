@@ -10,7 +10,7 @@ Produces:
   - Optional: filesystem attribution summary (if --walk-fds was enabled)
 
 Usage:
-    python3 analyze_validation.py path/to/spydur_baseline_*.db
+    python3 analyze_validation.py path/to/hpc1_baseline_*.db
     python3 analyze_validation.py path/to/db --cpu-threshold 10 --duration-minutes 5
 """
 
@@ -199,7 +199,7 @@ def main():
     if meta.get("walk_fds") == "1":
         section("FILESYSTEM ATTRIBUTION  (from /proc/<pid>/fd)")
         # Classify paths into rough buckets.
-        # NOTE: bucket names reflect intent, not mount point. On arachne,
+        # NOTE: bucket names reflect intent, not mount point. On hpc2,
         # /scratch doesn't exist as a separate filesystem -- "scratch"
         # directories live under /home (e.g. /home/scratch/<user>/...).
         # On clusters where /scratch IS a separate NFS mount, those
@@ -236,7 +236,7 @@ def main():
                   f"{d['nfs_data']:>8} {d['system']:>8} {d['other']:>8}")
 
         # Drill-down: per-user, what's actually under nfs_home?
-        # On arachne, /home/scratch/<user>/ is "scratch-like" use of NFS,
+        # On hpc2, /home/scratch/<user>/ is "scratch-like" use of NFS,
         # /home/<user>/ is "home-like" use. Worth distinguishing.
         section("NFS_HOME BREAKDOWN  (top path prefixes per user)")
         for u in sorted(bucket):

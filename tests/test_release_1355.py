@@ -17,7 +17,7 @@ def no_accounts(monkeypatch):
 
 
 def test_nothing_happens_automatically():
-    s = L.settings(check(names={"cparish": "Carol Parish"}), REPORT)
+    s = L.settings(check(names={"rames": "Robin Ames"}), REPORT)
     for e in (entry(), entry(kind="remind14", claims=2, left=40)):
         body = L._body(e, s)
         assert "\nNothing happens automatically. Our team reviews your answers before making any change.\n" in body
@@ -27,10 +27,10 @@ def test_nothing_happens_automatically():
 
 
 def test_a_name_not_filled_in_yet():
-    s = L.settings(check(names={"cparish": "Carol Parish", "myang": "", "knolin": "   "}), REPORT)
-    assert s.names == (("cparish", "Carol", "Parish"),)
+    s = L.settings(check(names={"rames": "Robin Ames", "tchen": "", "lnovak": "   "}), REPORT)
+    assert s.names == (("rames", "Robin", "Ames"),)
     assert not [p for p in s.problems if "names" in p]
-    assert L.name_of("myang", s) == (None, "none") and L.greeting(["myang"], s) == "Dear colleague,"
+    assert L.name_of("tchen", s) == (None, "none") and L.greeting(["tchen"], s) == "Dear colleague,"
     # a value that isn't a name is still said
-    bad = L.settings(check(names={"cparish": "Carol Parish", "x1": 3, "BAD NETID!": "Ann Lee"}), REPORT)
+    bad = L.settings(check(names={"rames": "Robin Ames", "x1": 3, "BAD NETID!": "Ann Lee"}), REPORT)
     assert len([p for p in bad.problems if "names:" in p]) == 2

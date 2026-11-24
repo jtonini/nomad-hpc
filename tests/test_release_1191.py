@@ -21,7 +21,7 @@ from nomad.collectors import watch_probe as probe
 
 ME = os.getuid()
 SSHD = 99                     # a system account's sshd (system=: uid 99)
-VADUR = "172.28.122.224"
+HPC3 = "172.28.122.224"
 
 
 def hex4(a):
@@ -44,7 +44,7 @@ def row(i, local, remote, st, uid, six=False):
 
 
 def make_proc(tmp_path, tcp=(), udp=(), raw=(), tcp6=(), procs=None, sshd=SSHD):
-    """A /proc like spydur's: 172.28.8.105 on en0 (the default route), the
+    """A /proc like hpc1's: 172.28.8.105 on en0 (the default route), the
     cluster's 10.1.1.0/24 on en1; sshd (uid 99) on port 22."""
     p = tmp_path / "proc"
     (p / "net").mkdir(parents=True)
@@ -74,9 +74,9 @@ def make_proc(tmp_path, tcp=(), udp=(), raw=(), tcp6=(), procs=None, sshd=SSHD):
     return p
 
 
-TUNNEL = (("172.28.8.105", 41000), (VADUR, 22), "01", ME)        # the forward's own connection
-USED = (("127.0.0.1", 41001), ("127.0.0.1", 22), "01", ME)       # someone on vadur using it
-TRUSTED = [(ipaddress.ip_network(VADUR + "/32"), 0)]
+TUNNEL = (("172.28.8.105", 41000), (HPC3, 22), "01", ME)        # the forward's own connection
+USED = (("127.0.0.1", 41001), ("127.0.0.1", 22), "01", ME)       # someone on hpc3 using it
+TRUSTED = [(ipaddress.ip_network(HPC3 + "/32"), 0)]
 
 
 def accounts(p, uid=ME, trusted=TRUSTED, campus=()):
@@ -91,16 +91,16 @@ def test_a_forward_to_a_listed_server_and_nothing_else(tmp_path):
 
 
 def test_ipv4_mapped_ipv6_reads_as_ipv4(tmp_path):
-    p = make_proc(tmp_path, tcp6=[(("::ffff:172.28.8.105", 41000), ("::ffff:" + VADUR, 22), "01", ME)])
+    p = make_proc(tmp_path, tcp6=[(("::ffff:172.28.8.105", 41000), ("::ffff:" + HPC3, 22), "01", ME)])
     assert accounts(p)["why"] == {}
 
 
 @pytest.mark.parametrize("extra, why, reach", [
     ((("172.28.8.105", 41010), ("140.82.112.3", 443), "01", ME), {"outside": 1}, "outside"),
     ((("172.28.8.105", 41010), ("172.29.3.4", 22), "01", ME), {"campus": 1}, "campus"),      # private, beyond
-    ((("172.28.8.105", 41010), ("141.166.180.43", 22), "01", ME), {"campus": 1}, "campus"),  # --campus
+    ((("172.28.8.105", 41010), ("172.40.180.43", 22), "01", ME), {"campus": 1}, "campus"),  # --campus
     ((("10.1.1.254", 41010), ("10.1.1.5", 6818), "01", ME), {"cluster_port": 1}, "inside"),   # a node's high port
-    ((("172.28.8.105", 41010), (VADUR, 2200), "01", ME), {"server_port": 1}, "inside"),
+    ((("172.28.8.105", 41010), (HPC3, 2200), "01", ME), {"server_port": 1}, "inside"),
     ((("127.0.0.1", 41010), ("127.0.0.1", 7000), "01", ME), {"host_port": 1}, "inside"),      # its own -L, say
     ((("127.0.0.1", 41010), ("127.0.0.1", 5000), "01", ME), {"host_port": 1}, "inside"),      # another's port
     ((("127.0.0.1", 41010), ("127.0.0.1", 6000), "02", ME), {"host_port": 1}, "inside"),      # nothing there
@@ -108,7 +108,7 @@ def test_ipv4_mapped_ipv6_reads_as_ipv4(tmp_path):
 def test_anything_else_it_reaches_keeps_it_unverified(tmp_path, extra, why, reach):
     listeners = [(("127.0.0.1", 7000), ("0.0.0.0", 0), "0A", ME), (("127.0.0.1", 5000), ("0.0.0.0", 0), "0A", 1600)]
     p = make_proc(tmp_path, tcp=[TUNNEL, *listeners, extra])
-    a = accounts(p, campus=[ipaddress.ip_network("141.166.0.0/16")])
+    a = accounts(p, campus=[ipaddress.ip_network("172.40.0.0/16")])
     assert a["why"] == why and a["reach"] == reach
 
 
@@ -138,7 +138,7 @@ def test_open_udp_and_raw_sockets(tmp_path):
 def test_no_connection_to_a_listed_server_or_into_the_cluster(tmp_path):
     assert accounts(make_proc(tmp_path))["why"] == {"none": 1}
     assert accounts(make_proc(tmp_path / "b", tcp=[TUNNEL]), trusted=[])["why"] == {"campus": 1, "none": 1}
-    syn = (("172.28.8.105", 41000), (VADUR, 22), "02", ME)              # not connected yet
+    syn = (("172.28.8.105", 41000), (HPC3, 22), "02", ME)              # not connected yet
     assert accounts(make_proc(tmp_path / "c", tcp=[syn]))["why"] == {"none": 1}
 
 
@@ -158,24 +158,24 @@ def _found(p, uid=ME):
     return [f for f in found if f["kind"] == "ssh_reverse"]
 
 
-def test_the_vadur_case_is_verified(tmp_path):
+def test_the_hpc3_case_is_verified(tmp_path):
     p = make_proc(tmp_path, tcp=[TUNNEL, USED],
-                  procs={300: (["ssh", "-fN", "-R", "2222:localhost:22", "vadur"], 1)})
+                  procs={300: (["ssh", "-fN", "-R", "2222:localhost:22", "hpc3"], 1)})
     [f] = _found(p)
     assert f["verified"] is True and f["why"] == {} and f["servers"] == [0] and f["reach"] == "inside"
     assert (f["far"], f["to"], f["proxied"], f["detail"]) == ("loopback", "this host", False, "2222")
 
 
 @pytest.mark.parametrize("argv, why", [
-    (["ssh", "-N", "-R", ":2222:localhost:22", "vadur"], {"far"}),              # every address on vadur
-    (["ssh", "-N", "-R", "10.9.9.9:2222:localhost:22", "vadur"], {"far"}),
-    (["ssh", "-N", "-R", "2222", "vadur"], {"to"}),                             # SOCKS on vadur, out from here
-    (["ssh", "-N", "-R", "2222:spdr12:22", "vadur"], {"to"}),                   # to a node
-    (["ssh", "-N", "-R", "2222:/run/docker.sock", "vadur"], {"to"}),
-    (["ssh", "-N", "-R", "/tmp/s:localhost:22", "vadur"], {"unchecked"}),
-    (["ssh", "-N", "-o", "ProxyJump=vadur", "-R", "2222:localhost:22", "evil"], {"proxied", "relay"}),
-    (["ssh", "-N", "-o", "HostName=evil.example.com", "-R", "2222:localhost:22", "vadur"], {"proxied"}),
-    (["ssh", "-N", "-R", "${P}:localhost:22", "vadur"], {"unchecked"}),
+    (["ssh", "-N", "-R", ":2222:localhost:22", "hpc3"], {"far"}),              # every address on hpc3
+    (["ssh", "-N", "-R", "10.9.9.9:2222:localhost:22", "hpc3"], {"far"}),
+    (["ssh", "-N", "-R", "2222", "hpc3"], {"to"}),                             # SOCKS on hpc3, out from here
+    (["ssh", "-N", "-R", "2222:nd12:22", "hpc3"], {"to"}),                   # to a node
+    (["ssh", "-N", "-R", "2222:/run/docker.sock", "hpc3"], {"to"}),
+    (["ssh", "-N", "-R", "/tmp/s:localhost:22", "hpc3"], {"unchecked"}),
+    (["ssh", "-N", "-o", "ProxyJump=hpc3", "-R", "2222:localhost:22", "evil"], {"proxied", "relay"}),
+    (["ssh", "-N", "-o", "HostName=evil.example.com", "-R", "2222:localhost:22", "hpc3"], {"proxied"}),
+    (["ssh", "-N", "-R", "${P}:localhost:22", "hpc3"], {"unchecked"}),
 ])
 def test_a_shape_that_is_never_verified(tmp_path, argv, why):
     p = make_proc(tmp_path, tcp=[TUNNEL], procs={300: (argv, 1)})
@@ -184,20 +184,20 @@ def test_a_shape_that_is_never_verified(tmp_path, argv, why):
 
 
 def test_an_ssh_with_a_child_or_that_relays(tmp_path):
-    # ~/.ssh/config: ProxyJump vadur for evil; the jump is a child, its connection only to vadur
+    # ~/.ssh/config: ProxyJump hpc3 for evil; the jump is a child, its connection only to hpc3
     procs = {300: (["ssh", "-N", "-R", "2222:localhost:22", "evil"], 1),
-             301: (["ssh", "-W", "[evil]:22", "vadur"], 300)}
+             301: (["ssh", "-W", "[evil]:22", "hpc3"], 300)}
     [f] = _found(make_proc(tmp_path, tcp=[TUNNEL], procs=procs))
     assert f["verified"] is False and set(f["why"]) == {"child", "relay", "carrier"}     # two ssh, one connection
     # a relay of its own, not a child: ssh -W reparented, or a local forward from a socket
-    for i, relay in enumerate((["ssh", "-W", "evil:22", "vadur"], ["ssh", "-NL", "/tmp/s:evil:22", "vadur"])):
-        procs = {300: (["ssh", "-N", "-R", "2222:localhost:22", "vadur"], 1), 302: (relay, 1)}
-        [f] = _found(make_proc(tmp_path / str(i), tcp=[TUNNEL, (("172.28.8.105", 41001), (VADUR, 22), "01", ME)],
+    for i, relay in enumerate((["ssh", "-W", "evil:22", "hpc3"], ["ssh", "-NL", "/tmp/s:evil:22", "hpc3"])):
+        procs = {300: (["ssh", "-N", "-R", "2222:localhost:22", "hpc3"], 1), 302: (relay, 1)}
+        [f] = _found(make_proc(tmp_path / str(i), tcp=[TUNNEL, (("172.28.8.105", 41001), (HPC3, 22), "01", ME)],
                                procs=procs))
         assert f["verified"] is False and set(f["why"]) == {"relay"}
     # autossh is ssh's parent, not a child of it; a TCP -L (autossh -M) is fine
-    procs = {300: (["autossh", "-M", "20000", "-N", "-R", "2222:localhost:22", "vadur"], 1),
-             301: (["/usr/bin/ssh", "-L", "20000:127.0.0.1:20000", "-N", "-R", "2222:localhost:22", "vadur"], 300)}
+    procs = {300: (["autossh", "-M", "20000", "-N", "-R", "2222:localhost:22", "hpc3"], 1),
+             301: (["/usr/bin/ssh", "-L", "20000:127.0.0.1:20000", "-N", "-R", "2222:localhost:22", "hpc3"], 300)}
     found = _found(make_proc(tmp_path / "a", tcp=[TUNNEL], procs=procs))
     assert {f["program"] for f in found} == {"autossh", "ssh"} and all(f["verified"] for f in found)
 
@@ -268,39 +268,39 @@ def test_forward_shapes_as_ssh_itself_reads_them():
 # ── the collector ───────────────────────────────────────────────────────────
 
 def fake_resolve(name):
-    return {"vadur": [VADUR], "login02": ["10.1.1.253", "fd00::253"], "spydur": ["127.0.1.1", "10.1.1.254"]
+    return {"hpc3": [HPC3], "login02": ["10.1.1.253", "fd00::253"], "hpc1": ["127.0.1.1", "10.1.1.254"]
             }.get(name, [])
 
 
 def test_trusted_entries():
     out, notes = pw.trusted_entries(
-        ["vadur", "vadur:2222", "10.1.2.0/24", "[fd00::1]:22", "fd00::/8", "bad name!", "nowhere", "127.0.0.1",
-         "0.0.0.0/0", "vadur:0", "vadur:70000"],
-        here="spydur", login_hosts=["login02"], resolve=fake_resolve)
-    assert out == [("vadur", VADUR + "/32", 0), ("vadur", VADUR + "/32", 2222), ("10.1.2.0/24", "10.1.2.0/24", 0),
+        ["hpc3", "hpc3:2222", "10.1.2.0/24", "[fd00::1]:22", "fd00::/8", "bad name!", "nowhere", "127.0.0.1",
+         "0.0.0.0/0", "hpc3:0", "hpc3:70000"],
+        here="hpc1", login_hosts=["login02"], resolve=fake_resolve)
+    assert out == [("hpc3", HPC3 + "/32", 0), ("hpc3", HPC3 + "/32", 2222), ("10.1.2.0/24", "10.1.2.0/24", 0),
                    ("fd00::1", "fd00::1/128", 22), ("fd00::/8", "fd00::/8", 0),
                    ("login02", "10.1.1.253/32", 0), ("login02", "fd00::253/128", 0),
-                   ("spydur", "10.1.1.254/32", 0)]                     # its 127.0.1.1 isn't a server
+                   ("hpc1", "10.1.1.254/32", 0)]                     # its 127.0.1.1 isn't a server
     assert any("nowhere: not found" in n for n in notes) and any("fd00::/8: a very wide network (/8)" in n
                                                                  for n in notes)
     assert sum("not a name, an address or a network" in n for n in notes) == 3
     assert any("127.0.0.1: not used" in n for n in notes) and any("0.0.0.0/0: not used" in n for n in notes)
     assert len(notes) == 7
-    _out, notes = pw.trusted_entries(["vadur", "vadur-alias", VADUR], resolve=lambda n: [VADUR])
-    assert notes == ["trusted host vadur-alias: already listed", f"trusted host {VADUR}: already listed"]
-    assert pw.trusted_entries("vadur", resolve=fake_resolve)[0] == [("vadur", VADUR + "/32", 0)]    # one string
+    _out, notes = pw.trusted_entries(["hpc3", "hpc3-alias", HPC3], resolve=lambda n: [HPC3])
+    assert notes == ["trusted host hpc3-alias: already listed", f"trusted host {HPC3}: already listed"]
+    assert pw.trusted_entries("hpc3", resolve=fake_resolve)[0] == [("hpc3", HPC3 + "/32", 0)]    # one string
 
 
 def test_the_probe_is_given_the_list_and_here_s_addresses_come_after(monkeypatch):
     monkeypatch.setattr(pw, "_resolve", fake_resolve)
-    monkeypatch.setattr(pw.os, "uname", lambda: os.uname_result(("Linux", "spydur", "", "", "")))
-    c = pw.PolicyWatchCollector({"trusted_hosts": ["vadur"], "campus_networks": ["141.166.0.0/16", "x"]}, ":memory:")
+    monkeypatch.setattr(pw.os, "uname", lambda: os.uname_result(("Linux", "hpc1", "", "", "")))
+    c = pw.PolicyWatchCollector({"trusted_hosts": ["hpc3"], "campus_networks": ["172.40.0.0/16", "x"]}, ":memory:")
     args = c._args()
-    assert args[args.index("--trusted") + 1] == f"{VADUR}/32@0,10.1.1.254/32@0"
-    assert args[args.index("--campus") + 1] == "141.166.0.0/16" and any("'x'" in n for n in c.trust_notes)
+    assert args[args.index("--trusted") + 1] == f"{HPC3}/32@0,10.1.1.254/32@0"
+    assert args[args.index("--campus") + 1] == "172.40.0.0/16" and any("'x'" in n for n in c.trust_notes)
     first = c.servers()
     c.here_addresses = ["172.28.8.105", "127.0.0.1", "10.1.1.254"]
-    assert c.servers()[:len(first)] == first and c.servers() == ["vadur", "spydur", "spydur"]
+    assert c.servers()[:len(first)] == first and c.servers() == ["hpc3", "hpc1", "hpc1"]
     assert "--inside" not in args
 
 
@@ -309,15 +309,15 @@ def verified_answer(**over):
          "processes": 1, "far": "loopback", "to": "this host", "proxied": False, "reach": "inside", "why": {},
          "servers": [0], "verified": True}
     f.update(over)
-    return {"host": "spydur", "uid": 990, "hidepid": False, "processes": 300, "others": 290, "others_readable": 200,
+    return {"host": "hpc1", "uid": 990, "hidepid": False, "processes": 300, "others": 290, "others_readable": 200,
             "findings": [f], "listeners": []}
 
 
 def test_findings_of_a_verified_forward():
-    [f] = pw.findings_of(verified_answer(), "spydur", "login", servers=["vadur"])
+    [f] = pw.findings_of(verified_answer(), "hpc1", "login", servers=["hpc3"])
     assert (f["severity"], f["verified"], f["reach"]) == ("info", True, "inside")
-    assert f["note"] == "verified: to vadur; far end loopback"
-    [f] = pw.findings_of(verified_answer(servers=[]), "spdr12", "node", servers=["vadur"])
+    assert f["note"] == "verified: to hpc3; far end loopback"
+    [f] = pw.findings_of(verified_answer(servers=[]), "nd12", "node", servers=["hpc3"])
     assert f["note"] == "verified: to the cluster; far end loopback"
 
 
@@ -336,14 +336,14 @@ def test_findings_of_a_verified_forward():
     ({"detail": "+3 more", "program": "+3 more"}, None),
 ])
 def test_findings_of_an_unverified_forward(over, note):
-    [f] = pw.findings_of(verified_answer(**over), "spydur", "login", servers=["vadur"])
+    [f] = pw.findings_of(verified_answer(**over), "hpc1", "login", servers=["hpc3"])
     assert f["severity"] == "warning" and f["verified"] is False
     if note:
         assert f["note"] == note
 
 
 def test_a_socks_proxy_is_never_verified():
-    [f] = pw.findings_of(verified_answer(kind="ssh_socks", to="socks"), "spydur", "login", servers=["vadur"])
+    [f] = pw.findings_of(verified_answer(kind="ssh_socks", to="socks"), "hpc1", "login", servers=["hpc3"])
     assert f["severity"] == "warning" and f["note"] == "a SOCKS proxy here, on loopback"
 
 
@@ -365,7 +365,7 @@ def dispatcher_like(sent):
 @pytest.fixture
 def watch(db_path, monkeypatch):
     monkeypatch.setattr(pw, "_resolve", fake_resolve)
-    c = pw.PolicyWatchCollector({"enabled": True, "nodes": [], "trusted_hosts": ["vadur"]}, db_path)
+    c = pw.PolicyWatchCollector({"enabled": True, "nodes": [], "trusted_hosts": ["hpc3"]}, db_path)
     state = {"a": verified_answer()}
     monkeypatch.setattr(c, "probe_here", lambda: (state["a"], ""))
     sent = []
@@ -386,7 +386,7 @@ def test_a_verified_forward_is_listed_not_alerted_and_one_finding_as_it_changes(
     c.store(c.collect())
     assert sent == []
     r = CliRunner().invoke(watch_group, ["list", "--db", db])
-    assert "ssh port 2222, verified" in r.output and "verified: to vadur; far end loopback" in r.output
+    assert "ssh port 2222, verified" in r.output and "verified: to hpc3; far end loopback" in r.output
     state["a"] = verified_answer(verified=False, why={"outside": 1}, reach="outside")
     _sweep(c, db)
     [(args, kw)] = sent
@@ -399,7 +399,7 @@ def test_a_verified_forward_is_listed_not_alerted_and_one_finding_as_it_changes(
     assert sent == []
     with sqlite3.connect(db) as conn:
         rows = conn.execute("SELECT sweeps, severity, verified, reach, note FROM policy_findings").fetchall()
-    assert rows == [(3, "info", 1, "inside", "verified: to vadur; far end loopback")]
+    assert rows == [(3, "info", 1, "inside", "verified: to hpc3; far end loopback")]
 
 
 def test_an_old_database_gains_the_columns(tmp_path):
@@ -408,7 +408,7 @@ def test_an_old_database_gains_the_columns(tmp_path):
     with sqlite3.connect(db) as conn:
         conn.executescript(pw.SCHEMA.replace("    verified INTEGER,\n    note TEXT,\n", ""))
         conn.execute("INSERT INTO policy_findings (host, kind, program, detail, reach, first_seen, last_seen, "
-                     "severity) VALUES ('spydur', 'tunnel', 'ngrok', '', '', '2099-01-01', '2099-01-01', 'warning')")
+                     "severity) VALUES ('hpc1', 'tunnel', 'ngrok', '', '', '2099-01-01', '2099-01-01', 'warning')")
     r = CliRunner().invoke(watch_group, ["list", "--db", db])                  # a hub before its sites sync
     assert r.exit_code == 0 and "ngrok" in r.output, r.output
     from nomad.db.migrations import MIGRATIONS
@@ -435,14 +435,14 @@ def test_the_probe_says_where_it_is_and_is_still_python_36(tmp_path):
         nobody = pwd.getpwuid(65534).pw_name
     except KeyError:
         pytest.skip("no uid 65534 here")
-    tunnel = {300: (["ssh", "-fN", "-R", "2222:localhost:22", "vadur"], 1)}
+    tunnel = {300: (["ssh", "-fN", "-R", "2222:localhost:22", "hpc3"], 1)}
     src = open(probe.__file__).read()
     for later in ("subnet_of", "supernet_of", "removeprefix", "capture_output", "text=True"):
         assert later not in src, later
 
     def run(p, *extra):
         r = subprocess.run(["python3", "-I", "-S", "-", "--min-uid", "0", "--proc", str(p), "--trusted",
-                            f"{VADUR}/32@0", *extra], input=src, capture_output=True, text=True, timeout=60)
+                            f"{HPC3}/32@0", *extra], input=src, capture_output=True, text=True, timeout=60)
         d = json.loads(r.stdout)
         return d, [f for f in d["findings"] if f["kind"] == "ssh_reverse"]
 
@@ -466,25 +466,25 @@ def test_set_up_in_nomad_toml(tmp_path, monkeypatch):
     conf = tomllib.loads("\n".join(ln[2:] for ln in block.splitlines() if ln.startswith("# ") and "=" in ln
                                    or ln.startswith("# [")))
     pwc = conf["collectors"]["policy_watch"]
-    assert pwc["trusted_hosts"] == ["vadur"] and pwc["campus_networks"] == ["141.166.0.0/16", "192.67.49.0/24"]
+    assert pwc["trusted_hosts"] == ["hpc3"] and pwc["campus_networks"] == ["172.40.0.0/16", "172.41.49.0/24"]
     c = pw.PolicyWatchCollector(pwc, ":memory:")
-    assert c.trusted_hosts == ["vadur"] and c.campus == ["141.166.0.0/16", "192.67.49.0/24"]
+    assert c.trusted_hosts == ["hpc3"] and c.campus == ["172.40.0.0/16", "172.41.49.0/24"]
     monkeypatch.setattr(pw, "_resolve", fake_resolve)
-    problems, info = pw.config_problems({**pwc, "trusted_hosts": ["vadur", "vadur:2222", "nowhere"],
-                                         "inside_hosts": ["x"], "campus_networks": ["141.166.0.0/16", "nope"]})
-    assert info[0] == f"trusted: vadur = {VADUR} (ports below 1024, port 2222)"
-    assert info[1].startswith("campus: 141.166.0.0/16 (and")
+    problems, info = pw.config_problems({**pwc, "trusted_hosts": ["hpc3", "hpc3:2222", "nowhere"],
+                                         "inside_hosts": ["x"], "campus_networks": ["172.40.0.0/16", "nope"]})
+    assert info[0] == f"trusted: hpc3 = {HPC3} (ports below 1024, port 2222)"
+    assert info[1].startswith("campus: 172.40.0.0/16 (and")
     assert any("inside_hosts: not a setting (1.19.1: trusted_hosts" in p for p in problems)
     assert any("nowhere: not found" in p for p in problems) and any("'nope': not a network" in p for p in problems)
-    assert pw.config_problems({"trusted_hosts": "vadur"}, resolve=fake_resolve) == \
-        ([], [f"trusted: vadur = {VADUR} (ports below 1024)"])                       # one string, as the collector
+    assert pw.config_problems({"trusted_hosts": "hpc3"}, resolve=fake_resolve) == \
+        ([], [f"trusted: hpc3 = {HPC3} (ports below 1024)"])                       # one string, as the collector
     assert pw.config_problems({"trusted_hosts": 3, "cluster_networks": [1]})[0] == \
-        ['[collectors.policy_watch] trusted_hosts: a list of strings, like ["vadur"]',
+        ['[collectors.policy_watch] trusted_hosts: a list of strings, like ["hpc3"]',
          '[collectors.policy_watch] cluster_networks: a list of strings, like ["10.1.1.0/24"]']
     toml = tmp_path / "nomad.toml"
-    toml.write_text('[collectors.policy_watch]\nenabled = true\ntrusted_hosts = ["vadur"]\ninside_hosts = []\n')
+    toml.write_text('[collectors.policy_watch]\nenabled = true\ntrusted_hosts = ["hpc3"]\ninside_hosts = []\n')
     r = CliRunner().invoke(cli, ["-c", str(toml), "config", "check"])
-    assert f"policy_watch: trusted: vadur = {VADUR} (ports below 1024)" in r.output, r.output
+    assert f"policy_watch: trusted: hpc3 = {HPC3} (ports below 1024)" in r.output, r.output
     assert "inside_hosts: not a setting" in r.output
 
 
@@ -531,7 +531,7 @@ def test_every_way_out_is_left_out_and_the_site_can_add(tmp_path):
 
 
 def test_a_forward_s_processes_have_a_key_that_holds_while_they_run(tmp_path):
-    procs = {300: (["ssh", "-fN", "-R", "2222:localhost:22", "vadur"], 1)}
+    procs = {300: (["ssh", "-fN", "-R", "2222:localhost:22", "hpc3"], 1)}
     [a] = _found(make_proc(tmp_path / "a", tcp=[TUNNEL], procs=procs))
     [b] = _found(make_proc(tmp_path / "b", tcp=[TUNNEL], procs=procs))
     [c] = _found(make_proc(tmp_path / "c", tcp=[TUNNEL], procs={301: procs[300]}))     # a new ssh
@@ -549,7 +549,7 @@ def test_a_verified_forward_stays_so_while_the_same_ssh_runs(watch):
     with sqlite3.connect(db) as conn:
         note, verified, sev = conn.execute("SELECT note, verified, severity FROM policy_findings").fetchone()
     assert (verified, sev) == (1, "info")
-    assert note == ("verified: to vadur; far end loopback (the same ssh since; now: 1 connection to a person's "
+    assert note == ("verified: to hpc3; far end loopback (the same ssh since; now: 1 connection to a person's "
                     "port on this host; far end loopback)")
     _sweep(c, db)                                                           # and again: the note doesn't grow
     with sqlite3.connect(db) as conn:
@@ -585,12 +585,12 @@ def test_one_alert_when_a_verified_account_s_first_warning_comes(watch):
 
 
 def test_the_child_is_named(tmp_path):
-    procs = {300: (["ssh", "-N", "-R", "2222:localhost:22", "vadur"], 1),
-             301: (["/usr/bin/sss_ssh_knownhostsproxy", "-p", "22", "vadur"], 300)}
+    procs = {300: (["ssh", "-N", "-R", "2222:localhost:22", "hpc3"], 1),
+             301: (["/usr/bin/sss_ssh_knownhostsproxy", "-p", "22", "hpc3"], 300)}
     [f] = _found(make_proc(tmp_path, tcp=[TUNNEL], procs=procs))
     assert f["children"] == ["sss_ssh_knownho"] and "child" in f["why"]          # comm: 15 characters
-    [g] = pw.findings_of(verified_answer(**{k: f[k] for k in ("verified", "why", "children")}), "spydur", "login",
-                         servers=["vadur"])
+    [g] = pw.findings_of(verified_answer(**{k: f[k] for k in ("verified", "why", "children")}), "hpc1", "login",
+                         servers=["hpc3"])
     assert "an ssh with a child process (sss_ssh_knownho: a proxy or jump)" in g["note"]
 
 
@@ -599,7 +599,7 @@ def test_mask_covers_notes_and_the_probe_s_addresses(watch, monkeypatch):
     c, sent, db, state = watch
     c.store(c.collect())
     r = CliRunner().invoke(watch_group, ["list", "--db", db, "--mask"])
-    assert "vadur" not in r.output and "verified: to host" in r.output, r.output
+    assert "hpc3" not in r.output and "verified: to host" in r.output, r.output
     r = CliRunner().invoke(watch_group, ["probe", "--json", "--mask"], obj={"config": {}})
     d = json.loads(r.output)
     assert d["addresses"] == [] and d["cluster"] == []
@@ -607,24 +607,24 @@ def test_mask_covers_notes_and_the_probe_s_addresses(watch, monkeypatch):
 
 def test_settings_given_as_one_string(monkeypatch):
     monkeypatch.setattr(pw, "_resolve", fake_resolve)
-    c = pw.PolicyWatchCollector({"trusted_hosts": "vadur", "campus_networks": "141.166.0.0/16",
+    c = pw.PolicyWatchCollector({"trusted_hosts": "hpc3", "campus_networks": "172.40.0.0/16",
                                  "cluster_networks": ["10.1.1.0/24", "nope"]}, ":memory:")
-    assert c.trusted_hosts == ["vadur"] and c.campus == ["141.166.0.0/16"] and c.cluster == ["10.1.1.0/24"]
+    assert c.trusted_hosts == ["hpc3"] and c.campus == ["172.40.0.0/16"] and c.cluster == ["10.1.1.0/24"]
     assert any("'nope': not a network" in n for n in c.trust_notes)
     args = c._args()
     assert args[args.index("--cluster") + 1] == "10.1.1.0/24"
 
 
 def test_an_ssh_without_a_connection_of_its_own(tmp_path):
-    """An idle ssh to vadur is the only connection; the -R between connection attempts has none."""
+    """An idle ssh to hpc3 is the only connection; the -R between connection attempts has none."""
     procs = {300: (["ssh", "-o", "ConnectionAttempts=1000", "-N", "-R", "2222:localhost:22", "evil"], 1),
-             301: (["ssh", "vadur"], 1)}
+             301: (["ssh", "hpc3"], 1)}
     [f] = _found(make_proc(tmp_path, tcp=[TUNNEL], procs=procs))
     assert f["verified"] is False and set(f["why"]) == {"carrier"}
 
 
 def test_only_ssh_by_its_kernel_name_gets_a_key(tmp_path):
-    p = make_proc(tmp_path, tcp=[TUNNEL], procs={300: (["ssh", "-N", "-R", "2222:localhost:22", "vadur"], 1)})
+    p = make_proc(tmp_path, tcp=[TUNNEL], procs={300: (["ssh", "-N", "-R", "2222:localhost:22", "hpc3"], 1)})
     (p / "300" / "comm").write_text("python3\n")                        # exec -a ssh python3 relay.py ...
     [f] = _found(p)
     assert "procs" not in f
@@ -634,8 +634,8 @@ def test_only_ssh_by_its_kernel_name_gets_a_key(tmp_path):
         os.symlink("/home/amy/bin/ssh", q / "300" / "exe")              # comm "ssh", but not the system's
         [f] = _found(q)
         assert "procs" not in f
-    procs = {300: (["autossh", "-M", "0", "-N", "-R", "2222:localhost:22", "vadur"], 1),
-             301: (["ssh", "-N", "-R", "2222:localhost:22", "vadur"], 300)}
+    procs = {300: (["autossh", "-M", "0", "-N", "-R", "2222:localhost:22", "hpc3"], 1),
+             301: (["ssh", "-N", "-R", "2222:localhost:22", "hpc3"], 300)}
     found = {f["program"]: f for f in _found(make_proc(tmp_path / "a", tcp=[TUNNEL], procs=procs))}
     assert "procs" not in found["autossh"] and "procs" in found["ssh"]
 
@@ -662,7 +662,7 @@ def test_kept_only_while_the_site_names_its_server(watch):
     c, sent, db, state = watch
     state["a"] = verified_answer(procs="a" * 16)
     c.store(c.collect())
-    c.trusted_hosts = ["other"]                                           # vadur taken off the list
+    c.trusted_hosts = ["other"]                                           # hpc3 taken off the list
     state["a"] = verified_answer(procs="a" * 16, verified=False, why={"campus": 1, "none": 1})
     _sweep(c, db)
     assert len(sent) == 1
@@ -695,7 +695,7 @@ def test_every_other_sweep_elsewhere_is_not_kept(watch):
 def test_a_kept_note_stays_whole():
     f = {"kind": "ssh_reverse", "verified": False, "procs": "a" * 16, "why": {"host_port": 1},
          "note": "not verified: " + "x" * 600}
-    pw.keep(f, (1, 1, "a" * 16, "verified: to vadur; far end loopback", "info", 0))
+    pw.keep(f, (1, 1, "a" * 16, "verified: to hpc3; far end loopback", "info", 0))
     assert f["verified"] and len(f["note"]) <= 400 and f["note"].endswith("...)")
     assert pw.KEPT_THROUGH >= {"host_port", "outside"} and not pw.KEPT_THROUGH & {"far", "to", "proxied"}
 
@@ -710,12 +710,12 @@ def test_an_autossh_row_is_verified_as_its_ssh(watch):
     assert sent == []
     with sqlite3.connect(db) as conn:
         rows = dict(conn.execute("SELECT program, note FROM policy_findings").fetchall())
-    assert rows["autossh"] == "as its ssh: verified: to vadur; far end loopback"
+    assert rows["autossh"] == "as its ssh: verified: to hpc3; far end loopback"
 
 
 def test_names_with_a_newline_are_not_names():
     assert probe.safe("kid\n") == "?"
-    [g] = pw.findings_of(verified_answer(verified=False, why={"child": 1}, children=["kid\n"]), "spydur", "login")
+    [g] = pw.findings_of(verified_answer(verified=False, why={"child": 1}, children=["kid\n"]), "hpc1", "login")
     assert "kid\n" not in g["note"] and "(?: a proxy or jump)" in g["note"]
 
 
@@ -737,8 +737,8 @@ def test_a_v6_default_leaves_the_v4_cluster_network(tmp_path):
 
 
 def test_reasons_kept_are_the_collectors_own():
-    [f] = pw.findings_of(verified_answer(verified=False, why="garbage"), "spydur", "login", servers=["vadur"])
+    [f] = pw.findings_of(verified_answer(verified=False, why="garbage"), "hpc1", "login", servers=["hpc3"])
     assert f["why"] == {"unchecked": 1}
     g = dict(f, procs="a" * 16)
-    pw.keep(g, (1, 1, "a" * 16, "verified: to vadur; far end loopback", "info", 0), {"vadur"})
+    pw.keep(g, (1, 1, "a" * 16, "verified: to hpc3; far end loopback", "info", 0), {"hpc3"})
     assert g["verified"] is False                                         # "not checked" isn't ridden through

@@ -116,9 +116,9 @@ def test_storage_is_matched_whatever_the_domain_or_case(tmp_path):
 
 def test_without_names_a_lab_says_no_site(tmp_path):
     from nomad.facts.busy import busy
-    rows = [("parishhead", "adam", 5 * i, 8, (60 - i) * 300) for i in range(30)]
+    rows = [("ameshead", "adam", 5 * i, 8, (60 - i) * 300) for i in range(30)]
     c, now = _ws_db(tmp_path / "site.db", rows)
     config = {"console": {"labs": {"resources": {"smith$": {"name": "Smith Lab", "workstations": ["adam"]}}}}}
     (w,) = busy(c, days=1, now=now, config=config, names=False)["workstations"]
     assert w["label"] == "lab 1" and w["site"] is None and w["sites"] == []
-    assert "parishhead" not in json.dumps(w) and "Smith" not in json.dumps(w)
+    assert "ameshead" not in json.dumps(w) and "Smith" not in json.dumps(w)

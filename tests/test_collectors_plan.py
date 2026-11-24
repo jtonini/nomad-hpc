@@ -7,7 +7,7 @@ On 1 October 2026 the hub's collection_log showed what the sites ran:
   fixed list that left them out, so enabling them did nothing;
 - nfs ran at all four sites every 5 minutes and never collected anything,
   logged as success with 0 records;
-- per_user on arachne logged "1 records" every run while collecting nothing
+- per_user on hpc2 logged "1 records" every run while collecting nothing
   (psutil missing), and groups did the same through its one envelope;
 - the `[collectors] enabled = [...]` list in the example config was never read.
 """
@@ -127,7 +127,7 @@ def test_per_user_counts_what_its_envelope_holds(db):
 
 def test_groups_without_clusters_reads_membership_here(db, monkeypatch):
     from nomad.collectors.groups import GroupCollector
-    c = GroupCollector({"clusters": {}, "local_name": "spiderweb"}, db)
+    c = GroupCollector({"clusters": {}, "local_name": "interactive1"}, db)
     monkeypatch.setattr(c, "_run_cmd", lambda cmd, *a, **k:
                         "lab$:x:5001:ann,bob\nusers:x:100:ann" if cmd == "getent group" else None)
     monkeypatch.setattr("shutil.which", lambda name: None)      # no sacct here
@@ -137,7 +137,7 @@ def test_groups_without_clusters_reads_membership_here(db, monkeypatch):
     rows = conn.execute("SELECT username, group_name, cluster FROM group_membership "
                         "ORDER BY username").fetchall()
     conn.close()
-    assert rows == [("ann", "lab$", "spiderweb"), ("bob", "lab$", "spiderweb")]
+    assert rows == [("ann", "lab$", "interactive1"), ("bob", "lab$", "interactive1")]
 
 
 def test_groups_with_nothing_read_says_so(db, monkeypatch):
@@ -329,13 +329,13 @@ def test_nomad_collectors_on_a_site(tmp_path, db):
 def test_nomad_collectors_on_the_hub_shows_every_site(tmp_path, db):
     from nomad.cli import cli
     t = datetime.now().isoformat()
-    _write_log(db, [("disk", t, t, 1, 4, None, "arachne"),
-                    ("nfs", t, t, 1, 0, "no NFS mounts on this host", "arachne"),
-                    ("disk", t, t, 1, 2, None, "spiderweb")], site_col=True)
+    _write_log(db, [("disk", t, t, 1, 4, None, "hpc2"),
+                    ("nfs", t, t, 1, 0, "no NFS mounts on this host", "hpc2"),
+                    ("disk", t, t, 1, 2, None, "interactive1")], site_col=True)
     cfg = tmp_path / "nomad.toml"
     cfg.write_text("[collectors]\n")
     out = CliRunner().invoke(cli, ["-c", str(cfg), "collectors", "--db", str(db)]).output
-    assert "arachne" in out and "spiderweb" in out
+    assert "hpc2" in out and "interactive1" in out
     assert "no NFS mounts on this host" in out
     assert "not run:" in out
 
@@ -425,7 +425,7 @@ def test_a_test_whose_source_is_this_hosts_address_runs(db, net):
 
 def test_workstation_clusters_without_an_ssh_account_read_membership_here(db, monkeypatch):
     from nomad.collectors.groups import GroupCollector
-    c = GroupCollector({"clusters": {"ws": {"name": "jonimitchell", "type": "workstations",
+    c = GroupCollector({"clusters": {"ws": {"name": "labhead1", "type": "workstations",
                                             "partitions": {"bio": {"nodes": ["ws1"]}}}}}, db)
     calls = []
 
@@ -462,14 +462,14 @@ def test_nfsiostat_in_usr_sbin_is_found_under_crons_path(db, tmp_path, monkeypat
 
 
 def test_the_hub_shows_why_a_collector_stopped_collecting(tmp_path, db):
-    """per_user on arachne: data all week from the old version's envelope,
+    """per_user on hpc2: data all week from the old version's envelope,
     nothing since the upgrade -- the newest run's reason is shown."""
     from nomad.cli import cli
     now = datetime.now()
-    rows = [("per_user", (now - timedelta(hours=h)).isoformat(), None, 1, 1, None, "arachne")
+    rows = [("per_user", (now - timedelta(hours=h)).isoformat(), None, 1, 1, None, "hpc2")
             for h in range(30, 40)]
     rows += [("per_user", (now - timedelta(hours=h)).isoformat(), None, 1, 0,
-              "psutil not installed: nothing collected", "arachne") for h in range(0, 5)]
+              "psutil not installed: nothing collected", "hpc2") for h in range(0, 5)]
     _write_log(db, rows, site_col=True)
     cfg = tmp_path / "nomad.toml"
     cfg.write_text("[collectors]\n")

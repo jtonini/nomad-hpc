@@ -78,7 +78,7 @@ def _insert_host(conn, *, hostname, memory_total_mb, cpu_count):
         INSERT INTO workstation_state
           (timestamp, hostname, department, status,
            memory_total_mb, cpu_count)
-        VALUES (?, ?, 'parish-lab', 'online', ?, ?)
+        VALUES (?, ?, 'ames-lab', 'online', ?, ?)
     """, (ts, hostname, memory_total_mb, cpu_count))
 
 

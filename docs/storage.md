@@ -406,7 +406,7 @@ who, where, how much of how much, when anything of it last changed, their
 last job, their labs and PIs, and what the [lab check](lab-check.md) said of
 them ("has left the lab; their data can be removed"). It is there to talk
 with them about a better place for it, so each one can become a case,
-numbered like the [account requests](lab-accounts.md) (ARC-0013), that
+numbered like the [account requests](lab-accounts.md) (REQ-0013), that
 moves through states with notes: to contact, contacted, moving it, then
 moved (or removed) or kept, with why.
 
@@ -424,9 +424,9 @@ long, the list uses its oldest and says so. Reading a file doesn't change it.
 sudo -u nomad nomad storage cold                                  # the list
 sudo -u nomad nomad storage cold --csv > cold.csv                 # a row each (it names people)
 sudo -u nomad nomad storage cold open jdoe fs1:/home --note "emailed her"
-sudo -u nomad nomad storage cold case ARC-0013 contacted --note "she'll move it to the archive"
-sudo -u nomad nomad storage cold case ARC-0013 keep --note "the lab's reference data"
-sudo -u nomad nomad storage cold show ARC-0013
+sudo -u nomad nomad storage cold case REQ-0013 contacted --note "she'll move it to the archive"
+sudo -u nomad nomad storage cold case REQ-0013 keep --note "the lab's reference data"
+sudo -u nomad nomad storage cold show REQ-0013
 sudo -u nomad nomad storage cold digest                           # the weekly email, printed
 sudo nomad storage cold timer --apply                             # sent Mondays (nomad-cold-data.timer)
 ```

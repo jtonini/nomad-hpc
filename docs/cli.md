@@ -17,7 +17,7 @@ The commands most people use, with their usual options. [All commands](cli-comma
 | `nomad lab assistant LAB NETID` | NETID is a research assistant of LAB: sees it as its PI does while one of its members (`--remove`: no longer; `--apply` writes it) |
 | `nomad demos ...` | Practice runs: small inputs, known to work, that show how a job runs ([Practice runs](demos.md)) |
 | `nomad lab check ...` | Each term, a lab's PI says who is still in it; research computing's to-do from the answers ([Lab membership check](lab-check.md)) |
-| `nomad lab accounts ...` | A lab's PI asks research computing for accounts; who each one is, from the campus directory; staff close each; each request numbered (ARC-0012 by default); `report` for a period, `--csv` one row per account ([Account requests](lab-accounts.md)) |
+| `nomad lab accounts ...` | A lab's PI asks research computing for accounts; who each one is, from the campus directory; staff close each; each request numbered (REQ-0012 by default); `report` for a period, `--csv` one row per account ([Account requests](lab-accounts.md)) |
 | `nomad notices` | A weekly email to each person about their own use (login nodes, jobs asking far more than they use): `mail [--send]`, `set NETID on|off`, `timer`; review first ([Notices](notices.md)) |
 | `nomad maintenance` | Declared maintenance windows: `start SITE --until WHEN --reason WHY`, `end SITE` (`--apply` does it); alerts about the site are held, the hub's and its own ([Alerts](alerts.md#declared-maintenance-1370)) |
 | `nomad demo` | Demo mode with synthetic data; `--console DIR`: a demo for the Console, with a cast to sign in as ([Quick Start](quickstart.md)) |
@@ -163,7 +163,7 @@ nomad storage status
 # Data unchanged for a year, and the cases about it (on the hub, as the nomad account)
 sudo -u nomad nomad storage cold [--server fs1] [--json | --csv]
 sudo -u nomad nomad storage cold open jdoe fs1:/home --note "emailed"
-sudo -u nomad nomad storage cold case ARC-0013 contacted --note "moving it to the archive"
+sudo -u nomad nomad storage cold case REQ-0013 contacted --note "moving it to the archive"
 sudo -u nomad nomad storage cold digest [--send]          # the weekly email; `timer` sends it weekly
 sudo -u nomad nomad storage cold letter jdoe --as rc1 [--send]   # the email to them about it (1.57.0)
 ```

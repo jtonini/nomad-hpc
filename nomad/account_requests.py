@@ -1,24 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 João Tonini
-"""A lab's PI asks ARC for accounts for their students (1.42.0).
+"""A lab's PI asks research computing for accounts for their students (1.42.0).
 
 On My lab in the Console, a PI types NetIDs or names (First Last, or Last,
 First), pastes a list, or gives a table (CSV, tab-separated or Excel, with
 a header row naming its columns: NetID, Email, First name, Last name or
-Name), and picks the clusters. Before anything goes to ARC, nomad says who
+Name), and picks the clusters. Before anything goes to research computing, nomad says who
 each one is, from the campus directory (nomad.directory): found, with their
 name; several people of that name (the PI picks); not found; already has an
 account on a cluster (nomad has their jobs, logins or groups there); already
-asked for. The PI sends the ones they mean, and ARC is emailed (``notify``).
+asked for. The PI sends the ones they mean, and research computing is emailed (``notify``).
 
-ARC makes the accounts as it does now (nomad makes none), and closes each
+Research computing makes the accounts as it does now (nomad makes none), and closes each
 one here, made or not made, with a note; the PI is emailed. Every request
 and every close is kept, with who and when, in the lab check's own small
-database (lab_check.db, beside combined.db) and its log: the record ARC has
+database (lab_check.db, beside combined.db) and its log: the record research computing has
 no ticket system for.
 
 Each request has a number, as a ticket would (1.44.0; nomad.tickets):
-ARC-0012, on the PI's card, in both emails' subjects, on the Admin page and
+REQ-0012, on the PI's card, in both emails' subjects, on the Admin page and
 in the log; ``find`` looks one up by it, or by a NetID, a name, a lab or a
 PI. ``report`` says, for a period, how many were asked for and made, by
 cluster, lab and month, and how long making them took; ``records`` is the
@@ -28,13 +28,13 @@ Settings, in the hub's nomad.toml::
 
     [console.labs.accounts]
     enabled = true                       # default: true once [directory] is set
-    sites = ["spydur", "arachne"]        # where a PI may ask (default: each site with Slurm nodes read this week)
+    sites = ["hpc1", "hpc2"]        # where a PI may ask (default: each site with Slurm nodes read this week)
     notify = ["hpc@example.edu"]         # new requests go here
     most = 100                           # people in one request
-    link = "https://nomad.example.edu/diagnostics?tab=labs"   # ARC's page, in the email
+    link = "https://nomad.example.edu/diagnostics?tab=labs"   # research computing's page, in the email
 
     [console.tickets]
-    prefix = "ARC"                       # the requests' numbers: ARC-0012 (nomad.tickets)
+    prefix = "REQ"                       # the requests' numbers: REQ-0012 (nomad.tickets)
     digits = 4
 
 The PIs' emails go as the lab check's do ([console.labs.check] mail_domain,
@@ -442,7 +442,7 @@ def open_records(path, write: bool = False):
 
 
 def ref_of(number, s: Settings | None = None) -> str:
-    """A request's number as shown: ARC-0012."""
+    """A request's number as shown: REQ-0012."""
     return T.ref(number, (s or Settings()).tickets)
 
 
@@ -566,7 +566,7 @@ FIND_MOST = 50
 
 def find(rec, text: str, s: Settings | None = None, lab: str | None = None, most: int = FIND_MOST) -> list[dict]:
     """The requests, of any age, a search finds, newest first: by number
-    (ARC-0012, #12 or 12: that one), else by a NetID, a name, a lab or the
+    (REQ-0012, #12 or 12: that one), else by a NetID, a name, a lab or the
     PI who asked (any part of one; case doesn't matter). ``lab``: within one lab's."""
     text = " ".join(str(text or "").split())[:80]
     if not text:
@@ -575,7 +575,7 @@ def find(rec, text: str, s: Settings | None = None, lab: str | None = None, most
     one_lab = " AND r.lab = ?" if lab else ""
     if n is not None:
         reqs = _rows(rec, "SELECT * FROM account_requests r WHERE r.id = ?" + one_lab, [n] + ([lab] if lab else []))
-        if reqs or not text.isdigit():          # ARC-0012 is that one or none; 12 may be part of a NetID
+        if reqs or not text.isdigit():          # REQ-0012 is that one or none; 12 may be part of a NetID
             return _with_people(rec, reqs, s)
     like = "%" + text.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     ids = _rows(rec, "SELECT DISTINCT r.id AS id FROM account_requests r "
@@ -592,7 +592,7 @@ def find(rec, text: str, s: Settings | None = None, lab: str | None = None, most
 
 def close(rec, request: int, netid: str, site: str, state: str, by: str, note: str | None = None,
           s: Settings | None = None) -> dict:
-    """ARC closes one account of a request: made, or not made (and why: a note
+    """Research computing closes one account of a request: made, or not made (and why: a note
     is needed then); or the PI withdraws it while it is still asked for."""
     if state not in STATES[1:]:
         raise RequestError(f"{state!r}: one of {', '.join(STATES[1:])}")
@@ -735,8 +735,8 @@ def _people(rows) -> list:
 
 
 def letter_to_arc(req: dict, s: Settings) -> tuple[str, str]:
-    """(subject, text) of the email to ARC about a new request; its number
-    first in the subject, as a ticket system's: "[ARC-0012] Account request: ..."."""
+    """(subject, text) of the email to research computing about a new request; its number
+    first in the subject, as a ticket system's: "[REQ-0012] Account request: ..."."""
     sites = sorted({r["site"] for r in req["rows"]})
     people = _people(req["rows"])
     ref = ref_of(req["id"], s)
@@ -756,7 +756,7 @@ def letter_to_arc(req: dict, s: Settings) -> tuple[str, str]:
 
 def letter_to_pi(req: dict, closed: list, check_settings, s: Settings | None = None) -> tuple[str, str]:
     """(subject, text) of the email to the PI about the accounts of their
-    request ARC just closed (one or several, at once); the request's number
+    request research computing just closed (one or several, at once); the request's number
     first in the subject, so a reply keeps it."""
     from nomad import lab_check
     made = [c for c in closed if c["state"] == "made"]
@@ -782,7 +782,7 @@ def letter_to_pi(req: dict, closed: list, check_settings, s: Settings | None = N
                  for c in not_made]
     notes = sorted({c["closed_note"] for c in made if c.get("closed_note")})
     if notes:
-        body += ["", "ARC's note: " + " ".join(notes)]
+        body += ["", "Research computing's note: " + " ".join(notes)]
     text = [lab_check.greeting([req["by"]], check_settings), ""] + body
     contact = getattr(check_settings, "contact", None)
     text += ([""] + [contact] if contact else []) + ["", "Thank you,", ""]
@@ -834,7 +834,7 @@ def send(config, check_settings, subject: str, text: str, to: list, reply_to: li
 
 
 def tell_arc(config, check_settings, s: Settings, req: dict) -> str:
-    """Email ARC (``notify``) about a new request; the PI's address as Reply-To."""
+    """Email research computing (``notify``) about a new request; the PI's address as Reply-To."""
     if not s.notify:
         return "not sent: no one to tell ([console.labs.accounts] notify)"
     subject, text = letter_to_arc(req, s)
@@ -844,7 +844,7 @@ def tell_arc(config, check_settings, s: Settings, req: dict) -> str:
 
 
 def tell_pi(config, check_settings, s: Settings, req: dict, closed: list) -> str:
-    """Email the PI about accounts of their request just closed; ARC's
+    """Email the PI about accounts of their request just closed; research computing's
     address (``notify``) as Reply-To. Withdrawn ones aren't said: the PI did that."""
     closed = [c for c in closed if c["state"] in ("made", "not_made")]
     if not closed:

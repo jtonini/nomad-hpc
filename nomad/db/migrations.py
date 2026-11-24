@@ -48,7 +48,7 @@ def _jobs_start_index(conn) -> None:
 
 def _temps_cores_as_one(conn) -> None:
     """1.25.6 kept each core's coretemp reading (1,674 rows a round on
-    spydur, and their hours for good); 1.25.7 keeps the chip's hottest
+    hpc1, and their hours for good); 1.25.7 keeps the chip's hottest
     core: the per-core rows are taken out."""
     have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     for table in ("hw_temps", "hw_temps_hourly"):

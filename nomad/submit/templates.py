@@ -8,13 +8,13 @@ hub's nomad.toml; the person picks the program, the version (one of the
 modules the cluster has: the modules collector reads them daily), and the
 input (a file, or a folder of inputs), and nomad writes the script::
 
-    [submit.build.spydur]                  # a site's own settings
+    [submit.build.hpc1]                  # a site's own settings
     module_paths = ["/usr/local/sw/modulefiles"]   # module use, before module load
     scratch = "/scratch/$USER/$SLURM_JOB_ID"       # {scratch} in a template
 
     [[submit.templates]]
     program = "Gaussian"
-    sites = ["spydur", "arachne"]          # where it is offered (default: every site)
+    sites = ["hpc1", "hpc2"]          # where it is offered (default: every site)
     modules = ["gaussian/*"]               # the versions to choose from (shell patterns)
     default = "gaussian/latest"            # chosen first, when the cluster has it (or a list: the first there)
     inputs = [".gjf", ".com"]              # the input: a file with one of these endings ...
@@ -27,7 +27,7 @@ input (a file, or a folder of inputs), and nomad writes the script::
     mem = "16G"
     time = "1-00:00:00"
     # gpus = 1
-    # partition = "gpunodes"               # or one a site: { spydur = "gpunodes" }
+    # partition = "gpunodes"               # or one a site: { hpc1 = "gpunodes" }
     # parallel = "mpi"                     # cpus as --ntasks (MPI) rather than --cpus-per-task
     [submit.templates.run_for]
     "gaussian/g09*" = "g09 < {input} > {stem}.log"   # a version that runs otherwise

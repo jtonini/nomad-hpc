@@ -7,8 +7,8 @@ deploying alerting thresholds. Collect, don't alert. Write to a
 private SQLite file. Track collector overhead.
 
 Usage:
-    python3 nomad_validation_probe.py --machine spydur --duration 168h
-    python3 nomad_validation_probe.py --machine arachne-node05 --duration 48h --walk-fds
+    python3 nomad_validation_probe.py --machine hpc1 --duration 168h
+    python3 nomad_validation_probe.py --machine hpc2-node05 --duration 48h --walk-fds
 
 Flags:
     --machine       Identifier for this machine (free-form string, used in DB and output filename)
@@ -68,7 +68,7 @@ def parse_duration(s: str) -> int:
 def parse_args():
     p = argparse.ArgumentParser(description="NØMAÐ validation probe")
     p.add_argument("--machine", required=True,
-                   help="Machine identifier (e.g. 'spydur', 'arachne-head', 'arachne-node05')")
+                   help="Machine identifier (e.g. 'hpc1', 'hpc2-head', 'hpc2-node05')")
     p.add_argument("--duration", type=parse_duration, default=parse_duration("168h"),
                    help="Run duration, e.g. '168h', '30m', '2d'. Default: 168h")
     p.add_argument("--interval", type=int, default=60,

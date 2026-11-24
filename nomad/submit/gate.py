@@ -4,8 +4,8 @@
 
 The Console (on the hub) lets a signed-in person size, submit, send again,
 list and cancel their own jobs on a cluster. It holds no key that can do
-anything as anyone: it reaches the cluster's nomad account (installer on
-spydur) with a key of its own whose authorized_keys line forces
+anything as anyone: it reaches the cluster's nomad account (hpcadmin on
+hpc1) with a key of its own whose authorized_keys line forces
 `nomad-gate serve`, so that key can do nothing but ask the gate. The gate
 does what was asked as the person -- `sudo -n -u PERSON nomad-gate run
 ...`, with the cluster account's own sudo rights -- and only what is on its
@@ -449,7 +449,7 @@ def account_open(home: str, uid: int, private: set = frozenset()) -> str | None:
 def trusted_owners(uid: int | None = None) -> set:
     """Who may own a program nomad runs as the person, and the folders it
     is in: root, the person, the account nomad itself is installed by
-    (installer, on spydur), and Slurm's own account."""
+    (hpcadmin, on hpc1), and Slurm's own account."""
     out = {0, os.getuid() if uid is None else uid}
     try:
         out.add(os.stat(os.path.dirname(os.path.abspath(__file__))).st_uid)

@@ -18,11 +18,11 @@ CONFIG = {"console": {"labs": {"group_pattern": "{netid}$", "not_labs": ["instal
                                "check": {"opens": ["09-15", "02-01", "06-15"], "mail_domain": "example.edu",
                                          "send_from": "RC <rc@example.edu>", "link": "https://nomad.example.edu/lab"}}}}
 REPORT = from_dict({"report": {"labs": {"mail_domain": "example.edu", "review_to": ["rc@example.edu"]},
-                               "clusters": {"spydur": {"condos": {
-                                   "bukach": {"owner": "cbukach", "members": "group:cbukach$"},
-                                   "parish": {"owner": "cparish", "members": "group:cparish$"},
-                                   "yang1": {"owner": "myang", "members": "group:myang$"},
-                                   "yangnolin": {"owner": ["myang", "knolin"], "members": "group:myang$,knolin$"}}}}}})
+                               "clusters": {"hpc1": {"condos": {
+                                   "bukach": {"owner": "cwalsh", "members": "group:cwalsh$"},
+                                   "ames": {"owner": "rames", "members": "group:rames$"},
+                                   "yang1": {"owner": "tchen", "members": "group:tchen$"},
+                                   "chennovak": {"owner": ["tchen", "lnovak"], "members": "group:tchen$,lnovak$"}}}}}})
 
 
 @pytest.fixture(autouse=True)
@@ -38,21 +38,21 @@ def hub(path, now=NOW):
             collected_at TEXT, has_account INTEGER, account_missing_since TEXT, first_seen TEXT, source_site TEXT);
         CREATE TABLE jobs (job_id TEXT, user_name TEXT, partition TEXT, submit_time TEXT, source_site TEXT);""")
     t = (now - timedelta(hours=1)).isoformat()
-    rows = [("cparish", "cparish$", "spydur"), ("ann", "cparish$", "spydur"), ("bo", "cparish$", "spydur"),
-            ("bo", "cparish$", "spiderweb"), ("cparish", "cparish$", "spiderweb"),
-            ("cbukach", "cbukach$", "spydur"),
-            ("kdonald", "kdonald$", "spydur"), ("dee", "kdonald$", "spydur"), ("eli", "kdonald$", "spydur"),
-            ("myang", "myang$", "spydur"), ("yu", "myang$", "spydur"),
-            ("knolin", "knolin$", "spydur"), ("kim", "knolin$", "spydur"),
-            ("ann", "faculty", "spydur"), ("cparish", "faculty", "spydur"),
-            ("installer", "installer$", "spydur"), ("zed", "installer$", "spydur")]
+    rows = [("rames", "rames$", "hpc1"), ("ann", "rames$", "hpc1"), ("bo", "rames$", "hpc1"),
+            ("bo", "rames$", "interactive1"), ("rames", "rames$", "interactive1"),
+            ("cwalsh", "cwalsh$", "hpc1"),
+            ("kdunn", "kdunn$", "hpc1"), ("dee", "kdunn$", "hpc1"), ("eli", "kdunn$", "hpc1"),
+            ("tchen", "tchen$", "hpc1"), ("yu", "tchen$", "hpc1"),
+            ("lnovak", "lnovak$", "hpc1"), ("kim", "lnovak$", "hpc1"),
+            ("ann", "faculty", "hpc1"), ("rames", "faculty", "hpc1"),
+            ("installer", "installer$", "hpc1"), ("zed", "installer$", "hpc1")]
     conn.executemany("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
                      "source_site) VALUES (?, ?, 1, ?, ?, 1, ?)", [(u, g, s, t, s) for u, g, s in rows])
     j = (now - timedelta(days=10)).isoformat()
-    jobs = [("1", "dee", "bukach"), ("2", "eli", "condos,bukach"), ("3", "cbukach", "bukach"),
-            ("4", "kim", "yangnolin"), ("5", "kim", "yang1"), ("6", "ann", "parish"), ("7", "old", "parish")]
-    conn.executemany("INSERT INTO jobs VALUES (?, ?, ?, ?, 'spydur')", [(i, u, p, j) for i, u, p in jobs])
-    conn.execute("INSERT INTO jobs VALUES ('8', 'gone', 'parish', ?, 'spydur')",
+    jobs = [("1", "dee", "bukach"), ("2", "eli", "condos,bukach"), ("3", "cwalsh", "bukach"),
+            ("4", "kim", "chennovak"), ("5", "kim", "yang1"), ("6", "ann", "ames"), ("7", "old", "ames")]
+    conn.executemany("INSERT INTO jobs VALUES (?, ?, ?, ?, 'hpc1')", [(i, u, p, j) for i, u, p in jobs])
+    conn.execute("INSERT INTO jobs VALUES ('8', 'gone', 'ames', ?, 'hpc1')",
                  ((now - timedelta(days=200)).isoformat(),))
     conn.commit()
     return conn
@@ -102,17 +102,17 @@ def test_the_terms_check():
 def test_who_is_asked(world):
     conn, rec, _ = world
     got = {lab.group: lab for lab in L.labs(conn, CONFIG, REPORT, now=NOW)}
-    assert set(got) == {"cparish$", "cbukach$", "kdonald$", "myang$", "knolin$"}   # not faculty, not installer$
-    p = got["cparish$"]
-    assert p.leaders == ("cparish",) and set(p.members) == {"ann", "bo"}       # the PI apart
-    assert p.members["bo"] == {"spydur": True, "spiderweb": True}
+    assert set(got) == {"rames$", "cwalsh$", "kdunn$", "tchen$", "lnovak$"}   # not faculty, not installer$
+    p = got["rames$"]
+    assert p.leaders == ("rames",) and set(p.members) == {"ann", "bo"}       # the PI apart
+    assert p.members["bo"] == {"hpc1": True, "interactive1": True}
     assert set(p.claims) == {"old"}                                          # used the condo lately, not in the group
-    b = got["cbukach$"]
-    assert b.members == {} and set(b.claims) == {"dee", "eli"}             # Donald's lab used Bukach's condo
-    assert b.claims["eli"] == {"spydur": ["bukach"]}
+    b = got["cwalsh$"]
+    assert b.members == {} and set(b.claims) == {"dee", "eli"}             # Dunn's lab used Walsh's condo
+    assert b.claims["eli"] == {"hpc1": ["bukach"]}
     # a condo two labs share asks neither about the other's members; one of its own condos does
-    assert got["myang$"].claims == {"kim": {"spydur": ["yang1"]}}
-    assert "kim" not in got["knolin$"].claims and got["knolin$"].members.keys() == {"kim"}
+    assert got["tchen$"].claims == {"kim": {"hpc1": ["yang1"]}}
+    assert "kim" not in got["lnovak$"].claims and got["lnovak$"].members.keys() == {"kim"}
 
 
 # -- answers -----------------------------------------------------------------------------
@@ -120,24 +120,24 @@ def test_who_is_asked(world):
 def test_answers_fit_their_question(world):
     conn, rec, _ = world
     rnd = L.round_of(L.settings(CONFIG), NOW.date())
-    lab = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
+    lab = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
     with pytest.raises(L.CheckError, match="one of here, left, not_mine"):
-        L.record(rec, rnd, lab, "ann", "guest", by="cparish")
+        L.record(rec, rnd, lab, "ann", "guest", by="rames")
     with pytest.raises(L.CheckError, match="what to do with bo's data"):
-        L.record(rec, rnd, lab, "bo", "left", by="cparish")
+        L.record(rec, rnd, lab, "bo", "left", by="rames")
     with pytest.raises(L.CheckError, match="asked only of someone who has left"):
-        L.record(rec, rnd, lab, "ann", "here", data="keep", by="cparish")
+        L.record(rec, rnd, lab, "ann", "here", data="keep", by="rames")
     with pytest.raises(L.CheckError, match="not someone"):
-        L.record(rec, rnd, lab, "dee", "mine", by="cparish")
+        L.record(rec, rnd, lab, "dee", "mine", by="rames")
     with pytest.raises(L.CheckError, match="one of mine, guest"):
-        L.record(rec, rnd, lab, "old", "here", by="cparish")
-    row = L.record(rec, rnd, lab, "BO", "left", data="ask", note="  graduated\nin May ", by="cparish")
+        L.record(rec, rnd, lab, "old", "here", by="rames")
+    row = L.record(rec, rnd, lab, "BO", "left", data="ask", note="  graduated\nin May ", by="rames")
     assert (row["netid"], row["note"], row["kind"]) == ("bo", "graduated in May", "member")
     with pytest.raises(L.CheckError, match="2 still to answer"):
-        L.submit(rec, rnd, lab, by="cparish")
-    L.record(rec, rnd, lab, "ann", "here", by="cparish")
-    L.record(rec, rnd, lab, "old", "guest", by="cparish")
-    L.submit(rec, rnd, lab, by="cparish")
+        L.submit(rec, rnd, lab, by="rames")
+    L.record(rec, rnd, lab, "ann", "here", by="rames")
+    L.record(rec, rnd, lab, "old", "guest", by="rames")
+    L.submit(rec, rnd, lab, by="rames")
     log = [json.loads(r["what"]) for r in rec.execute("SELECT what FROM lab_check_log")]
     assert len(log) == 4 and "submitted" in log[-1]
 
@@ -146,15 +146,15 @@ def test_what_the_pi_sees(world):
     conn, rec, _ = world
     s = L.settings(CONFIG)
     spring = L.round_of(s, date(2026, 2, 10))
-    lab = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
-    L.record(rec, spring, lab, "ann", "here", by="cparish")
-    v = L.view(conn, rec, CONFIG, REPORT, "cparish$", now=NOW)
+    lab = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
+    L.record(rec, spring, lab, "ann", "here", by="rames")
+    v = L.view(conn, rec, CONFIG, REPORT, "rames$", now=NOW)
     assert v["round"] == "2026-09-15" and v["asked"] == 3 and v["answered"] == 0
     ann = next(q for q in v["questions"] if q["netid"] == "ann")
-    assert ann["answer"] is None and ann["last_term"]["answer"] == "here" and ann["sites"] == ["spydur"]
+    assert ann["answer"] is None and ann["last_term"]["answer"] == "here" and ann["sites"] == ["hpc1"]
     old = next(q for q in v["questions"] if q["netid"] == "old")
-    assert old["kind"] == "claim" and old["used"] == [{"site": "spydur", "partitions": ["parish"]}]
-    assert L.view(conn, rec, {"console": {"labs": {"group_pattern": "{netid}$"}}}, REPORT, "cparish$") is None
+    assert old["kind"] == "claim" and old["used"] == [{"site": "hpc1", "partitions": ["ames"]}]
+    assert L.view(conn, rec, {"console": {"labs": {"group_pattern": "{netid}$"}}}, REPORT, "rames$") is None
 
 
 # -- ARC's to-do -------------------------------------------------------------------------
@@ -162,46 +162,46 @@ def test_what_the_pi_sees(world):
 def test_the_to_do(world):
     conn, rec, _ = world
     rnd = L.round_of(L.settings(CONFIG), NOW.date())
-    par = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
-    buk = L.lab_for(conn, CONFIG, REPORT, "cbukach$", now=NOW)
-    L.record(rec, rnd, par, "bo", "left", data="keep", by="cparish")
-    L.record(rec, rnd, par, "ann", "here", by="cparish")
-    L.record(rec, rnd, par, "old", "mine", by="cparish")
-    L.record(rec, rnd, buk, "dee", "guest", by="cbukach")
-    L.record(rec, rnd, buk, "eli", "mine", by="cbukach")
+    par = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
+    buk = L.lab_for(conn, CONFIG, REPORT, "cwalsh$", now=NOW)
+    L.record(rec, rnd, par, "bo", "left", data="keep", by="rames")
+    L.record(rec, rnd, par, "ann", "here", by="rames")
+    L.record(rec, rnd, par, "old", "mine", by="rames")
+    L.record(rec, rnd, buk, "dee", "guest", by="cwalsh")
+    L.record(rec, rnd, buk, "eli", "mine", by="cwalsh")
     t = L.todo(conn, rec, CONFIG, REPORT, now=NOW)
     got = sorted((i["kind"], i["lab"], i["netid"], i["site"]) for i in t["items"])
-    assert got == [("add", "cbukach$", "eli", "spydur"), ("add", "cparish$", "old", "spydur"),
-                   ("data", "cparish$", "bo", ""),
-                   ("remove", "cparish$", "bo", "spiderweb"), ("remove", "cparish$", "bo", "spydur")]
+    assert got == [("add", "cwalsh$", "eli", "hpc1"), ("add", "rames$", "old", "hpc1"),
+                   ("data", "rames$", "bo", ""),
+                   ("remove", "rames$", "bo", "hpc1"), ("remove", "rames$", "bo", "interactive1")]
     data = next(i for i in t["items"] if i["kind"] == "data")
     assert data["data"] == "keep" and data["where"] == []             # no storage readings here
-    # ARC takes bo out on spydur: the groups readings there no longer list him (as nomad counts a
+    # ARC takes bo out on hpc1: the groups readings there no longer list him (as nomad counts a
     # member: gone from its readings for a couple of days, so a missed reading takes no one out)
     later = (NOW + timedelta(days=3)).isoformat()
-    conn.execute("UPDATE group_membership SET collected_at = ? WHERE source_site = 'spydur' AND username != 'bo'",
+    conn.execute("UPDATE group_membership SET collected_at = ? WHERE source_site = 'hpc1' AND username != 'bo'",
                  (later,))
     conn.commit()
     t = L.todo(conn, rec, CONFIG, REPORT, now=NOW)
-    assert ("remove", "spydur") not in {(i["kind"], i["site"]) for i in t["items"] if i["netid"] == "bo"}
+    assert ("remove", "hpc1") not in {(i["kind"], i["site"]) for i in t["items"] if i["netid"] == "bo"}
     # marked: the data moved
     with pytest.raises(L.CheckError, match="note"):
-        L.mark_done(rec, rnd.id, "cparish$", "bo", "data", by="jtonini", note="  ")
-    L.mark_done(rec, rnd.id, "cparish$", "bo", "data", by="jtonini", note="moved to /scratch/parish/bo")
+        L.mark_done(rec, rnd.id, "rames$", "bo", "data", by="rcadmin", note="  ")
+    L.mark_done(rec, rnd.id, "rames$", "bo", "data", by="rcadmin", note="moved to /scratch/ames/bo")
     t = L.todo(conn, rec, CONFIG, REPORT, now=NOW)
     assert "data" not in {i["kind"] for i in t["items"]}
-    assert t["done"][0]["done"]["note"] == "moved to /scratch/parish/bo"
+    assert t["done"][0]["done"]["note"] == "moved to /scratch/ames/bo"
 
 
 def test_put_back_after_leaving_is_asked_again_not_taken_out(world):
     conn, rec, _ = world
     rnd = L.round_of(L.settings(CONFIG), NOW.date())
-    par = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
-    L.record(rec, rnd, par, "ann", "left", data="keep", by="cparish")
+    par = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
+    L.record(rec, rnd, par, "ann", "left", data="keep", by="rames")
     assert ("remove", "ann") in {(i["kind"], i["netid"]) for i in L.todo(conn, rec, CONFIG, REPORT, now=NOW)["items"]}
     # ARC took her out; later she is back in the group (a new stretch of membership)
     later = (datetime.now() + timedelta(minutes=5)).isoformat(timespec="seconds")
-    conn.execute("UPDATE group_membership SET first_seen = ? WHERE username = 'ann' AND group_name = 'cparish$'",
+    conn.execute("UPDATE group_membership SET first_seen = ? WHERE username = 'ann' AND group_name = 'rames$'",
                  (later,))
     conn.commit()
     t = L.todo(conn, rec, CONFIG, REPORT, now=NOW)
@@ -211,13 +211,13 @@ def test_put_back_after_leaving_is_asked_again_not_taken_out(world):
 def test_a_changed_answer_is_to_do_again(world):
     conn, rec, _ = world
     rnd = L.round_of(L.settings(CONFIG), NOW.date())
-    par = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
-    L.record(rec, rnd, par, "bo", "left", data="ask", by="cparish")
-    L.mark_done(rec, rnd.id, "cparish$", "bo", "data", by="jtonini", note="waiting until December")
+    par = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
+    L.record(rec, rnd, par, "bo", "left", data="ask", by="rames")
+    L.mark_done(rec, rnd.id, "rames$", "bo", "data", by="rcadmin", note="waiting until December")
     assert "data" not in {i["kind"] for i in L.todo(conn, rec, CONFIG, REPORT, now=NOW)["items"]}
     import time
     time.sleep(1.1)                           # answers and marks are kept to the second
-    L.record(rec, rnd, par, "bo", "left", data="remove", by="cparish")
+    L.record(rec, rnd, par, "bo", "left", data="remove", by="rames")
     item = next(i for i in L.todo(conn, rec, CONFIG, REPORT, now=NOW)["items"] if i["kind"] == "data")
     assert item["data"] == "remove"
 
@@ -225,11 +225,11 @@ def test_a_changed_answer_is_to_do_again(world):
 def test_a_condo_group_named_for_no_one(world):
     conn, rec, _ = world
     conn.execute("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
-                 "source_site) VALUES ('jsmith', 'chemlab$', 1, 'spydur', ?, 1, 'spydur'), "
-                 "('sam', 'chemlab$', 1, 'spydur', ?, 1, 'spydur')",
+                 "source_site) VALUES ('jsmith', 'chemlab$', 1, 'hpc1', ?, 1, 'hpc1'), "
+                 "('sam', 'chemlab$', 1, 'hpc1', ?, 1, 'hpc1')",
                  ((NOW - timedelta(hours=1)).isoformat(),) * 2)
     conn.commit()
-    report = from_dict({"report": {"clusters": {"spydur": {"condos": {
+    report = from_dict({"report": {"clusters": {"hpc1": {"condos": {
         "chem": {"owner": "jsmith", "members": "group:chemlab$"}}}}}})
     lab = L.lab_for(conn, CONFIG, report, "chemlab$", now=NOW)
     assert lab.leaders == ("jsmith",) and set(lab.members) == {"sam"}       # not "chemlab", and not jsmith
@@ -241,44 +241,44 @@ def test_a_member_as_nomad_counts_one(world):
     t = (NOW - timedelta(hours=1)).isoformat()
     # two clusters read at one site: one's reading 40 days behind the other's is no longer read
     conn.executemany("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
-                     "source_site) VALUES (?, 'cparish$', 1, ?, ?, 1, 'jonimitchell')",
+                     "source_site) VALUES (?, 'rames$', 1, ?, ?, 1, 'labhead1')",
                      [("cy", "ws-a", t), ("dot", "ws-b", (NOW - timedelta(days=40)).isoformat())])
     conn.commit()
-    sites = L.by_site(conn)["cparish$"]
-    assert sites["jonimitchell"]["cy"][0] and not sites["jonimitchell"]["dot"][0]
+    sites = L.by_site(conn)["rames$"]
+    assert sites["labhead1"]["cy"][0] and not sites["labhead1"]["dot"][0]
     # a whole site not read for a while still counts, as nomad.config.access counts it
-    conn.execute("UPDATE group_membership SET collected_at = ? WHERE source_site = 'spiderweb'",
+    conn.execute("UPDATE group_membership SET collected_at = ? WHERE source_site = 'interactive1'",
                  ((NOW - timedelta(days=40)).isoformat(),))
     conn.commit()
     from nomad.config.access import members_lookup
     _, members_of = members_lookup(conn)
-    assert ("bo" in members_of("cparish$")) == L._inside(L.by_site(conn)["cparish$"]["spiderweb"]["bo"])
+    assert ("bo" in members_of("rames$")) == L._inside(L.by_site(conn)["rames$"]["interactive1"]["bo"])
 
 
 def test_added_only_where_they_used_the_condo(world):
     conn, rec, _ = world
     conn.execute("INSERT INTO group_membership (username, group_name, gid, cluster, collected_at, has_account, "
-                 "source_site) VALUES ('cparish', 'cparish$', 1, 'arachne', ?, 1, 'arachne')",
+                 "source_site) VALUES ('rames', 'rames$', 1, 'hpc2', ?, 1, 'hpc2')",
                  ((NOW - timedelta(hours=1)).isoformat(),))
     conn.commit()
     report = from_dict({"report": {"clusters": {
-        "spydur": {"condos": {"parish": {"owner": "cparish", "members": "group:cparish$"}}},
-        "arachne": {"condos": {"parish2": {"owner": "cparish", "members": "group:cparish$"}}}}}})
+        "hpc1": {"condos": {"ames": {"owner": "rames", "members": "group:rames$"}}},
+        "hpc2": {"condos": {"ames2": {"owner": "rames", "members": "group:rames$"}}}}}})
     rnd = L.round_of(L.settings(CONFIG), NOW.date())
-    L.record(rec, rnd, L.lab_for(conn, CONFIG, report, "cparish$", now=NOW), "old", "mine", by="cparish")
+    L.record(rec, rnd, L.lab_for(conn, CONFIG, report, "rames$", now=NOW), "old", "mine", by="rames")
     adds = {(i["netid"], i["site"]) for i in L.todo(conn, rec, CONFIG, report, now=NOW)["items"] if i["kind"] == "add"}
-    assert adds == {("old", "spydur")}
+    assert adds == {("old", "hpc1")}
 
 
 def test_the_last_answer_given_counts(world):
     conn, rec, _ = world
     s = L.settings(CONFIG)
-    par = L.lab_for(conn, CONFIG, REPORT, "cparish$", now=NOW)
+    par = L.lab_for(conn, CONFIG, REPORT, "rames$", now=NOW)
     later = L.Round(id="2026-09-20", opened=date(2026, 9, 20), closes=date(2026, 10, 30), next_opens=date(2027, 2, 1))
-    L.record(rec, later, par, "bo", "left", data="keep", by="cparish")       # kept under a later round's name
+    L.record(rec, later, par, "bo", "left", data="keep", by="rames")       # kept under a later round's name
     import time
     time.sleep(1.1)
-    L.record(rec, L.round_of(s, NOW.date()), par, "bo", "here", by="cparish")  # opens moved: the answer given last
+    L.record(rec, L.round_of(s, NOW.date()), par, "bo", "here", by="rames")  # opens moved: the answer given last
     assert "bo" not in {i["netid"] for i in L.todo(conn, rec, CONFIG, REPORT, now=NOW)["items"]}
 
 
@@ -294,7 +294,7 @@ def test_labs_that_didnt_answer(world):
     late = datetime(2026, 10, 28, 9, 0)
     t = L.todo(conn, rec, CONFIG, REPORT, now=late)
     assert {i["lab"] for i in t["items"] if i["kind"] == "no_answer"} == {
-        "cparish$", "cbukach$", "kdonald$", "myang$", "knolin$"}
+        "rames$", "cwalsh$", "kdunn$", "tchen$", "lnovak$"}
     assert not [i for i in L.todo(conn, rec, CONFIG, REPORT, now=NOW)["items"] if i["kind"] == "no_answer"]
 
 
@@ -307,21 +307,21 @@ def test_the_emails(world, monkeypatch):
     monkeypatch.setattr("nomad.mail.settings", lambda config: {"from": "nomad@example.edu"})
     opened = datetime(2026, 9, 15, 8, 0)
     plan = L.mail_plan(conn, rec, CONFIG, REPORT, now=opened)
-    assert {e["lab"] for e in plan} == {"cparish$", "cbukach$", "kdonald$", "myang$", "knolin$"}
+    assert {e["lab"] for e in plan} == {"rames$", "cwalsh$", "kdunn$", "tchen$", "lnovak$"}
     assert all(e["review"] and e["to"] == ["rc@example.edu"] for e in plan)        # report.toml's review_to
     out = L.send(conn, rec, CONFIG, REPORT, now=opened)
     assert {e["status"] for e in out} == {"sent"} and len(sent) == 5
-    body = next(m for m in sent if "cparish$" in m.get_content()).get_content()
-    assert "would have gone to cparish@example.edu" in body and "https://nomad.example.edu/lab" in body
+    body = next(m for m in sent if "rames$" in m.get_content()).get_content()
+    assert "would have gone to rames@example.edu" in body and "https://nomad.example.edu/lab" in body
     assert sent[0]["Subject"].startswith("[review] Please confirm the members of")
     assert L.send(conn, rec, CONFIG, REPORT, now=opened) == []                     # nothing twice
     # a lab that answered everything gets no reminder
     rnd = L.round_of(L.settings(CONFIG), opened.date())
-    buk = L.lab_for(conn, CONFIG, REPORT, "cbukach$", now=opened)
-    L.record(rec, rnd, buk, "dee", "guest", by="cbukach")
-    L.record(rec, rnd, buk, "eli", "guest", by="cbukach")
+    buk = L.lab_for(conn, CONFIG, REPORT, "cwalsh$", now=opened)
+    L.record(rec, rnd, buk, "dee", "guest", by="cwalsh")
+    L.record(rec, rnd, buk, "eli", "guest", by="cwalsh")
     reminders = L.mail_plan(conn, rec, CONFIG, REPORT, now=datetime(2026, 10, 20, 8, 0))
-    assert "cbukach$" not in {e["lab"] for e in reminders}
+    assert "cwalsh$" not in {e["lab"] for e in reminders}
     assert {e["kind"] for e in reminders} == {"remind28"}
     assert all(e["skipped"] == ["review-remind14"] for e in reminders)
     assert L.mail_plan(conn, rec, CONFIG, REPORT, now=datetime(2026, 11, 2)) == []   # after it closed
@@ -330,7 +330,7 @@ def test_the_emails(world, monkeypatch):
                                  "check": {**CONFIG["console"]["labs"]["check"], "review_to": []}}}}
     plan = L.mail_plan(conn, rec, live, REPORT, now=datetime(2026, 10, 20, 8, 0))
     assert plan and {e["kind"] for e in plan} == {"open"} and not any(e["review"] for e in plan)
-    assert next(e for e in plan if e["lab"] == "cparish$")["to"] == ["cparish@example.edu"]
+    assert next(e for e in plan if e["lab"] == "rames$")["to"] == ["rames@example.edu"]
 
 
 def test_report_toml_that_doesnt_read_holds_the_emails(world):
@@ -371,31 +371,31 @@ def test_the_commands(world, monkeypatch):
     monkeypatch.setattr(C, "datetime", Frozen)
     monkeypatch.setattr(L, "datetime", Frozen)
     run = CliRunner()
-    r = run.invoke(cli, ["lab", "check", "answer", "cparish$", "bo", "left", "--data", "remove", "--by", "cparish"])
+    r = run.invoke(cli, ["lab", "check", "answer", "rames$", "bo", "left", "--data", "remove", "--by", "rames"])
     assert r.exit_code == 0, r.output
-    assert "bo in cparish$: has left the lab; their data can be removed" in r.output
-    r = run.invoke(cli, ["lab", "check", "answer", "cparish$", "bo", "left"])
+    assert "bo in rames$: has left the lab; their data can be removed" in r.output
+    r = run.invoke(cli, ["lab", "check", "answer", "rames$", "bo", "left"])
     assert r.exit_code != 0 and "what to do with bo's data" in r.output
-    r = run.invoke(cli, ["lab", "check", "show", "cparish$"])
+    r = run.invoke(cli, ["lab", "check", "show", "rames$"])
     assert "bo" in r.output and "has left the lab" in r.output and "1 of 3 answered" in r.output
     r = run.invoke(cli, ["lab", "check", "todo"])
-    assert "[remove] take bo out of cparish$ on spydur" in r.output and "[data] bo's data" in r.output
-    r = run.invoke(cli, ["lab", "check", "done", "cparish$", "bo", "data", "--note", "removed"])
+    assert "[remove] take bo out of rames$ on hpc1" in r.output and "[data] bo's data" in r.output
+    r = run.invoke(cli, ["lab", "check", "done", "rames$", "bo", "data", "--note", "removed"])
     assert r.exit_code == 0, r.output
     r = run.invoke(cli, ["lab", "check", "status"])
-    assert "cparish$" in r.output and "1 of 3 answered" in r.output
+    assert "rames$" in r.output and "1 of 3 answered" in r.output
     # one lab's email, printed, then sent on its own: the others stay due
-    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "cparish$", "--text"])
+    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "rames$", "--text"])
     assert r.exit_code == 0, r.output
     assert "Subject: [review] Please confirm the members of" in r.output
-    assert "would have gone to cparish@example.edu" in r.output and "For your lab (cparish$), please tell us" in r.output
-    assert "cbukach$" not in r.output and "A dry run" in r.output
+    assert "would have gone to rames@example.edu" in r.output and "For your lab (rames$), please tell us" in r.output
+    assert "cwalsh$" not in r.output and "A dry run" in r.output
     sent = []
     monkeypatch.setattr("nomad.mail.send", lambda msg, cfg, timeout=15: sent.append(msg))
     monkeypatch.setattr("nomad.mail.settings", lambda config: {"from": "nomad@example.edu"})
-    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "cparish$", "--send"])
+    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "rames$", "--send"])
     assert r.exit_code == 0 and len(sent) == 1, r.output
     r = run.invoke(cli, ["lab", "check", "mail"])
-    assert "cbukach$" in r.output and "cparish$" not in r.output
-    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "cparish$"])
-    assert "Nothing due today for cparish$." in r.output
+    assert "cwalsh$" in r.output and "rames$" not in r.output
+    r = run.invoke(cli, ["lab", "check", "mail", "--lab", "rames$"])
+    assert "Nothing due today for rames$." in r.output

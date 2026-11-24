@@ -48,6 +48,22 @@ DEFAULT_CONFIG = {
     }
 }
 
+
+def _gpu_nodes(conn) -> set:
+    """The nodes the GPU collector has read (1.66.0), once a connection."""
+    cached = _GPU_NODES.get(id(conn))
+    if cached is not None:
+        return cached
+    try:
+        found = {r[0] for r in conn.execute("SELECT DISTINCT node_name FROM gpu_stats") if r[0]}
+    except Exception:                       # noqa: BLE001 -- no GPU table: no GPU nodes
+        found = set()
+    _GPU_NODES[id(conn)] = found
+    return found
+
+
+_GPU_NODES: dict = {}
+
 def find_config_file() -> Path | None:
     """The config nomad itself would use (nomad.config.find_config), then the
     older places this dashboard also looked: ~/nomad/nomad.toml, ./nomad.toml."""
@@ -201,8 +217,8 @@ def load_clusters_from_db(db_path: Path, config: dict = None) -> dict:
 
                 for cluster_name, nodes in cluster_nodes.items():
                     cluster_id = cluster_name.lower().replace(' ', '-')
-                    # Detect GPU nodes by name pattern
-                    gpu_nodes = [n for n in nodes if any(x in n.lower() for x in ['gpu', 'arachne0[456]'])]
+                    # GPU nodes: named so, or read by the GPU collector (1.66.0: no site's names here)
+                    gpu_nodes = [n for n in nodes if 'gpu' in n.lower() or n in _gpu_nodes(conn)]
                     clusters[cluster_id] = {
                         "name": cluster_name,
                         "description": f"{len(nodes)}-node cluster",
@@ -356,10 +372,8 @@ def load_node_data_from_db(db_path: Path, clusters: dict) -> dict:
                     # Status can be 'ok', 'online', or other values
                     is_down = not row['is_available'] or row['status'] not in ('ok', 'online', 'up')
 
-                    # Detect GPU by node name pattern (node51-53 are GPU nodes on Arachne)
-                    has_gpu = any(x in node_name.lower() for x in ['gpu']) or \
-                              node_name in ('node51', 'node52', 'node53') or \
-                              (node_name.startswith('arachne') and node_name[-2:] in ['04', '05', '06'])
+                    # GPU nodes: named so, or read by the GPU collector (1.66.0: no site's names here)
+                    has_gpu = 'gpu' in node_name.lower() or node_name in _gpu_nodes(conn)
 
                     # Determine partition from node_state data
                     node_partition = None
@@ -918,7 +932,7 @@ def generate_demo_node_data(clusters):
     """Generate realistic node statistics."""
     nodes = {}
     failure_types = ["OOM", "Timeout", "Cancelled", "NodeFail", "DiskFull"]
-    users = ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry"]
+    users = ["alice", "bob", "robin", "dave", "eve", "frank", "grace", "henry"]
     # Build node-to-partition mapping
     node_partition_map = {}
     for _cid, _cl in clusters.items():
@@ -1101,7 +1115,7 @@ def generate_demo_interactive():
     import random
     from datetime import datetime, timedelta
 
-    users = ["alice", "bob", "carol", "dave", "eve", "frank", "grace", "henry", "ivan", "judy"]
+    users = ["alice", "bob", "robin", "dave", "eve", "frank", "grace", "henry", "ivan", "judy"]
     session_types = [
         ("RStudio", 0.3),
         ("Jupyter (Python)", 0.6),

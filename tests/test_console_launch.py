@@ -39,17 +39,17 @@ def free_port():
 # -- the ssh command ----------------------------------------------------------
 
 def test_command_binds_this_computer_only_and_jumps_when_asked():
-    t = L.Target("carol@mingus.example")
+    t = L.Target("robin@hub.example")
     argv = L.ssh_command("/usr/bin/ssh", t, 8000)
     assert argv[:2] == ["/usr/bin/ssh", "-N"]
     assert argv[argv.index("-L") + 1] == "127.0.0.1:8000:localhost:8000"
-    assert "-J" not in argv and argv[-1] == "carol@mingus.example"
+    assert "-J" not in argv and argv[-1] == "robin@hub.example"
 
-    t = L.Target("carol@mingus.example", via="carol@ws.example", remote_port=8080)
+    t = L.Target("robin@hub.example", via="robin@ws.example", remote_port=8080)
     argv = L.ssh_command("ssh", t, 9000)
     assert argv[argv.index("-L") + 1] == "127.0.0.1:9000:localhost:8080"
-    assert argv[argv.index("-J") + 1] == "carol@ws.example"
-    assert argv[-1] == "carol@mingus.example"
+    assert argv[argv.index("-J") + 1] == "robin@ws.example"
+    assert argv[-1] == "robin@hub.example"
 
 
 def test_command_keeps_its_own_connection_and_says_when_ready():
@@ -261,15 +261,15 @@ def test_resolve_needs_a_machine_the_first_time(saved_file):
 
 
 def test_save_and_reuse(saved_file):
-    t = L.Target("carol@mingus.example", via="carol@ws.example")
+    t = L.Target("robin@hub.example", via="robin@ws.example")
     assert L.save(t) is True
     assert L.save(t) is False
-    assert json.loads(saved_file.read_text())["destination"] == "carol@mingus.example"
+    assert json.loads(saved_file.read_text())["destination"] == "robin@hub.example"
     assert L.resolve(None, None, None) == t
-    assert L.resolve(None, "other@jump", 8080) == L.Target("carol@mingus.example",
+    assert L.resolve(None, "other@jump", 8080) == L.Target("robin@hub.example",
                                                            "other@jump", 8080)
     # A machine named on the command line wins, without the saved jump.
-    assert L.resolve("zeus@mingus", None, None) == L.Target("zeus@mingus")
+    assert L.resolve("monitor@hub", None, None) == L.Target("monitor@hub")
 
 
 @pytest.mark.parametrize("content", ["{not json", '{"destination": 5}',
@@ -354,7 +354,7 @@ def test_launch_opens_saves_and_reports_when_the_tunnel_closes(fake_ssh, saved_f
     monkeypatch.setattr(L.webbrowser, "open", lambda url: opened.append(url) or True)
     out = []
     port = free_port()
-    code = L.launch(L.Target("carol@mingus.example"), local_port=port,
+    code = L.launch(L.Target("robin@hub.example"), local_port=port,
                     out=out.append, ssh=str(fake_ssh), here=True)
     text = "\n".join(out)
     assert code == 0
@@ -368,7 +368,7 @@ def test_launch_opens_saves_and_reports_when_the_tunnel_closes(fake_ssh, saved_f
 def test_launch_when_ssh_cannot_log_in(fake_ssh, saved_file, monkeypatch):
     monkeypatch.setenv("FAKE_SSH_MODE", "fail")
     out = []
-    code = L.launch(L.Target("carol@nowhere"), out=out.append, ssh=str(fake_ssh),
+    code = L.launch(L.Target("robin@nowhere"), out=out.append, ssh=str(fake_ssh),
                     open_browser=False, here=True)
     assert code == 255
     assert "Check the machine name" in "\n".join(out)
@@ -387,7 +387,7 @@ def test_something_else_on_the_port_is_not_taken_for_the_console(fake_ssh, saved
     monkeypatch.setenv("FAKE_SSH_DELAY", "2")
     out = []
     try:
-        code = L.launch(L.Target("carol@mingus.example"), local_port=port, out=out.append,
+        code = L.launch(L.Target("robin@hub.example"), local_port=port, out=out.append,
                         ssh=str(fake_ssh), open_browser=False, here=True)
     finally:
         other.shutdown()
@@ -403,7 +403,7 @@ def test_launch_when_nothing_answers_through_the_tunnel(fake_ssh, saved_file, mo
     monkeypatch.setenv("FAKE_SSH_MODE", "silent")
     monkeypatch.setenv("FAKE_SSH_SECONDS", "10")
     out = []
-    code = L.launch(L.Target("carol@mingus.example"), out=out.append, ssh=str(fake_ssh),
+    code = L.launch(L.Target("robin@hub.example"), out=out.append, ssh=str(fake_ssh),
                     open_browser=False, no_console=1, local_port=free_port(), here=True)
     assert code == 1
     assert "nothing answers" in "\n".join(out)
@@ -443,7 +443,7 @@ def test_stopping_the_launcher_closes_the_tunnel(fake_ssh, tmp_path, how):
                FAKE_SSH_PIDFILE=str(pidfile), FAKE_SSH_IGNORE_INT="1",
                PYTHONUNBUFFERED="1")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "nomad.console.launch", "carol@mingus.example",
+        [sys.executable, "-m", "nomad.console.launch", "robin@hub.example",
          "--no-browser", "--here", "--port", str(free_port())],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
         start_new_session=True, cwd=Path(__file__).resolve().parents[1])
@@ -484,10 +484,10 @@ def test_stopping_the_launcher_closes_the_tunnel(fake_ssh, tmp_path, how):
 
 def test_cli_print(saved_file, monkeypatch):
     monkeypatch.setattr(L.shutil, "which", lambda name: None)
-    r = CliRunner().invoke(cli, ["console", "launch", "--print", "carol@mingus.example",
-                                 "--via", "carol@ws.example"])
+    r = CliRunner().invoke(cli, ["console", "launch", "--print", "robin@hub.example",
+                                 "--via", "robin@ws.example"])
     assert r.exit_code == 0, r.output
-    assert "ssh -N -L" in r.output and "-J carol@ws.example" in r.output
+    assert "ssh -N -L" in r.output and "-J robin@ws.example" in r.output
 
 
 def test_cli_without_a_machine_says_which(saved_file):
@@ -536,31 +536,31 @@ def test_browser_here(env, platform, want):
 
 def test_on_a_cluster_it_prints_the_line_for_your_own_computer(monkeypatch):
     monkeypatch.setenv("SSH_CONNECTION", "10.0.0.5 50000 10.0.0.1 22")
-    monkeypatch.setattr(L, "_user", lambda: "carol")
+    monkeypatch.setattr(L, "_user", lambda: "robin")
     monkeypatch.setattr(L.shutil, "which", lambda name: pytest.fail("no ssh should run here"))
     out = []
-    code = L.launch(L.Target("mingus.example"), out=out.append, local_port=None)
+    code = L.launch(L.Target("hub.example"), out=out.append, local_port=None)
     text = "\n".join(out)
     assert code == 0
-    assert "ssh -N -L 8000:localhost:8000 " in text and " -J carol@" in text
-    assert text.count("carol@mingus.example") == 1
+    assert "ssh -N -L 8000:localhost:8000 " in text and " -J robin@" in text
+    assert text.count("robin@hub.example") == 1
     assert "http://localhost:8000" in text
 
 
 def test_the_jump_is_this_cluster_by_the_name_users_reach_it_by(monkeypatch):
-    monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
-    monkeypatch.setattr(L, "_user", lambda: "carol")
-    lines = L.instructions(L.Target("carol@mingus.example.edu"))
+    monkeypatch.setenv(L.ENV_LOGIN, "hpc1.example.edu")
+    monkeypatch.setattr(L, "_user", lambda: "robin")
+    lines = L.instructions(L.Target("robin@hub.example.edu"))
     assert _long(lines) == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS + " "
-                            "-J carol@spydur.example.edu carol@mingus.example.edu")
-    assert 'leave out "-J carol@spydur.example.edu"' in lines[-1]
+                            "-J robin@hpc1.example.edu robin@hub.example.edu")
+    assert 'leave out "-J robin@hpc1.example.edu"' in lines[-1]
 
 
 def test_no_jump_on_the_consoles_own_machine(monkeypatch):
-    monkeypatch.setattr(L, "_user", lambda: "zeus")
-    lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
+    monkeypatch.setattr(L, "_user", lambda: "monitor")
+    lines = L.instructions(L.Target("monitor@hub.example.edu"), login_host="hub")
     assert _long(lines) == ("ssh -N -L 8000:localhost:8000 " + OPEN_SAYS
-                            + " zeus@mingus.example.edu")
+                            + " monitor@hub.example.edu")
 
 
 def _long(lines):
@@ -575,7 +575,7 @@ OPEN_SAYS = ("-o PermitLocalCommand=yes -o 'LocalCommand=echo Tunnel open: "
 
 def test_the_open_message_runs_through_a_shell_as_one_echo():
     import shlex
-    lines = L.instructions(L.Target("zeus@mingus.example.edu"), login_host="mingus")
+    lines = L.instructions(L.Target("monitor@hub.example.edu"), login_host="hub")
     words = shlex.split(_long(lines))
     local = next(w for w in words if w.startswith("LocalCommand="))
     command = local.split("=", 1)[1]
@@ -586,22 +586,22 @@ def test_the_open_message_runs_through_a_shell_as_one_echo():
 
 
 def test_the_site_names_the_consoles_machine(monkeypatch, saved_file):
-    monkeypatch.setenv(L.ENV_HOST, "mingus.example.edu")
-    monkeypatch.setattr(L, "_user", lambda: "carol")
-    assert L.resolve(None, None, None) == L.Target("carol@mingus.example.edu")
+    monkeypatch.setenv(L.ENV_HOST, "hub.example.edu")
+    monkeypatch.setattr(L, "_user", lambda: "robin")
+    assert L.resolve(None, None, None) == L.Target("robin@hub.example.edu")
     # A launch that worked, and the command line, both come first.
-    L.save(L.Target("carol@other.example.edu"))
-    assert L.resolve(None, None, None).destination == "carol@other.example.edu"
+    L.save(L.Target("robin@other.example.edu"))
+    assert L.resolve(None, None, None).destination == "robin@other.example.edu"
     assert L.resolve("x@y", None, None).destination == "x@y"
 
 
 def test_nomad_console_alone_is_launch(monkeypatch, saved_file):
     monkeypatch.setenv("SSH_CONNECTION", "1 2 3 4")
-    monkeypatch.setenv(L.ENV_HOST, "mingus.example.edu")
-    monkeypatch.setenv(L.ENV_LOGIN, "spydur.example.edu")
+    monkeypatch.setenv(L.ENV_HOST, "hub.example.edu")
+    monkeypatch.setenv(L.ENV_LOGIN, "hpc1.example.edu")
     r = CliRunner().invoke(cli, ["console"])
     assert r.exit_code == 0, r.output
-    assert "-J " in r.output and "@spydur.example.edu" in r.output
+    assert "-J " in r.output and "@hpc1.example.edu" in r.output
     assert "On your own computer, run:" in r.output
 
 

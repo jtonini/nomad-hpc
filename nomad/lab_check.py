@@ -12,11 +12,11 @@ asks each lab's PI two things, on My lab in the Console:
 - each person who sent jobs to one of the lab's condos lately without being
   in its group: in my lab, or a guest (another lab's member using the condo).
 
-The answers become ARC's to-do, a cluster at a time: take someone out of a
+The answers become research computing's to-do, a cluster at a time: take someone out of a
 group, put someone in one, what to do with a leaver's data (where it is, and
 how big), and the labs that didn't answer. A group change is done once
-nomad's own groups reading shows it; the rest is marked done by someone at
-ARC, with a note. nomad never changes a group, an account or a file itself.
+nomad's own groups reading shows it; the rest is marked done by someone in
+research computing, with a note. nomad never changes a group, an account or a file itself.
 
 PIs are told by email when the check opens, and reminded while they haven't
 answered; while ``review_to`` is set, every email goes there instead, saying
@@ -28,15 +28,15 @@ Settings, in the hub's nomad.toml::
     opens = ["09-15", "02-01", "06-15"]   # MM-DD: the day each term's check opens; [] (default): off
     remind_days = [14, 28]               # days after it opens: reminders to PIs who haven't answered
     remind_gap_days = 7                  # a reminder comes at least this long after the lab's last email
-    closes_days = 42                     # days after it opens: unanswered, the lab is on ARC's to-do
+    closes_days = 42                     # days after it opens: unanswered, the lab is on research computing's to-do
     claim_days = 120                     # condo users of the last this many days are asked about
     link = "https://nomad.example.edu/lab"   # where PIs answer, in the email
     mail_domain = "example.edu"          # a PI's address: NETID@mail_domain
     send_from = "Research Computing <rc@example.edu>"
     review_to = ["rc@example.edu"]       # while set, every email goes here instead
     # db = "/home/nomad/.local/share/nomad/lab_check.db"   # the answers (default: beside combined.db)
-    salutation = "Dr. {last}"            # the greeting: "Dear Dr. Parish," ({first}, {last}, {name})
-    names = { cparish = "Carol Parish" } # where the account's full name (getent passwd) won't do
+    salutation = "Dr. {last}"            # the greeting: "Dear Dr. Ames," ({first}, {last}, {name})
+    names = { rames = "Robin Ames" } # where the account's full name (getent passwd) won't do
     signature = ["Research Computing", "Example University"]   # default: [console.branding]
     contact = "Questions: rc@example.edu"   # default: report.toml's [report.labs] contact
 
@@ -78,7 +78,7 @@ NOTE_MAX = 300
 _KEYS = ("opens", "remind_days", "remind_gap_days", "closes_days", "claim_days", "link", "mail_domain",
          "send_from", "review_to", "db", "not_sites", "salutation", "names", "signature", "date_format", "contact", "directory")
 QUIET_DAYS = 365                         # no job this long, and in the group longer: "no job in a year"
-SALUTATION = "Dr. {last}"                # how the email greets a PI ("Dear Dr. Parish,")
+SALUTATION = "Dr. {last}"                # how the email greets a PI ("Dear Dr. Ames,")
 _FIELDS = {"first", "last", "name"}      # what a salutation may use
 _SUFFIXES = {"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "phd", "ph.d.", "ph.d", "md", "m.d.", "esq", "esq."}
 NAME_MAX = 80
@@ -128,7 +128,7 @@ class Round:
     term's until the next one opens."""
     id: str                              # YYYY-MM-DD, the day it opened
     opened: date
-    closes: date                         # unanswered after this: on ARC's to-do
+    closes: date                         # unanswered after this: on research computing's to-do
     next_opens: date
 
     def remind_on(self, days: int) -> date:
@@ -367,8 +367,8 @@ def _signature(value, config, delivery, problems: list) -> tuple:
 
 
 def split_name(full) -> tuple[str, str] | None:
-    """(first, last) of a full name as an account holds it ("Carol A. Parish",
-    "PARISH, CAROL", "Carol Parish Jr."); None when it isn't one."""
+    """(first, last) of a full name as an account holds it ("Robin A. Ames",
+    "AMES, ROBIN", "Robin Ames Jr."); None when it isn't one."""
     if not isinstance(full, str):
         return None
     head = full.split(",")[0]               # GECOS: the name, then office, phone, ...
@@ -406,7 +406,7 @@ def name_of(netid: str, s: Settings) -> tuple[tuple[str, str] | None, str]:
 
 
 def salute(netid: str, s: Settings) -> str | None:
-    """How a PI is greeted ("Dr. Parish"); None when nomad has no name for them,
+    """How a PI is greeted ("Dr. Ames"); None when nomad has no name for them,
     or the salutation needs a part of the name it doesn't have."""
     got, _ = name_of(netid, s)
     if got is None:
@@ -418,7 +418,7 @@ def salute(netid: str, s: Settings) -> str | None:
 
 
 def greeting(leaders, s: Settings) -> str:
-    """"Dear Dr. Parish," / "Dear Dr. Yang and Dr. Nolin,"; "Dear colleague,"
+    """"Dear Dr. Ames," / "Dear Dr. Chen and Dr. Novak,"; "Dear colleague,"
     when nomad has no name for one of them."""
     leaders = list(leaders)
     said = [salute(n, s) for n in leaders]
@@ -951,7 +951,7 @@ def view(conn, rec, config: dict | None, report, lab_group: str, now: datetime |
             "claim_days": s.claim_days, "quiet_days": QUIET_DAYS, "not_sites": list(s.not_sites)}
 
 
-# --- ARC's to-do -------------------------------------------------------------------------
+# --- Research computing's to-do -------------------------------------------------------------------------
 
 def _done(rec) -> dict:
     return {(r["round"], r["lab"], r["netid"], r["kind"], r["site"]): r
@@ -960,7 +960,7 @@ def _done(rec) -> dict:
 
 def todo(conn, rec, config: dict | None, report, now: datetime | None = None, done_days: int = 30,
          report_problem: str | None = None) -> dict:
-    """What ARC is left to do by the PIs' answers, a cluster at a time,
+    """What research computing is left to do by the PIs' answers, a cluster at a time,
     from the answer given last for each person:
 
     - remove: has left, or not in the lab, and in the lab's group at a site
@@ -1060,7 +1060,7 @@ def _data_places(conn):
 
 def mark_done(rec, item_round: str, lab: str, netid: str, kind: str, site: str = "",
               by: str = "", note: str | None = None) -> dict:
-    """ARC says a to-do item is done (or won't be, and why): kept with
+    """Research computing says a to-do item is done (or won't be, and why): kept with
     who and when."""
     if kind not in KINDS:
         raise CheckError(f"{kind!r}: one of {', '.join(KINDS)}")
@@ -1108,7 +1108,7 @@ def mail_plan(conn, rec, config: dict | None, report, now: datetime | None = Non
     done_labs = submitted(rec, rnd.id)
     today = now.date()
     if today > rnd.closes:
-        return []                          # closed: on ARC's to-do now, not asked by email
+        return []                          # closed: on research computing's to-do now, not asked by email
     plan = []
     for lab in labs(conn, config, report, s, now):
         got = {r["netid"] for r in have if r["lab"] == lab.group}
@@ -1147,7 +1147,7 @@ _ARTICLE = {"lab", "laboratory", "group", "team", "center", "centre", "initiativ
 
 
 def _title(e: dict) -> str:
-    """How an email names the lab: "the Parish Lab (cparish$)", "Smith Lab"
+    """How an email names the lab: "the Ames Lab (rames$)", "Smith Lab"
     names as they are, else "your lab" with its group."""
     name = e.get("name")
     if not name or name == e["lab"]:

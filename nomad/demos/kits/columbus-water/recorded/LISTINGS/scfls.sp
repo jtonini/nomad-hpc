@@ -55,7 +55,7 @@ bfn_to_orbital_type map(*), i:map(i)
   11:  2  12:  2  13:  2  14:  4  15:  1  16:  1  17:  2  18:  2  19:  2  20:  2
   21:  4  22:  2  23:  4  24:  2
 
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 
 core potentials used
 
@@ -73,7 +73,7 @@ DIIS SWITCHED ON (error vector is dF)
 
 total number of SCF basis functions:  24
 
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 H2O PVDZ                                                                        
 
                 107 s integrals
@@ -86,7 +86,7 @@ H2O PVDZ
            starting vectors from diagonalization of one-electron terms
 
      occupied and virtual orbitals
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 H2O PVDZ                                                                        
 
                          A1  molecular orbitals
@@ -250,7 +250,7 @@ scf gradient information written to file vectgrd
      wavefunction norm =     1.0000000000
 
      occupied and virtual orbitals
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 H2O PVDZ                                                                        
 
                          A1  molecular orbitals
@@ -353,7 +353,7 @@ H2O PVDZ
       occ. no.      0.000000    0.000000
 
      population analysis
-Hermit Integral Program : SIFS version  spdr61.cluster    17:22:14.302 09-Nov-26
+Hermit Integral Program : SIFS version  nd61.cluster    17:22:14.302 09-Nov-26
 H2O PVDZ                                                                        
   NOTE: For HERMIT use spherical harmonics basis sets !!!
  

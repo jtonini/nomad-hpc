@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.66.0 (November 2026)
+
+- **No site's names in nomad.** Help texts, examples, defaults, code
+  comments, tests and the example settings name made-up clusters (hpc1,
+  hpc2, interactive1, the hub...), people and labs instead of the site
+  nomad was first run on. The folder of a validation run's results, which
+  listed people's usernames, is removed.
+- **Request numbers are `REQ-0012` by default** (`[console.tickets] prefix`;
+  it was `ARC`, the name of one site's center). A site whose numbers read
+  `ARC-0012` keeps them with `prefix = "ARC"`. Emails and help say "research
+  computing" where they named that center.
+- The old dashboard finds GPU nodes by their GPU readings, not by one site's
+  node names; the bundled demo kits' recorded runs are said without the site
+  they ran on.
+- **`nomad analyze` reads the disk collector's readings** (it read the NAS
+  collector's table, which has no path, and failed), and fits a curve to
+  every reading of the window: it took the rate and the acceleration from
+  the last three readings, which a few gigabytes of noise turned into a disk
+  "full in 1.6 days". It says which paths it has readings of when the one
+  asked for has none.
+- **The demo has lab machines' sessions and disk readings**, so `nomad edu
+  me`, My activity's lab machines and `nomad analyze` have something to
+  read; `nomad notices mail --db DB` says what the weekly emails would say
+  from such a database (never with `--send`).
+- The setup wizard says where people see nomad: the Console, on the hub;
+  `nomad dashboard` is this machine's own page. A hub named `hub` is "the
+  hub" in a sentence, not "the hub hub".
+
 ## v1.65.0 (November 2026)
 
 - **Advice never asks for fewer cores than the most any of the jobs used.**

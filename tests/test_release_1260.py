@@ -1,5 +1,5 @@
 """1.26.0: a job script made for someone who has none, from a program's
-template (spydur's and arachne's modules, as their clusters list them) or
+template (hpc1's and hpc2's modules, as their clusters list them) or
 from a past script of theirs."""
 import subprocess
 from datetime import datetime
@@ -8,19 +8,19 @@ import pytest
 
 from nomad.submit import templates as T
 
-GAUSSIAN = {"program": "Gaussian", "sites": ["spydur", "arachne"], "modules": ["gaussian/*"],
+GAUSSIAN = {"program": "Gaussian", "sites": ["hpc1", "hpc2"], "modules": ["gaussian/*"],
             "default": "gaussian/latest", "inputs": [".gjf", ".com"],
             "setup": ["export GAUSS_SCRDIR={scratch}", "mkdir -p {scratch}"],
             "run": "g16 < {input} > {stem}.log", "after": ["rm -rf {scratch}"], "outputs": ["{stem}.log"],
             "cpus": 8, "mem": "16G", "time": "1-00:00:00",
             "run_for": {"gaussian/g09*": "g09 < {input} > {stem}.log"}}
-COLUMBUS = {"program": "Columbus", "sites": ["spydur"], "modules": ["columbus/*"], "default": "columbus/722",
+COLUMBUS = {"program": "Columbus", "sites": ["hpc1"], "modules": ["columbus/*"], "default": "columbus/722",
             "folder": "control.run", "run": "$COLUMBUS/runc -m {mem_mb} -nproc {cpus} > runls 2>&1",
             "cpus": 4, "mem": "8G", "time": "2-00:00:00", "parallel": "mpi"}
 QCHEM = {"program": "Q-Chem", "modules": ["qchem/*"], "inputs": [".in", ".inp"],
          "run": "qchem -nt {cpus} {input} {stem}.out", "outputs": ["{stem}.out"]}
-# what spydur's `module -t avail` gives (with /usr/local/sw/modulefiles), 4 Nov 2026
-SPYDUR = ["columbus/", "columbus/7-2013-02-04p", "columbus/7-2017-12-07", "columbus/722", "columbus/722.bak-20260630",
+# what hpc1's `module -t avail` gives (with /usr/local/sw/modulefiles), 4 Nov 2026
+HPC1 = ["columbus/", "columbus/7-2013-02-04p", "columbus/7-2017-12-07", "columbus/722", "columbus/722.bak-20260630",
           "columbus/columbus", "columbus/columbus701", "gaussian/", "gaussian/g16", "gaussian/g16c02",
           "gaussian/latest", "gromacs/2026.2-gpu", "qchem/qchem", "qchem/qchem521", "qchem/qchem54",
           "qchem/qchem611"]
@@ -28,7 +28,7 @@ SPYDUR = ["columbus/", "columbus/7-2013-02-04p", "columbus/7-2017-12-07", "colum
 
 def test_a_template_is_checked_and_bad_ones_are_said():
     t = T.template(GAUSSIAN)
-    assert t.program == "Gaussian" and t.offered_at("spydur") and not t.offered_at("vadur")
+    assert t.program == "Gaussian" and t.offered_at("hpc1") and not t.offered_at("hpc3")
     for bad, said in (({"run": "g16 < {inpt}"}, "isn't a place nomad fills"),
                       ({"run": "a\nb"}, "one line"),
                       ({"inputs": ["gjf"]}, "file endings"),
@@ -39,25 +39,25 @@ def test_a_template_is_checked_and_bad_ones_are_said():
         with pytest.raises(T.TemplateError, match=said):
             T.template(dict(GAUSSIAN, **bad))
     got, problems = T.templates({"submit": {"templates": [GAUSSIAN, dict(GAUSSIAN, mem="x"), COLUMBUS,
-                                                          dict(COLUMBUS, cpus=2)]}}, "spydur")
+                                                          dict(COLUMBUS, cpus=2)]}}, "hpc1")
     assert [t.program for t in got] == ["Gaussian", "Columbus"]
     assert any("#2" in p and "isn't a size" in p for p in problems) and any("two templates for Columbus" in p
                                                                              for p in problems)
-    assert [t.program for t in T.templates({"submit": {"templates": [GAUSSIAN, COLUMBUS]}}, "arachne")[0]] == \
+    assert [t.program for t in T.templates({"submit": {"templates": [GAUSSIAN, COLUMBUS]}}, "hpc2")[0]] == \
         ["Gaussian"]
 
 
 def test_versions_from_what_the_cluster_has():
     g = T.template(GAUSSIAN)
-    names, first = T.versions(g, SPYDUR)
+    names, first = T.versions(g, HPC1)
     assert names == ["gaussian/latest", "gaussian/g16", "gaussian/g16c02"] and first == "gaussian/latest"
     c = T.template(COLUMBUS)
-    names, first = T.versions(c, SPYDUR)
+    names, first = T.versions(c, HPC1)
     assert "columbus/722.bak-20260630" not in names and "columbus/" not in names
     assert first == "columbus/722"
     # no default of the template's there: one the cluster marks, else the newest
     q = T.template(dict(GAUSSIAN, program="Q-Chem", modules=["qchem/qchem*"], default="qchem/qchem700"))
-    assert T.versions(q, SPYDUR)[1] == "qchem/qchem611"
+    assert T.versions(q, HPC1)[1] == "qchem/qchem611"
     assert T.versions(q, ["qchem/qchem54", ("qchem/qchem521", True)])[1] == "qchem/qchem521"
     assert T.versions(q, []) == ([], None)
     assert T.run_line(g, "gaussian/g09d01") == "g09 < {input} > {stem}.log"
@@ -119,7 +119,7 @@ def test_the_modules_a_cluster_lists(tmp_path, monkeypatch):
     import sqlite3
     import subprocess
     from nomad.collectors import modules as M
-    # Lmod's terse list (arachne's, 4 Nov 2026, with a header and marks as other versions print them)
+    # Lmod's terse list (hpc2's, 4 Nov 2026, with a header and marks as other versions print them)
     out = ("/usr/local/sw/modulefiles:\ngaussian/\ngaussian/g16\ngaussian/g16c02\ngaussian/latest(default)\n"
            "vasp/\nvasp/6.5.1\nvasp/6.6.0 <L>\nqchem/qchem611(D)\n\n")
     assert M.parse(out) == [("gaussian/g16", False), ("gaussian/g16c02", False), ("gaussian/latest", True),
@@ -169,13 +169,13 @@ def test_nomad_templates_shows_and_makes(tmp_path):
     conn = sqlite3.connect(db)
     conn.executescript(M.ModulesCollector.SCHEMA.replace("module TEXT PRIMARY KEY", "module TEXT"))
     conn.execute("ALTER TABLE modules_available ADD COLUMN source_site TEXT")
-    for m in SPYDUR:
-        conn.execute("INSERT INTO modules_available (module, is_default, source_site) VALUES (?, 0, 'spydur')", (m,))
-    conn.execute("INSERT INTO modules_available (module, is_default, source_site) VALUES ('vasp/6.6.0', 0, 'arachne')")
+    for m in HPC1:
+        conn.execute("INSERT INTO modules_available (module, is_default, source_site) VALUES (?, 0, 'hpc1')", (m,))
+    conn.execute("INSERT INTO modules_available (module, is_default, source_site) VALUES ('vasp/6.6.0', 0, 'hpc2')")
     conn.commit()
     toml = tmp_path / "nomad.toml"
     toml.write_text("""
-[submit.build.spydur]
+[submit.build.hpc1]
 module_paths = ["/usr/local/sw/modulefiles"]
 
 [[submit.templates]]
@@ -190,23 +190,23 @@ time = "1-00:00:00"
 
 [[submit.templates]]
 program = "VASP"
-sites = ["spydur"]
+sites = ["hpc1"]
 modules = ["vasp/*"]
 folder = "INCAR"
 run = "mpirun -np {gpus} vasp_std"
 gpus = 1
 """)
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--hub"])
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--hub"])
     assert r.exit_code == 0, r.output
     assert "versions: gaussian/latest, gaussian/g16, gaussian/g16c02  (first: gaussian/latest)" in r.output
-    assert "! VASP: none of vasp/* is among spydur's modules" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--hub",
+    assert "! VASP: none of vasp/* is among hpc1's modules" in r.output
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--hub",
                                  "--make", "gaussian", "--input", "/home/ab/water.gjf"])
     assert r.exit_code == 0, r.output
     assert "# would be saved as /home/ab/water.sh" in r.output and "module load gaussian/latest || exit 1" in r.output
-    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "spydur", "--db", str(db), "--hub",
+    r = CliRunner().invoke(cli, ["-c", str(toml), "templates", "--site", "hpc1", "--db", str(db), "--hub",
                                  "--make", "gaussian", "--input", "/home/ab/water.gjf", "--module", "gaussian/g09"])
-    assert r.exit_code != 0 and "isn't one of spydur's Gaussian modules" in r.output
+    assert r.exit_code != 0 and "isn't one of hpc1's Gaussian modules" in r.output
 
 
 # ── review of 1.26.0 ───────────────────────────────────────────────────────

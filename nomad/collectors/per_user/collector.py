@@ -72,7 +72,7 @@ CMDLINE_TRUNCATE = 512
 # A rate over a shorter window says little (a process 0.05 s old that used
 # 0.04 s is "80%"): it is not used for the floor or the rules.
 MIN_WINDOW_SECONDS = 10.0
-# Raw samples deleted per run when pruning, so a large backlog (arachne's
+# Raw samples deleted per run when pruning, so a large backlog (hpc2's
 # 12.4M rows from May) goes over hours without holding the database long.
 PRUNE_BATCH = 100_000
 # An interval longer than this (the collector stopped for a while) is not
@@ -357,7 +357,7 @@ class PerUserCollector(BaseCollector):
         if psutil is None and not snapshots:
             # Without psutil there are no processes to read. This used to
             # return an empty envelope, logged as "1 records" every run:
-            # arachne looked healthy from May to September collecting nothing.
+            # hpc2 looked healthy from May to September collecting nothing.
             self.note = "psutil not installed: nothing collected"
             return []
         me = os.geteuid()

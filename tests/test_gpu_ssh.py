@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 from nomad.collectors.gpu import GPUCollector, GPU_TEMP_WARN, _get_temp_threshold
 
 
-# Realistic nvidia-smi output from arachne node51 (8x RTX 6000 Ada)
+# Realistic nvidia-smi output from hpc2 node51 (8x RTX 6000 Ada)
 NVIDIA_SSH_OUTPUT = """0, NVIDIA RTX 6000 Ada Generation, 45.2, 38, 12288, 49152, 36864, 62, 150.5, 300.0
 1, NVIDIA RTX 6000 Ada Generation, 92.0, 85, 40960, 49152, 8192, 78, 275.3, 300.0
 2, NVIDIA RTX 6000 Ada Generation, 0.0, 2, 512, 49152, 48640, 35, 25.0, 300.0
@@ -15,11 +15,11 @@ NVIDIA_SSH_OUTPUT = """0, NVIDIA RTX 6000 Ada Generation, 45.2, 38, 12288, 49152
 6, NVIDIA RTX 6000 Ada Generation, 0.0, 2, 512, 49152, 48640, 34, 25.2, 300.0
 7, NVIDIA RTX 6000 Ada Generation, 88.3, 72, 36864, 49152, 12288, 75, 265.0, 300.0"""
 
-# spydur GPU output (A100 + A40)
-NVIDIA_SSH_OUTPUT_SPYDUR_A100 = """0, NVIDIA A100-SXM4-80GB, 72.0, 65, 52000, 81920, 29920, 68, 380.0, 400.0
+# hpc1 GPU output (A100 + A40)
+NVIDIA_SSH_OUTPUT_HPC1_A100 = """0, NVIDIA A100-SXM4-80GB, 72.0, 65, 52000, 81920, 29920, 68, 380.0, 400.0
 1, NVIDIA A100-SXM4-80GB, 0.0, 1, 256, 81920, 81664, 42, 55.0, 400.0"""
 
-NVIDIA_SSH_OUTPUT_SPYDUR_A40 = """0, NVIDIA A40, 88.0, 70, 35000, 46080, 11080, 75, 290.0, 300.0
+NVIDIA_SSH_OUTPUT_HPC1_A40 = """0, NVIDIA A40, 88.0, 70, 35000, 46080, 11080, 75, 290.0, 300.0
 1, NVIDIA A40, 15.0, 10, 4096, 46080, 41984, 48, 80.0, 300.0"""
 
 
@@ -29,7 +29,7 @@ def gpu_config_ssh():
     return {
         'enabled': True,
         'gpu_nodes': ['node51', 'node52', 'node53'],
-        'ssh_user': 'zeus',
+        'ssh_user': 'monitor',
     }
 
 
@@ -54,7 +54,7 @@ class TestGPUSSHMode:
         """SSH mode should read gpu_nodes and ssh_user from config."""
         collector = GPUCollector(gpu_config_ssh, str(tmp_path / 'test.db'))
         assert collector._gpu_nodes == ['node51', 'node52', 'node53']
-        assert collector._ssh_user == 'zeus'
+        assert collector._ssh_user == 'monitor'
 
     def test_init_local_mode(self, gpu_config_local, tmp_path):
         """Local mode should have empty gpu_nodes."""
@@ -150,7 +150,7 @@ class TestA100A40Support:
 
     def test_parse_a100_output(self, tmp_path):
         collector = GPUCollector({'enabled': True}, str(tmp_path / 'test.db'))
-        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_SPYDUR_A100, hostname='spdr16')
+        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_HPC1_A100, hostname='nd16')
         assert len(records) == 2
         assert all('A100' in r['gpu_name'] for r in records)
         assert records[0]['gpu_util_percent'] == 72.0
@@ -158,7 +158,7 @@ class TestA100A40Support:
 
     def test_parse_a40_output(self, tmp_path):
         collector = GPUCollector({'enabled': True}, str(tmp_path / 'test.db'))
-        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_SPYDUR_A40, hostname='spdr17')
+        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_HPC1_A40, hostname='nd17')
         assert len(records) == 2
         assert all('A40' in r['gpu_name'] for r in records)
         assert records[0]['memory_total_mb'] == 46080
@@ -180,7 +180,7 @@ class TestA100A40Support:
         """A100 records enrich correctly with DCGM data."""
         from nomad.collectors.gpu import DCGMStats
         collector = GPUCollector({'enabled': True}, str(tmp_path / 'test.db'))
-        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_SPYDUR_A100, hostname='spdr16')
+        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_HPC1_A100, hostname='nd16')
         from nomad.collectors.gpu import DCGMStats
         dcgm_data = {
             0: DCGMStats(gpu_index=0, sm_active_pct=65.0, tensor_active_pct=50.0,
@@ -197,7 +197,7 @@ class TestA100A40Support:
         """A40 running FP64 HPC workload classifies correctly."""
         from nomad.collectors.gpu import DCGMStats
         collector = GPUCollector({'real_util_weights': 'hpc'}, str(tmp_path / 'test.db'))
-        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_SPYDUR_A40, hostname='spdr17')
+        records = collector._parse_nvidia_output(NVIDIA_SSH_OUTPUT_HPC1_A40, hostname='nd17')
         dcgm_data = {
             0: DCGMStats(gpu_index=0, sm_active_pct=75.0, tensor_active_pct=5.0,
                          dram_active_pct=30.0, gr_engine_active_pct=65.0, fp64_active_pct=30.0),

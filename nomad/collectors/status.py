@@ -9,7 +9,7 @@ the collectors configured there, and on a hub's combined database for every
 site at once.
 
 A collector that runs and finds nothing used to look like one that works
-(success, 0 records) -- nfs at every UR site for months, per_user on arachne
+(success, 0 records) -- nfs at every site for months, per_user on hpc2
 since May. Here "runs, never any data" and its reason are said plainly.
 """
 from __future__ import annotations
@@ -82,7 +82,7 @@ def read(conn: sqlite3.Connection, days: int = 7) -> dict[tuple, RunStats]:
             "WHERE success AND records_collected > 0 GROUP BY 1, 2"):
         out.setdefault((s, k), RunStats()).last_data = last
     # What the newest run said: a collector that worked earlier in the
-    # window and now collects nothing (per_user on arachne after 1.7.13)
+    # window and now collects nothing (per_user on hpc2 after 1.7.13)
     # must not hide behind its older runs.
     for s, k, msg, _ in conn.execute(
             f"SELECT {site}, collector, error_message, MAX(started_at) FROM collection_log "

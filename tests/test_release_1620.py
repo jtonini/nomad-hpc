@@ -83,7 +83,7 @@ def test_an_array_is_named_once_with_its_tasks():
 # -- asking for too much time: only when it made them wait --------------------------------------
 
 def jobs_db(tmp_path, mine_wait, others_wait, others=12, gpus=0):
-    """kim's five jobs on vadur's cpu partition asked for a year and ran 2 h;
+    """kim's five jobs on hpc3's cpu partition asked for a year and ran 2 h;
     other people's 4-core jobs there, sent the same days, asked for about
     what they ran."""
     db = tmp_path / "combined.db"
@@ -92,7 +92,7 @@ def jobs_db(tmp_path, mine_wait, others_wait, others=12, gpus=0):
               "submit_time TEXT, eligible_time TEXT, start_time TEXT, end_time TEXT, req_cpus INTEGER, "
               "req_gpus INTEGER, req_time_seconds INTEGER, runtime_seconds INTEGER, wait_time_seconds INTEGER)")
 
-    def job(jid, user, wait, asked, ran, days_ago, cpus=4, part="cpu", site="vadur", g=0):
+    def job(jid, user, wait, asked, ran, days_ago, cpus=4, part="cpu", site="hpc3", g=0):
         sub = NOW - timedelta(days=days_ago)
         start = sub + timedelta(seconds=wait)
         end = start + timedelta(seconds=ran)
@@ -117,7 +117,7 @@ def time_issue(**kw):
     base = {"dimension": "time", "dimension_key": "time", "affected_jobs": 5, "total_applicable": 5,
             "avg_score": 10.0, "severity": "critical", "trajectory": "stable", "directive": "time",
             "direction": "lower", "current_value_typical": 365 * 86400.0, "current_display": "365-00:00:00",
-            "suggested_display": "9-15:00:00", "suggested_value": 231 * 3600.0, "cluster": "vadur",
+            "suggested_display": "9-15:00:00", "suggested_value": 231 * 3600.0, "cluster": "hpc3",
             "partition": "cpu", "usage_stats": UsageStats(7800, 7000, 9000, 6000, 154 * 3600, "seconds"),
             "jobs": [{"job_id": f"90{k}"} for k in range(5)]}
     base.update(kw)
@@ -147,7 +147,7 @@ def test_told_when_their_jobs_waited_longer(tmp_path, kim_asks_a_year):
     (m,) = due(db)["mail"]
     (e,) = m["entries"]
     assert e.title == "Your jobs ask for more time than they use"
-    assert e.lines[0] == ("On vadur (cpu), 5 of your last 5 jobs asked for more time than they ran: they typically "
+    assert e.lines[0] == ("On hpc3 (cpu), 5 of your last 5 jobs asked for more time than they ran: they typically "
                           "asked for 365 days; most ran about 2 h 10 min, the longest 6 days 10 h.")
     assert e.lines[1] == ("They waited about 3 h 20 min to start (the median). Jobs of the same size on the same "
                           "partition, sent in the same days, that asked for about the time they ran waited about "
@@ -200,12 +200,12 @@ def test_the_settings():
 # -- the email laid out -------------------------------------------------------------------------
 
 def an_email():
-    quick = N.Entry("jobs", "jobs:quick:vadur", "Some of your jobs stopped within a minute",
-                    ["On vadur, 186 of your jobs this week stopped with an error within a minute of starting."],
+    quick = N.Entry("jobs", "jobs:quick:hpc3", "Some of your jobs stopped within a minute",
+                    ["On hpc3, 186 of your jobs this week stopped with an error within a minute of starting."],
                     group="jobs:quick", advice=list(N._QUICK_WHY), todo=list(N._QUICK_TODO),
                     jobs=N._job_words([f"13213_{k}" for k in range(180)] + [f"12269_{k}" for k in range(6)], 186))
-    asked = N.Entry("jobs", "jobs:vadur:cpu:time", "Your jobs ask for more time than they use",
-                    ["On vadur (cpu), 15 of your last 15 jobs asked for more time than they ran: <script>x</script>."],
+    asked = N.Entry("jobs", "jobs:hpc3:cpu:time", "Your jobs ask for more time than they use",
+                    ["On hpc3 (cpu), 15 of your last 15 jobs asked for more time than they ran: <script>x</script>."],
                     group="jobs:time", advice=[N._WHY["time"]], jobs="array 13212 (15 tasks)",
                     change=["#SBATCH --time=9-15:00:00"],
                     change_note="That is 9 days 15 h: enough for the longest of these jobs, with some margin.")

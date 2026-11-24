@@ -445,10 +445,10 @@ def test_each_server_is_named_once_with_its_paths(tmp_path):
     _HOLDINGS.clear()
     conn = facts.open_readonly(path)
     try:
-        places = {"store1": ("store1", "spydur's storage"), "gpu": ("gpu", "the GPU cluster")}
+        places = {"store1": ("store1", "hpc1's storage"), "gpu": ("gpu", "the GPU cluster")}
         items = lab_attention(conn, {"storage": []}, {"u1"}, {}, NOW, places=places)
     finally:
         conn.close()
     says, = [i["says"] for i in items if i["kind"] == "data"]
-    assert says == ("u1 holds 17.4 TB: on store1 (spydur's storage) /scratch 11.4 TB; on gpu (the GPU cluster) "
+    assert says == ("u1 holds 17.4 TB: on store1 (hpc1's storage) /scratch 11.4 TB; on gpu (the GPU cluster) "
                     "/home 2.8 TB, /scratch 2.8 TB; 360.9 GB on 3 other places.")

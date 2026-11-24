@@ -283,7 +283,7 @@ def test_invalid_starttls_is_an_error():
 
 
 def test_alert_section_overrides_mail_and_old_names_work():
-    config = {"mail": {"host": "cotton.example.edu", "port": 25, "from": "hpc@example.edu",
+    config = {"mail": {"host": "relay.example.edu", "port": 25, "from": "hpc@example.edu",
                        "tls_name": "smtp.example.edu"}}
     legacy = {"enabled": True, "smtp_server": "relay.example.edu", "smtp_port": 587,
               "use_tls": False, "from_address": "alerts@example.edu",
@@ -296,9 +296,9 @@ def test_alert_section_overrides_mail_and_old_names_work():
 
 
 def test_alert_section_without_server_uses_mail():
-    cfg = mail.settings({"mail": {"host": "cotton.example.edu", "from": "hpc@example.edu"}},
+    cfg = mail.settings({"mail": {"host": "relay.example.edu", "from": "hpc@example.edu"}},
                         {"enabled": True, "recipients": ["a@example.edu"]})
-    assert cfg["host"] == "cotton.example.edu" and cfg["from"] == "hpc@example.edu"
+    assert cfg["host"] == "relay.example.edu" and cfg["from"] == "hpc@example.edu"
 
 
 def test_password_file(tmp_path):
@@ -360,7 +360,7 @@ def test_old_alert_settings_keep_their_old_port():
     assert old.mail_settings["port"] == 587
     assert old.mail_settings["starttls"] == "required"
     shared = EmailBackend({"enabled": True, "recipients": ["a@x.edu"]},
-                          {"host": "cotton.example.edu", "port": 25})
+                          {"host": "relay.example.edu", "port": 25})
     assert shared.mail_settings["port"] == 25
 
 

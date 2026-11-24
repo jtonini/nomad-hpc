@@ -8,7 +8,7 @@ a global _dispatcher set by init_dispatcher(). If init_dispatcher()
 is never called, send_alert() silently returns {} with only a
 warning-level log.
 
-Production symptom on 2026-05-20: arachne node03 was MIXED+DRAIN for
+Production symptom on 2026-05-20: hpc2 node03 was MIXED+DRAIN for
 16+ hours. The node_state collector captured it every 5 minutes. But
 the alerts table had exactly one row (a manual test alert from the
 night before) and no email was ever sent. Root cause: nomad collect

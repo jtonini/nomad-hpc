@@ -37,7 +37,7 @@ A kit is a folder holding its input files and a ``kit.toml``::
     makes = ["water.tpr"]             # among files: made by the commands
 
     [recorded]                        # one real run of it (1.35.0), to compare a new one with
-    site = "spydur"
+    site = "hpc1"
     date = "2026-11-09"               # text, not a TOML date
     module = "gromacs/2026.2-gpu"
     partition = "gpunodes"
@@ -59,9 +59,9 @@ Kits come with nomad (nomad/demos/kits) and from a site's own folders::
     dirs = ["/usr/local/share/nomad-demos"]   # folders of kit folders (a site's own, and those built there)
     bundled = true                            # also the kits that come with nomad (default)
     into = "~/nomad-demos"                    # where a copy goes: a new folder each time
-    partition = { spydur = "condos" }         # where practice runs with no GPU are sent (default: the template's)
+    partition = { hpc1 = "condos" }           # where practice runs with no GPU are sent (default: the template's)
     gpu_partition = "gpunodes"                # and those with one (a name: every site)
-    site_dirs = { spydur = "/usr/local/sw/nomad-demos" }   # the hub's: each site's own kits, for the Console
+    site_dirs = { hpc1 = "/usr/local/sw/nomad-demos" }     # the hub's: each site's own kits, for the Console
                                               # (there: root's or nomad's installer's, as is each folder
                                               # above it, and no one else may write; build leaves it so)
 
@@ -343,7 +343,8 @@ def recorded_text(kit: Kit) -> str:
         parts.append(f"{_secs(r['cpu_s'])} of CPU time"
                      + (f" (about {r['cores_busy']:g} of its {r['cpus']} core(s) kept busy)" if "cores_busy" in r
                         else ""))
-    text = f"A run of it on {r['site']} ({where}): {size}; " + ", ".join(parts)
+    # 1.66.0: not the site's name: the kits nomad comes with were run where it was made
+    text = f"A run of it ({where}): {size}; " + ", ".join(parts)
     if "peak_mb" in r:
         text += f"; at most {_mb(r['peak_mb'])} of memory"
     return text + "."

@@ -443,11 +443,11 @@ def test_size_jobs_cancel_and_ls(person, capsys):
     capsys.readouterr()
     answers["out"] = b"Error: no such job\n"
     assert call("size", "--job", "1") == 2 and "nomad size didn't answer" in _out(capsys)["error"]
-    answers["out"] = "\x1f".join(("4242", "my job", "RUNNING", "1:02", "4:00:00", "1", "spdr02",
+    answers["out"] = "\x1f".join(("4242", "my job", "RUNNING", "1:02", "4:00:00", "1", "nd02",
                                   "/scratch/jdoe/run 1")).encode() + b"\nnoise\n"
     assert call("jobs") == 0
     assert _out(capsys)["jobs"] == [{"job": "4242", "name": "my job", "state": "RUNNING", "time": "1:02",
-                                     "limit": "4:00:00", "nodes": "1", "where": "spdr02",
+                                     "limit": "4:00:00", "nodes": "1", "where": "nd02",
                                      "workdir": "/scratch/jdoe/run 1"}]
     assert said[-1][6:10] == ["exec", "squeue", "-u", str(PERSON)]   # uid 5123 has no name here; by the gate's exec (1.25.2)
     answers.update(out=b"scancel: error: Kill job error on job id 9: Access/permission denied\n", code=1)
@@ -516,7 +516,7 @@ def test_the_tag_says_it_came_from_the_console(cluster_here):  # noqa: F811
 def _site(tmp_path, **kw):
     key = tmp_path / "id_gate"
     key.write_text("k")
-    return {"name": "spydur", "host": "spydur.example.edu", "ssh_user": "installer", "submit": "gate",
+    return {"name": "hpc1", "host": "hpc1.example.edu", "ssh_user": "installer", "submit": "gate",
             "gate_key": str(key), **kw}
 
 
@@ -524,7 +524,7 @@ def test_a_site_asked_through_its_gate(tmp_path):
     s = _site(tmp_path)
     assert remote.mode(s) == "gate" and remote.mode({"name": "x"}) == "copy"
     cfg = remote.settings(s)
-    assert cfg == {"name": "spydur", "host": "spydur.example.edu", "user": "installer", "port": None,
+    assert cfg == {"name": "hpc1", "host": "hpc1.example.edu", "user": "installer", "port": None,
                    "key": str(tmp_path / "id_gate")}
     for bad, why in (({"submit": "copy"}, "no gate"), ({"host": "-oProxyCommand=x"}, "isn't a host name"),
                      ({"ssh_user": "a b"}, "isn't an account name"), ({"port": "22;x"}, "isn't a number"),
@@ -543,7 +543,7 @@ def test_a_site_asked_through_its_gate(tmp_path):
               "ControlPath=none", "ClearAllForwardings=yes", "RequestTTY=no"):
         assert o in argv
     assert argv[argv.index("-i") + 1] == cfg["key"] and argv[argv.index("-p") + 1] == "2222"
-    assert argv[-4:-1] == ["installer", "--", "spydur.example.edu"]
+    assert argv[-4:-1] == ["installer", "--", "hpc1.example.edu"]
     assert shlex.split(argv[-1]) == [gate.GATE] + words          # what serve reads back
 
 
@@ -560,7 +560,7 @@ def test_the_hubs_answers(tmp_path):
     assert set(got["argv"]) and doc["ok"]
     assert doc == {"ok": True, "jobs": []} and shlex.split(got["argv"][-1]) == ["nomad-gate", "jobs", "--user",
                                                                                 "jdoe"]
-    doc = remote.call(s, "jobs", "jdoe", run_=ssh(err="installer@spydur: Permission denied (publickey).", code=255))
+    doc = remote.call(s, "jobs", "jdoe", run_=ssh(err="hpcadmin@hpc1: Permission denied (publickey).", code=255))
     assert doc["where"] == "ssh" and "nomad gate install-key there" in doc["error"]
     doc = remote.call(s, "jobs", "jdoe", run_=ssh(err="Host key verification failed.", code=255))
     assert "host key" in doc["error"] and "known_hosts" in doc["error"]
@@ -571,10 +571,10 @@ def test_the_hubs_answers(tmp_path):
     assert "nomad-gate isn't installed there" in doc["error"]
     # no answer: never got in (nothing sent), or lost on the way (a job may have been sent)
     doc = remote.call(s, "submit", "jdoe", script="/s/j.sh", sha256=H,
-                      run_=ssh(err="Connection to spydur.example.edu closed by remote host.", code=255))
+                      run_=ssh(err="Connection to hpc1.example.edu closed by remote host.", code=255))
     assert doc["maybe"] and "may have been submitted" in doc["error"]
     doc = remote.call(s, "submit", "jdoe", script="/s/j.sh", sha256=H,
-                      run_=ssh(err="ssh: connect to host spydur port 22: Connection refused", code=255))
+                      run_=ssh(err="ssh: connect to host hpc1 port 22: Connection refused", code=255))
     assert "maybe" not in doc
     doc = remote.call(s, "jobs", "jdoe", run_=ssh(err="Connection to x closed by remote host.", code=255))
     assert "maybe" not in doc
@@ -605,16 +605,16 @@ def _a_gate(tmp_path):
 def test_the_key_line_on_the_cluster(tmp_path):
     ak = tmp_path / ".ssh" / "authorized_keys"
     gp = _a_gate(tmp_path)
-    status, lines = remote.install_key(PUB, origins="141.166.1.2", gate_path=gp, path=ak)
+    status, lines = remote.install_key(PUB, origins="172.40.1.2", gate_path=gp, path=ak)
     assert status == "would-change" and not ak.exists()
-    want = (f'restrict,command="{gp} serve",from="141.166.1.2" ' + PUB)
+    want = (f'restrict,command="{gp} serve",from="172.40.1.2" ' + PUB)
     assert "  " + want in lines
     ak.parent.mkdir()
     ak.write_text("ssh-ed25519 AAAAOTHER other@x\n")
-    status, lines = remote.install_key(PUB, origins="141.166.1.2", gate_path=gp, path=ak, apply=True)
+    status, lines = remote.install_key(PUB, origins="172.40.1.2", gate_path=gp, path=ak, apply=True)
     assert status == "changed" and ak.read_text() == "ssh-ed25519 AAAAOTHER other@x\n" + want + "\n"
     assert any(p.name.startswith("authorized_keys.bak-nomad-gate-") for p in ak.parent.iterdir())
-    status, lines = remote.install_key(PUB, origins="141.166.1.2", gate_path=gp, path=ak, apply=True)
+    status, lines = remote.install_key(PUB, origins="172.40.1.2", gate_path=gp, path=ak, apply=True)
     assert status == "present" and "restricted to `nomad-gate serve`" in lines[0]
     for bad in ("nomad-gate", "/x/nomad-gate; id", "/x;id;/nomad-gate", "/x|id>/tmp/p&/nomad-gate", "/x/other",
                 '/x/"nomad-gate', "/x/../nomad-gate", "/not/there/nomad-gate"):
@@ -639,8 +639,8 @@ def test_nomad_gate_commands(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert f'command="{gp} serve",from="10.0.0.5"' in (home / ".ssh" / "authorized_keys").read_text()
     toml = tmp_path / "nomad.toml"
-    toml.write_text(f'[hub]\ngate_key = "{tmp_path}/id_gate"\n[[hub.sites]]\nname = "spydur"\n'
-                    'host = "spydur.example.edu"\nssh_user = "installer"\nsubmit = "gate"\n')
+    toml.write_text(f'[hub]\ngate_key = "{tmp_path}/id_gate"\n[[hub.sites]]\nname = "hpc1"\n'
+                    'host = "hpc1.example.edu"\nssh_user = "installer"\nsubmit = "gate"\n')
     (tmp_path / "id_gate").write_text("k")
     asked = []
 
@@ -651,12 +651,12 @@ def test_nomad_gate_commands(tmp_path, monkeypatch):
             return {"ok": True, "gate": 1, "nomad": "1.25.0", "account": user or "installer"}
         return {"ok": True, "jobs": [{"job": "1"}]}
     monkeypatch.setattr(remote, "ask", ask)
-    r = CliRunner().invoke(cli, ["-c", str(toml), "gate", "test", "--site", "spydur", "--user", "jdoe"])
+    r = CliRunner().invoke(cli, ["-c", str(toml), "gate", "test", "--site", "hpc1", "--user", "jdoe"])
     assert r.exit_code == 0, r.output
     assert "ok   it acts as jdoe" in r.output and "1 job(s)" in r.output
     assert [w for _s, w, _k in asked] == [["version"], ["version", "--user", "jdoe"], ["jobs", "--user", "jdoe"]]
     assert asked[0][2] == f"{tmp_path}/id_gate"
-    r = CliRunner().invoke(cli, ["-c", str(toml), "gate", "ask", "--site", "spydur", "--user", "jdoe",
+    r = CliRunner().invoke(cli, ["-c", str(toml), "gate", "ask", "--site", "hpc1", "--user", "jdoe",
                                  "size", "--script", "/s/j.sh"])
     assert r.exit_code == 0, r.output and asked[-1][1] == ["size", "--user", "jdoe", "--script", "/s/j.sh"]
     r = CliRunner().invoke(cli, ["-c", str(toml), "gate", "test", "--site", "nope"])

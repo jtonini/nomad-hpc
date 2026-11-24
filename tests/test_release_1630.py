@@ -16,7 +16,7 @@ from click.testing import CliRunner
 from nomad import db_health as H
 from nomad import keep_rules as K
 
-TODAY = date(2026, 11, 23)
+TODAY = date.today()                 # the CLI goes by today: so do these (1.66.0)
 
 
 def ts(d: date, h=0, m=0, s=0) -> str:
@@ -276,10 +276,10 @@ def test_sites_lists_each_sites_latest_reading(tmp_path, monkeypatch):
     H.ensure(c)
     c.execute("ALTER TABLE db_files ADD COLUMN source_site TEXT")
     c.execute("ALTER TABLE db_tables ADD COLUMN source_site TEXT")
-    for t, path, role, b, site in (("2026-11-23T13:10:00", "/d/arachne.db", "site", 6_260_000_000, "arachne"),
-                                   ("2026-11-23T13:10:00", "/d/nomad.db", "empty", 0, "arachne"),
-                                   ("2026-11-23T19:10:00", "/d/arachne.db", "site", 2_590_000_000, "arachne"),
-                                   ("2026-11-23T13:10:00", "/d/vadur.db", "site", 110_800_000, "vadur")):
+    for t, path, role, b, site in (("2026-11-23T13:10:00", "/d/hpc2.db", "site", 6_260_000_000, "hpc2"),
+                                   ("2026-11-23T13:10:00", "/d/nomad.db", "empty", 0, "hpc2"),
+                                   ("2026-11-23T19:10:00", "/d/hpc2.db", "site", 2_590_000_000, "hpc2"),
+                                   ("2026-11-23T13:10:00", "/d/hpc3.db", "site", 110_800_000, "hpc3")):
         c.execute("INSERT INTO db_files (timestamp, path, role, bytes, free_bytes, disk_free, source_site) "
                   "VALUES (?,?,?,?,0,1,?)", (t, path, role, b, site))
     c.commit()
@@ -288,7 +288,7 @@ def test_sites_lists_each_sites_latest_reading(tmp_path, monkeypatch):
     out = run_cli(["status", "--sites"], tmp_path / "site.db")
     assert out.exit_code == 0, out.output
     lines = out.output.splitlines()
-    assert len(lines) == 2 and "2.59 GB" in lines[0] and "nomad.db" not in out.output and "vadur.db" in lines[1]
+    assert len(lines) == 2 and "2.59 GB" in lines[0] and "nomad.db" not in out.output and "hpc3.db" in lines[1]
 
 
 @pytest.mark.parametrize("width, prefix", [(13, "2026-08-01T05"), (10, "2026-08-01")])

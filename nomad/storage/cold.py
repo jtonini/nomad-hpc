@@ -8,7 +8,7 @@ for Research Computing: who, where, how much of how much, when anything of
 it last changed, their last job, their labs and PIs, and what the lab check
 said of them (has left, their data can be removed...). Its purpose is the
 conversation with them about a better place for it, so each one can become
-a case with a number (ARC-0013, the account requests' sequence:
+a case with a number (REQ-0013, the account requests' sequence:
 nomad.tickets) that goes through states, with notes:
 
     to contact -> contacted -> moving it -> moved (or removed)

@@ -44,7 +44,7 @@ def key_cmd(ctx):
         raise click.ClickException(str(e)) from None
     click.echo(f"The hub's gate key: {path} (its public half: {path}.pub)")
     click.echo()
-    click.echo("On each cluster, as the account nomad runs as there (installer on spydur), once (a dry run;")
+    click.echo("On each cluster, as the account nomad runs as there (hpcadmin on hpc1), once (a dry run;")
     click.echo("--apply writes it). --from: this hub's address(es) as the cluster sees them:")
     click.echo()
     click.echo(f"  nomad gate install-key '{pub}' --from HUB-ADDRESS")
@@ -95,7 +95,7 @@ def install_key_cmd(pubkey, origins, from_anywhere, gate_path, edit, apply):
 @gate_group.command("jump-key")
 @click.argument("pubkey")
 @click.option("--to", "to", multiple=True, required=True,
-              help="The cluster's ssh as this host reaches it, host:port (vadur:22); again for more.")
+              help="The cluster's ssh as this host reaches it, host:port (hpc3:22); again for more.")
 @click.option("--from", "origins", help="Only from these addresses (sshd's from=): the hub's, as this host "
               "sees it.")
 @click.option("--from-anywhere", is_flag=True, help="No from= (not advised).")
@@ -262,11 +262,11 @@ def ask_cmd(ctx, site_name, user, words):
     """Ask the gate one thing, as --user; print its answer (JSON).
 
     \b
-      nomad gate ask --site spydur --user jdoe jobs
-      nomad gate ask --site spydur --user jdoe size --script /scratch/jdoe/run/job.sh
-      nomad gate ask --site spydur --user jdoe show --script /scratch/jdoe/run/job.sh
-      nomad gate ask --site spydur --user jdoe submit --script /scratch/jdoe/run/job.sh --sha256 HEX --mem 8G
-      nomad gate ask --site spydur --user jdoe job --job 4815162
+      nomad gate ask --site hpc1 --user jdoe jobs
+      nomad gate ask --site hpc1 --user jdoe size --script /scratch/jdoe/run/job.sh
+      nomad gate ask --site hpc1 --user jdoe show --script /scratch/jdoe/run/job.sh
+      nomad gate ask --site hpc1 --user jdoe submit --script /scratch/jdoe/run/job.sh --sha256 HEX --mem 8G
+      nomad gate ask --site hpc1 --user jdoe job --job 4815162
     """
     from nomad.submit import remote
     s, hub = _site(ctx, site_name)
