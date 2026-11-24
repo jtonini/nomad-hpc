@@ -317,6 +317,8 @@ def db_keep(ctx, apply, no_vacuum):
                 return "to days"
             if td.rule.kind == K.SAMPLE:
                 return f"to one reading every {k.sample_minutes} minutes"
+            if td.rule.kind == K.SESSIONS:
+                return f"to one reading every {k.sample_minutes} minutes, and where sessions end or begin"
             return "removed" if td.rule.kind == K.REMOVE else "rolled up"
         for td in due:
             d, hr = k.days(td.table)

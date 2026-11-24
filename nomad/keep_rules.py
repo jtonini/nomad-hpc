@@ -32,9 +32,10 @@ months. After that:
   cluster's readings are kept by whole checks (every node's reading at that
   moment), so a count of nodes down still means what it did.
 - ``workstation_user_snapshot`` (people's sessions on lab machines): each
-  session's last reading every ``sample_minutes``, its first reading of the
-  day and the day's reading with the most memory in use. Its counters keep
-  growing, so a session's length and CPU time stay exact.
+  person's last reading on a machine every ``sample_minutes``, and every
+  reading where a session ends or begins (as ``nomad.workstation_sessions``
+  tells them apart), with each session's reading with the most memory in
+  use (1.64.1). Its sessions, their length and CPU time stay exact.
 - ``interactive_sessions`` (sessions on interactive servers): removed, where
   the server's daily totals (``interactive_daily``) had begun by that day.
 - ``workstation_process_record`` (programs run on lab machines): removed.
@@ -80,6 +81,7 @@ AVERAGES = "averages"        # hours, then days, of averages, in the table itsel
 DAILY_READING = "daily"      # the readings that say what a day was
 DAILY_COUNTS = "counts"      # a day's runs counted in a table of their own
 SAMPLE = "sample"            # one reading every sample_minutes, as it was (1.64.0)
+SESSIONS = "sessions"        # SAMPLE, and every reading where a person's session ends or begins (1.64.1)
 REMOVE = "remove"            # removed (1.64.0)
 
 
@@ -116,9 +118,8 @@ RULES = (
     Rule("vmstat", SAMPLE, "timestamp", (), what="a machine's CPU and memory", long=True),
     Rule("iostat_cpu", SAMPLE, "timestamp", (), what="a machine's CPU (iostat)", long=True),
     Rule("workstation_state", SAMPLE, "timestamp", (), what="lab machines' state", long=True),
-    Rule("workstation_user_snapshot", SAMPLE, "timestamp", ("uid", "session_epoch"),
-         what="people's sessions on lab machines", long=True, last=True, day_first=True,
-         day_max=("memory_anon_bytes",)),
+    Rule("workstation_user_snapshot", SESSIONS, "timestamp", ("uid",),
+         what="people's sessions on lab machines", long=True, day_max=("memory_anon_bytes",)),
     Rule("interactive_sessions", REMOVE, "timestamp", ("server_id",), what="sessions on interactive servers",
          long=True, after_totals=("interactive_daily", "day")),
     Rule("workstation_process_record", REMOVE, "ingested_at", (), what="programs run on lab machines",
@@ -490,6 +491,81 @@ def _sample(conn, rule: Rule, cols: set, w: Window, minutes: int) -> None:
                  w.args)
 
 
+def _sessions(conn, rule: Rule, cols: set, w: Window, minutes: int) -> None:
+    """A person's readings on a machine thinned so that their sessions stay
+    exactly as nomad.workstation_sessions.split tells them (1.64.1): each
+    slot's last reading; the day's first and last; both readings around
+    every place a session ends and the next begins, and around every gap
+    longer than a slot; every reading missing a counter, with its
+    neighbours; and each session's reading with the most of ``day_max``.
+    Between two readings kept, then, nothing ends a session that the
+    readings left out did not, and each session keeps its first and last
+    reading (its length, and its CPU time: the counters only grow in it)."""
+    from nomad.workstation_sessions import _new_slice
+    keys = _keys(rule, cols)
+    t = rule.time
+
+    def col(c):
+        return f'"{c}"' if c in cols else "NULL"
+    most = [c for c in rule.day_max if c in cols]
+    key = " || char(0) || ".join(f"COALESCE(\"{k}\", '')" for k in keys) or "''"
+    sel = ", ".join(["rowid", key, f'"{t}"',
+                     col("session_epoch"), col("cpu_usage_usec"), col("memory_peak_bytes")]
+                    + [f'"{c}"' for c in most])
+    order = ", ".join([f'"{k}"' for k in keys] + [f'"{t}"', "rowid"])
+    rows = conn.execute(f'SELECT {sel} FROM "{rule.table}" WHERE {w.where(rule)} ORDER BY {order}',
+                        w.args).fetchall()
+    gap = timedelta(minutes=minutes)
+    has_cpu, has_peak = "cpu_usage_usec" in cols, "memory_peak_bytes" in cols
+    keep = set()
+
+    def when(x):
+        try:
+            return datetime.fromisoformat(str(x)[:19])
+        except ValueError:
+            return None
+
+    def slot(x):
+        x = str(x)
+        try:
+            return x[:13] + "." + str(int(x[14:16]) // minutes)
+        except ValueError:
+            return x[:13]
+    i = 0
+    while i < len(rows):
+        j = i
+        while j < len(rows) and rows[j][1] == rows[i][1]:
+            j += 1
+        run = rows[i:j]                                     # one person on one machine, in time order
+        keep.add(run[0][0])
+        keep.add(run[-1][0])
+        last_of = {}
+        best = [None] * len(most)
+        for n, r in enumerate(run):
+            last_of[slot(r[2])] = r[0]
+            if (has_cpu and r[4] is None) or (has_peak and r[5] is None):   # a counter missing: and its neighbours
+                keep.update(x[0] for x in run[max(0, n - 1):n + 2])
+            if n:
+                p = run[n - 1]
+                a, b = when(p[2]), when(r[2])
+                if _new_slice(p[1:6], r[1:6]) or (a is not None and b is not None and b - a > gap):
+                    keep.update((p[0], r[0]))
+                    if _new_slice(p[1:6], r[1:6]):          # a new session: its own reading with the most
+                        keep.update(x[0] for x in best if x is not None)
+                        best = [None] * len(most)
+            for k in range(len(most)):
+                v = r[6 + k]
+                if v is not None and (best[k] is None or v > best[k][1]):
+                    best[k] = (r[0], v)
+        keep.update(x[0] for x in best if x is not None)
+        keep.update(last_of.values())
+        i = j
+    _keep_ids(conn)
+    conn.executemany("INSERT OR IGNORE INTO _keep_ids (id) VALUES (?)", [(x,) for x in keep])
+    conn.execute(f'DELETE FROM "{rule.table}" WHERE {w.where(rule)} AND rowid NOT IN (SELECT id FROM _keep_ids)',
+                 w.args)
+
+
 def _remove(conn, rule: Rule, cols: set, w: Window, day: str) -> None:
     """The day's rows removed (1.64.0); with ``after_totals``, only those of
     the servers whose daily totals had begun by that day."""
@@ -561,6 +637,8 @@ def _one_day(conn, rule: Rule, cols: set, level: str, d: date, minutes: int = 15
         _daily_reading(conn, rule, cols, w)
     elif rule.kind == SAMPLE:
         _sample(conn, rule, cols, w, minutes)
+    elif rule.kind == SESSIONS:
+        _sessions(conn, rule, cols, w, minutes)
     elif rule.kind == REMOVE:
         _remove(conn, rule, cols, w, _day(d))
     else:

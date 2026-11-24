@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.64.1 (November 2026)
+
+- **People's sessions on lab machines keep where each one ends and begins**
+  when they are thinned past 13 months. 1.64.0 kept each session's last
+  reading every 15 minutes, which could hide one session ending and the next
+  beginning in the same 15 minutes: a check on a copy of a hub's database
+  found the impact report's sessions merged and their processor time lower.
+  Now every reading around such a place is kept too, and around a gap longer
+  than 15 minutes or a reading missing a counter, so the sessions
+  (`nomad.workstation_sessions`), their length, processor time and most
+  memory stay exactly as they were.
+
 ## v1.64.0 (November 2026)
 
 - **Keep rules, part 2**: the tables reports read over terms and years keep

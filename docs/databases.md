@@ -124,7 +124,7 @@ reading them as before:
 | `gpu_stats` (GPUs) | 13 months | one reading per GPU every 15 minutes |
 | `vmstat`, `iostat_cpu` (a machine's processor and memory) | 13 months | one reading every 15 minutes |
 | `workstation_state` (lab machines) | 13 months | one reading per machine every 15 minutes |
-| `workstation_user_snapshot` (people's sessions on lab machines) | 13 months | each session's last reading every 15 minutes, its first reading of the day, and the day's reading with the most memory in use: its counters keep growing, so a session's length and processor time stay exact |
+| `workstation_user_snapshot` (people's sessions on lab machines) | 13 months | each person's last reading on a machine every 15 minutes, and every reading where one of their sessions ends or begins, with each session's reading with the most memory in use (1.64.1): the sessions, their length and processor time stay exactly as they were; long runs in them are found at 15 minutes |
 | `interactive_sessions` (sessions on interactive servers) | 13 months | removed, where the server's daily totals (`interactive_daily`) had begun by that day: those totals keep each person's day |
 | `workstation_process_record` (programs run on lab machines) | 13 months | removed: nothing in nomad reads it |
 
