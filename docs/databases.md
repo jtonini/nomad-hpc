@@ -109,11 +109,30 @@ the tables nothing in nomad reads in full detail beyond a few days:
 | `collection_log` (collector runs) | 90 days | each collector's day in `collection_log_daily` (runs, failures, records, first and last run, the last error), and each collector's very first run as it was |
 
 A day's average is the average of its hours. Jobs, their summaries, job
-accounting, groups, alerts and monthly usage are never trimmed. The tables
-reports add up over long periods (node states, GPU readings, memory and
-processor load, interactive sessions, lab machine logins) come in part 2,
-once the reports that look back further than a year read hourly and daily
-totals.
+accounting, groups, alerts and monthly usage are never trimmed.
+
+**Part 2 (1.64.0): the tables reports read over terms and years.** These keep
+every reading for `report_detail_days` (395, 13 months), so a term report, a
+condo report or a year's figures read every reading of any period that began
+in the last 13 months. After that the tables keep one reading every
+`sample_minutes` (15), as it was taken, so every report and page goes on
+reading them as before:
+
+| Table | Full detail | After that, kept for good |
+|---|---|---|
+| `node_state` (cluster nodes' state) | 13 months | one check of the cluster every 15 minutes, with every node's reading at that moment, so a count of nodes down (an outage) still means what it did |
+| `gpu_stats` (GPUs) | 13 months | one reading per GPU every 15 minutes |
+| `vmstat`, `iostat_cpu` (a machine's processor and memory) | 13 months | one reading every 15 minutes |
+| `workstation_state` (lab machines) | 13 months | one reading per machine every 15 minutes |
+| `workstation_user_snapshot` (people's sessions on lab machines) | 13 months | each session's last reading every 15 minutes, its first reading of the day, and the day's reading with the most memory in use: its counters keep growing, so a session's length and processor time stay exact |
+| `interactive_sessions` (sessions on interactive servers) | 13 months | removed, where the server's daily totals (`interactive_daily`) had begun by that day: those totals keep each person's day |
+| `workstation_process_record` (programs run on lab machines) | 13 months | removed: nothing in nomad reads it |
+
+A reading that stands for 15 minutes counts for 15 minutes: the term report
+weighs each day by the time its readings cover, so a period with older days
+thinned and newer ones in full gives the same shares and hours. What is lost
+is detail inside the 15 minutes (a node down for five minutes between two
+checks, the highest run queue of a minute).
 
 **Where it runs.** On the database nomad collects into: each site's, and the
 hub's own (not the hub's combined database, which follows the sites).
@@ -135,13 +154,18 @@ once a day on that database, a day's worth at a time, through the change
 log as any other change. It does this only once `nomad db keep --apply` has
 run there, and leaves any table with more than `keep_max_rows` rows due for
 `nomad db keep --apply` again. A run stopped part way goes on from the day
-it got to.
+it got to. A rule new to a database (part 2's, on a database part 1 went
+through) waits until `nomad db keep --apply` has gone through it there once;
+`nomad db keep` names the tables waiting, and for each table with nothing due
+yet, the day its first readings become due.
 
 ```toml
 [collectors.databases]
 # keep_rules = true          # the collector's daily run (after nomad db keep --apply once)
-# detail_days = 90           # full detail this long
+# detail_days = 90           # full detail this long (part 1)
 # hourly_days = 365          # then hours this long, then days (CPU per core, disk per device)
+# report_detail_days = 395   # full detail this long (part 2: the tables reports read; 1.64.0)
+# sample_minutes = 15        # then one reading this often: 5, 10, 15, 20, 30 or 60 (1.64.0)
 # keep_max_rows = 1000000    # a daily run with more due waits for nomad db keep --apply
 # [collectors.databases.keep]          # a table's own, to differ
 # mpstat_core = { detail_days = 180 }

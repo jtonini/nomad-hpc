@@ -242,6 +242,8 @@ check_services = ["slurmd", "munge"]
 # keep_rules = true          # (1.63.0) old detail rolled up once a day, after nomad db keep --apply once
 # detail_days = 90           # full detail this long
 # hourly_days = 365          # then hours this long, then days (CPU per core, disk per device)
+# report_detail_days = 395   # full detail this long for the tables reports read (1.64.0)
+# sample_minutes = 15        # then one reading this often (5, 10, 15, 20, 30 or 60)
 # keep_max_rows = 1000000    # a daily run with more due waits for nomad db keep --apply
 # [collectors.databases.keep]          # a table's own, to differ
 # mpstat_core = { detail_days = 180 }

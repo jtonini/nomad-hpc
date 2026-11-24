@@ -273,8 +273,12 @@ def db_keep(ctx, apply, no_vacuum):
     readings older than detail_days (90) rolled up -- CPU per core and disk
     per device to hours, then days past hourly_days (365); lab machines'
     mounts to what each day was; collector runs to a count a day -- so
-    history stays, at less detail. Jobs, groups, alerts and usage are never
-    trimmed (docs/databases.md).
+    history stays, at less detail. The tables reports read over terms and
+    years (1.64.0) keep full detail report_detail_days (395), then one
+    reading every sample_minutes (15); sessions on interactive servers
+    (where their daily totals are kept) and programs run on lab machines are
+    then removed. Jobs, groups, alerts and usage are never trimmed
+    (docs/databases.md).
 
     \b
     The first time it removes many rows: each table with more than
@@ -301,20 +305,37 @@ def db_keep(ctx, apply, no_vacuum):
     try:
         today = date.today()
         due = K.todo(conn, k, today)
+        covered = K.covered(conn)
         click.echo(f"{site}: {H.size(site.stat().st_size)}")
         any_due = False
+        waiting = []
+
+        def how(lv):
+            if lv == "hourly":
+                return "to hours"
+            if lv == "daily":
+                return "to days"
+            if td.rule.kind == K.SAMPLE:
+                return f"to one reading every {k.sample_minutes} minutes"
+            return "removed" if td.rule.kind == K.REMOVE else "rolled up"
         for td in due:
             d, hr = k.days(td.table)
             if not td.present:
                 continue
             what = td.rule.what
+            if td.table not in covered:
+                waiting.append(td.table)
             if not td.levels:
-                click.echo(f"  {td.table} ({what}): nothing due (full detail {d} days)")
+                when = (f"; its first day, {td.first}, is due {td.first + timedelta(days=d)}"
+                        if td.first is not None else "")
+                click.echo(f"  {td.table} ({what}): nothing due (full detail {d} days{when})")
                 continue
             any_due = True
-            spans = "; ".join(f"{'to hours' if lv == 'hourly' else 'to days' if lv == 'daily' else 'rolled up'} "
-                              f"{a} to {b - timedelta(days=1)}" for lv, a, b in td.levels)
+            spans = "; ".join(f"{how(lv)}, {a} to {b - timedelta(days=1)}" for lv, a, b in td.levels)
             click.echo(f"  {td.table} ({what}): {td.rows:,} rows due ({spans})")
+        if waiting and not apply:
+            click.echo(f"New here, left by the daily run until nomad db keep --apply goes through them once: "
+                       f"{', '.join(waiting)}.")
         if not any_due:
             click.echo("Nothing due.")
             if apply:

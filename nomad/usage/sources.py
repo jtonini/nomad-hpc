@@ -138,14 +138,15 @@ class Data:
     outside_map_core_hours: float = 0.0
     jobs_by_month: Counter = field(default_factory=Counter)       # every job record, by month submitted
     first_job: datetime | None = None
-    # node_state: (node, month) -> [samples, sum alloc share, sum load share]
+    # node_state: (node, month) -> [samples, alloc share x hours, load share x hours, hours]: each
+    # day's samples stand for the hours they cover (1.64.0: older days keep fewer samples)
     node_months: dict[tuple[str, str], list[float]] = field(default_factory=dict)
     node_state_span: tuple[datetime, datetime] | None = None
-    # (node, month) -> Counter of state class -> samples; node -> hours per sample
+    # (node, month) -> Counter of state class -> hours; node -> hours per sample
     node_state_classes: dict[tuple[str, str], Counter] = field(default_factory=dict)
     node_sample_hours: dict[str, float] = field(default_factory=dict)
     outages: list[tuple[datetime, datetime]] = field(default_factory=list)
-    # gpu_stats: month -> [samples, active samples, sum util]
+    # gpu_stats: month -> [samples, active hours, util x hours, hours] (as node_months)
     gpu_months: dict[str, list[float]] = field(default_factory=dict)
     gpu_stats_span: tuple[datetime, datetime] | None = None
     # filesystems: path -> [(month, max used, max total, last reading)]
@@ -750,27 +751,66 @@ def _jobs_from_export(path: Path, builder: _Builder) -> None:
         builder.add(row)
 
 
+DEFAULT_SAMPLE_HOURS = 5 / 60.0
+
+
+def day_hours(days) -> dict:
+    """{(series, day): the hours that day's samples stand for}, from
+    [(series, day, samples, first, last)]: first to last, and one interval
+    more (the day's own; one sample: the series' usual). Older days keep
+    fewer samples (the keep rules, 1.64.0), each standing for longer, so a
+    period's figures weigh each day by its time, not by its samples."""
+    steps = defaultdict(list)
+    spans = {}
+    for key, day, n, a, b in days:
+        a, b = parse_time(a), parse_time(b)
+        span = (b - a).total_seconds() / 3600.0 if a and b else 0.0
+        spans[(key, day)] = (span, n)
+        if n and n > 1 and span > 0:
+            steps[key].append(span / (n - 1))
+    usual = {k: sorted(v)[len(v) // 2] for k, v in steps.items()}
+    out = {}
+    for (key, day), (span, n) in spans.items():
+        step = span / (n - 1) if n and n > 1 and span > 0 else usual.get(key, DEFAULT_SAMPLE_HOURS)
+        out[(key, day)] = min(24.0, span + step)
+    return out
+
+
 def _node_samples(conn, data: Data) -> None:
     cols = _columns(conn, "node_state")
     if not {"node_name", "cpus_total", "cpus_alloc", "cpu_load", "timestamp"} <= cols:
         return
     where, args = _site_filter(conn, "node_state", data.site)
     rng = [data.t0.isoformat(), data.t1.isoformat()] + args
-    for r in conn.execute(
-            "SELECT node_name, substr(timestamp, 1, 7), COUNT(*), "
-            "SUM(1.0 * cpus_alloc / cpus_total), SUM(MIN(cpu_load, cpus_total) * 1.0 / cpus_total) "
-            f"FROM node_state WHERE timestamp >= ? AND timestamp < ? AND cpus_total > 0{where} "
-            "GROUP BY node_name, 2", rng):
-        data.node_months[(r[0], r[1])] = [r[2], r[3] or 0.0, r[4] or 0.0]
+    rows = conn.execute(
+        "SELECT node_name, substr(timestamp, 1, 10), COUNT(*), "
+        "SUM(1.0 * cpus_alloc / cpus_total), SUM(MIN(cpu_load, cpus_total) * 1.0 / cpus_total), "
+        f"MIN(timestamp), MAX(timestamp) FROM node_state WHERE timestamp >= ? AND timestamp < ? AND cpus_total > 0"
+        f"{where} GROUP BY node_name, 2", rng).fetchall()
+    hours = day_hours((r[0], r[1], r[2], r[5], r[6]) for r in rows)
+    for node, day, n, alloc, load, _, _ in rows:
+        h = hours[(node, day)]
+        v = data.node_months.setdefault((node, day[:7]), [0, 0.0, 0.0, 0.0])
+        v[0] += n
+        v[1] += (alloc or 0.0) / n * h
+        v[2] += (load or 0.0) / n * h
+        v[3] += h
     span = conn.execute(f"SELECT MIN(timestamp), MAX(timestamp) FROM node_state "
                         f"WHERE timestamp >= ? AND timestamp < ?{where}", rng).fetchone()
     if span and span[0]:
         data.node_state_span = (parse_time(span[0]), parse_time(span[1]))
     if "state" in cols:
+        days = conn.execute("SELECT node_name, substr(timestamp, 1, 10), COUNT(*), MIN(timestamp), MAX(timestamp) "
+                            f"FROM node_state WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY node_name, 2",
+                            rng).fetchall()
+        hours = day_hours(days)
+        per_day = {(r[0], r[1]): r[2] for r in days}
         for r in conn.execute(
-                "SELECT node_name, substr(timestamp, 1, 7), state, COUNT(*) FROM node_state "
+                "SELECT node_name, substr(timestamp, 1, 10), state, COUNT(*) FROM node_state "
                 f"WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY node_name, 2, state", rng):
-            data.node_state_classes.setdefault((r[0], r[1]), Counter())[node_state_class(r[2])] += r[3]
+            share = r[3] / per_day[(r[0], r[1])]
+            data.node_state_classes.setdefault((r[0], r[1][:7]), Counter())[node_state_class(r[2])] += \
+                share * hours[(r[0], r[1])]
         for r in conn.execute(
                 "SELECT node_name, MIN(timestamp), MAX(timestamp), COUNT(*) FROM node_state "
                 f"WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY node_name", rng):
@@ -804,11 +844,21 @@ def _gpu_samples(conn, data: Data) -> None:
         return
     where, args = _site_filter(conn, "gpu_stats", data.site)
     rng = [data.t0.isoformat(), data.t1.isoformat()] + args
-    for r in conn.execute(
-            "SELECT substr(timestamp, 1, 7), COUNT(*), SUM(gpu_util_percent > 0), SUM(gpu_util_percent) "
-            f"FROM gpu_stats WHERE gpu_util_percent IS NOT NULL AND timestamp >= ? AND timestamp < ?{where} "
-            "GROUP BY 1", rng):
-        data.gpu_months[r[0]] = [r[1], r[2] or 0, r[3] or 0.0]
+    node = "node_name" if "node_name" in cols else "NULL"
+    card = "gpu_index" if "gpu_index" in cols else "NULL"
+    rows = conn.execute(
+        f"SELECT COALESCE({node}, '') || char(0) || COALESCE({card}, ''), substr(timestamp, 1, 10), COUNT(*), SUM(gpu_util_percent > 0), "
+        "SUM(gpu_util_percent), MIN(timestamp), MAX(timestamp) "
+        f"FROM gpu_stats WHERE gpu_util_percent IS NOT NULL AND timestamp >= ? AND timestamp < ?{where} "
+        "GROUP BY 1, 2", rng).fetchall()
+    hours = day_hours((r[0], r[1], r[2], r[5], r[6]) for r in rows)
+    for key, day, n, busy, util, _, _ in rows:
+        h = hours[(key, day)]
+        v = data.gpu_months.setdefault(day[:7], [0, 0.0, 0.0, 0.0])
+        v[0] += n
+        v[1] += (busy or 0) / n * h
+        v[2] += (util or 0.0) / n * h
+        v[3] += h
     span = conn.execute(f"SELECT MIN(timestamp), MAX(timestamp) FROM gpu_stats "
                         f"WHERE timestamp >= ? AND timestamp < ?{where}", rng).fetchone()
     if span and span[0]:
@@ -981,11 +1031,24 @@ def _teaching(conn, data: Data, site: str, umap: dict | None = None) -> None:
                                f"WHERE timestamp >= ? AND timestamp < ?{w2}", [last, t1] + a2).fetchone()
             cores = row[0] if row and row[0] else None
         swap = "MAX(swap_used_kb)" if "swap_used_kb" in vcols else "NULL"
-        row = conn.execute(
-            f"SELECT COUNT(*), AVG(100 - cpu_idle), MAX(procs_runnable), {swap}, "
-            f"SUM(CASE WHEN ? IS NOT NULL AND procs_runnable > ? THEN 1 ELSE 0 END) "
-            f"FROM vmstat WHERE timestamp >= ? AND timestamp < ?{where}",
-            [cores, cores or 0, t0, t1] + args).fetchone()
+        # by the day, each day weighed by its time (1.64.0: older days keep fewer samples)
+        days = conn.execute(
+            f"SELECT substr(timestamp, 1, 10), COUNT(*), SUM(100 - cpu_idle), MAX(procs_runnable), {swap}, "
+            f"SUM(CASE WHEN ? IS NOT NULL AND procs_runnable > ? THEN 1 ELSE 0 END), MIN(timestamp), MAX(timestamp), "
+            f"COUNT(cpu_idle) FROM vmstat WHERE timestamp >= ? AND timestamp < ?{where} GROUP BY 1",
+            [cores, cores or 0, t0, t1] + args).fetchall()
+        row = None
+        if days:
+            hours = day_hours(("", d[0], d[1], d[6], d[7]) for d in days)
+            h_all = sum(hours[("", d[0])] for d in days)
+            h_busy = sum(hours[("", d[0])] for d in days if d[8])
+            busy = (sum(d[2] / d[8] * hours[("", d[0])] for d in days if d[8]) / h_busy) if h_busy else None
+            over = sum(d[5] / d[1] * hours[("", d[0])] for d in days) / h_all if h_all else 0
+            maxes = [d[3] for d in days if d[3] is not None]
+            swaps = [d[4] for d in days if d[4] is not None]
+            # as the one row it was: samples, busy, run queue max, swap max, the share over cores (x samples)
+            n = sum(d[1] for d in days)
+            row = (n, busy, max(maxes) if maxes else None, max(swaps) if swaps else None, over * n)
         if row and row[0]:
             busiest = conn.execute(
                 "SELECT CAST(substr(timestamp, 12, 2) AS INTEGER), AVG(100 - cpu_idle) FROM vmstat "

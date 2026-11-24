@@ -21,9 +21,31 @@ Part 1, the tables nothing in nomad reads in full detail beyond a few days:
   records, first and last run, the last error), and each collector's very
   first run kept as it was (when nomad started watching what it watches).
 
-Readers keep reading the same tables: they find hours or days where the
-readings are older. Jobs, their summaries, accounting, groups, alerts and
-monthly usage are never trimmed.
+Part 2 (1.64.0), the tables reports read over terms and years: full detail
+``report_detail_days`` (395, 13 months), so a term report, a condo report or
+a year's figures read every reading of any period that began in the last 13
+months. After that:
+
+- ``node_state`` (cluster nodes), ``gpu_stats`` (GPUs), ``vmstat`` and
+  ``iostat_cpu`` (a machine's CPU and memory), ``workstation_state`` (lab
+  machines): one reading every ``sample_minutes`` (15), as it was. The
+  cluster's readings are kept by whole checks (every node's reading at that
+  moment), so a count of nodes down still means what it did.
+- ``workstation_user_snapshot`` (people's sessions on lab machines): each
+  session's last reading every ``sample_minutes``, its first reading of the
+  day and the day's reading with the most memory in use. Its counters keep
+  growing, so a session's length and CPU time stay exact.
+- ``interactive_sessions`` (sessions on interactive servers): removed, where
+  the server's daily totals (``interactive_daily``) had begun by that day.
+- ``workstation_process_record`` (programs run on lab machines): removed.
+  Nothing in nomad reads it.
+
+A rule new to a database starts there only once ``nomad db keep --apply``
+has gone through it by hand: the daily run leaves it until then.
+
+Readers keep reading the same tables: they find hours or days, or fewer
+readings, where the readings are older. Jobs, their summaries, accounting,
+groups, alerts and monthly usage are never trimmed.
 
 It runs where the readings are written (each site, and the hub's own
 database), never on the hub's combined database: the hub's copy follows the
@@ -37,8 +59,10 @@ rows at once: past that it waits for ``nomad db keep --apply`` again.
 Settings, in [collectors.databases]::
 
     keep_rules = true        # the collector's daily run (after nomad db keep --apply once here)
-    detail_days = 90         # full detail this long
+    detail_days = 90         # full detail this long (part 1)
     hourly_days = 365        # then hours this long, then days (CPU per core, disk per device)
+    report_detail_days = 395 # full detail this long (part 2: the tables reports read)
+    sample_minutes = 15      # then one reading this often (5, 10, 15, 20, 30 or 60)
     keep_max_rows = 1000000  # a daily run that would go through more waits for nomad db keep --apply
     [collectors.databases.keep]          # a table's own, to differ
     mpstat_core = { detail_days = 180 }
@@ -55,6 +79,8 @@ from datetime import date, datetime, timedelta
 AVERAGES = "averages"        # hours, then days, of averages, in the table itself
 DAILY_READING = "daily"      # the readings that say what a day was
 DAILY_COUNTS = "counts"      # a day's runs counted in a table of their own
+SAMPLE = "sample"            # one reading every sample_minutes, as it was (1.64.0)
+REMOVE = "remove"            # removed (1.64.0)
 
 
 @dataclass(frozen=True)
@@ -65,6 +91,12 @@ class Rule:
     keys: tuple                  # what a row is about (with source_site and hostname, where the table has them)
     columns: tuple = ()          # averaged (AVERAGES)
     what: str = ""
+    long: bool = False           # read by reports over terms and years: report_detail_days (1.64.0)
+    rounds: tuple = ()           # SAMPLE by whole checks: the rows of one moment, by these and the site
+    last: bool = False           # SAMPLE: each slot's last reading (counters that keep growing)
+    day_first: bool = False      # SAMPLE: and each key's first reading of the day
+    day_max: tuple = ()          # SAMPLE: and each key's reading of the day with the most of these
+    after_totals: tuple = ()     # REMOVE: (table, its day column): only where those totals had begun
 
 
 RULES = (
@@ -77,8 +109,26 @@ RULES = (
     Rule("workstation_mount_state", DAILY_READING, "timestamp", ("hostname", "mountpoint"), (),
          "lab machines' mounts"),
     Rule("collection_log", DAILY_COUNTS, "started_at", ("collector",), (), "collector runs"),
+    # part 2 (1.64.0)
+    Rule("node_state", SAMPLE, "timestamp", ("node_name",), what="cluster nodes' state", long=True,
+         rounds=("cluster",)),
+    Rule("gpu_stats", SAMPLE, "timestamp", ("node_name", "gpu_index"), what="GPUs", long=True),
+    Rule("vmstat", SAMPLE, "timestamp", (), what="a machine's CPU and memory", long=True),
+    Rule("iostat_cpu", SAMPLE, "timestamp", (), what="a machine's CPU (iostat)", long=True),
+    Rule("workstation_state", SAMPLE, "timestamp", (), what="lab machines' state", long=True),
+    Rule("workstation_user_snapshot", SAMPLE, "timestamp", ("uid", "session_epoch"),
+         what="people's sessions on lab machines", long=True, last=True, day_first=True,
+         day_max=("memory_anon_bytes",)),
+    Rule("interactive_sessions", REMOVE, "timestamp", ("server_id",), what="sessions on interactive servers",
+         long=True, after_totals=("interactive_daily", "day")),
+    Rule("workstation_process_record", REMOVE, "ingested_at", (), what="programs run on lab machines",
+         long=True),
 )
 BY_TABLE = {r.table: r for r in RULES}
+# The tables 1.63's nomad db keep --apply went through: a by-hand run from then covers them.
+PART1 = ("mpstat_core", "iostat_device", "workstation_mount_state", "collection_log")
+COVERED = "covered: "
+SAMPLE_MINUTES = (5, 10, 15, 20, 30, 60)
 WHERE_KEYS = ("source_site", "hostname")       # added to a rule's keys where the table has them
 
 MARKS = "keep_marks"
@@ -125,9 +175,16 @@ class Settings:
     max_rows: int = 1_000_000
     tables: dict = field(default_factory=dict)     # table: (detail_days, hourly_days)
     problems: tuple = ()
+    report_detail_days: int = 395
+    sample_minutes: int = 15
+
+    def default(self, table: str) -> int:
+        rule = BY_TABLE.get(table)
+        return self.report_detail_days if rule is not None and rule.long else self.detail_days
 
     def days(self, table: str) -> tuple[int, int]:
-        return self.tables.get(table, (self.detail_days, self.hourly_days))
+        d = self.default(table)
+        return self.tables.get(table, (d, max(d, self.hourly_days)))
 
 
 def _whole(raw, key, default, lo, hi, problems, where="[collectors.databases]"):
@@ -152,6 +209,12 @@ def settings(raw: dict | None) -> Settings:
         problems.append(f"[collectors.databases] hourly_days ({hourly}) is less than detail_days ({detail}): "
                         f"taken as {detail}")
         hourly = detail
+    report = _whole(raw, "report_detail_days", 395, 7, 36500, problems)
+    minutes = raw.get("sample_minutes", 15)
+    if isinstance(minutes, bool) or minutes not in SAMPLE_MINUTES:
+        problems.append(f"[collectors.databases] sample_minutes = {minutes!r}: one of "
+                        f"{', '.join(map(str, SAMPLE_MINUTES))}")
+        minutes = 15
     most = _whole(raw, "keep_max_rows", 1_000_000, 1000, 10 ** 9, problems)
     tables: dict = {}
     own = raw.get("keep", {})
@@ -166,11 +229,11 @@ def settings(raw: dict | None) -> Settings:
         if not isinstance(v, dict):
             problems.append(f"{where}: {{ detail_days = N, hourly_days = N }}")
             continue
-        d = _whole(v, "detail_days", detail, 7, 36500, problems, where)
+        d = _whole(v, "detail_days", report if BY_TABLE[name].long else detail, 7, 36500, problems, where)
         h = _whole(v, "hourly_days", max(hourly, d), 7, 36500, problems, where)
         tables[name] = (d, max(h, d))
     return Settings(enabled=on, detail_days=detail, hourly_days=hourly, max_rows=most, tables=tables,
-                    problems=tuple(problems))
+                    problems=tuple(problems), report_detail_days=report, sample_minutes=minutes)
 
 
 # -- the work ----------------------------------------------------------------------------------
@@ -195,7 +258,7 @@ def _cols(conn, table: str) -> set:
 
 
 def _keys(rule: Rule, cols: set) -> list:
-    return [k for k in WHERE_KEYS if k in cols and k not in rule.keys] + list(rule.keys)
+    return [k for k in WHERE_KEYS if k in cols and k not in rule.keys] + [k for k in rule.keys if k in cols]
 
 
 def _day(d: date) -> str:
@@ -260,10 +323,16 @@ def _bound(conn, rule: Rule, day: str, lo: int, hi: int) -> int:
 class Window:
     """The rows of [d0, d1): by their time, within the row numbers where
     those days are (rows a little out of time order elsewhere are left as
-    they are, never touched by mistake)."""
+    they are, never touched by mistake). Where an index starts with the
+    time column, by the time alone (1.64.0): rows out of order are then
+    found as well."""
 
     def __init__(self, conn, rule: Rule, d0: date, d1: date):
         self.args = (0, 0, _day(d0), _day(d1))
+        self.by_time = _indexed(conn, rule)
+        if self.by_time:
+            self.args = (_day(d0), _day(d1))
+            return
         try:
             lo, hi = conn.execute(f'SELECT MIN(rowid), MAX(rowid) FROM "{rule.table}"').fetchone()
         except sqlite3.Error:
@@ -276,6 +345,8 @@ class Window:
 
     def where(self, rule: Rule, alias: str = "") -> str:
         a = f"{alias}." if alias else ""
+        if self.by_time:
+            return f'{a}"{rule.time}" >= ? AND {a}"{rule.time}" < ?'
         return f'{a}rowid >= ? AND {a}rowid < ? AND {a}"{rule.time}" >= ? AND {a}"{rule.time}" < ?'
 
 
@@ -294,6 +365,7 @@ class Todo:
     levels: list            # [(level, start, end)]
     rows: int               # rows in those days now
     present: bool = True
+    first: date | None = None   # the day of the oldest reading
 
 
 def _levels(rule: Rule) -> tuple:
@@ -324,7 +396,7 @@ def todo(conn, s: Settings, today: date | None = None) -> list[Todo]:
                 if start < end:
                     levels.append((level, start, end))
         rows = sum(_rows_between(conn, rule, a, b) for _, a, b in levels) if levels else 0
-        out.append(Todo(rule.table, rule, levels, rows))
+        out.append(Todo(rule.table, rule, levels, rows, first=first))
     return out
 
 
@@ -379,6 +451,67 @@ def _daily_reading(conn, rule: Rule, cols: set, w: Window) -> None:
                  w.args)
 
 
+def _slot(t: str, minutes: int) -> str:
+    """The reading's slot: its hour and which ``minutes`` of it."""
+    return f"substr({t}, 1, 13) || '.' || (CAST(substr({t}, 15, 2) AS INTEGER) / {minutes})"
+
+
+def _sample(conn, rule: Rule, cols: set, w: Window, minutes: int) -> None:
+    """One reading a key every ``minutes``, as it was (1.64.0): each slot's
+    first (or last); by whole checks, every row of the slot's first moment;
+    and what the rule adds of each key's day. The rest go."""
+    t = f'"{rule.time}"'
+    keys = [f'"{k}"' for k in _keys(rule, cols)]
+    slot = _slot(t, minutes)
+    _keep_ids(conn)
+    if rule.rounds:
+        by = [k for k in WHERE_KEYS + tuple(rule.rounds) if k in cols]
+        sel = ", ".join([f"MIN({t}) AS ts"] + [f'"{k}"' for k in by])
+        group = ", ".join([f'"{k}"' for k in by] + [slot])
+        on = " AND ".join([f"r.{t} = f.ts"] + [f'r."{k}" IS f."{k}"' for k in by])
+        conn.execute(f'INSERT OR IGNORE INTO _keep_ids SELECT r.rowid FROM "{rule.table}" r JOIN '
+                     f'(SELECT {sel} FROM "{rule.table}" WHERE {w.where(rule)} GROUP BY {group}) f ON {on} '
+                     f"WHERE {w.where(rule, 'r')}", w.args + w.args)
+    else:
+        pick = "MAX" if rule.last else "MIN"
+        conn.execute(f'INSERT OR IGNORE INTO _keep_ids SELECT {pick}(rowid) FROM "{rule.table}" '
+                     f"WHERE {w.where(rule)} GROUP BY {', '.join(keys + [slot])}", w.args)
+    by_key = f" GROUP BY {', '.join(keys)}" if keys else ""
+    if rule.day_first:
+        conn.execute(f'INSERT OR IGNORE INTO _keep_ids SELECT id FROM (SELECT MIN(rowid) AS id FROM "{rule.table}" '
+                     f"WHERE {w.where(rule)}{by_key}) WHERE id IS NOT NULL", w.args)
+    for c in rule.day_max:
+        if c in cols:
+            # SQLite gives the other columns of the row that has the MAX
+            conn.execute(f'INSERT OR IGNORE INTO _keep_ids SELECT id FROM (SELECT rowid AS id, MAX("{c}") '
+                         f'FROM "{rule.table}" WHERE {w.where(rule)} AND "{c}" IS NOT NULL{by_key}) '
+                         "WHERE id IS NOT NULL", w.args)
+    conn.execute(f'DELETE FROM "{rule.table}" WHERE {w.where(rule)} AND rowid NOT IN (SELECT id FROM _keep_ids)',
+                 w.args)
+
+
+def _remove(conn, rule: Rule, cols: set, w: Window, day: str) -> None:
+    """The day's rows removed (1.64.0); with ``after_totals``, only those of
+    the servers whose daily totals had begun by that day."""
+    if not rule.after_totals:
+        conn.execute(f'DELETE FROM "{rule.table}" WHERE {w.where(rule)}', w.args)
+        return
+    totals, tday = rule.after_totals
+    tcols = _cols(conn, totals)
+    match = [k for k in rule.keys if k in cols and k in tcols]
+    if tday not in tcols or not match:
+        return                                  # no totals here: nothing removed
+    site = "source_site" if "source_site" in cols and "source_site" in tcols else None
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_with (site TEXT, k TEXT)")
+    conn.execute("DELETE FROM _keep_with")
+    key = match[0]
+    conn.execute(f'INSERT INTO _keep_with SELECT {site or "NULL"}, "{key}" FROM "{totals}" GROUP BY 1, 2 '
+                 f'HAVING MIN("{tday}") <= ?', (day,))
+    same_site = f' AND k.site IS "{rule.table}"."{site}"' if site else ""
+    conn.execute(f'DELETE FROM "{rule.table}" WHERE {w.where(rule)} AND EXISTS (SELECT 1 FROM _keep_with k '
+                 f'WHERE k.k = "{rule.table}"."{key}"{same_site})', w.args)
+
+
 def _first_runs(conn, rule: Rule) -> None:
     """Each collector's very first run, kept as it was (temp _keep_first)."""
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS _keep_first (id INTEGER PRIMARY KEY)")
@@ -420,12 +553,16 @@ def _daily_counts(conn, rule: Rule, cols: set, w: Window, day: str) -> None:
                  w.args)
 
 
-def _one_day(conn, rule: Rule, cols: set, level: str, d: date) -> None:
+def _one_day(conn, rule: Rule, cols: set, level: str, d: date, minutes: int = 15) -> None:
     w = Window(conn, rule, d, d + timedelta(days=1))
     if rule.kind == AVERAGES:
         _averages(conn, rule, cols, w, 13 if level == "hourly" else 10)
     elif rule.kind == DAILY_READING:
         _daily_reading(conn, rule, cols, w)
+    elif rule.kind == SAMPLE:
+        _sample(conn, rule, cols, w, minutes)
+    elif rule.kind == REMOVE:
+        _remove(conn, rule, cols, w, _day(d))
     else:
         _daily_counts(conn, rule, cols, w, _day(d))
 
@@ -511,7 +648,7 @@ def run(conn, s: Settings, how: str, today: date | None = None, limit: int | Non
             d = start
             while d < end:
                 def day(c, rule=td.rule, cols=cols, level=level, d=d):
-                    _one_day(c, rule, cols, level, d)
+                    _one_day(c, rule, cols, level, d, s.sample_minutes)
                     _set_mark(c, rule.table, level, d + timedelta(days=1))
                 _write(conn, day)
                 days += 1
@@ -523,11 +660,12 @@ def run(conn, s: Settings, how: str, today: date | None = None, limit: int | Non
             (datetime.now().isoformat(timespec="seconds"), how, td.table, days, td.rows, after, round(took, 1))))
         out.append({"table": td.table, "days": days, "before": td.rows, "after": after, "seconds": took,
                     "note": ""})
-    if how == "by hand" and not any(not d["note"] for d in out):
-        # gone through by hand, nothing due: the collector may go on daily
+    if how == "by hand" and not only:
+        # gone through by hand: the collector may go on daily with each of these rules (1.64.0)
         _write(conn, lambda c: c.execute(
-            f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds) "
-            "VALUES (?, ?, '-', 0, 0, 0, 0)", (datetime.now().isoformat(timespec="seconds"), how)))
+            f"INSERT INTO {RUNS} (timestamp, how, tbl, days, rows_before, rows_after, seconds, note) "
+            "VALUES (?, ?, '-', 0, 0, 0, 0, ?)",
+            (datetime.now().isoformat(timespec="seconds"), how, COVERED + ",".join(BY_TABLE))))
     return out
 
 
@@ -539,6 +677,25 @@ def ran_by_hand(conn) -> bool:
         return False
 
 
+def covered(conn) -> set:
+    """The tables whose rules nomad db keep --apply has gone through here by
+    hand (1.64.0): the daily run goes on with these only. A by-hand run of
+    1.63 covers part 1's; one from 1.64.0 on names its tables."""
+    try:
+        rows = conn.execute(f"SELECT tbl, note FROM {RUNS} WHERE how = 'by hand'").fetchall()
+    except sqlite3.Error:
+        return set()
+    if not rows:
+        return set()
+    out = set(PART1)
+    for tbl, note in rows:
+        if note and str(note).startswith(COVERED):
+            out |= set(str(note)[len(COVERED):].split(","))
+        elif tbl in BY_TABLE:
+            out.add(tbl)
+    return out & set(BY_TABLE)
+
+
 def last_run(conn) -> datetime | None:
     try:
         t = conn.execute(f"SELECT MAX(timestamp) FROM {RUNS}").fetchone()[0]
@@ -547,5 +704,5 @@ def last_run(conn) -> datetime | None:
         return None
 
 
-__all__ = ["RULES", "Rule", "Settings", "Todo", "ensure", "last_run", "ran_by_hand", "run", "settings", "todo",
-           "untrack"]
+__all__ = ["RULES", "Rule", "Settings", "Todo", "covered", "ensure", "last_run", "ran_by_hand", "run", "settings",
+           "todo", "untrack"]

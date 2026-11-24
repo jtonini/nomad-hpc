@@ -128,18 +128,20 @@ class DatabasesCollector(BaseCollector):
 
     def _keep(self, conn, now) -> str:
         """The keep rules, once a day, on the database nomad collects into:
-        only once nomad db keep --apply has gone through it by hand (the
-        first run removes many rows at once), and a table with more rows due
-        than keep_max_rows waits for it again."""
+        each rule only once nomad db keep --apply has gone through it by hand
+        (the first run removes many rows at once; a rule new to the database,
+        1.64.0, waits for it too), and a table with more rows due than
+        keep_max_rows waits for it again."""
         try:
             K.ensure(conn)
             conn.commit()
-            if not K.ran_by_hand(conn):
+            covered = K.covered(conn)
+            if not covered:
                 return ""
             last = K.last_run(conn)
             if last and now - last < timedelta(hours=20):
                 return ""
-            done = K.run(conn, self.k, "daily", now.date(), limit=self.k.max_rows)
+            done = K.run(conn, self.k, "daily", now.date(), limit=self.k.max_rows, only=tuple(sorted(covered)))
         except sqlite3.Error as e:
             logger.info("databases: keep rules not gone through: %s", e)
             return ""

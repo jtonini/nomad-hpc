@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.64.0 (November 2026)
+
+- **Keep rules, part 2**: the tables reports read over terms and years keep
+  every reading for 13 months (`report_detail_days`, 395), so a term report,
+  a condo report or a year's figures read every reading of any period that
+  began in the last 13 months. After that they keep one reading every 15
+  minutes (`sample_minutes`), as it was taken: cluster nodes' state (by
+  whole checks of the cluster, so an outage still shows), GPUs, a machine's
+  processor and memory, lab machines. People's sessions on lab machines
+  keep what makes their length and processor time exact. Sessions on
+  interactive servers are then removed where the server's daily totals are
+  kept, and programs run on lab machines (read by nothing in nomad) are
+  removed. Every report and page reads the same tables as before.
+- A rule new to a database waits until `nomad db keep --apply` has gone
+  through it there once; `nomad db keep` names those tables, and for each
+  with nothing due yet, the day its first readings become due.
+- The term report weighs each day's node, GPU and teaching-machine readings
+  by the time they cover, so a period with older days thinned and newer ones
+  in full gives the same shares and hours.
+- The keep rules find a day's rows by their time where an index starts with
+  it, rows out of order included.
+
 ## v1.63.2 (November 2026)
 
 - **A whole vacuum puts SQLite's temporary copy beside the database.** Left

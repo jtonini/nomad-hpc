@@ -502,22 +502,23 @@ def s05_held(ctx: Ctx) -> Section:
         months = sorted({m for (_, m) in d.node_months})
         for t in ctx.tiers:
             nodes = set(d.tier_nodes([t]))
-            tot = [0.0, 0.0, 0.0]
+            # [samples, alloc x hours, load x hours, hours]: means by time (1.64.0)
+            tot = [0.0, 0.0, 0.0, 0.0]
             for m in months:
-                acc = [0.0, 0.0, 0.0]
+                acc = [0.0, 0.0, 0.0, 0.0]
                 for (n, mm), v in d.node_months.items():
                     if mm == m and n in nodes:
-                        for i in range(3):
+                        for i in range(4):
                             acc[i] += v[i]
-                if acc[0]:
-                    s.fact(f"allocation.{t}.{m}", f"{t}, {m}: mean share of cores allocated", acc[1] / acc[0], "share",
+                if acc[0] and acc[3]:
+                    s.fact(f"allocation.{t}.{m}", f"{t}, {m}: mean share of cores allocated", acc[1] / acc[3], "share",
                            source=NODE_SAMPLES, n=int(acc[0]))
-                    s.fact(f"load.{t}.{m}", f"{t}, {m}: mean node load as a share of cores", acc[2] / acc[0], "share",
+                    s.fact(f"load.{t}.{m}", f"{t}, {m}: mean node load as a share of cores", acc[2] / acc[3], "share",
                            source=NODE_SAMPLES, n=int(acc[0]))
-                    for i in range(3):
+                    for i in range(4):
                         tot[i] += acc[i]
-            if tot[0]:
-                a, l = tot[1] / tot[0], tot[2] / tot[0]
+            if tot[0] and tot[3]:
+                a, l = tot[1] / tot[3], tot[2] / tot[3]
                 s.fact(f"allocation.{t}", f"{t}: mean share of cores allocated", a, "share", source=NODE_SAMPLES,
                        n=int(tot[0]))
                 s.fact(f"load.{t}", f"{t}: mean node load as a share of cores", l, "share", source=NODE_SAMPLES,
@@ -556,13 +557,13 @@ def s05_held(ctx: Ctx) -> Section:
                                    "Slurm. The two measures disagree; the truth lies between them."))
     parts = []
     inst_nodes = set(ctx.inst_nodes)
-    tot = [0.0, 0.0, 0.0]
+    tot = [0.0, 0.0, 0.0, 0.0]
     for (n, _), v in d.node_months.items():
         if n in inst_nodes:
-            for i in range(3):
+            for i in range(4):
                 tot[i] += v[i]
-    if tot[0]:
-        a, l = tot[1] / tot[0], tot[2] / tot[0]
+    if tot[0] and tot[3]:
+        a, l = tot[1] / tot[3], tot[2] / tot[3]
         s.fact("allocation.institutional", "institutional nodes: mean share of cores allocated", a, "share",
                source=NODE_SAMPLES, n=int(tot[0]))
         s.fact("load.institutional", "institutional nodes: mean node load as a share of cores", l, "share",
@@ -721,9 +722,9 @@ def s07_gpus(ctx: Ctx) -> Section:
             sh = gh / (cards * calcs.period_hours(ma, mb)) if mb > ma else float("nan")
             s.fact(f"gpu_hours.{m}", f"{m}: GPU-hours allocated", gh, "GPU-hours")
             s.fact(f"allocation_share.{m}", f"{m}: share of card-hours allocated", sh, "share")
-            act = d.gpu_months.get(m)
-            active = act[1] / act[0] if act and act[0] else float("nan")
-            util = act[2] / act[0] / 100 if act and act[0] else float("nan")
+            act = d.gpu_months.get(m)        # [samples, active hours, util x hours, hours] (1.64.0)
+            active = act[1] / act[3] if act and act[3] else float("nan")
+            util = act[2] / act[3] / 100 if act and act[3] else float("nan")
             if act:
                 s.fact(f"card_active_share.{m}", f"{m}: share of GPU samples with the card computing", active,
                        "share", source=GPU_SAMPLES, n=int(act[0]))
@@ -799,8 +800,10 @@ def s07_gpus(ctx: Ctx) -> Section:
     elif d.gpu_months:
         rows = []
         for m, v in sorted(d.gpu_months.items()):
-            rows.append([fmt.month(m), fmt.pct(v[1] / v[0]), fmt.pct(v[2] / v[0] / 100)])
-            s.fact(f"card_active_share.{m}", f"{m}: share of GPU samples with the card computing", v[1] / v[0],
+            if not v[3]:
+                continue
+            rows.append([fmt.month(m), fmt.pct(v[1] / v[3]), fmt.pct(v[2] / v[3] / 100)])
+            s.fact(f"card_active_share.{m}", f"{m}: share of GPU samples with the card computing", v[1] / v[3],
                    "share", source=GPU_SAMPLES, n=int(v[0]))
         s.tables.append(Table("GPU activity by month", ["Month", "Cards computing", "Mean utilization"], rows))
     # People in GPU partitions or asking for GPUs, over the whole period.
@@ -1077,8 +1080,9 @@ def s10_reliability(ctx: Ctx) -> Section:
                               ["Month", "Core-hours down", "Share of all core-hours"], mrows))
         parts.append(f"nodes were down for {fmt.pct(share, 1)} of the core-hours")
     if d.node_state_classes:
-        # A node's share of samples down (or drained), times the period: gaps
-        # in collection don't count as either.
+        # A node's share of its time down (or drained), times the period: gaps
+        # in collection don't count as either. (The classes are hours, 1.64.0:
+        # each day's samples stand for the time they cover.)
         counts = defaultdict(Counter)
         for (n, m), c in d.node_state_classes.items():
             counts[n].update(c)
