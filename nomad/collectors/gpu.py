@@ -76,8 +76,8 @@ class GPUStats:
     memory_total_mb: int
     memory_free_mb: int
     temperature_c: int
-    power_draw_w: float
-    power_limit_w: float
+    power_draw_w: float | None       # None: the card doesn't report it ("[N/A]"), 1.65.0
+    power_limit_w: float | None
     compute_processes: int
 
     def to_dict(self) -> dict[str, Any]:
@@ -564,6 +564,11 @@ class GPUCollector(BaseCollector):
                 def safe_float(v: str, default: float = 0.0) -> float:
                     return float(v) if v not in ('[N/A]', 'N/A', '') else default
 
+                def reading(v: str) -> float | None:
+                    # 1.65.0: a card without a power sensor says "[N/A]": not
+                    # read, never 0 W (energy then estimates it instead)
+                    return float(v) if v not in ('[N/A]', 'N/A', '', '[Not Supported]', 'Not Supported') else None
+
                 stats = GPUStats(
                     gpu_index=int(parts[0]),
                     gpu_name=parts[1],
@@ -573,8 +578,8 @@ class GPUCollector(BaseCollector):
                     memory_total_mb=int(safe_float(parts[5])),
                     memory_free_mb=int(safe_float(parts[6])),
                     temperature_c=int(safe_float(parts[7])),
-                    power_draw_w=safe_float(parts[8]),
-                    power_limit_w=safe_float(parts[9]),
+                    power_draw_w=reading(parts[8]),
+                    power_limit_w=reading(parts[9]),
                     compute_processes=0,
                 )
                 records.append({

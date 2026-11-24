@@ -190,12 +190,14 @@ def gpu_energy_from_dcgm(
 
     Returns (total_gpu_wh, idle_gpu_wh, dcgm_present). Energy = sum over
     samples of power_draw_w x median inter-sample interval (hours).
+    A draw of 0 W is not a reading (1.65.0): a card without a power sensor
+    was stored as 0.0 before; such cards are estimated instead.
     """
     rows = conn.execute(
         """SELECT node_name, gpu_index, timestamp, power_draw_w,
                   real_util_pct, workload_class
            FROM gpu_stats
-           WHERE timestamp BETWEEN ? AND ? AND power_draw_w IS NOT NULL
+           WHERE timestamp BETWEEN ? AND ? AND power_draw_w > 0
            ORDER BY node_name, gpu_index, timestamp""",
         (start.isoformat(sep=" "), end.isoformat(sep=" ")),
     ).fetchall()
@@ -203,7 +205,7 @@ def gpu_energy_from_dcgm(
         rows = conn.execute(
             """SELECT node_name, gpu_index, timestamp, power_draw_w,
                       real_util_pct, workload_class
-               FROM gpu_stats WHERE power_draw_w IS NOT NULL
+               FROM gpu_stats WHERE power_draw_w > 0
                ORDER BY node_name, gpu_index, timestamp"""
         ).fetchall()
     if not rows:

@@ -919,6 +919,19 @@ def _aggregate_dimension(
     else:
         value, strategy_label, rationale = _aggregate_mode(core)
 
+    if direction == "lower" and _directive_family(primary_directive) in ("cores", "gres") \
+            and issue.usage_stats is not None:
+        # Never fewer cores (GPUs) than the most any of these jobs used (1.65.0):
+        # most jobs needing one core while one used ten is no reason to tell
+        # the ten-core job to ask for one. When that is the request or more,
+        # there is nothing to ask less of.
+        most = math.ceil(issue.usage_stats.max - 1e-9)
+        if value < most:
+            value = most
+            n = len(core)
+            rationale = ("the most the flagged job used" if n == 1 else
+                         f"the most any of the {n} flagged jobs used")
+
     if direction == "raise" and dim_key in DIMENSION_FRAMING_UNDER:
         # Raising the request: say why in those terms, not "you asked too much".
         issue.rationale = DIMENSION_FRAMING_UNDER[dim_key]

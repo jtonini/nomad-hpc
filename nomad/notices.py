@@ -677,7 +677,9 @@ def _typical(i) -> str:
     text = f"they typically asked for {asked}; most {verb} about {used}"
     top = getattr(st, "max", 0) or 0
     if top and top > 1.5 * (st.median or 0):
-        one = _dur(top) if str(st.unit) == "seconds" else _mem(top) if str(st.unit) == "MB" else _num(top)
+        unit = str(st.unit)
+        one = (_dur(top) if unit == "seconds" else _mem(top) if unit == "MB"
+               else _many(top, unit[:-1]) if unit in ("cores", "GPUs") else _num(top))
         text += f", the longest {one}" if verb == "ran" else f", at most {one}"
     return text
 
@@ -689,6 +691,12 @@ def _suggested_words(i) -> str:
     if not v or st is None:
         return ""
     unit = str(st.unit or "")
+    if unit in ("cores", "GPUs"):
+        # 1.65.0: never fewer than the most any of these jobs used
+        word = unit[:-1]
+        if (st.max or 0) > 1.5 * (st.median or 0) and v >= (st.max or 0):
+            return f"That is {_many(v, word)}: as many as the most any of these jobs used."
+        return ""
     said = _dur(v) if unit == "seconds" else _mem(v) if unit == "MB" else ""
     if not said:
         return ""

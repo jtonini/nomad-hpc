@@ -77,6 +77,13 @@ Try: #SBATCH --ntasks=1
      If your code is single-threaded, request 1 core.
 ```
 
+**Never fewer cores than the most any of the jobs used** (1.65.0). Advice over
+several jobs takes the value most of them needed, but never fewer cores (GPUs)
+than the most any of those jobs used: most jobs using one core while one used
+ten is no reason to tell the ten-core job to ask for one. When that is what
+the jobs asked for, or more, there is nothing to ask less of, and the weekly
+email says nothing about it.
+
 ### 2. Memory Efficiency
 
 **What it measures**: How well did the user size their memory request?

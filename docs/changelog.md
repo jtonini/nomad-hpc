@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.65.0 (November 2026)
+
+- **Advice never asks for fewer cores than the most any of the jobs used.**
+  Over several jobs the advice took the value most of them needed, so jobs
+  asking for different numbers of cores, most using one and one using ten,
+  were told to ask for one core: the email said "most used about 1.5, at
+  most 10" and then "ask for 1". Now the value is at least the most any of
+  those jobs used (GPUs the same), and when that is what they asked for or
+  more there is nothing to ask less of: My activity shows the finding, and
+  the weekly email says nothing about it. The email says the most in cores
+  ("at most 3 cores") and, where it differs much from the usual, that the
+  value is as many as the most any of these jobs used.
+- **A GPU that doesn't report its power is stored as not read**, never 0 W:
+  nvidia-smi says "[N/A]" for cards without a power sensor, and nomad stored
+  0.0 for the draw and the limit. Energy leaves 0 W readings out (those
+  stored before too), so such cards are estimated instead of counted as
+  drawing nothing; `nomad status` says "n/a".
+
 ## v1.64.1 (November 2026)
 
 - **People's sessions on lab machines keep where each one ends and begins**

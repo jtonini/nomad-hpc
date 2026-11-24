@@ -318,7 +318,7 @@ CREATE TABLE gpu_stats (
     memory_total_mb INTEGER,
     memory_free_mb INTEGER,
     temperature_c INTEGER,
-    power_draw_w REAL,
+    power_draw_w REAL,           -- NULL when the card doesn't report it (1.65.0; was 0.0)
     power_limit_w REAL,
     compute_processes INTEGER,
     -- DCGM fields (NULL when nvidia-smi only)

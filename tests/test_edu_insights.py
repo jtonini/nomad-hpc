@@ -156,7 +156,9 @@ class TestAggregation:
         issue = _aggregate_dimension("cpu", fps, 40.0)
         assert issue is not None
         assert issue.directive == "ntasks"
-        assert issue.suggested_display == "1"  # mode of {1,1,1,2,2} = 1
+        # mode of {1,1,1,2,2} = 1, but two of the jobs used 2 cores: never fewer
+        # than the most any of them used (1.65.0)
+        assert issue.suggested_display == "2"
         assert issue.strategy == "mode"
 
     def test_quantile_strategy_for_continuous(self):

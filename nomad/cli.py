@@ -2111,9 +2111,10 @@ def status(ctx: click.Context, db: str) -> None:
 
                 mem_pct = (gpu['memory_used_mb'] / gpu['memory_total_mb'] * 100) if gpu['memory_total_mb'] else 0
                 power = gpu['power_draw_w']
+                power = f"{power:.0f}W" if power is not None else "n/a"
 
                 click.echo(f"  GPU {gpu['gpu_index']}: {gpu['gpu_name']}")
-                click.echo(f"    Util: {click.style(f'{util:.0f}%', fg=util_color)}  Mem: {mem_pct:.0f}%  Temp: {click.style(f'{temp}°C', fg=temp_color)}  Power: {power:.0f}W")
+                click.echo(f"    Util: {click.style(f'{util:.0f}%', fg=util_color)}  Mem: {mem_pct:.0f}%  Temp: {click.style(f'{temp}°C', fg=temp_color)}  Power: {power}")
             click.echo()
     except sqlite3.OperationalError:
         pass  # No GPU table - skip silently
