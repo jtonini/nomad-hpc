@@ -123,9 +123,9 @@ class TestAggregation:
         assert issue.avg_score == 5.0
         assert issue.severity == "critical"
         assert issue.directive == "mem"
-        # The aggregator uses p95×2 of actual_usage. For uniform 1024MB usage
-        # rounded up to a SLURM-friendly value, expect 2G or 4G.
-        assert issue.suggested_display in ("2G", "4G")
+        # The aggregator uses p95 × 1.5 of actual_usage (1.67.1; it was × 2).
+        # For uniform 1024MB usage, rounded up to a value people type: 1.5G.
+        assert issue.suggested_display == "1.5G"
 
     def test_non_systemic_filtered_out(self):
         # 1 of 4 below threshold = 25% < 50% systemic ratio
@@ -164,7 +164,7 @@ class TestAggregation:
     def test_quantile_strategy_for_continuous(self):
         # Memory recommendations use quantile×buffer strategy.
         # Build jobs with usage 1000, 1100, 1200, 1300, 1400 MB (range 1-1.4G).
-        # p95 = ~1380, × 2x buffer = ~2760, rounded up = 4G.
+        # p95 = ~1380, × 1.5 = ~2070, rounded up by 512M = 2.5G (1.67.1).
         fps = []
         for i, usage in enumerate([1000, 1100, 1200, 1300, 1400]):
             sug = Suggestion(directive="mem", suggested_value=usage * 2,
@@ -174,7 +174,7 @@ class TestAggregation:
         issue = _aggregate_dimension("memory", fps, 40.0)
         assert issue is not None
         assert issue.directive == "mem"
-        assert issue.suggested_display in ("4G",)
+        assert issue.suggested_display == "2.5G"
         assert "buffer" in issue.strategy or "p95" in issue.strategy
 
     def test_inapplicable_excluded_from_total(self):
@@ -251,7 +251,8 @@ class TestFramingFollowsTheSuggestion:
 
     def test_no_advice_that_changes_nothing(self):
         # rounded up, the advice lands on the request itself: "32G -> 32G"
-        issue = self._issue("memory", "mem", [(16384, 32768, 16000)] * 4)
+        # (21000 MB × 1.5 = 31500, rounded up by 2G: 32G)
+        issue = self._issue("memory", "mem", [(16384, 32768, 21000)] * 4)
         assert issue is not None and issue.suggested_display == ""
         assert issue.directive_label == ""
         # every job's own suggestion is its request: no direction at all

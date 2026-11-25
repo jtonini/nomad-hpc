@@ -35,6 +35,7 @@ The scoring functions are intentionally separated so they can be reused by:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -167,25 +168,24 @@ def bar(score: float, width: int = 10) -> str:
 
 # ── Rounding utilities ───────────────────────────────────────────────
 
-# Memory ladder: SLURM-friendly values users actually type
-MEMORY_LADDER_MB = [
-    512,         # 512M (rare)
-    1024,        # 1G
-    2048, 4096, 8192, 16384,
-    32768, 65536, 98304, 131072,        # 32G, 64G, 96G, 128G
-    196608, 262144, 393216, 524288,     # 192G, 256G, 384G, 512G
-    786432, 1048576,                    # 768G, 1024G
-]
+# The room nomad's memory advice leaves above a peak (1.67.1; it was 2 for a
+# job that asked too much, rounded up a ladder that doubled from 4G to 32G,
+# so advice could land at a quarter of the request). A peak × 1.5, rounded as
+# below, is 50-75% of the request: inside the score's best band. The Submit
+# page sizes memory the same way (nomad.submit.sizing).
+MEMORY_ROOM = 1.5
 
 
 def round_memory_up(target_mb: float) -> int:
-    """Round a memory value (MB) up to the nearest SLURM-friendly value."""
-    target_mb = max(target_mb, 1024)  # never below 1G
-    for v in MEMORY_LADDER_MB:
-        if v >= target_mb:
-            return v
-    # Above the ladder — round up to nearest 512G
-    return int((target_mb + 524287) // 524288 * 524288)
+    """Memory (MB) rounded up to a value people type, at least 1G: up to 4G
+    by 512M, 16G by 1G, 64G by 2G, 256G by 8G, then by 32G (1.67.1: the
+    Submit page's steps; each step is at most half a peak that needs it, so
+    a peak × 1.5 never rounds up past twice the peak)."""
+    mb = max(float(target_mb), 1024)
+    for top, step in ((4096, 512), (16384, 1024), (65536, 2048), (262144, 8192)):
+        if mb <= top:
+            return int(math.ceil(mb / step) * step)
+    return int(math.ceil(mb / 32768) * 32768)
 
 
 def format_memory(mb: float) -> str:
@@ -475,11 +475,15 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
     blocks other jobs from running on the node.
 
     Scoring:
-        utilization 50-90%  → Excellent
-        utilization 30-50%  → Good
-        utilization 10-30%  → Developing
-        utilization <10%    → Needs Work
-        OUT_OF_MEMORY       → Needs Work (under-requested)
+        utilization 50-90%  → Excellent (70% scores 100)
+        utilization 90-100% → 80 (Good: little room left)
+        utilization <50%    → the share × 1.3 (1.67.1): under half its
+                              request, a job asked for more than twice its
+                              peak, more than nomad suggests (peak × 1.5), so
+                              never Good: 49% → 64, 35% → 46 (Developing),
+                              under 31% → Needs Work
+        above 100%          → 30
+        OUT_OF_MEMORY       → 15, Needs Work (under-requested)
     """
     # A peak above the largest node's memory can't be real: Slurm's
     # jobacct_gather/linux adds up every process's RSS, counting memory the
@@ -503,7 +507,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
         if needed_gb_oom > 0:
             suggestion_oom = Suggestion(
                 directive="mem",
-                suggested_value=round_memory_up(needed_gb_oom * 1024 * 1.5),
+                suggested_value=round_memory_up(needed_gb_oom * 1024 * MEMORY_ROOM),
                 current_value=req_mem_mb_oom,
                 actual_usage=needed_gb_oom * 1024,
                 unit="MB",
@@ -570,7 +574,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
     # Already as small as nomad would suggest (1.25.3): the peak with room to
     # spare, rounded up to a size Slurm takes, is no less than what was asked
     # (a 12 MB job asking 1G): nothing to ask less of.
-    if utilization < 50 and round_memory_up(peak_mem_gb * 1024 * 2) >= req_mem_mb:
+    if utilization < 50 and round_memory_up(peak_mem_gb * 1024 * MEMORY_ROOM) >= req_mem_mb:
         return _not_judged("Memory Efficiency",
                            f"Asked {format_memory(req_mem_mb)} and peaked at {peak_mem_gb * 1024:,.0f} MB: "
                            f"{format_memory(req_mem_mb)} is already as little as nomad would suggest.")
@@ -589,41 +593,42 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
         score = 80
     elif utilization > 100:
         score = 30
-    elif 30 <= utilization < 50:
-        score = 65 + (utilization - 30) * 1
-    elif 10 <= utilization < 30:
-        score = 40 + (utilization - 10) * 1.25
     else:
-        score = max(5, utilization * 2.5)
+        # Under half the request (1.67.1; it was 65-85, Good, from 30%): the
+        # share × 1.3, as the CPU score is the share × 1.1, so asking for
+        # more than twice the peak is never Good.
+        score = utilization * 1.3
 
     score = min(100, max(0, score))
 
-    # Suggestion: peak × 2 buffer, rounded up to a SLURM-friendly value
-    # (single-job scorer uses 2x; aggregator may override with p95 strategy)
+    # Suggestion: the peak × MEMORY_ROOM, rounded up to a value people type
+    # (the aggregator uses the runs' 95th percentile × the same room)
     if score >= 85:
         detail = (f"Good memory sizing. Used {peak_mem_gb:.1f}GB of "
                   f"{req_mem_gb:.0f}GB requested ({utilization:.0f}% utilization).")
         suggestion = None
-    elif score >= 65:
-        detail = (f"Reasonable memory sizing. Used {peak_mem_gb:.1f}GB of "
-                  f"{req_mem_gb:.0f}GB requested ({utilization:.0f}% utilization).")
+    elif 90 < utilization <= 100:
+        detail = (f"Tight memory sizing. Used {peak_mem_gb:.1f}GB of "
+                  f"{req_mem_gb:.0f}GB requested ({utilization:.0f}% utilization): "
+                  f"little room if a run needs more.")
         suggestion = None
     elif score >= 40:
-        suggested_mb = round_memory_up(peak_mem_gb * 1024 * 2)  # 2x buffer
+        suggested_mb = round_memory_up(peak_mem_gb * 1024 * MEMORY_ROOM)
         detail = (f"Moderate memory over-request. Used {peak_mem_gb:.1f}GB "
-                  f"of {req_mem_gb:.0f}GB requested. {_gb(waste_gb)}GB unused.")
+                  f"of {req_mem_gb:.0f}GB requested ({utilization:.0f}% utilization). "
+                  f"{_gb(waste_gb)}GB unused.")
         suggestion = Suggestion(
             directive="mem",
             suggested_value=suggested_mb,
             current_value=req_mem_mb,
             actual_usage=peak_mem_gb * 1024,
             unit="MB",
-            rationale=f"peak {peak_mem_gb:.1f}GB × 2x buffer",
+            rationale=f"peak {peak_mem_gb:.1f}GB × {MEMORY_ROOM:g}, rounded up",
         )
     elif utilization > 100:
         # Used more than it asked for: the node let it, this time. Where
         # Slurm enforces memory limits the job would have been killed.
-        suggested_mb = round_memory_up(peak_mem_gb * 1024 * 1.5)
+        suggested_mb = round_memory_up(peak_mem_gb * 1024 * MEMORY_ROOM)
         detail = (f"Peaked at {peak_mem_gb:.1f}GB, more than the "
                   f"{req_mem_gb:.0f}GB requested ({utilization:.0f}%). Where "
                   f"memory limits are enforced, a job like this is killed.")
@@ -636,7 +641,7 @@ def score_memory(job: dict, summary: dict) -> DimensionScore:
             rationale="peak × 1.5; request what the job uses",
         )
     else:
-        suggested_mb = round_memory_up(peak_mem_gb * 1024 * 2)
+        suggested_mb = round_memory_up(peak_mem_gb * 1024 * MEMORY_ROOM)
         detail = (f"Requested {req_mem_gb:.0f}GB but peaked at "
                   f"{peak_mem_gb:.1f}GB ({utilization:.0f}% utilization). "
                   f"{_gb(waste_gb)}GB was unused.")

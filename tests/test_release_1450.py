@@ -549,4 +549,7 @@ def test_the_failed_card_leads_its_place_and_says_so(tmp_path):
     text = format_user_insights(ui)
     assert "3 of 5 measured jobs failed (2 completed)" in text
     assert "from the jobs that completed; 3 that didn't aren't counted" in text
-    assert "scored below threshold" not in text.split("CPU Efficiency")[0]
+    # the failed card, before the first scored one, says nothing of scores
+    # (memory leads the scored ones since 1.67.1: 3 GB of 350 asked scores 1)
+    first_scored = min(text.index(k) for k in ("CPU Efficiency", "Memory Efficiency") if k in text)
+    assert "scored below threshold" not in text[:first_scored]

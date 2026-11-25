@@ -44,6 +44,7 @@ from nomad.edu.scoring import (
     format_duration_human,
     format_memory,
     format_time_slurm,
+    MEMORY_ROOM,
     round_memory_up,
     round_time_up,
 )
@@ -70,7 +71,7 @@ SEVERITY_CRITICAL_RATIO = 0.8
 
 # Buffer factors for continuous-quantity recommendations.
 # Configurable in future via TOML; constants for now.
-MEMORY_BUFFER_FACTOR = 2.0
+MEMORY_BUFFER_FACTOR = MEMORY_ROOM          # 1.67.1: was 2.0; the single job's room (scoring)
 TIME_BUFFER_FACTOR = 1.5
 USAGE_QUANTILE = 0.95  # use p95 of usage (covers most of the user's jobs)
 

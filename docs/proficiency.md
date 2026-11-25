@@ -88,22 +88,35 @@ email says nothing about it.
 
 **What it measures**: How well did the user size their memory request?
 
-**Formula**:
+**Formula** (the peak as a share of the request):
+
 $$\text{Memory Score} = \begin{cases}
-100 - (100 - \text{Utilization}) \times 0.5 & \text{if utilization} \geq 50\% \\
-\text{Utilization} \times 1.5 & \text{if utilization} < 50\%
+85 + 15 \times \left(1 - \frac{|\text{Utilization} - 70|}{20}\right) & \text{if } 50\% \leq \text{utilization} \leq 90\% \\
+80 & \text{if } 90\% < \text{utilization} \leq 100\% \\
+\text{Utilization} \times 1.3 & \text{if utilization} < 50\% \\
+30 & \text{if utilization} > 100\%
 \end{cases}$$
 
-The asymmetric formula penalizes under-utilization more harshly than slight over-utilization (better to have headroom than OOM kills).
+Under half its request a job asked for more than twice its peak, more than
+nomad's own advice (the peak × 1.5, rounded up), so it is never Good (1.67.1;
+from 30% it scored 65-85 before). Running out of memory (OUT_OF_MEMORY) scores
+15.
 
 **Scoring rubric**:
 
 | Utilization | Score | Level | Interpretation |
 |-------------|-------|-------|----------------|
-| 70-95% | 85-100 | Excellent | Well-sized |
-| 50-69% | 65-84 | Good | Acceptable headroom |
-| 30-49% | 40-64 | Developing | Over-allocated |
-| < 30% | 0-39 | Needs Work | Significant waste |
+| 50-90% | 85-100 (70% scores 100) | Excellent | Well-sized |
+| 90-100% | 80 | Good | Little room if a run needs more |
+| 31-49% | 40-64 | Developing | Over-allocated |
+| < 31% | 0-39 | Needs Work | Significant waste |
+| > 100% | 30 | Needs Work | Used more than it asked for |
+
+**nomad's advice** is the peak × 1.5, rounded up to a value people type (up to
+4G by 512M, 16G by 1G, 64G by 2G, 256G by 8G, then by 32G): a request that
+puts the peak at 50-75% of it, inside the best band. The Submit page sizes
+memory the same way; across several runs of a program, the runs' 95th
+percentile × 1.5.
 
 **Common issues**:
 
@@ -112,8 +125,8 @@ The asymmetric formula penalizes under-utilization more harshly than slight over
 - Not profiling memory requirements
 
 **Small requests aren't judged** (1.35.2). A request of 2 GB or less, or one
-already as small as nomad would suggest (the peak doubled, rounded up to a size
-Slurm takes, at least 1 GB), is "not judged": asking 1 or 2 GB is the least
+already as small as nomad would suggest (the peak × 1.5, rounded up as above,
+at least 1 GB), is "not judged": asking 1 or 2 GB is the least
 anyone usually asks, and what it leaves unused is too little to matter on a
 node. The floor is a setting:
 

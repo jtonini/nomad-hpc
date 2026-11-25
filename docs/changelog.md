@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.67.1 (November 2026)
+
+- **A job that asks for more than twice the memory it uses is no longer
+  "Good".** Under half its request, the memory score is the peak's share
+  × 1.3 (a peak at 35% of the request scores 46, Developing; under 31%,
+  Needs Work); from 30% it scored 65-85 before. 50-90% stays the best band.
+- **nomad's memory advice lands in that band**: the peak × 1.5 (it was × 2
+  for a job that asked too much), rounded up to a value people type by the
+  Submit page's steps (up to 4G by 512M, 16G by 1G, 64G by 2G...) instead of
+  a ladder that doubled from 4G to 32G. Advice could put a peak at a quarter
+  of the new request; now it is at 50-75%. The advice across several runs
+  takes their 95th percentile × 1.5 (it was × 2).
+- The proficiency docs' memory formula and rubric say what the code does.
+
 ## v1.67.0 (November 2026)
 
 - **Jobs on lab machines.** A job script can be sent from the Console's

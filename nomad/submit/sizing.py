@@ -46,7 +46,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from nomad.edu.scoring import format_time_slurm, round_time_up
+from nomad.edu.scoring import format_time_slurm, round_memory_up, round_time_up
 from nomad.submit import forms
 from nomad.submit.apps import GENERIC, Needs, Program
 from nomad.submit.cluster import Access, Partition, may_use
@@ -63,14 +63,10 @@ NOMADS = ("history", "outcome", "partition")    # values nomad works out (capped
 
 
 def round_mem(mb: float) -> int:
-    """Memory rounded up to a value people type, finer than the scores'
-    ladder (which goes from 16G to 32G): up to 4G by 512M, 16G by 1G, 64G by
-    2G, 256G by 8G, then by 32G; at least 1G."""
-    mb = max(float(mb), 1024)
-    for top, step in ((4096, 512), (16384, 1024), (65536, 2048), (262144, 8192)):
-        if mb <= top:
-            return int(math.ceil(mb / step) * step)
-    return int(math.ceil(mb / 32768) * 32768)
+    """Memory rounded up to a value people type: up to 4G by 512M, 16G by
+    1G, 64G by 2G, 256G by 8G, then by 32G; at least 1G. The scores' advice
+    rounds the same way since 1.67.1 (nomad.edu.scoring.round_memory_up)."""
+    return round_memory_up(mb)
 
 
 @dataclass
