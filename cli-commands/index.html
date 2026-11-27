@@ -1,0 +1,4720 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Monitoring, diagnostics and plain-language guidance for research computing">
+      
+      
+        <meta name="author" content="João Tonini">
+      
+      
+        <link rel="canonical" href="https://jtonini.github.io/nomad-hpc/cli-commands/">
+      
+      
+        <link rel="prev" href="../cli/">
+      
+      
+        <link rel="next" href="../ARCHITECTURE/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>All Commands - NØMAÐ-HPC Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#all-commands" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-header__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            NØMAÐ-HPC Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              All Commands
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="cyan"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../quickstart/" class="md-tabs__link">
+          
+  
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../submit/" class="md-tabs__link">
+          
+  
+  
+  People and Labs
+
+        </a>
+      </li>
+    
+  
+
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../alerts/" class="md-tabs__link">
+          
+  
+  
+  Operations
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../usage-report/" class="md-tabs__link">
+          
+  
+  
+  Reports and Analysis
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../cli/" class="md-tabs__link">
+          
+  
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../CONTRIBUTING/" class="md-tabs__link">
+          
+  
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="NØMAÐ-HPC Documentation" class="md-nav__button md-logo" aria-label="NØMAÐ-HPC Documentation" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    NØMAÐ-HPC Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jtonini/nomad-hpc" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jtonini/nomad-hpc
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../setup-wizard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Wizard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../config/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../collectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../console/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Console Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    People and Labs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    People and Labs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For people who run jobs
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For people who run jobs
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../submit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sizing and Submitting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../demos/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Practice Runs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../files/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    My Files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-machine-jobs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jobs on Lab Machines
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../help-requests/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ask (Help Requests)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weekly Notices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../edu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Educational Analytics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    For faculty
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    For faculty
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../condo-reports/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Condo Reports
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-check/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lab Membership Check
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lab-accounts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Account Requests
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../alerts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Alerts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../infrastructure/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Infrastructure
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GPU Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../interactive/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interactive Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../storage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Storage Use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../licenses/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Licenses
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../policy_watch/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Policy Watch
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prometheus Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../databases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    nomad's Databases
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../readiness/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Readiness
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cloud/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cloud Monitoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reports and Analysis
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reports and Analysis
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage-report/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage Report
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impact/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Impact
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../facts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Facts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../insights/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Insight Engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dynamics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    System Dynamics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ML Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ml-training/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Training the Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../proficiency/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Proficiency Scoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../network/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Network Methodology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    All Commands
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    All Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cloud
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#community" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        community
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#course" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        course
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#db" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        db
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        demos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dyn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dyn
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edu
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        facts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        impact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        import
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#insights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        insights
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#interactive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        interactive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        issue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lab
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        licenses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maintenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        node
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        notices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sync
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        usage-report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        watch
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference System
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standalone Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../issue/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Issue Reporting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dev/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Toolchain
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending NØMAÐ
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        actions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        agent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cloud
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#community" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        community
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        console
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#course" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        course
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#db" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        db
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#demos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        demos
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dev" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dev
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        diag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dyn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        dyn
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#edu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        edu
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#facts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        facts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        files
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        impact
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        import
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#insights" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        insights
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#interactive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        interactive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#issue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        issue
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        lab
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#licenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        licenses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#maintenance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        maintenance
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        metrics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ml
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        node
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        notices
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#storage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        storage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        sync
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        usage-report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#watch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        watch
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="all-commands">All commands<a class="headerlink" href="#all-commands" title="Permanent link">&para;</a></h1>
+<!-- Generated by scripts/gen_cli_reference.py from the CLI's own help: do not edit by hand. -->
+
+<p>Every <code>nomad</code> command in 1.66.0, each with the first paragraph of its
+own <code>--help</code>. <code>nomad COMMAND --help</code> has its options and examples; the page
+named beside each command explains it. The <a href="../cli/">CLI Reference</a> has the
+common ones with their usual options.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#actions"><code>nomad actions</code></a></td>
+<td>The catalog of actions the Console can start, here or on a site. (<a href="../actions/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#agent"><code>nomad agent</code></a></td>
+<td>A site's side of the actions: answer one request from the hub. (<a href="../actions/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad alerts</code></td>
+<td>Show and manage alerts. (<a href="../alerts/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad analyze</code></td>
+<td>A filesystem's trend: how fast it fills, and when it will be full.</td>
+</tr>
+<tr>
+<td><code>nomad clock</code></td>
+<td>How fast each CPU really runs when busy (1.27.0): a CPU braked far below its clock (a power supply lost, PROCHOT) is said here. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#cloud"><code>nomad cloud</code></a></td>
+<td>Cloud provider monitoring commands. (<a href="../cloud/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad collect</code></td>
+<td>Run data collectors. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad collection-check</code></td>
+<td>Is every site still collecting? (read-only unless --send) (<a href="../alerts/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad collectors</code></td>
+<td>Which collectors run here, why, and whether they collect anything. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#community"><code>nomad community</code></a></td>
+<td>NØMAÐ Community Dataset commands.</td>
+</tr>
+<tr>
+<td><a href="#config"><code>nomad config</code></a></td>
+<td>nomad.toml: does it read, and if not, where it goes wrong. (<a href="../config/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#console"><code>nomad console</code></a></td>
+<td>The NØMAÐ Console, the web interface. (<a href="../console/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#course"><code>nomad course</code></a></td>
+<td>Courses: a Unix group per course, its instructors and this term's students ([console.courses] in nomad.toml). (<a href="../config/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad dashboard</code></td>
+<td>Start the interactive web dashboard. (<a href="../dashboard/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#db"><code>nomad db</code></a></td>
+<td>nomad's own databases: how big each is and how fast it grows, old copies, and the space a vacuum gives back. (<a href="../databases/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad demo</code></td>
+<td>Run demo mode with synthetic data. (<a href="../quickstart/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#demos"><code>nomad demos</code></a></td>
+<td>Practice runs: small inputs, known to work, that show how a job runs. (<a href="../demos/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#dev"><code>nomad dev</code></a></td>
+<td>NØMAÐ Developer Toolchain. (<a href="../dev/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#diag"><code>nomad diag</code></a></td>
+<td>NØMAÐ Diagnostics — Infrastructure troubleshooting. (<a href="../diagnostics/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#dyn"><code>nomad dyn</code></a></td>
+<td>System dynamics analysis — ecological and economic metrics. (<a href="../dynamics/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#edu"><code>nomad edu</code></a></td>
+<td>NØMAÐ Edu — Educational analytics for HPC. (<a href="../edu/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#energy"><code>nomad energy</code></a></td>
+<td>Energy consumption, waste, and carbon-footprint monitoring.</td>
+</tr>
+<tr>
+<td><a href="#facts"><code>nomad facts</code></a></td>
+<td>nomad's answers about sites, a person and a lab, as the Console's /api/v1 gives them. (<a href="../facts/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#files"><code>nomad files</code></a></td>
+<td>Who the Console's My files is open to ([console.files] open), and setting it. (<a href="../files/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#gate"><code>nomad gate</code></a></td>
+<td>The hub acting on a cluster as a person (the Console's Submit page). (<a href="../submit/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#impact"><code>nomad impact</code></a></td>
+<td>What changed after NØMAÐ: [impact] in nomad.toml, jobs before and after launch. (<a href="../impact/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#import"><code>nomad import</code></a></td>
+<td>Load data nomad didn't collect itself. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad init</code></td>
+<td>Initialize NØMAÐ with an interactive setup wizard. (<a href="../setup-wizard/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#insights"><code>nomad insights</code></a></td>
+<td>NØMAÐ Insight Engine — operational narratives and analysis. (<a href="../insights/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#interactive"><code>nomad interactive</code></a></td>
+<td>Interactive servers (RStudio, JupyterHub): what the interactive collector keeps. (<a href="../interactive/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#issue"><code>nomad issue</code></a></td>
+<td>Report issues, request features, and ask questions. (<a href="../issue/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#lab"><code>nomad lab</code></a></td>
+<td>A lab's machines and storage: what nomad collects for it, and what its PI sees. Edits nomad.toml here (a backup first): each command shows the change, and --apply writes it. (<a href="../config/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad learn</code></td>
+<td>Continuous learning - retrain models as new data arrives.</td>
+</tr>
+<tr>
+<td><a href="#licenses"><code>nomad licenses</code></a></td>
+<td>When the licenses of the center's software end -- read where the software keeps the date -- and an email to the center before each does. nomad never changes a license. (<a href="../licenses/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#machine"><code>nomad machine</code></a></td>
+<td>What each machine is: a line nomad and the Console show beside its name. (<a href="../config/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#maintenance"><code>nomad maintenance</code></a></td>
+<td>Declared maintenance: a site (or the hub) taken down on purpose. (<a href="../alerts/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#metrics"><code>nomad metrics</code></a></td>
+<td>What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. Nothing about one person. (<a href="../metrics/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#ml"><code>nomad ml</code></a></td>
+<td>Train the model from the Console: TESSERA on a worker with a GPU. (<a href="../ml-training/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad monitor</code></td>
+<td>Monitor running jobs for I/O metrics.</td>
+</tr>
+<tr>
+<td><a href="#node"><code>nomad node</code></a></td>
+<td>Drain a Slurm node, or resume it: a dry run unless --apply. (<a href="../actions/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#notices"><code>nomad notices</code></a></td>
+<td>A weekly email to each person about their own use: what of theirs a login node's monitoring caught, and a pattern of jobs asking for far more than they use, with the better way and a link to My activity. (<a href="../notices/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad partitions</code></td>
+<td>Each Slurm partition's limits, who may use it, and its preemption. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad per-user</code></td>
+<td>Heavy use of shared hosts (login nodes): what was flagged, and who used each host most. (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad power</code></td>
+<td>Power supplies, voltages and fans, as the boards read them (1.25.8). (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad predict</code></td>
+<td>Show ML predictions for jobs. (<a href="../ml/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad readiness</code></td>
+<td>Check data readiness for ML training. (<a href="../readiness/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad ref</code></td>
+<td>Built-in reference and documentation. (<a href="../reference/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad report</code></td>
+<td>Generate ML analysis report. (<a href="../ml/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad report-interactive</code></td>
+<td>Report on interactive sessions (RStudio/Jupyter).</td>
+</tr>
+<tr>
+<td><code>nomad similarity</code></td>
+<td>Analyze job similarity and clustering. (<a href="../network/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad size</code></td>
+<td>What a job should ask for: CPUs, memory, time, GPUs and partition, each with where it comes from and why. (<a href="../submit/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad status</code></td>
+<td>Show system status overview.</td>
+</tr>
+<tr>
+<td><a href="#storage"><code>nomad storage</code></a></td>
+<td>Who uses each storage server's space, and on what. (<a href="../storage/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad submit</code></td>
+<td>Size a job and submit it: nomad's values, or yours. (<a href="../submit/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#sync"><code>nomad sync</code></a></td>
+<td>Sync remote NØMAÐ databases into a combined local database. (<a href="../setup-wizard/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad syscheck</code></td>
+<td>Check system requirements and configuration.</td>
+</tr>
+<tr>
+<td><code>nomad templates</code></td>
+<td>The job script templates a site offers (1.26.0): [[submit.templates]]. (<a href="../submit/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad temps</code></td>
+<td>Hardware temperatures the temps collector read (1.25.6). (<a href="../collectors/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad test-alerts</code></td>
+<td>Test configured alert notification backends end-to-end.</td>
+</tr>
+<tr>
+<td><code>nomad train</code></td>
+<td>Train ML ensemble models on job data. (<a href="../ml/">docs</a>)</td>
+</tr>
+<tr>
+<td><a href="#usage-report"><code>nomad usage-report</code></a></td>
+<td>The administrators' report: use, people, waits, GPUs, storage, capacity. (<a href="../usage-report/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad version</code></td>
+<td>Show version information.</td>
+</tr>
+<tr>
+<td><a href="#watch"><code>nomad watch</code></a></td>
+<td>What the policy watch found: tunnels, miners, relays, exposed services. (<a href="../policy_watch/">docs</a>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="actions">actions<a class="headerlink" href="#actions" title="Permanent link">&para;</a></h2>
+<p>The catalog of actions the Console can start, here or on a site. See <a href="../actions/">actions.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad actions key</code></td>
+<td>The hub's agent key (made the first time) and how to install it on a site.</td>
+</tr>
+<tr>
+<td><code>nomad actions list</code></td>
+<td>The actions, where each runs, and their parameters.</td>
+</tr>
+<tr>
+<td><code>nomad actions run</code></td>
+<td>Run one action and print its output.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="agent">agent<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h2>
+<p>A site's side of the actions: answer one request from the hub. See <a href="../actions/">actions.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad agent install-key</code></td>
+<td>Let the hub's key run <code>nomad agent</code> here, and nothing else.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cloud">cloud<a class="headerlink" href="#cloud" title="Permanent link">&para;</a></h2>
+<p>Cloud provider monitoring commands. See <a href="../cloud/">cloud.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad cloud collect</code></td>
+<td>Run cloud collectors once.</td>
+</tr>
+<tr>
+<td><code>nomad cloud instances</code></td>
+<td>List discovered cloud instances.</td>
+</tr>
+<tr>
+<td><code>nomad cloud status</code></td>
+<td>Check cloud collector connectivity and authentication.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="community">community<a class="headerlink" href="#community" title="Permanent link">&para;</a></h2>
+<p>NØMAÐ Community Dataset commands.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad community export</code></td>
+<td>Export anonymized data for community dataset.</td>
+</tr>
+<tr>
+<td><code>nomad community preview</code></td>
+<td>Preview an export file.</td>
+</tr>
+<tr>
+<td><code>nomad community verify</code></td>
+<td>Verify an export file meets community standards.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="config">config<a class="headerlink" href="#config" title="Permanent link">&para;</a></h2>
+<p>nomad.toml: does it read, and if not, where it goes wrong. See <a href="../config/">config.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad config check</code></td>
+<td>Whether nomad.toml reads; if not, the line and what is wrong there.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="console">console<a class="headerlink" href="#console" title="Permanent link">&para;</a></h2>
+<p>The NØMAÐ Console, the web interface. See <a href="../console/">console.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad console launch</code></td>
+<td>Open the Console in your browser, through an SSH tunnel.</td>
+</tr>
+<tr>
+<td><code>nomad console policies</code></td>
+<td>The policy documents in the Console's Help &gt; Policies ([[console.policies]] in nomad.toml), and what is wrong with any.</td>
+</tr>
+<tr>
+<td><code>nomad console policy</code></td>
+<td>Add, change or take off one policy document in the Console's Help &gt; Policies ([[console.policies]] in nomad.toml), by its TITLE.</td>
+</tr>
+<tr>
+<td><code>nomad console role</code></td>
+<td>Give one person a Console role in nomad.toml ([console.roles]).</td>
+</tr>
+<tr>
+<td><code>nomad console roles</code></td>
+<td>Who may see what in the Console, as nomad.toml says.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="course">course<a class="headerlink" href="#course" title="Permanent link">&para;</a></h2>
+<p>Courses: a Unix group per course, its instructors and this term's students ([console.courses] in nomad.toml). See <a href="../config/">config.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad course add</code></td>
+<td>NETID teaches GROUP this term: when no faculty member is in the group, when several are and nomad can't tell which teaches it, or when a group is reused from an earlier term. Whoever is added teaches it alone that term (nobody else is guessed or asked), so add each co-instructor and TA too. Decisions for a term stop applying when the term moves on (--every-term: they don't).</td>
+</tr>
+<tr>
+<td><code>nomad course answer</code></td>
+<td>Record what NETID said about teaching GROUP this term, as the Console does when they answer there (say, they told you by email). Only one of the course's faculty members can answer (in its group, or a user of the environment named for it); nomad.toml's decisions still win.</td>
+</tr>
+<tr>
+<td><code>nomad course answers</code></td>
+<td>What faculty members said (in the Console) about teaching their course groups' courses this term.</td>
+</tr>
+<tr>
+<td><code>nomad course discover</code></td>
+<td>What here may be a course that nomad.toml doesn't say is one yet: the environments people had a session in this term (a conda environment, a Jupyter kernel), and groups with a faculty member and people active this term; then what to do about them. Read-only: each command it suggests shows its change first. Best a week or two into a term.</td>
+</tr>
+<tr>
+<td><code>nomad course env</code></td>
+<td>Whoever used ENVIRONMENT this term (a conda environment, a Jupyter kernel) is one of the course GROUP's people, for a class that uses an environment not named like its course; it makes GROUP a course. Every term, until --remove. The interactive servers record which environment each session runs from (nomad 1.12.5 and later); <code>nomad course discover</code> lists them.</td>
+</tr>
+<tr>
+<td><code>nomad course exclude</code></td>
+<td>NETID is in GROUP and in the faculty group but doesn't teach it this term (overrides what they said and nomad's guess). For someone who teaches no course at all, <code>nomad course not-teaching</code>.</td>
+</tr>
+<tr>
+<td><code>nomad course ignore</code></td>
+<td>GROUP is named like a course but isn't one (a project's or a lab's group): no course view, no instructors.</td>
+</tr>
+<tr>
+<td><code>nomad course list</code></td>
+<td>Each course: its instructors this term and why, and its students this term (counts). Courses nobody teaches this term come last.</td>
+</tr>
+<tr>
+<td><code>nomad course name</code></td>
+<td>How GROUP is shown ("" to remove the name).</td>
+</tr>
+<tr>
+<td><code>nomad course not-teaching</code></td>
+<td>NETID is in the faculty group but teaches no course (staff): left out of every course's instructors, unless added to one by name.</td>
+</tr>
+<tr>
+<td><code>nomad course remove</code></td>
+<td>NETID off GROUP's instructors and excluded lists (this term's and every term's).</td>
+</tr>
+<tr>
+<td><code>nomad course setup</code></td>
+<td>Turn courses on, or change their settings. In a terminal with no setting given, it asks how classes get access here (a group per course, instructors' own groups, an environment per course), which names are courses', who can teach one, when the term began and whether instructors see names, with what it finds here for each; then shows what would change, and what nomad would take as courses.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="db">db<a class="headerlink" href="#db" title="Permanent link">&para;</a></h2>
+<p>nomad's own databases: how big each is and how fast it grows, old copies, and the space a vacuum gives back. See <a href="../databases/">databases.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad db keep</code></td>
+<td>The keep rules on the database nomad collects into here (1.63.0): readings older than detail_days (90) rolled up -- CPU per core and disk per device to hours, then days past hourly_days (365); lab machines' mounts to what each day was; collector runs to a count a day -- so history stays, at less detail. The tables reports read over terms and years (1.64.0) keep full detail report_detail_days (395), then one reading every sample_minutes (15); sessions on interactive servers (where their daily totals are kept) and programs run on lab machines are then removed. Jobs, groups, alerts and usage are never trimmed (docs/databases.md).</td>
+</tr>
+<tr>
+<td><code>nomad db status</code></td>
+<td>Each of nomad's databases here: its size, how fast it grows, the free space inside it (what a vacuum gives back) and on its disk, and old copies or empty databases beside it.</td>
+</tr>
+<tr>
+<td><code>nomad db tidy</code></td>
+<td>Old copies and empty databases removed: an old copy (FILE, or one found beside nomad's databases) only when the live database (the site's, or the hub's for a hub's copy) holds everything nomad keeps that it holds; an empty one only when nomad doesn't use it.</td>
+</tr>
+<tr>
+<td><code>nomad db vacuum</code></td>
+<td>The free space inside a database given back (FILE, else the site's). Set for incremental vacuuming, it moves pages, never rows, and the databases collector does it once a week by itself. --full does it once: the database set for that and vacuumed whole (needs about twice its size free beside it, for SQLite's copy and journal, which it writes there; holds the database for the while; the hub then copies this site's database whole at its next sync, since a whole vacuum may renumber rows).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="demos">demos<a class="headerlink" href="#demos" title="Permanent link">&para;</a></h2>
+<p>Practice runs: small inputs, known to work, that show how a job runs. See <a href="../demos/">demos.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad demos build</code></td>
+<td>Staff: make a kit's files once (GROMACS's .tpr, AMBER's topology), running its commands as you with its module loaded, in TO/NAME.</td>
+</tr>
+<tr>
+<td><code>nomad demos check</code></td>
+<td>Staff: does each kit fit the site's template? Exits 1 if one doesn't.</td>
+</tr>
+<tr>
+<td><code>nomad demos copy</code></td>
+<td>Copy a kit, as you, into a new folder ([submit.demos] into: ~/nomad-demos by default).</td>
+</tr>
+<tr>
+<td><code>nomad demos list</code></td>
+<td>The kits: nomad's own and a site's ([submit.demos] dirs).</td>
+</tr>
+<tr>
+<td><code>nomad demos look</code></td>
+<td>Once a copy of kit NAME has run in FOLDER: each thing to look at, and the lines that show it; with --recorded, what the kit's recorded run showed.</td>
+</tr>
+<tr>
+<td><code>nomad demos scripts</code></td>
+<td>Staff: each kit's job script, as the site's template makes it for a copy in ROOT/NAME (nomad demos copy NAME --to ROOT/NAME), at the kit's own size: to send every practice run once and see they work.</td>
+</tr>
+<tr>
+<td><code>nomad demos show</code></td>
+<td>A kit: what it does, its files, and what to look at once it has run.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="dev">dev<a class="headerlink" href="#dev" title="Permanent link">&para;</a></h2>
+<p>NØMAÐ Developer Toolchain. See <a href="../dev/">dev.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad dev bump</code></td>
+<td>Manage version increments.</td>
+</tr>
+<tr>
+<td><code>nomad dev check</code></td>
+<td>Validate codebase health.</td>
+</tr>
+<tr>
+<td><code>nomad dev deps</code></td>
+<td>Show module dependency graph.</td>
+</tr>
+<tr>
+<td><code>nomad dev guide</code></td>
+<td>Interactive contribution wizard.</td>
+</tr>
+<tr>
+<td><code>nomad dev new</code></td>
+<td>Scaffold a new module directly.</td>
+</tr>
+<tr>
+<td><code>nomad dev setup</code></td>
+<td>One-time developer environment configuration.</td>
+</tr>
+<tr>
+<td><code>nomad dev status</code></td>
+<td>Show current development state.</td>
+</tr>
+<tr>
+<td><code>nomad dev submit</code></td>
+<td>Submit contribution as a pull request.</td>
+</tr>
+<tr>
+<td><code>nomad dev test</code></td>
+<td>Run targeted tests.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="diag">diag<a class="headerlink" href="#diag" title="Permanent link">&para;</a></h2>
+<p>NØMAÐ Diagnostics — Infrastructure troubleshooting. See <a href="../diagnostics/">diagnostics.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad diag cloud</code></td>
+<td>Diagnose a cloud instance.</td>
+</tr>
+<tr>
+<td><code>nomad diag gpu</code></td>
+<td>GPU diagnostic report: current state, workload patterns, hardware health.</td>
+</tr>
+<tr>
+<td><code>nomad diag nas</code></td>
+<td>Diagnose a NAS/storage device.</td>
+</tr>
+<tr>
+<td><code>nomad diag network</code></td>
+<td>Diagnose network performance.</td>
+</tr>
+<tr>
+<td><code>nomad diag node</code></td>
+<td>Diagnose an HPC node.</td>
+</tr>
+<tr>
+<td><code>nomad diag workstation</code></td>
+<td>Diagnose a workstation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="dyn">dyn<a class="headerlink" href="#dyn" title="Permanent link">&para;</a></h2>
+<p>System dynamics analysis — ecological and economic metrics. See <a href="../dynamics/">dynamics.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad dyn capacity</code></td>
+<td>Multi-dimensional carrying capacity utilization.</td>
+</tr>
+<tr>
+<td><code>nomad dyn diversity</code></td>
+<td>Workload diversity indices (Shannon, Simpson).</td>
+</tr>
+<tr>
+<td><code>nomad dyn externality</code></td>
+<td>Inter-user/group impact quantification.</td>
+</tr>
+<tr>
+<td><code>nomad dyn niche</code></td>
+<td>Resource usage overlap between user communities.</td>
+</tr>
+<tr>
+<td><code>nomad dyn resilience</code></td>
+<td>Recovery time after disturbance events.</td>
+</tr>
+<tr>
+<td><code>nomad dyn summary</code></td>
+<td>Full dynamics summary combining all metrics.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="edu">edu<a class="headerlink" href="#edu" title="Permanent link">&para;</a></h2>
+<p>NØMAÐ Edu — Educational analytics for HPC. See <a href="../edu/">edu.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad edu cloud</code></td>
+<td>Cloud resource proficiency analysis.</td>
+</tr>
+<tr>
+<td><code>nomad edu explain</code></td>
+<td>Explain a job in plain language with proficiency scores.</td>
+</tr>
+<tr>
+<td><code>nomad edu me</code></td>
+<td>Show your computational profile across recent jobs.</td>
+</tr>
+<tr>
+<td><code>nomad edu report</code></td>
+<td>Generate a proficiency report for a course or lab group.</td>
+</tr>
+<tr>
+<td><code>nomad edu trajectory</code></td>
+<td>Show a user's proficiency development over time.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="energy">energy<a class="headerlink" href="#energy" title="Permanent link">&para;</a></h2>
+<p>Energy consumption, waste, and carbon-footprint monitoring.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad energy carbon</code></td>
+<td>CO2 view with configurable regional carbon intensity.</td>
+</tr>
+<tr>
+<td><code>nomad energy compare</code></td>
+<td>Compare energy efficiency before vs after a point in time.</td>
+</tr>
+<tr>
+<td><code>nomad energy forecast</code></td>
+<td>Project consumed and recoverable energy forward via trend analysis.</td>
+</tr>
+<tr>
+<td><code>nomad energy predict</code></td>
+<td>Predict which job submissions will waste energy, before they run.</td>
+</tr>
+<tr>
+<td><code>nomad energy report</code></td>
+<td>Detailed energy report broken down by partition, group, or user.</td>
+</tr>
+<tr>
+<td><code>nomad energy summary</code></td>
+<td>Cluster-wide energy and sustainability summary.</td>
+</tr>
+<tr>
+<td><code>nomad energy user</code></td>
+<td>Per-user energy profile: footprint, efficiency score, recommendations.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="facts">facts<a class="headerlink" href="#facts" title="Permanent link">&para;</a></h2>
+<p>nomad's answers about sites, a person and a lab, as the Console's /api/v1 gives them. See <a href="../facts/">facts.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad facts busy</code></td>
+<td>When each cluster, interactive server and group of workstations is busiest: the most in use at once and when, the average, a typical week and the busiest and quietest hours, over --days.</td>
+</tr>
+<tr>
+<td><code>nomad facts course</code></td>
+<td>A course's students this term: the class together, each student as a row (their typical week and its range: a caterpillar plot), and when the class works. GROUPS: the course groups (default: every course, or with --instructor the ones NETID teaches). Needs [console.courses] in nomad.toml.</td>
+</tr>
+<tr>
+<td><code>nomad facts lab</code></td>
+<td>The labs NETID leads, or is a research assistant of, by nomad.toml's rules: members, their jobs taken together, workstations and storage; --each, each member too.</td>
+</tr>
+<tr>
+<td><code>nomad facts me</code></td>
+<td>One person's work: jobs over --days, running and waiting now, score and advice (as the Console's My Activity).</td>
+</tr>
+<tr>
+<td><code>nomad facts node</code></td>
+<td>One node over a window (the Console's node timeline): cores, load, memory, GPUs, temperatures, clock and local disk, and what happened: drained or down (and why), gaps in the readings, jobs started and ended, out-of-memory kills, power events, alerts, maintenance.</td>
+</tr>
+<tr>
+<td><code>nomad facts share</code></td>
+<td>The share of each cluster of the labs NETID leads, or is a research assistant of (or of --group): its jobs' core-hours on its own condo, the shared nodes and other labs' condos, against everyone else's and the nodes' capacity; who waited for room while the lab's jobs ran there, and the lab's own waits. Nodes as each cluster's latest reading has them.</td>
+</tr>
+<tr>
+<td><code>nomad facts sites</code></td>
+<td>Every site now: freshness, nodes, CPU, memory, GPUs, queue, storage, alerts, workstations; and its jobs over --days.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="files">files<a class="headerlink" href="#files" title="Permanent link">&para;</a></h2>
+<p>Who the Console's My files is open to ([console.files] open), and setting it. See <a href="../files/">files.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad files open</code></td>
+<td>Set who My files is open to: [console.files] open (and, with labs, labs and active_days). Shows it first, with how many it would be open to; --apply writes it, with a copy of the file before. The Console reads it at each request: no restart.</td>
+</tr>
+<tr>
+<td><code>nomad files status</code></td>
+<td>Who My files is open to now; with open = "labs", each lab: its members now, those their PI said are in it or have left, those not seen at work lately, and how many it is open to.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="gate">gate<a class="headerlink" href="#gate" title="Permanent link">&para;</a></h2>
+<p>The hub acting on a cluster as a person (the Console's Submit page). See <a href="../submit/">submit.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad gate ask</code></td>
+<td>Ask the gate one thing, as --user; print its answer (JSON).</td>
+</tr>
+<tr>
+<td><code>nomad gate install-key</code></td>
+<td>Let the hub's gate key run <code>nomad-gate serve</code> here, and nothing else.</td>
+</tr>
+<tr>
+<td><code>nomad gate jump-key</code></td>
+<td>Let the hub's gate key through this host to a cluster's ssh, and nothing else (1.40.0): for a site whose [[hub.sites]] has gate_jump = "THIS-ACCOUNT@THIS-HOST".</td>
+</tr>
+<tr>
+<td><code>nomad gate key</code></td>
+<td>The hub's gate key (made the first time) and how to let it in on a cluster.</td>
+</tr>
+<tr>
+<td><code>nomad gate test</code></td>
+<td>Is the gate there, and may it act as --user? Asks it its version (as itself, then as the person) and the person's jobs now (not on a machine with the gate alone: it runs no Slurm jobs); where moving files is on, sends half a file and removes it. Changes nothing, but with --run on a lab machine: a test job of nomad's started and stopped there (its record kept, as any job's, in the person's ~/.local/share/nomad/runs).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="impact">impact<a class="headerlink" href="#impact" title="Permanent link">&para;</a></h2>
+<p>What changed after NØMAÐ: [impact] in nomad.toml, jobs before and after launch. See <a href="../impact/">impact.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad impact backfill</code></td>
+<td>Measure the before period again from Slurm's accounting, the 1.13 way.</td>
+</tr>
+<tr>
+<td><code>nomad impact extract</code></td>
+<td>The measured jobs of an older copy, into a small file for <code>nomad impact restore</code> on the site: job numbers, submit times and the measurements, no names. Read-only on the copy.</td>
+</tr>
+<tr>
+<td><code>nomad impact report</code></td>
+<td>Month by month from baseline_from, then before launch, after it and the same days a year earlier, for each part that has data:</td>
+</tr>
+<tr>
+<td><code>nomad impact restore</code></td>
+<td>Bring back measurements an older copy has for jobs this site now holds unmeasured: those 1.13.0's and 1.13.1's backfill wrote "not measured" over where Slurm no longer kept the steps' usage. Only jobs without a measurement now, and only the same job (the submit times agree). With --apply, a copy of the database is taken first (SQLite's backup: safe while the collector writes). On the site; the next sync brings them to the hub.</td>
+</tr>
+<tr>
+<td><code>nomad impact status</code></td>
+<td>The launch, the periods and events, and for each site what the jobs before and after launch have: measured, measured the 1.13 way, with an eligible time. Then what to run so the before period can be compared.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="import">import<a class="headerlink" href="#import" title="Permanent link">&para;</a></h2>
+<p>Load data nomad didn't collect itself. See <a href="../collectors/">collectors.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad import sacct</code></td>
+<td>Slurm job records nomad didn't collect, from an export or from sacct.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="insights">insights<a class="headerlink" href="#insights" title="Permanent link">&para;</a></h2>
+<p>NØMAÐ Insight Engine — operational narratives and analysis. See <a href="../insights/">insights.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad insights brief</code></td>
+<td>Print a concise operational briefing.</td>
+</tr>
+<tr>
+<td><code>nomad insights detail</code></td>
+<td>Print a detailed operational analysis.</td>
+</tr>
+<tr>
+<td><code>nomad insights digest</code></td>
+<td>Generate an email digest of insights.</td>
+</tr>
+<tr>
+<td><code>nomad insights gpu</code></td>
+<td>Narrative summary of GPU usage patterns and health concerns.</td>
+</tr>
+<tr>
+<td><code>nomad insights json</code></td>
+<td>Output insights as JSON (for API/Console integration).</td>
+</tr>
+<tr>
+<td><code>nomad insights slack</code></td>
+<td>Generate a Slack-formatted insight message.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="interactive">interactive<a class="headerlink" href="#interactive" title="Permanent link">&para;</a></h2>
+<p>Interactive servers (RStudio, JupyterHub): what the interactive collector keeps. See <a href="../interactive/">interactive.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad interactive backfill</code></td>
+<td>Rebuild the daily and hourly totals for the days before nomad kept them (1.11; hours 1.11.1), from the raw snapshots: who was on and for how long, and the memory held. Not what was computing: the old snapshots can't say. Run it on the interactive server itself (the hub rebuilds its copy from the site's at the next sync). Rows written are marked rebuilt.</td>
+</tr>
+<tr>
+<td><code>nomad interactive clear</code></td>
+<td>Suspend each RStudio session, and stop each Jupyter server, idle at least --hours. A dry run unless --apply.</td>
+</tr>
+<tr>
+<td><code>nomad interactive restart</code></td>
+<td>Restart RStudio (Workbench) or JupyterHub. A dry run unless --apply.</td>
+</tr>
+<tr>
+<td><code>nomad interactive sessions</code></td>
+<td>The RStudio and Jupyter sessions here now, how long each has been idle, and what nomad may do about them here. Changes nothing.</td>
+</tr>
+<tr>
+<td><code>nomad interactive stop</code></td>
+<td>Suspend PERSON's RStudio session PID (R saves it; it comes back when they next open RStudio), or stop their Jupyter server or kernel PID (as them). A dry run unless --apply.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="issue">issue<a class="headerlink" href="#issue" title="Permanent link">&para;</a></h2>
+<p>Report issues, request features, and ask questions. See <a href="../issue/">issue.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad issue info</code></td>
+<td>Show system information that would be included in a report.</td>
+</tr>
+<tr>
+<td><code>nomad issue report</code></td>
+<td>Submit a bug report, feature request, or question.</td>
+</tr>
+<tr>
+<td><code>nomad issue search</code></td>
+<td>Search existing issues for a topic.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="lab">lab<a class="headerlink" href="#lab" title="Permanent link">&para;</a></h2>
+<p>A lab's machines and storage: what nomad collects for it, and what its PI sees. Edits nomad.toml here (a backup first): each command shows the change, and --apply writes it. See <a href="../config/">config.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad lab accounts</code></td>
+<td>A lab's PI asks for accounts for their students, on My lab in the Console: nomad says who each one is, from the campus directory, and research computing is emailed. It makes the accounts as it does now, and closes each one here (the PI is emailed). nomad makes no account itself. (<a href="../lab-accounts/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts check</code></td>
+<td>Can nomad ask the directory? A search for no one, as the service account, with nothing printed of the password.</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts close</code></td>
+<td>Research computing made the account, or not (and why): the request keeps who closed it and when, and the PI is emailed (review_to while set). REQUEST: its number, REQ-0012 (or 12).</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts list</code></td>
+<td>The requests, newest first, and what became of each account.</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts lookup</code></td>
+<td>Who each NetID, address or name is, as a PI checking a request would see it: found (and their name), several of that name, not found; and where nomad sees them with an account already. Each TEXT is a line ("Jane Doe", "Doe, Jane", jdoe).</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts report</code></td>
+<td>The requests asked in a period, and what became of each account as of now: in all, by cluster, lab and month, and how long making them took (from asked to marked made).</td>
+</tr>
+<tr>
+<td><code>nomad lab accounts show</code></td>
+<td>One request, by its number (REQ-0012, or 12), and what became of each account.</td>
+</tr>
+<tr>
+<td><code>nomad lab add-machine</code></td>
+<td>A workstation collected here, tagged with LAB (its PI sees it).</td>
+</tr>
+<tr>
+<td><code>nomad lab add-nas</code></td>
+<td>A NAS collected here over ssh (the storage collector), listed as LAB's (LAB "shared": everyone's storage, listed for no lab).</td>
+</tr>
+<tr>
+<td><code>nomad lab add-storage</code></td>
+<td>Storage LAB's machines mount, listed as LAB's (on the Console's machine).</td>
+</tr>
+<tr>
+<td><code>nomad lab assistant</code></td>
+<td>NETID is a research assistant of LAB: in the Console they see LAB as its PI does -- its members one by one (not the PI's own work), their jobs, the lab's machines and storage -- while they are one of its members. LAB must be a lab by nomad's rules, not any group. Someone who leaves the group stops being its assistant with no edit; <code>nomad console roles</code> lists entries that no longer apply. --remove: no longer. The PI can do the same from the lab's Members page in the Console.</td>
+</tr>
+<tr>
+<td><code>nomad lab check</code></td>
+<td>Each term, a lab's PI says who is still in it, on My lab in the Console; what their answers call for is research computing's to-do. nomad changes no group or account itself. (<a href="../lab-check/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad lab check answer</code></td>
+<td>Keep an answer for LAB's check this term, as its PI would give it on My lab (one they sent by email, say): a member is here, left (with --data) or not_mine; someone who used the lab's condo is mine or guest. Kept as entered at the command line, by --by or who runs this.</td>
+</tr>
+<tr>
+<td><code>nomad lab check done</code></td>
+<td>Mark a to-do item done, with a note: a leaver's data moved, someone kept in a group on purpose, a lab that answered by email. NETID is "-" for no_answer.</td>
+</tr>
+<tr>
+<td><code>nomad lab check email</code></td>
+<td>LAB's email as its PIs would get it now (LAB: its group, e.g. smith$), whatever has been sent; nothing is sent.</td>
+</tr>
+<tr>
+<td><code>nomad lab check mail</code></td>
+<td>The emails due today: when the check opens, and each reminder while a lab's PI hasn't answered. While review_to is set, they go there.</td>
+</tr>
+<tr>
+<td><code>nomad lab check name</code></td>
+<td>One PI's name, for the lab check's email: nomad lab check name jdoe Jane Doe (or Maria | de la Cruz for a last name of more than one word). Shows the change; --apply writes it to [console.labs.check.names].</td>
+</tr>
+<tr>
+<td><code>nomad lab check names</code></td>
+<td>How each lab's email greets its PIs, and where each name comes from: names in [console.labs.check.names], the account's full name (getent passwd), or none ("Dear colleague,").</td>
+</tr>
+<tr>
+<td><code>nomad lab check show</code></td>
+<td>What LAB's PI is asked this term (LAB: its group, e.g. smith$), and the answers so far.</td>
+</tr>
+<tr>
+<td><code>nomad lab check status</code></td>
+<td>This term's check: each lab, how many asked about and answered, whether its PI sent it in, and the emails sent.</td>
+</tr>
+<tr>
+<td><code>nomad lab check submit</code></td>
+<td>LAB's check is done for this term (every question answered).</td>
+</tr>
+<tr>
+<td><code>nomad lab check timer</code></td>
+<td>A systemd timer that sends the day's emails (<code>nomad lab check mail --send</code>) as the nomad account (or --user). Without --apply it prints the two files.</td>
+</tr>
+<tr>
+<td><code>nomad lab check todo</code></td>
+<td>What the PIs' answers leave research computing to do, a cluster at a time: who to take out of a group or put in one, what to do with a leaver's data (and where it is), and labs that didn't answer. A group change is done once nomad's groups reading shows it; mark the rest with <code>done</code>.</td>
+</tr>
+<tr>
+<td><code>nomad lab hide</code></td>
+<td>LAB is not a lab, whatever nomad's rules say (1.17.10): a service account's group, a mistyped one, someone's who left. The Console doesn't show it (Labs, search, Groups), nobody leads it or assists it; nothing on the clusters changes, and its data stays. --remove: a lab again.</td>
+</tr>
+<tr>
+<td><code>nomad lab lead</code></td>
+<td>NETID leads LAB too (a co-PI, a lab manager, a test account): in the Console they see LAB's machines and, one by one, its members. The PI group_pattern names needs no entry. --remove: no longer.</td>
+</tr>
+<tr>
+<td><code>nomad lab name</code></td>
+<td>How LAB is shown, e.g. "Smith Lab" ("" goes back to its group).</td>
+</tr>
+<tr>
+<td><code>nomad lab remove</code></td>
+<td>HOST out of LAB: no longer collected here, no longer listed.</td>
+</tr>
+<tr>
+<td><code>nomad lab show</code></td>
+<td>What nomad.toml here says about labs (or about one).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="licenses">licenses<a class="headerlink" href="#licenses" title="Permanent link">&para;</a></h2>
+<p>When the licenses of the center's software end -- read where the software keeps the date -- and an email to the center before each does. nomad never changes a license. See <a href="../licenses/">licenses.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad licenses add</code></td>
+<td>List a license in this machine's nomad.toml: a [[collectors.licenses.items]] entry (and [collectors.licenses] enabled = true when it isn't set). Shows it first; --apply writes it, with a copy of the file before, and reads it once.</td>
+</tr>
+<tr>
+<td><code>nomad licenses find</code></td>
+<td>What licenses this machine seems to have (Posit's programs, FlexLM and Gurobi license files, web certificates here), each as the <code>nomad licenses add</code> line that lists it. Changes nothing; shows no keys.</td>
+</tr>
+<tr>
+<td><code>nomad licenses read</code></td>
+<td>Read this machine's licenses now (or NAME's), keep what was read, and say it. The collector does it a few times a day on its own.</td>
+</tr>
+<tr>
+<td><code>nomad licenses remind</code></td>
+<td>On the hub: what is due now (a license ending within a reminder's days, one that ended lately, one nomad can't read), in one email to the center; --send sends it and keeps what went, so nothing goes twice.</td>
+</tr>
+<tr>
+<td><code>nomad licenses renew</code></td>
+<td>Whether NAME is being renewed: no keeps it listed without reminders (renew = false in its entry); yes reminds again.</td>
+</tr>
+<tr>
+<td><code>nomad licenses timer</code></td>
+<td>On the hub: a systemd timer that sends what is due every morning (<code>nomad licenses remind --send</code>) as the nomad account (or --user). Without --apply it prints the two files.</td>
+</tr>
+<tr>
+<td><code>nomad licenses tries</code></td>
+<td>Whether licensed programs run on the lab machines (or a cluster's nodes): a tiny job with each install of each program listed, on each machine, twice a day ([collectors.license_tries], docs/licenses.md).</td>
+</tr>
+<tr>
+<td><code>nomad licenses tries now</code></td>
+<td>On the site: try each program on each machine now (not waiting for the collector's turn), keep what came, and say it.</td>
+</tr>
+<tr>
+<td><code>nomad licenses tries setup</code></td>
+<td>List a program to try on this site's lab machines (or, with --nodes, on every node of its cluster): a [[collectors.license_tries.programs]] entry (and [collectors.license_tries] enabled = true when it isn't set; machines = "slurm" with --nodes). Shows it first; --apply writes it, with a copy of the file before.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="machine">machine<a class="headerlink" href="#machine" title="Permanent link">&para;</a></h2>
+<p>What each machine is: a line nomad and the Console show beside its name. See <a href="../config/">config.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad machine list</code></td>
+<td>Every machine nomad.toml describes here.</td>
+</tr>
+<tr>
+<td><code>nomad machine note</code></td>
+<td>What NAME is (a head node, the hub, a NAS), shown beside its name.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="maintenance">maintenance<a class="headerlink" href="#maintenance" title="Permanent link">&para;</a></h2>
+<p>Declared maintenance: a site (or the hub) taken down on purpose. See <a href="../alerts/">alerts.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad maintenance end</code></td>
+<td>SITE's maintenance is over now: alerts about it are no longer held. One thing at a time: the window running; else the hour after one just over; else the window coming, which is called off. Shows what would end; --apply ends it.</td>
+</tr>
+<tr>
+<td><code>nomad maintenance start</code></td>
+<td>SITE is in maintenance from now (or --from) until --until: alerts about it are held, and the Console says so. Declaring again changes it. Shows what it would declare; --apply declares it.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="metrics">metrics<a class="headerlink" href="#metrics" title="Permanent link">&para;</a></h2>
+<p>What nomad publishes for Prometheus: each site's last pull and collectors, each node's condition, cores, CPU clock and power problems, each GPU's use, each partition's jobs and wait, each filesystem's space. Nothing about one person. See <a href="../metrics/">metrics.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad metrics dashboard</code></td>
+<td>A Grafana dashboard for what nomad publishes, as JSON: import it (Dashboards &gt; New &gt; Import) or put it in a provisioning folder. It asks which Prometheus, and which sites.</td>
+</tr>
+<tr>
+<td><code>nomad metrics serve</code></td>
+<td>Answer Prometheus at http://ADDRESS:PORT/metrics until stopped. Only when [metrics] enabled = true; on an address other hosts can reach, only with [metrics] token_file (Prometheus sends it as a bearer token). The page is built again at most every cache_seconds.</td>
+</tr>
+<tr>
+<td><code>nomad metrics service</code></td>
+<td>A systemd service that runs <code>nomad metrics serve</code> as the nomad account (or --user), started again if it stops. Without --apply it prints the unit.</td>
+</tr>
+<tr>
+<td><code>nomad metrics token</code></td>
+<td>A new token in [metrics] token_file, readable by this account only. Run it as the account that serves (sudo -u nomad). It never prints the token: copy the file to the Prometheus host (its credentials_file).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="ml">ml<a class="headerlink" href="#ml" title="Permanent link">&para;</a></h2>
+<p>Train the model from the Console: TESSERA on a worker with a GPU. See <a href="../ml-training/">ml-training.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad ml ask</code></td>
+<td>Queue a training request with [ml.train]'s settings now.</td>
+</tr>
+<tr>
+<td><code>nomad ml cancel</code></td>
+<td>Cancel a queued request (one running finishes or is given up).</td>
+</tr>
+<tr>
+<td><code>nomad ml check</code></td>
+<td>On the worker: reach the Console with the key, and say what it said.</td>
+</tr>
+<tr>
+<td><code>nomad ml key</code></td>
+<td>The worker's key: made on the hub when there is none ([ml.train] key_file, the nomad account's, 600); on the worker, the copy of it ([ml.worker] key_file). Either way only its fingerprint is said: compare them.</td>
+</tr>
+<tr>
+<td><code>nomad ml preview</code></td>
+<td>What a request would be sent now, in counts only: how many jobs (after thin and max_jobs) and when they ended, how many people and how much the busiest weigh, each target, and the tests (the holdout, period by period, new people). Nothing is sent, nothing trained (hub).</td>
+</tr>
+<tr>
+<td><code>nomad ml scores</code></td>
+<td>A run's riskiest jobs: those running or waiting then, or the holdout's (with what became of them).</td>
+</tr>
+<tr>
+<td><code>nomad ml status</code></td>
+<td>The request queued or running, and the last result.</td>
+</tr>
+<tr>
+<td><code>nomad ml timer</code></td>
+<td>On the worker: <code>nomad ml work</code> from a systemd timer (nomad-ml-worker), every 5 minutes; a run still training isn't started again.</td>
+</tr>
+<tr>
+<td><code>nomad ml work</code></td>
+<td>On the worker: one pass. Takes the oldest queued request, if any, trains, and sends back the result (or why it failed).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="node">node<a class="headerlink" href="#node" title="Permanent link">&para;</a></h2>
+<p>Drain a Slurm node, or resume it: a dry run unless --apply. See <a href="../actions/">actions.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad node drain</code></td>
+<td>No new job starts on NODE; the jobs running there run to their end.</td>
+</tr>
+<tr>
+<td><code>nomad node resume</code></td>
+<td>A drained (or down) NODE takes jobs again.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="notices">notices<a class="headerlink" href="#notices" title="Permanent link">&para;</a></h2>
+<p>A weekly email to each person about their own use: what of theirs a login node's monitoring caught, and a pattern of jobs asking for far more than they use, with the better way and a link to My activity. See <a href="../notices/">notices.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad notices mail</code></td>
+<td>The emails due now: each person with something new since the last one, at most every every_days. While review_to is set, they go there.</td>
+</tr>
+<tr>
+<td><code>nomad notices set</code></td>
+<td>NETID is emailed (on, the default) or not (off): for someone who asked by email. People choose for themselves on My activity in the Console.</td>
+</tr>
+<tr>
+<td><code>nomad notices timer</code></td>
+<td>A systemd timer that sends the week's emails (<code>nomad notices mail --send</code>) as the nomad account (or --user). Without --apply it prints the two files. While review_to is set, they go there.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="storage">storage<a class="headerlink" href="#storage" title="Permanent link">&para;</a></h2>
+<p>Who uses each storage server's space, and on what. See <a href="../storage/">storage.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad storage cold</code></td>
+<td>Data unchanged for a year: who holds at least [console.cold_data] min_tb of it on a path, on every scanned storage server, with their last job, labs and what the lab check said of them; and the cases Research Computing opens to talk with them about it (numbered like account requests: REQ-0013).</td>
+</tr>
+<tr>
+<td><code>nomad storage cold case</code></td>
+<td>A case moves on to STATE, or gets a note (or both).</td>
+</tr>
+<tr>
+<td><code>nomad storage cold digest</code></td>
+<td>The weekly email to Research Computing: any server nearly full, what is new on the list, the open cases and those not updated lately, and the largest not yet a case. Sending marks what was new.</td>
+</tr>
+<tr>
+<td><code>nomad storage cold letter</code></td>
+<td>The email PERSON gets about their data on the list: to them, a copy to their faculty sponsor (the PI of each lab they are in, unless they lead one) and to Research Computing; their storage page; replies to whoever writes and to Research Computing. --send sends it as printed, keeps it, and moves their cases to "contacted". The Console's Write to them lets you change it first.</td>
+</tr>
+<tr>
+<td><code>nomad storage cold list</code></td>
+<td>The list, largest first.</td>
+</tr>
+<tr>
+<td><code>nomad storage cold open</code></td>
+<td>Open a case about PERSON's data on SERVER:/PATH, to contact them.</td>
+</tr>
+<tr>
+<td><code>nomad storage cold show</code></td>
+<td>One case, and its notes.</td>
+</tr>
+<tr>
+<td><code>nomad storage cold timer</code></td>
+<td>Send the weekly email from a systemd timer (nomad-cold-data.timer).</td>
+</tr>
+<tr>
+<td><code>nomad storage cron</code></td>
+<td>How to run nomad-storage.sh on a server -- as root, through sudo, as an account with only the right to read, or measuring each top folder as its owner -- and the [collectors.storage_use] part of nomad.toml that reads what it writes.</td>
+</tr>
+<tr>
+<td><code>nomad storage script</code></td>
+<td>Print nomad-storage.sh, to install on a storage server.</td>
+</tr>
+<tr>
+<td><code>nomad storage status</code></td>
+<td>What the storage_use collector read from each server, and when.</td>
+</tr>
+<tr>
+<td><code>nomad storage use</code></td>
+<td>Who holds each path's space: now, the change over 30 days (--days), and what the scans found older than their ages; with each person's last job. --over 1T --list gives the plain list of who holds more than 1 TiB.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="sync">sync<a class="headerlink" href="#sync" title="Permanent link">&para;</a></h2>
+<p>Sync remote NØMAÐ databases into a combined local database. See <a href="../setup-wizard/">setup-wizard.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad sync status</code></td>
+<td>How each site's last syncs went: when its data was last brought up to date, how (only what changed, or copied whole), how many rows, and why the last one failed. Reads only; on the hub.</td>
+</tr>
+<tr>
+<td><code>nomad sync timer</code></td>
+<td>Set the hub's sync timer to [hub] sync_interval_minutes (1.40.0): every that many minutes, two minutes after the five-minute marks the sites read themselves on. Without --apply, says what it would be.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="usage-report">usage-report<a class="headerlink" href="#usage-report" title="Permanent link">&para;</a></h2>
+<p>The administrators' report: use, people, waits, GPUs, storage, capacity. See <a href="../usage-report/">usage-report.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad usage-report condos</code></td>
+<td>Each condo's monthly report for its owner, and the summary. (<a href="../condo-reports/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad usage-report condos idle</code></td>
+<td>Idle condo capacity while jobs that would have fit waited elsewhere.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report condos init</code></td>
+<td>Draft each cluster's condos into report.toml from the nodes' partitions.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report condos set</code></td>
+<td>Change the condo settings in report.toml: [report.labs] and [report.policy] values, owners, and which condos are confirmed.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report condos status</code></td>
+<td>What is left to set up before the reports go out as meant.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report condos timer</code></td>
+<td>A systemd timer that makes and mails last month's reports on the 1st.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report init</code></td>
+<td>Draft report.toml from the latest node samples: tiers by hardware, partitions and their nodes. Edit it before the first report.</td>
+</tr>
+<tr>
+<td><code>nomad usage-report labs</code></td>
+<td>Each lab's term report for its PI, and a summary of every lab. (<a href="../lab-reports/">docs</a>)</td>
+</tr>
+<tr>
+<td><code>nomad usage-report labs timer</code></td>
+<td>A systemd timer that makes and mails each lab's report for the term that ended, on the first day of the next (the days in [report.labs] terms; run it again after changing them).</td>
+</tr>
+<tr>
+<td><code>nomad usage-report people</code></td>
+<td>Write the period's usernames to a CSV (user, department, school) for someone to fill in; pass it back with --user-map. Names stay in that file: nothing is printed.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="watch">watch<a class="headerlink" href="#watch" title="Permanent link">&para;</a></h2>
+<p>What the policy watch found: tunnels, miners, relays, exposed services. See <a href="../policy_watch/">policy_watch.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nomad watch list</code></td>
+<td>Findings, the most serious and the latest first; a verified ssh forward (to a listed server) is shown too, as info.</td>
+</tr>
+<tr>
+<td><code>nomad watch probe</code></td>
+<td>Look now, here or on HOST (over ssh, as the collector does). Stores nothing.</td>
+</tr>
+<tr>
+<td><code>nomad watch status</code></td>
+<td>The last sweep: each host asked, and what the probe could see there.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2024-2026 João Tonini
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/jtonini/nomad-hpc" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="mailto:jtonini@richmond.edu" target="_blank" rel="noopener" title="" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M536.4-26.3c9.8-3.5 20.6-1 28 6.3s9.8 18.2 6.3 28l-178 496.9c-5 13.9-18.1 23.1-32.8 23.1-14.2 0-27-8.6-32.3-21.7l-64.2-158c-4.5-11-2.5-23.6 5.2-32.6l94.5-112.4c5.1-6.1 4.7-15-.9-20.6s-14.6-6-20.6-.9l-112.4 94.3c-9.1 7.6-21.6 9.6-32.6 5.2L38.1 216.8c-13.1-5.3-21.7-18.1-21.7-32.3 0-14.7 9.2-27.8 23.1-32.8z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tabs.link"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
